@@ -1,0 +1,37 @@
+# 嵌入的独立仓库（各自有 .git，不在本仓库维护）
+/Axiom-Flow/
+/QED-Tracker/
+
+# 数据集（原始文档与解析产物，Phase 1 定义目录结构后再细粒度管理）
+/dataset/*
+!/dataset/.gitkeep
+
+# IDE / 编辑器
+/.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+build/
+
+# 日志与运行产物
+/logs/
+*.log
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 系统
+Thumbs.db
+.DS_Store

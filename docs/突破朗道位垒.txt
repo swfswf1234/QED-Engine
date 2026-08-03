@@ -1,0 +1,120 @@
+朗道位垒——朗道“理论物理最低标准” (Theoretical Minimum)，旨在甄选出具备研究潜力的学生。
+我曾是一名数学系的本科生，后来转到了计算机行业研究算法，现在过去十年了，但我作为一名数学爱好者仍希望能像通过朗道位垒那样在数学上扎扎实实更上一个台阶，达到顶尖大学数学系博士研究生需要通过的博士资格考试(Qualifying Exams)相应的水准。因此我希望重新学习高等数学，从数学分析、高等代数、概率论开始（曾学明白），到泛函分析、实分析、复分析、常微分方程（没学明白），一直到达到“数学研究最低标准”为止的课程。
+下面是“朗道位垒“要求的数学基础标准：
+数学‑I：分析、代数与几何基础
+积分与极限：核心是熟练掌握各类常见函数的不定、定积分和反常积分计算，彻底搞懂极限与无穷分析。
+常微分方程 (ODEs)：核心是熟练求解各类一阶和高阶常微分方程。
+向量代数：核心是对向量点积、叉积及梯度、散度、旋度等微分算子的计算必须非常熟练。
+张量分析：作为微分几何纽带，需掌握指标运算与张量场分析。
+数学‑II：复变函数论
+复变函数理论：核心是深入理解全纯函数、共形映射、柯西积分公式等基础概念。
+留数与围道积分：核心是娴熟运用留数定理计算各类实积分和复积分。
+积分渐近：核心是精通拉普拉斯方法、最速下降法等，用于求积分的渐近近似。
+特殊函数：核心是熟悉Gamma、超几何、贝塞尔等函数的性质，这些是PDE解的基石。
+我希望了解“数学研究最低标准”所需课程，及它们的递进关系，请仔细梳理。
+我倾向与美国版本的教程，更加详细易于理解，请为我列出每一项课程最合适的教材（可以多个）及其相关习题集。最后为我画一张数学进阶流程图显示它们的关系。
+
+要达到世界顶尖大学（如 Top 10 US Math PhD）的**博士资格考试 (Qualifying Exams, 简称 QE)** 水准，意味着你不仅要掌握工具的使用，更要理解数学结构的底层逻辑与证明体系。
+
+
+---
+
+## 第一阶段：夯实地基 (The Undergraduate Pillars)
+这是进入高等数学的门槛，目标是实现从“计算”到“论证”的思维转换。
+
+### 1. 线性代数 (Advanced Linear Algebra)
+* **核心内容：** 谱理论、若尔当标准型、内积空间、双线性型。
+* **教材：**
+    * **Sheldon Axler, *Linear Algebra Done Right*:** 美国最流行的教材，强调算子理论，避开行列式切入逻辑，非常直观。
+    * **Hoffman & Kunze, *Linear Algebra*:** 经典的“硬核”教材，虽然老旧但覆盖面极广，适合查漏补缺。
+* **习题：** 课后习题必做；**Zhang Fuzhen, *Linear Algebra: Challenges and Solutions***。
+
+### 2. 数学分析 (Real Analysis - Undergrad Level)
+* **核心内容：** $\epsilon-\delta$ 语言、一致收敛、多元微积分的严谨化。
+* **教材：**
+    * **Walter Rudin, *Principles of Mathematical Analysis* (Baby Rudin):** 数学系的成人礼。前 7 章必须逐字读完，课后题是精华。
+    * **Terence Tao (陶哲轩), *Analysis I & II*:** 逻辑极其细腻，适合重新建立数学直觉。
+* **习题：** **W.J. Kaczor, *Problems in Mathematical Analysis*** (三卷本，极佳)。
+
+### 3. 点集拓扑 (Point-Set Topology)
+* **核心内容：** 连续性、紧致性、连通性、完备化。这是泛函分析和流形的先修课。
+* **教材：**
+    * **James Munkres, *Topology*:** 毫无争议的标准教材，讲解极其详尽。
+* **习题：** Munkres 课后前几章。
+
+---
+
+## 第二阶段：核心分析课 (The Analysis Core - QE 重点)
+这是你提到“没学明白”的部分，也是博士考试的重灾区。
+
+### 4. 实分析与测度论 (Real Analysis / Measure Theory)
+* **核心内容：** Lebesgue 测度、收敛定理、$L^p$ 空间、Radon-Nikodym 定理。
+* **教材：**
+    * **Elias Stein & Rami Shakarchi, *Real Analysis* (Princeton Lectures Vol. III):** 现代分析学的典范，强调几何直觉。
+    * **Gerald Folland, *Real Analysis*:** 难度略高，是很多顶尖名校的指定教材。
+* **习题：** **R.L. Wheeden, *Measure and Integral*** 课后题。
+
+### 5. 复分析 (Complex Analysis)
+* **核心内容：** 柯西积分公式、全纯函数、留数定理、共形映射、黎曼映射定理。
+* **教材：**
+    * **Stein & Shakarchi, *Complex Analysis* (Vol. II):** 难度适中，非常适合自学。
+    * **Lars Ahlfors, *Complex Analysis*:** 经典的圣经，视角很高。
+* **习题：** 留数计算必须通过大量练习达到“本能反应”。
+
+### 6. 泛函分析 (Functional Analysis)
+* **核心内容：** Hilbert 空间、Banach 空间、算子谱理论、分布论。
+* **教材：**
+    * **Elias Stein, *Functional Analysis* (Vol. IV):** 承接前两卷，风格统一。
+    * **Peter Lax, *Functional Analysis*:** 充满了物理背景和应用案例，非常符合“朗道”口味。
+* **习题：** **Karen Saxe, *Beginning Functional Analysis***。
+
+---
+
+## 第三阶段：代数、方程与几何 (The Breadth)
+
+### 7. 抽象代数 (Abstract Algebra)
+* **核心内容：** 群、环、域、Galois 理论、模论。
+* **教材：**
+    * **Dummit & Foote, *Abstract Algebra*:** 像百科全书一样详细，美国研究生阶段的标准参考书。
+    * **Paolo Aluffi, *Algebra: Chapter 0*:** 用范畴论的视角写代数，非常现代，适合计算机背景的人（理解抽象结构）。
+
+### 8. 常微分方程与偏微分方程 (ODEs/PDEs)
+* **核心内容：** 存在唯一性定理、稳定性、特征线法、调和函数、热/波方程。
+* **教材：**
+    * **Morris Tenenbaum, *Ordinary Differential Equations*:** 极佳的基础习题集。
+    * **Lawrence Evans, *Partial Differential Equations*:** PDE 领域的终极标准教材，QE 必考。
+
+---
+
+## 终极标准：博士资格考试 (QE) 冲刺
+当你完成上述学习后，你需要通过“实战”来达到所谓的“最低标准”。
+
+* **综合习题集：**
+    * ***Berkeley Problems in Mathematics*** (By Paulo Ney de Souza & Jorge-Nuno Silva): 这本书收集了加州大学伯克利分校几十年的数学 PhD 入学考试题。**如果你能独立做出其中 80% 的题目，你已经达到了顶尖大学数学博士的“最低标准”。**
+
+---
+
+## 数学进阶流程图 (Progression Roadmap)
+
+
+
+```mermaid
+graph TD
+    A[数学分析 Rudin/Tao] --> B[点集拓扑 Munkres]
+    C[线性代数 Axler] --> D[抽象代数 Dummit]
+    
+    B --> E[实分析 Stein/Folland]
+    B --> F[复分析 Stein/Ahlfors]
+    A --> G[微分方程 ODE/PDE]
+    
+    E --> H[泛函分析 Stein/Lax]
+    F --> H
+    
+    D --> I{数学研究最低标准: PhD QE}
+    E --> I
+    F --> I
+    H --> I
+    G --> I
+    
+    I --> J[Berkeley Problems in Mathematics]
+```
