@@ -12,7 +12,7 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 ├── Axiom-Flow/        # 独立 git 仓库（PDF 解析/OCR/质量审阅，不进本仓库版本控制）
 ├── QED-Tracker/       # 独立 git 仓库（书籍/论文下载、校验、登记，不进本仓库版本控制）
 ├── dataset/           # 共享数据目录：原始文档 + 解析产物（git 忽略，仅保留目录骨架）
-└── docs/              # 本仓库文档（设计文档、学习资料等）
+└── docs/              # 本仓库文档（导航入口见 docs/index.md）
 ```
 
 - 进入 Axiom-Flow / QED-Tracker 目录工作前，**必须先读各自的 AGENTS.md**，遵守其分支与门禁规则。
@@ -29,11 +29,19 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 **独立性铁律**：Axiom-Flow 与 QED-Tracker 未启动时，QED-Engine 前端对话/展示必须正常；QED-Engine 后端离线时，前两者用本地默认配置降级运行。三个项目均可独立开发、独立部署。
 
-## dataset 约定（Phase 1 细化）
+## 文档入口
 
-- 根目录 `dataset/` 存放原始文档与解析产物，是本项目（QED-Engine）目录的一部分；
-- 子项目通过配置指向该目录写入/读取，具体子目录结构（raw/parsed 等）与读写契约见后续设计文档；
-- 目录当前仅保留骨架（`.gitkeep`），数据文件不入库。
+具体约束一律以 docs 正文为准，本文件不保存正文事实：
+
+| 需要 | 入口 |
+| --- | --- |
+| 系统结构与服务边界 | [docs/architecture/](docs/architecture/index.md) |
+| 服务契约、dataset 约定、统一配置接口 | [docs/design/](docs/design/index.md) |
+| 工程治理规则（文档规范等） | [docs/standards/](docs/standards/index.md) |
+| 开发/联调步骤 | [docs/guides/](docs/guides/index.md) |
+| 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md) |
+| 长期决策（ADR） | [docs/adr/](docs/adr/index.md) |
+| 全部入口汇总 | [docs/index.md](docs/index.md) |
 
 ## 协作流程
 
