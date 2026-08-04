@@ -1,4 +1,8 @@
-"""API 响应模型。"""
+"""
+模块职责：配置中心 API 的请求与响应模型。
+设计关联（DesignRef）：docs/design/config-center-api.md
+实现状态：Current
+"""
 
 from pydantic import BaseModel
 

@@ -10,7 +10,8 @@
 
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
-| *（待 Phase 1 接口盘点后创建）* | — | — | 四服务架构与边界、dataset 拓扑 |
+| [四服务架构与边界](four-service-architecture.md) | Accepted | In Progress | 服务职责、端口规划、独立性铁律与前端统一路线 |
+| [代码与设计映射表](code-map.md) | Accepted | Implemented | 受管代码、DesignRef 与测试的双向映射唯一事实源 |
 
 ## 规则
 

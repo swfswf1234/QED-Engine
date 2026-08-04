@@ -35,11 +35,11 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 | 需要 | 入口 |
 | --- | --- |
-| 系统结构与服务边界 | [docs/architecture/](docs/architecture/index.md) |
+| 系统结构与服务边界 | [docs/architecture/](docs/architecture/index.md)，映射与实现状态见 [code-map.md](docs/architecture/code-map.md) |
 | 服务契约、dataset 约定、统一配置接口 | [docs/design/](docs/design/index.md) |
-| 工程治理规则（文档规范等） | [docs/standards/](docs/standards/index.md) |
+| 工程治理规则（文档规范等） | `docs/standards/` 是工程治理规则的唯一事实源，入口 [docs/standards/](docs/standards/index.md)，具体采用 [任务生命周期](docs/standards/task-lifecycle.md)、[文档规范](docs/standards/documentation.md)、[ADR 治理](docs/standards/adr-governance.md)、[代码与文档追溯](docs/standards/code-document-traceability.md)、[测试架构与门禁](docs/standards/testing.md)、[跨项目协作流程](docs/standards/cross-project-collaboration.md) |
 | 开发/联调步骤 | [docs/guides/](docs/guides/index.md) |
-| 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md) |
+| 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md)，任务台账 [todo.md](docs/trackers/todo.md) |
 | 长期决策（ADR） | [docs/adr/](docs/adr/index.md) |
 | 全部入口汇总 | [docs/index.md](docs/index.md) |
 
@@ -50,6 +50,10 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 - 技能清单（精简保留）：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`requesting-code-review`、`receiving-code-review`。
 - 已移出禁用：`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
+- **跨项目协作**：需要对方项目配合时，在对方仓库建设计文档 + todo 任务（请求），用户评审
+  确认后由对方执行；不直接修改对方项目代码。规则见
+  [跨项目协作流程](docs/standards/cross-project-collaboration.md)；收到对方发起的配合需求时，
+  先评审后执行。
 - 中文交流；文档默认中文，标识符/API 字段保持英文。
 
 ## 完成检查

@@ -3,8 +3,8 @@
 状态：Current
 最后更新：2026-08-04
 治理对象：文档分类、写作、元数据、索引、命名、归档与删除
-依据：Axiom-Flow `docs/standards/documentation.md` 治理模式，适配根仓库（QED-Engine）三仓库结构与学习资料域
-关联测试：暂无（根仓库不复制子项目契约测试，规则由人工审阅执行）
+依据 ADR：`docs/adr/0001-root-contract-tests.md`
+关联测试：`tests/contract/test_document_structure.py`、`tests/contract/test_markdown_links.py`、`tests/contract/test_standard_governance.py`
 
 ## 目的与边界
 
@@ -79,8 +79,8 @@
 - 新建或移动文档前先确认其唯一事实归属；删除前搜索全部引用并验证 Git 锚点可读。
 - 仍含唯一事实、决策依据或审计证据的文件必须归档；精确重复、空草稿或已有高优先级承接事实的
   文件可以删除。
-- 根仓库不复制子项目的文档契约测试；目录结构、元数据和链接规则由计划中声明的人工审阅负责，
-  每次文档变更在提交前完成人工复核。
+- 根仓库文档治理规则由 `tests/contract/` 契约测试守护（目录结构、元数据、链接与标准一致性）；
+  每次文档变更在提交前运行适用契约测试并完成人工复核（见[测试架构与门禁](testing.md)）。
 - 涉及子项目边界的文档变更，先确认子项目自身 `AGENTS.md` 与规范，不越权修改其内容。
 
 ## 变更与取代

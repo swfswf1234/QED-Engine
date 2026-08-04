@@ -1,4 +1,9 @@
-"""API 契约：health、模型路由表与供应商配置状态，密钥值不泄露。"""
+"""
+模块职责：配置中心 API 契约测试：health、模型路由表与供应商配置状态，密钥值不泄露。
+设计关联（DesignRef）：docs/design/config-center-api.md
+实现状态：Current
+被测代码：src/qed_engine/api/main.py、src/qed_engine/api/schemas.py
+"""
 
 from fastapi.testclient import TestClient
 

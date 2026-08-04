@@ -1,9 +1,9 @@
 # 配置中心 API 契约
 
 设计状态：Accepted
-实现状态：Current
+实现状态：Implemented
 最后更新：2026-08-04
-关联代码：`src/qed_engine/`（config.py、api/main.py、api/schemas.py）
+关联代码：`src/qed_engine/api/main.py`、`src/qed_engine/api/schemas.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`
 关联 ADR：无
 

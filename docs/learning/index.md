@@ -11,3 +11,7 @@
 | 资料 | 说明 |
 | --- | --- |
 | [突破朗道位垒.txt](突破朗道位垒.txt) | 数学学习规划：朗道位垒目标、课程递进关系、教材与习题集清单 |
+| [LangChain 核心概念笔记](langchain-notes.md) | 组件、LCEL、Agent 与 QED 结合点 |
+| [文本切分笔记](chunking-notes.md) | 切分策略、参数与数学文档特殊性 |
+| [向量数据库笔记](vector-db-notes.md) | 方案对比、嵌入/索引概念、数学检索注意点 |
+| [RAG 笔记](rag-notes.md) | 流程、检索增强关键点、变体与 QED 落地清单 |
