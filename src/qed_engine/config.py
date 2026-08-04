@@ -1,0 +1,39 @@
+"""统一配置：读取根 .env，集中管理供应商 API key 与模型选择。
+
+设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/design/config-center-api.md
+实现状态：Current
+关联测试：tests/test_config.py
+"""
+
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """读取根 .env 的统一配置。空 key 视为未配置，服务保持可用。"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    deepseek_api_key: SecretStr = SecretStr("")
+    qwen_api_key: SecretStr = SecretStr("")
+    glm_api_key: SecretStr = SecretStr("")
+    # 当前生效档（qwen）：主对话 / OCR 视觉 / 嵌入
+    qed_model: str = "qwen-plus"
+    qed_ocr_model: str = "qwen-vl-plus"
+    qed_embedding_model: str = "text-embedding-v4"
+    # 切换档（GLM）：对话 / 专用文档 OCR
+    glm_model: str = "glm-5.2"
+    glm_ocr_model: str = "glm-ocr"
+    # 占位档（deepseek，key 配置后生效）
+    deepseek_model: str = "deepseek-v4-flash"
+
+    def has_configured(self, provider: str) -> bool:
+        """指定供应商的 API key 是否已配置（空值视为未配置）。"""
+        key = getattr(self, f"{provider}_api_key", None)
+        if key is None:
+            return False
+        return key.get_secret_value() != ""

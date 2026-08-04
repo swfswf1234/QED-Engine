@@ -21,7 +21,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | QED-Tracker | 教材/习题集/论文的发现、下载、校验、登记 | Python CLI | [README](https://github.com/swfswf1234/QED-Tracker) |
 | Axiom-Flow | PDF 解析、OCR、公式/图表还原、质量审阅 | FastAPI + Worker + Web 工作台 | [README](https://github.com/swfswf1234/Axiom-Flow) |
-| QED-Engine | 学习界面、管理界面、统一配置中心 | 待建设（本仓库） | 本仓库 |
+| QED-Engine | 学习界面、管理界面、统一配置中心 | 配置中心已落地：FastAPI（Python 3.12），端口 8900 | 本仓库 |
 
 子项目为独立 git 仓库，嵌入本仓库目录下，可独立开发、独立部署。
 
@@ -39,7 +39,30 @@ flowchart LR
 
 ## 快速开始
 
-QED-Engine 本体仍在建设中。当前可先体验两个子项目：
+### QED-Engine 配置中心（本仓库）
+
+```powershell
+# 0. 使用 conda 环境（Python 3.12）
+conda activate QED_env
+
+# 1. 准备密钥：复制模板并填入真实 API key
+Copy-Item .env.example .env
+
+# 2. 安装与启动（根仓库目录）
+python -m pip install -e ".[dev]"
+python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900
+
+# 3. 验证
+Invoke-RestMethod http://127.0.0.1:8900/api/v1/health
+Invoke-RestMethod http://127.0.0.1:8900/api/v1/config/models
+
+# 4. 真实调用验证各供应商 key（不打印密钥）
+python scripts/check_api_keys.py
+```
+
+接口契约见 [配置中心 API 契约](docs/design/config-center-api.md)。
+
+### 两个子项目
 
 ```powershell
 # QED-Tracker：安装与下载教材/论文（详见其 README）
@@ -61,6 +84,9 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `Axiom-Flow/` | 子项目（独立 git 仓库，解析与质量审阅） |
 | `QED-Tracker/` | 子项目（独立 git 仓库，下载与文件管理） |
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
+| `src/qed_engine/` | 统一配置中心（FastAPI，端口 8900） |
+| `scripts/` | 辅助脚本（如 load-env.ps1） |
+| `tests/` | 配置中心测试（pytest + ruff 门禁） |
 | `docs/` | 架构、设计、决策、规范、计划与学习资料 |
 | `AGENTS.md` | Agent 执行总纲 |
 
