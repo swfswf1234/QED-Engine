@@ -2,9 +2,13 @@
 /Axiom-Flow/
 /QED-Tracker/
 
-# 数据集（原始文档与解析产物，Phase 1 定义目录结构后再细粒度管理）
+# 数据集（原始文档与解析产物，仅保留目录骨架）
 /dataset/*
 !/dataset/.gitkeep
+!/dataset/axiom-flow/
+!/dataset/axiom-flow/.gitkeep
+!/dataset/qed-tracker/
+!/dataset/qed-tracker/.gitkeep
 
 # IDE / 编辑器
 /.idea/

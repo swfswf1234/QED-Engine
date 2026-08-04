@@ -18,10 +18,9 @@
 | REQ-005 | 实现 | 高 | 待开始 | Axiom-Flow web/ 前端迁入根仓库 web/，子项目退役 web/ | 用户评审 ADR 0002 后启动前端迁移轮 |
 | REQ-006 | 实现 | 中 | 待开始 | QED-Engine 前端（8903）：学习界面 + 管理界面 + 审阅工作台 | 待 REQ-005 迁移完成后开发 |
 | REQ-007 | 实现 | 中 | 待开始 | 配置中心数据库选择：QED_DB_* 变量 + 配置接口 | 待写计划（B 类） |
-| REQ-008 | 实现 | 中 | 待开始 | Axiom-Flow OCR 多后端：qwen-vl-plus → glm-ocr 适配（请求：Axiom-Flow） | Axiom-Flow 仓库内进行，其 todo 承接 |
+| REQ-008 | 实现 | 中 | 待开始 | Axiom-Flow OCR 多后端：qwen-vl-plus → glm-ocr 适配（请求：Axiom-Flow） | 已补登记 Axiom-Flow todo ALN-005（跨项目），用户确认后由其仓库执行 |
 | REQ-009 | 实现 | 低 | 待开始 | deepseek 接入：DEEPSEEK_API_KEY 配置后启用 deepseek-v4-flash 路由 | 用户账户可用后处理 |
 | REQ-010 | 流程 | 中 | 进行中 | 跨项目协作流程演练：向 Axiom-Flow/QED-Tracker 登记改造请求 todo | 双方回执并关闭其 todo 后完成 |
-| DES-001 | 实现 | 中 | 待开始 | 统一 CLI `qed`：config 子命令 + 服务发现（8901/8902 地址可配置） | 计划 Phase 1 工作项；CORS 允许 8901/8902/8903 一并落地 |
 
 ## 规则
 
