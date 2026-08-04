@@ -71,3 +71,24 @@ def test_secret_empty_detection(monkeypatch):
     assert settings.qwen_api_key.get_secret_value() == ""
     assert settings.has_configured("qwen") is False
     assert settings.has_configured("deepseek") is False
+
+
+def test_service_url_defaults(monkeypatch):
+    """无环境变量时：三服务地址使用全局端口规划默认值。"""
+    for name in ("QED_CONFIG_CENTER_URL", "QED_TRACKER_URL", "QED_AXIOM_URL", "QED_TRACKER_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.qed_config_center_url == "http://127.0.0.1:8900"
+    assert settings.qed_tracker_url == "http://127.0.0.1:8901"
+    assert settings.qed_axiom_url == "http://127.0.0.1:8902"
+
+
+def test_service_url_env_override(monkeypatch):
+    """QED_*_URL 环境变量可覆盖默认服务地址（服务发现可配置）。"""
+    monkeypatch.setenv("QED_CONFIG_CENTER_URL", "http://config.local:9999")
+    monkeypatch.setenv("QED_TRACKER_URL", "http://tracker.local:9101")
+    monkeypatch.setenv("QED_AXIOM_URL", "http://axiom.local:9102")
+    settings = Settings(_env_file=None)
+    assert settings.qed_config_center_url == "http://config.local:9999"
+    assert settings.qed_tracker_url == "http://tracker.local:9101"
+    assert settings.qed_axiom_url == "http://axiom.local:9102"

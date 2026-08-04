@@ -73,3 +73,38 @@ def test_keys_status(monkeypatch):
     assert body == {"deepseek": False, "qwen": True, "glm": True}
     assert "sk-qwen" not in response.text
     assert "sk-glm" not in response.text
+
+
+def test_cors_allowlist_covers_all_services(monkeypatch):
+    """预检：8900/8901/8902/8903 与 8000 来源均被允许（全局端口规划）。"""
+    client = _client(monkeypatch)
+    for origin in (
+        "http://127.0.0.1:8900",
+        "http://127.0.0.1:8901",
+        "http://127.0.0.1:8902",
+        "http://127.0.0.1:8903",
+        "http://localhost:8000",
+    ):
+        response = client.options(
+            "/api/v1/health",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == origin
+
+
+def test_cors_rejects_unknown_origin(monkeypatch):
+    """未列入白名单的来源被拒绝预检，不返回 allow-origin 头。"""
+    client = _client(monkeypatch)
+    response = client.options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://evil.example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers

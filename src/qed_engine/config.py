@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr = SecretStr("")
     qwen_api_key: SecretStr = SecretStr("")
     glm_api_key: SecretStr = SecretStr("")
+    # 服务地址（全局端口规划 8900/8901/8902，可被 QED_*_URL 覆盖）
+    qed_config_center_url: str = "http://127.0.0.1:8900"
+    qed_tracker_url: str = "http://127.0.0.1:8901"
+    qed_axiom_url: str = "http://127.0.0.1:8902"
     # 当前生效档（qwen）：主对话 / OCR 视觉 / 嵌入
     qed_model: str = "qwen-plus"
     qed_ocr_model: str = "qwen-vl-plus"

@@ -14,9 +14,11 @@
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `src/qed_engine/config.py` | 统一配置读取 | Current | `docs/design/configuration-and-secrets.md` | `tests/test_config.py` | 根 `.env` 唯一事实源，空 key 降级。 |
-| `src/qed_engine/api/main.py` | 配置中心 API 入口 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 三接口，密钥不下发。 |
+| `src/qed_engine/cli.py` | 统一 CLI `qed` | Current | `docs/design/configuration-and-secrets.md` | `tests/test_cli.py` | config 子命令、服务发现与最小配置尾注。 |
+| `src/qed_engine/api/main.py` | 配置中心 API 入口 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 三接口，密钥不下发，CORS 允许 8900-8903。 |
 | `src/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 健康、模型路由与密钥布尔状态。 |
 | `tests/test_config.py` | 配置读取单元测试 | Current | `docs/design/configuration-and-secrets.md` | — | 默认值与空值降级。 |
+| `tests/test_cli.py` | 统一 CLI 契约测试 | Current | `docs/design/configuration-and-secrets.md` | — | 子命令、服务地址与尾注提醒。 |
 | `tests/test_api.py` | 配置中心 API 契约测试 | Current | `docs/design/config-center-api.md` | — | 密钥值不泄露。 |
 | `tests/contract/test_standard_governance.py` | 标准治理测试 | Current | `docs/standards/documentation.md` | — | 守护标准目录、元数据、索引与 AGENTS 路由。 |
 | `tests/contract/test_adr_governance.py` | ADR 治理测试 | Current | `docs/standards/adr-governance.md` | — | 守护编号、登记表、元数据与取代关系。 |

@@ -24,6 +24,9 @@ dev = [
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[project.scripts]
+qed = "qed_engine.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["qed_engine*"]

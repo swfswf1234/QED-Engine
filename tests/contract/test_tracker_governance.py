@@ -44,14 +44,26 @@ def _todo_rows() -> list[dict[str, str]]:
 
 
 def test_tracker_directory_has_exact_governed_files_and_index_links():
-    assert {path.name for path in TRACKERS.glob("*.md")} == {
-        "index.md",
-        "roadmap.md",
-        "todo.md",
-    }
+    # completed.md 为按需创建的关闭台账（见 task-lifecycle 终态规则），其余文件必须齐全
+    names = {path.name for path in TRACKERS.glob("*.md")}
+    assert names <= {"index.md", "roadmap.md", "todo.md", "completed.md"}
+    assert {"index.md", "roadmap.md", "todo.md"} <= names
     index = (TRACKERS / "index.md").read_text(encoding="utf-8")
     for filename in ("roadmap.md", "todo.md"):
         assert f"]({filename})" in index
+
+
+def test_completed_log_rows_reference_closed_tasks():
+    completed = TRACKERS / "completed.md"
+    if not completed.exists():
+        return
+    rows = _table(completed, ("ID", "类型", "任务", "关闭结果", "证据"))
+    assert rows
+    ids = [row["ID"] for row in rows]
+    assert all(TASK_ID.fullmatch(task_id) for task_id in ids)
+    assert len(ids) == len(set(ids))
+    assert all(row["关闭结果"] in {"Achieved", "Rejected", "Partial", "Not Applicable"} for row in rows)
+    assert all(all(row.values()) for row in rows)
 
 
 def test_task_ids_are_stable_unique_and_rows_are_complete():

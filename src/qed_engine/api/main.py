@@ -22,9 +22,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
+            # 全局端口规划（ADR 0002）：8900 配置中心 / 8901 QED-Tracker /
+            # 8902 Axiom-Flow / 8903 前端；8000 为 Axiom-Flow 迁移前兼容
             "http://127.0.0.1:8000",
             "http://localhost:8000",
             "http://127.0.0.1:8900",
+            "http://localhost:8900",
+            "http://127.0.0.1:8901",
+            "http://localhost:8901",
+            "http://127.0.0.1:8902",
+            "http://localhost:8902",
+            "http://127.0.0.1:8903",
+            "http://localhost:8903",
         ],
         allow_credentials=False,
         allow_methods=["*"],

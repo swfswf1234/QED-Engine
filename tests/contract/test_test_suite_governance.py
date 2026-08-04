@@ -19,7 +19,7 @@ def test_test_directories_are_limited_to_contract_layer():
 
 def test_root_test_files_are_the_config_center_suite():
     root_tests = {path.name for path in TESTS.glob("test_*.py")}
-    assert root_tests == {"test_api.py", "test_config.py"}
+    assert root_tests == {"test_api.py", "test_config.py", "test_cli.py"}
 
 
 def test_pytest_uses_strict_markers_and_importlib():
