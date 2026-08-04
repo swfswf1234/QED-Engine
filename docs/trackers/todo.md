@@ -12,7 +12,7 @@
 | --- | --- | --- | --- | --- | --- |
 | ARCH-001 | Plan | 高 | Accepted | [2026-08 三项目同步对齐计划（sync-alignment）](../plans/2026-08-sync-alignment.md) | 计划状态 Accepted；Phase 0/1 完成后按归档判定关闭 |
 | REQ-001 | 请求 | 高 | 待开始 | Axiom-Flow 端口 8000 → 8902 迁移（启动命令、README、指南、CORS）（请求：Axiom-Flow） | 已向 Axiom-Flow 登记 todo（跨项目），用户确认后由其仓库执行 |
-| REQ-002 | 实现 | 中 | 进行中 | 根仓库文档治理落地：标准/ADR/计划/台账与契约测试全绿（ADR 0001） | `tests/contract/` 全量通过后完成并关闭 |
+| REQ-002 | 实现 | 中 | 进行中 | 文档治理持续演进：标准/ADR/计划/台账与契约测试随需求同步更新（ADR 0001 已落地） | 每次文档变更前运行 `tests/contract/` 门禁 |
 | REQ-003 | 请求 | 高 | 待开始 | Axiom-Flow 数据目录指向根 dataset/axiom-flow/parsed、直读 QED_* 变量（请求：Axiom-Flow） | Axiom-Flow 仓库内执行，其 todo 承接后更新证据 |
 | REQ-004 | 请求 | 高 | 待开始 | QED-Tracker 服务化 8901：API + 后台任务 + 轮询；数据根迁 dataset/qed-tracker/（请求：QED-Tracker） | QED-Tracker 仓库内执行，其 todo 承接后更新证据 |
 | REQ-005 | 实现 | 高 | 待开始 | Axiom-Flow web/ 前端迁入根仓库 web/，子项目退役 web/ | 用户评审 ADR 0002 后启动前端迁移轮 |
