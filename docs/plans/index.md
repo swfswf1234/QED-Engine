@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-06
 
 本目录保存已批准且尚未关闭的短期执行合同。文档分类与元数据规则见
 [文档规范](../standards/documentation.md)。
@@ -16,3 +16,6 @@
 ## 活跃计划
 
 - [2026-08 三项目同步对齐计划（sync-alignment）](../trackers/todo.md)（ARCH-001，状态见任务台账）
+- [2026-08 教材下载轮计划（textbook-download-round）](../trackers/todo.md)（ARCH-002，状态见任务台账）
+- [2026-08 8903 前端三期改造计划（frontend-redesign-v3）](../trackers/todo.md)（ARCH-003，状态见任务台账）
+- [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../trackers/todo.md)（ARCH-004，状态见任务台账）

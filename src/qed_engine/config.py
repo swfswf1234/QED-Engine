@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     glm_ocr_model: str = "glm-ocr"
     # 占位档（deepseek，key 配置后生效）
     deepseek_model: str = "deepseek-v4-flash"
+    # 统一数据库（MySQL 8 qed 库，ADR 0003；QED_DB_* 为三项目唯一事实源）
+    qed_db_host: str = "127.0.0.1"
+    qed_db_port: int = 3306
+    qed_db_name: str = "qed"
+    qed_db_user: str = "root"
+    qed_db_password: SecretStr = SecretStr("")
 
     def has_configured(self, provider: str) -> bool:
         """指定供应商的 API key 是否已配置（空值视为未配置）。"""

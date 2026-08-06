@@ -1,14 +1,14 @@
 # 能力路线图
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-05
 
 本文件只描述无执行状态的后续能力方向，不含任务排期。执行任务登记在[任务台账](todo.md)。
 
 | 方向 | 能力目标 | 关联任务 |
 | --- | --- | --- |
 | QED-Engine 前端 | 学习界面（知识点解析、练习、温故知新）与管理界面（解析进度、原始文档对照、追溯） | REQ-005、REQ-006 |
-| QED-Engine 配置中心 | 模型/API-key/数据库选择统一接口，向 Axiom-Flow、QED-Tracker 提供配置 | REQ-007、REQ-009 |
+| QED-Engine 配置中心 | 模型/API-key/数据库选择统一接口，向 Axiom-Flow、QED-Tracker 提供配置 | REQ-009 |
 | Axiom-Flow 对齐 | 端口 8902、数据目录指向根 dataset/、直读 QED_ 变量、前端迁移 | REQ-003、REQ-004 |
 | Axiom-Flow 解析质量 | 解析质量提升、真实数学样本评测、glm-ocr 多后端 | REQ-008 |
 | QED-Tracker | 学习方向驱动的自主检索（以其自身 roadmap 为准） | REQ-004 |

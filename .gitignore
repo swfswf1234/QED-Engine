@@ -7,7 +7,7 @@
 !/dataset/.gitkeep
 !/dataset/axiom-flow/
 !/dataset/axiom-flow/.gitkeep
-!/dataset/qed-tracker/
+/dataset/qed-tracker/*
 !/dataset/qed-tracker/.gitkeep
 
 # IDE / 编辑器

@@ -92,3 +92,37 @@ def test_service_url_env_override(monkeypatch):
     assert settings.qed_config_center_url == "http://config.local:9999"
     assert settings.qed_tracker_url == "http://tracker.local:9101"
     assert settings.qed_axiom_url == "http://axiom.local:9102"
+
+
+def test_db_defaults_when_no_env(monkeypatch):
+    """无环境变量时：统一数据库使用默认值（qed 库，密码空）。"""
+    for name in ("QED_DB_HOST", "QED_DB_PORT", "QED_DB_NAME", "QED_DB_USER", "QED_DB_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.qed_db_host == "127.0.0.1"
+    assert settings.qed_db_port == 3306
+    assert settings.qed_db_name == "qed"
+    assert settings.qed_db_user == "root"
+    assert settings.qed_db_password.get_secret_value() == ""
+
+
+def test_db_env_override(monkeypatch):
+    """QED_DB_* 环境变量覆盖默认值（唯一事实源，端口为整数）。"""
+    monkeypatch.setenv("QED_DB_HOST", "db.local")
+    monkeypatch.setenv("QED_DB_PORT", "3307")
+    monkeypatch.setenv("QED_DB_NAME", "qed_test")
+    monkeypatch.setenv("QED_DB_USER", "qeduser")
+    monkeypatch.setenv("QED_DB_PASSWORD", "sk-db-pass")
+    settings = Settings(_env_file=None)
+    assert settings.qed_db_host == "db.local"
+    assert settings.qed_db_port == 3307
+    assert settings.qed_db_name == "qed_test"
+    assert settings.qed_db_user == "qeduser"
+    assert settings.qed_db_password.get_secret_value() == "sk-db-pass"
+
+
+def test_db_password_not_leaked_in_repr():
+    """数据库密码为 SecretStr，repr/str 不泄露。"""
+    settings = Settings(_env_file=None, qed_db_password="sk-db-secret")
+    assert "sk-db-secret" not in repr(settings.qed_db_password)
+    assert "sk-db-secret" not in str(settings.qed_db_password)

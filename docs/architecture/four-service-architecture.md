@@ -2,10 +2,10 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-04
+最后更新：2026-08-05
 关联代码：根 `scripts/check_api_keys.py`、`scripts/load-env.ps1`（配置中心代码见[配置中心 API 契约](../design/config-center-api.md)）
 关联测试：`tests/contract/test_architecture_documents.py`
-关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`
+关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0003-shared-qed-database-independence.md`
 
 ## 服务视图
 
@@ -49,8 +49,10 @@ flowchart LR
 
 - Axiom-Flow 与 QED-Tracker 未启动时，QED-Engine 前端对话/展示必须正常，管理界面显示服务离线。
 - QED-Engine 配置中心离线时，Axiom-Flow 与 QED-Tracker 用本地默认配置降级运行。
-- 三个项目各自独立部署、独立升级，不共享 Python 包、数据库或代码仓库。
-- 跨项目传递只通过：HTTP 接口、共享 dataset 目录、环境变量（见
+- 三个项目各自独立部署、独立升级，不共享 Python 包或代码仓库；MySQL 例外为共享 `qed` 库实例
+  （[ADR 0003](../adr/0003-shared-qed-database-independence.md)），以 `qt_*`/`af_*` 表命名空间
+  隔离。
+- 跨项目传递只通过：HTTP 接口、共享 dataset 目录、环境变量与表隔离的共享 qed 库（见
   [统一配置与密钥规范](../design/configuration-and-secrets.md)）。
 
 ## 前端统一路线

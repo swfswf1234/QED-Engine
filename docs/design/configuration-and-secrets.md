@@ -48,6 +48,20 @@
 | `QED_TRACKER_PORT` | QED-Tracker 服务监听端口 | `8901` | 服务化轮启用 |
 | `QED_AXIOM_URL` | Axiom-Flow 服务地址 | `http://127.0.0.1:8902` | 取代 QED-Tracker 现状的 `axiom_url` 默认 8000 |
 
+### 统一数据库（MySQL 8，qed 库；2026-08-04 用户裁决）
+
+| 变量 | 用途 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `QED_DB_HOST` | 数据库主机 | `127.0.0.1` | 三个项目共用同一 MySQL 8 实例 |
+| `QED_DB_PORT` | 数据库端口 | `3306` | — |
+| `QED_DB_NAME` | 数据库名 | `qed` | 统一库：QED-Tracker 用 `qt_*` 表、Axiom-Flow 用 `af_*` 表（互不读对方表） |
+| `QED_DB_USER` | 数据库用户 | `root` | — |
+| `QED_DB_PASSWORD` | 数据库密码 | 空 | 密钥类变量，绝不下发、不打印 |
+
+- 映射：Axiom-Flow `AXIOM_MYSQL_*`（存量别名，默认库名随之改为 `qed`，改造后别名退役）；QED-Tracker 服务化轮直接读取本组变量。
+- 存量库（Axiom-Flow `xqfm11`）不迁移、不改名；`qed` 库由各项目 Alembic 独立初始化（建表与迁移见各自仓库门禁）。
+- 数据库配置状态由配置中心 `/config/database` 接口暴露（布尔，密码不下发），见[配置中心 API 契约](config-center-api.md)。
+
 ## 强制规则
 
 - 根 `.env` 是密钥唯一事实源，不入库；根 `.env.example` 入库存模板，只放占位空值。
@@ -59,12 +73,14 @@
   子项目现状变量名。子项目改造为直读新变量后，映射层退役并从本表移除映射列。
 - 新增供应商 key、模型变量或服务端口时，同步更新本表、`.env.example`、配置中心路由与
   `check_api_keys.py`（如适用）。
+- 新增数据库变量（`QED_DB_*`）或变更库名时，同步更新本表、`.env.example`、配置中心
+  `/config/database` 接口契约与子项目数据库别名映射。
 
 ## 统一配置中心（QED-Engine 后端）
 
-配置中心（`src/qed_engine/`，端口 8900）读取根 `.env`，提供健康检查与模型路由表，**密钥不下发**
-（详见[配置中心 API 契约](config-center-api.md)）。子项目获取 key 的路径：现状经
-`load-env.ps1` 映射，Phase 2/3 改造为直读根 `.env` 变量后映射层退役。中心接口变更不影响子项目启动。
+配置中心（`src/qed_engine/`，端口 8900）读取根 `.env`，提供健康检查、模型路由表与数据库配置
+状态，**密钥绝不下发**（详见[配置中心 API 契约](config-center-api.md)）。子项目获取 key 的路径：
+现状经 `load-env.ps1` 映射，Phase 2/3 改造为直读根 `.env` 变量后映射层退役。中心接口变更不影响子项目启动。
 
 ## 执行与验证
 

@@ -32,3 +32,27 @@ class KeysResponse(BaseModel):
     deepseek: bool
     qwen: bool
     glm: bool
+
+
+class DatabaseResponse(BaseModel):
+    host: str
+    port: int
+    name: str
+    user: str
+    configured: bool
+    reachable: bool = False
+    reason: str = ""
+
+
+class LlmStatus(BaseModel):
+    """单个供应商的 LLM 可达性（需真实探测，非配置布尔）。"""
+
+    reachable: bool
+    reason: str = ""
+    checked_at: str
+
+
+class LlmStatusResponse(BaseModel):
+    qwen: LlmStatus
+    glm: LlmStatus
+    deepseek: LlmStatus

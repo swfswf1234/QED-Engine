@@ -43,7 +43,7 @@ dataset/                                # QED-Engine 根仓库（git 忽略，�
 | 子域 | 写入方 | 读取方 | 内容 |
 | --- | --- | --- | --- |
 | `qed-tracker/raw/` | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始 PDF，保持来源完整性与校验信息 |
-| `qed-tracker/meta/` | QED-Tracker | QED-Engine 前端 | 资源清单、选择报告、传输与任务记录 |
+| `qed-tracker/meta/` | QED-Tracker | QED-Engine 前端、MySQL 索引 | 资源清单、选择报告、传输与任务记录 |
 | `axiom-flow/parsed/` | Axiom-Flow | QED-Engine 前端 | 解析产物（页面事实、Markdown、manifest） |
 
 ## 强制规则
@@ -55,6 +55,9 @@ dataset/                                # QED-Engine 根仓库（git 忽略，�
 - 存量数据不自动迁移：子项目改造只改默认值与新下载行为；用户已有数据根（如 `D:\coding\dataset\textbooks`）保持不动。
 - dataset 内任何文件的增删改不影响三个项目的独立启动。
 - 服务化后写操作任务记录登记目标相对路径（`meta/tasks/`），前端可"任务 → 文件"跳转。
+- 资源登记双写：`meta/resources/<sha256>.json` 保持为文件状态事实，MySQL `qt_resources`（qed 库）
+  为查询/展示索引；登记顺序先落盘后登记，失败可重放（统一数据库契约见
+  [service-contracts.md](service-contracts.md)）。
 
 ## 现状与差距
 

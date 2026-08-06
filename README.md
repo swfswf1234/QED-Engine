@@ -42,10 +42,10 @@ flowchart LR
 ### QED-Engine 配置中心（本仓库）
 
 ```powershell
-# 0. 使用 conda 环境（Python 3.12）
+# 0. 使用 conda 环境（Python 3.12）；需要本机 MySQL 8 实例并创建三项目共用的 qed 库
 conda activate QED_env
 
-# 1. 准备密钥：复制模板并填入真实 API key
+# 1. 准备密钥：复制模板并填入真实 API key 与 QED_DB_* 数据库配置
 Copy-Item .env.example .env
 
 # 2. 安装与启动（根仓库目录）
@@ -61,6 +61,22 @@ python scripts/check_api_keys.py
 ```
 
 接口契约见 [配置中心 API 契约](docs/design/config-center-api.md)。
+
+### QED-Engine 前端（8903）
+
+原生静态单页应用（无构建步骤），浏览器直连 8900/8901 读取数据：
+
+```powershell
+# 在根仓库目录启动（QED_env 环境）
+python -m http.server 8903 --directory web
+
+# 打开 http://127.0.0.1:8903
+# 主体学习界面 → 右上角"管理后台" → 后台管理（仪表盘 / 文件下载管理 / 解析进度 / 文档对照 / 追溯）
+# 文件下载管理：候选清单（触发评估/确认/拒绝）、任务中心（1s 轮询）、验收台（PDF 预览+通过/删除）
+# QED-Tracker（8901）未启动时页面降级显示离线提示，不影响配置横幅与页面渲染
+```
+
+前端信息架构、视觉规范与响应式说明见 [三项目对接规范](docs/design/service-contracts.md)「8903 QED-Engine 前端」小节。
 
 ### 两个子项目
 
@@ -85,6 +101,7 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `QED-Tracker/` | 子项目（独立 git 仓库，下载与文件管理） |
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
 | `src/qed_engine/` | 统一配置中心（FastAPI，端口 8900） |
+| `web/` | QED-Engine 前端（8903，主体学习界面 + 后台管理，原生单页应用） |
 | `scripts/` | 辅助脚本（如 load-env.ps1） |
 | `tests/` | 配置中心测试（pytest + ruff 门禁） |
 | `docs/` | 架构、设计、决策、规范、计划与学习资料 |

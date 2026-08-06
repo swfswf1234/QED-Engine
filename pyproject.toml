@@ -9,14 +9,15 @@ description = "QED-Engine 统一配置中心：集中管理模型/API-key，向 
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.110.0",
+  "httpx>=0.28.0",
   "pydantic>=2.0.0",
   "pydantic-settings>=2.0.0",
+  "pymysql>=1.1.0",
   "uvicorn[standard]>=0.27.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28.0",
   "pytest>=8.0.0",
   "ruff>=0.5.0",
 ]
