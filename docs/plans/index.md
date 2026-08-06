@@ -19,3 +19,4 @@
 - [2026-08 教材下载轮计划（textbook-download-round）](../trackers/todo.md)（ARCH-002，状态见任务台账）
 - [2026-08 8903 前端三期改造计划（frontend-redesign-v3）](../trackers/todo.md)（ARCH-003，状态见任务台账）
 - [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../trackers/todo.md)（ARCH-004，状态见任务台账）
+- [2026-08 前端展示重构（display-redesign-v5）](../trackers/todo.md)（ARCH-005，状态见任务台账）

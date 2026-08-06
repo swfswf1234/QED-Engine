@@ -1,9 +1,15 @@
 "use strict";
 /* QED-Engine 前端（8903 静态页）：主体学习界面 + 后台管理（hash 路由）。
- * 数据源：8900 配置中心（横幅）+ 8901 QED-Tracker（目录/资源/任务/统计）。
+ * 数据源：8900 QED 管理服务（横幅/健康）+ 8901 QED-Tracker（目录/资源/任务/统计）。
  * 契约：docs/design/service-contracts.md；离线时各模块独立降级显示（独立性铁律）。
  * 三期（2026-08-06）：横幅粗粒度化、主界面三卡、仪表盘 SVG 图表、
- * 下载管理「领域-课程-书籍」树 + 事务面板、解析/对照/追溯空态。
+ * 下载管理「知识点-领域-课程-书籍」树 + 事务面板、解析/对照空态。
+ * 四期（2026-08-06）：卡片墙、严格三领域、树主评估窄 + 拖拽记忆、筛选栏、详情评估视角。
+ * 五期（2026-08-06）：入口页零后台痕迹 + 使用手册、仪表大盘四阶段流水线 + 服务健康面板、
+ * 知识点四级树 +（N本）计数、按钮弹层筛选器。
+ * 六期（2026-08-06）：取消「模块总览」卡片墙与「追溯」，#/admin 直达仪表大盘。
+ * 七期（2026-08-06）：修复管理视图互斥显示（.view 显隐规则）；界面改名
+ * 仪表大盘 / 文档下载管理 / 文档解析进度（树根同步改名）。
  * 视觉规范：DeepSeek 蓝黑风格，样式见 style.css。 */
 
 const CONFIG_BASE = "http://127.0.0.1:8900/api/v1";
@@ -14,6 +20,7 @@ const AXIOM_BASE = "http://127.0.0.1:8902/api/v1";
 const ENDPOINTS = {
     health: "/api/v1/health",
     keys: "/config/keys",
+    models: "/config/models",
     database: "/config/database",
     llmStatus: "/config/llm-status",
     resources: "/resources",
@@ -62,17 +69,15 @@ const STATUS_COLORS = {
 };
 
 /* hash 路由表（tests/test_web.py 守护）。
- * URL 形式：#/（主体界面）、#/admin（卡片墙）、#/admin/dashboard（仪表盘）、
- * #/admin/downloads（文件下载管理）、#/admin/parsing（解析进度）、
- * #/admin/compare（原始文档对照）、#/admin/trace（追溯） */
+ * URL 形式：#/（主体界面）、#/admin（直达仪表大盘）、#/admin/dashboard（仪表大盘）、
+ * #/admin/downloads（知识点）、#/admin/parsing（文档解析进度）、#/admin/compare（原始文档对照） */
 const ROUTES = {
     "/": { page: "home" },
-    "/admin": { page: "admin", view: "admin" },
+    "/admin": { page: "admin", view: "dashboard" },
     "/admin/dashboard": { page: "admin", view: "dashboard" },
     "/admin/downloads": { page: "admin", view: "downloads" },
     "/admin/parsing": { page: "admin", view: "parsing" },
     "/admin/compare": { page: "admin", view: "compare" },
-    "/admin/trace": { page: "admin", view: "trace" },
 };
 
 const STATUS_LABEL = {
@@ -88,14 +93,92 @@ const STATUS_LABEL = {
     backup: "备选",
 };
 
+/* ---------- 按钮弹层筛选器（五期：替代原生 select，浅底深字） ---------- */
+
 const state = {
     resources: [],
     tasks: [],
     catalog: [], // catalog targets（8901 /catalogs/math-qe）
     selection: null, // {kind: "domain"|"course"|"target", id: string}
+    filters: { domain: "", course: "", status: "" }, // 资源筛选（与树选择 AND 叠加）
+    taskFilters: { status: "", type: "", course: "" }, // 任务筛选（前端过滤）
     pollTimer: null,
     modalAction: null, // {type, id}
 };
+
+/* 筛选器选项定义（值 → 标签；空串 = 全部） */
+const RESOURCE_STATUS_OPTIONS = [
+    ["", "全部"], ["candidate", "候选"], ["backup", "备选"], ["confirmed", "已确认"],
+    ["downloading", "下载中"], ["downloaded", "已下载"], ["approved", "已验收"],
+    ["rejected", "已拒绝"], ["failed", "失败"], ["pending_manual", "待人工补充"],
+];
+const TASK_STATUS_OPTIONS = [
+    ["", "全部"], ["pending", "待评估"], ["processing", "评估中"],
+    ["queued", "排队中"], ["running", "运行中"], ["succeeded", "已完成"], ["failed", "失败"],
+];
+const TASK_TYPE_OPTIONS = [
+    ["", "全部"], ["catalog_evaluate", "目录评估"], ["books/download", "书籍下载"],
+];
+
+/* 渲染弹层选项：按钮 + popover 菜单 */
+function renderPopover(popKey, options, label) {
+    const btn = $("btn-" + popKey);
+    const menu = document.querySelector(`[data-menu="${popKey}"]`);
+    if (!btn || !menu) return;
+    const short = popKey.replace("filter-", "");
+    const current = state.filters[short] ?? state.taskFilters[short] ?? "";
+    const curLabel = options.find(([v]) => v === current);
+    btn.textContent = label + "：" + (curLabel ? curLabel[1] : "全部");
+    menu.innerHTML = options.map(([value, text]) =>
+        `<button type="button" class="popover-option${value === current ? " selected" : ""}" data-value="${esc(value)}">${esc(text)}</button>`
+    ).join("");
+}
+
+function initPopovers() {
+    const popKeys = ["filter-domain", "filter-course", "filter-status", "filter-task-status", "filter-task-type", "filter-task-course"];
+    popKeys.forEach((key) => {
+        const btn = $("btn-" + key);
+        if (!btn) return;
+        const wrap = btn.closest(".filter-popover");
+        btn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            document.querySelectorAll(".popover-menu").forEach((m) => m.classList.add("hidden"));
+            const menu = document.querySelector(`[data-menu="${key}"]`);
+            if (menu) menu.classList.toggle("hidden");
+        });
+        const menu = document.querySelector(`[data-menu="${key}"]`);
+        if (menu) menu.addEventListener("click", (ev) => {
+            const opt = ev.target.closest(".popover-option");
+            if (!opt) return;
+            const value = opt.dataset.value;
+            if (key.startsWith("filter-task-")) {
+                state.taskFilters[key.replace("filter-task-", "")] = value;
+                renderTaskFilters();
+                renderTasks();
+            } else {
+                state.filters[key.replace("filter-", "")] = value;
+                renderResourceFilters();
+                renderPanel();
+            }
+            menu.classList.add("hidden");
+        });
+    });
+    document.addEventListener("click", () => {
+        document.querySelectorAll(".popover-menu").forEach((m) => m.classList.add("hidden"));
+    });
+}
+
+function renderResourceFilters() {
+    renderPopover("filter-domain", domainOptions(), "领域");
+    renderPopover("filter-course", courseOptions(), "课程");
+    renderPopover("filter-status", RESOURCE_STATUS_OPTIONS, "状态");
+}
+
+function renderTaskFilters() {
+    renderPopover("filter-task-status", TASK_STATUS_OPTIONS, "任务状态");
+    renderPopover("filter-task-type", TASK_TYPE_OPTIONS, "任务类型");
+    renderPopover("filter-task-course", courseOptions(), "课程");
+}
 
 /* ---------- 通用 ---------- */
 
@@ -140,8 +223,11 @@ function route() {
     $("page-admin").classList.toggle("active", isAdmin);
     document.title = isAdmin ? "管理后台 · QED-Engine" : "QED-Engine";
     if (isAdmin) {
+        const navHash = location.hash.replace(/^#/, "") || "/";
+        // #/admin 为仪表大盘别名：高亮「仪表大盘」菜单
+        const activeHash = navHash === "/admin" ? "/admin/dashboard" : navHash;
         document.querySelectorAll(".sidebar .nav-item").forEach((a) => {
-            a.classList.toggle("active", a.getAttribute("href") === "#" + (location.hash.replace(/^#/, "") || "/"));
+            a.classList.toggle("active", a.getAttribute("href") === "#" + activeHash);
         });
         showAdminView(r.view || "dashboard");
     }
@@ -151,9 +237,7 @@ function showAdminView(view) {
     document.querySelectorAll("#page-admin .view").forEach((v) => v.classList.remove("active"));
     const el = $("view-" + view);
     if (el) el.classList.add("active");
-    if (view === "admin") {
-        // 卡片墙（四期 D1）：纯入口，不加载数据
-    } else if (view === "dashboard") loadDashboard();
+    if (view === "dashboard") loadDashboard();
     else if (view === "downloads") {
         loadTree();
         loadResources();
@@ -162,28 +246,18 @@ function showAdminView(view) {
     }
 }
 
-/* ---------- 服务状态与配置横幅（8900） ---------- */
+/* ---------- 配置横幅（8900）与仪表盘健康面板 ---------- */
 
-async function refreshServiceStatus() {
-    const cards = [
-        ["card-config", CONFIG_BASE + ENDPOINTS.health],
-        ["card-tracker", TRACKER_BASE + ENDPOINTS.health],
-        ["card-axiom", AXIOM_BASE + ENDPOINTS.health],
-    ];
-    for (const [id, url] of cards) {
-        try {
-            const body = await fetchJson(url);
-            const name = body.service || id.replace("card-", "");
-            $(id).innerHTML = `<span class="pulse"></span>${esc(name)}：在线`;
-            $(id).classList.add("online");
-            $(id).classList.remove("offline");
-        } catch (_) {
-            const name = id === "card-config" ? "配置中心" : id === "card-tracker" ? "QED-Tracker" : "Axiom-Flow";
-            $(id).innerHTML = `<span class="pulse"></span>${name}：离线`;
-            $(id).classList.remove("online");
-            $(id).classList.add("offline");
-        }
-    }
+/* 五期：横幅 = 粗粒度模块连接状态（QED 管理服务横幅，仪表盘顶部）；健康面板 = 分组明细。
+ * 健康明细只在仪表盘渲染，入口页不展示任何服务状态（面向学习用户）。 */
+
+function healthStatusMarkup() {
+    const escH = esc;
+    return {
+        ok: (label, detail) => `<div class="health-item ok"><span class="h-dot"></span><span class="h-label">${escH(label)}</span>${detail ? `<span class="h-detail">${escH(detail)}</span>` : ""}</div>`,
+        bad: (label, detail) => `<div class="health-item bad"><span class="h-dot"></span><span class="h-label">${escH(label)}</span><span class="h-detail">${escH(detail || "异常")}</span></div>`,
+        dim: (label, detail) => `<div class="health-item dim"><span class="h-dot"></span><span class="h-label">${escH(label)}</span><span class="h-detail">${escH(detail || "—")}</span></div>`,
+    };
 }
 
 async function refreshConfigBanner() {
@@ -195,126 +269,148 @@ async function refreshConfigBanner() {
             fetchJson(CONFIG_BASE + ENDPOINTS.llmStatus),
         ]);
         // 粗粒度横幅（ARCH-003 决策 D2/D3）：只显示模块连接状态，不透露 provider 名单与主机细节。
-        // LLM：任一已配置供应商可达即 OK；无配置→未配置；有配置全不可达→不可用。
         const providers = ["qwen", "glm", "deepseek"].map((p) => llm[p] || {});
         const configured = providers.some((s) => s.reason !== "未配置");
         const llmOk = configured && providers.some((s) => s.reachable);
         const llmLabel = !configured ? "未配置" : llmOk ? "OK" : "不可用";
         const llmCls = !configured ? "dim" : llmOk ? "hl" : "hl-off";
-        // 数据库：reachable 为 8900 真实连接探测结果（pymysql 认证）。
         const dbLabel = !db.configured ? "未配置" : db.reachable ? "OK" : "连接失败";
         const dbCls = !db.configured ? "dim" : db.reachable ? "hl" : "hl-off";
-        banner.innerHTML = `LLM评估模块连接：<span class="${llmCls}">${llmLabel}</span> / MySQL数据库连接：<span class="${dbCls}">${dbLabel}</span> / 向量数据库连接：<span class="dim">—</span>`;
+        banner.innerHTML = `LLM评估模块连接：<span class="${llmCls}">${llmLabel}</span> / MySQL数据库连接：<span class="${dbCls}">${dbLabel}</span>`;
         banner.classList.toggle("warn", !llmOk || !db.reachable);
     } catch (_) {
-        banner.textContent = "配置中心 8900 离线，横幅不可用";
+        banner.textContent = "QED 管理服务 8900 离线，横幅不可用";
         banner.classList.add("warn");
     }
 }
 
-/* ---------- 仪表盘（总体数字 + SVG 图表，8901 离线降级） ---------- */
+/* ---------- 仪表大盘（五期：四阶段流水线 + 服务健康分组面板，8901/8900 离线降级） ---------- */
 
-function donutMarkup(counts) {
-    const statuses = ["candidate", "confirmed", "backup", "downloading", "downloaded", "approved", "rejected", "failed"];
-    const segments = statuses
-        .map((s) => ({ key: s, value: counts[s] || 0, color: STATUS_COLORS[s] }))
-        .filter((s) => s.value > 0);
-    const total = segments.reduce((sum, s) => sum + s.value, 0);
-    if (!total) return '<div class="empty-state"><div class="emoji">📊</div>暂无数据</div>';
-    const R = 42, C = 2 * Math.PI * R;
-    let offset = 0;
-    const arcs = segments.map((s) => {
-        const len = (s.value / total) * C;
-        const arc = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${s.color}" stroke-width="14"
-            stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;
-        offset += len;
-        return arc;
-    }).join("");
-    const legend = segments.map((s) =>
-        `<span class="legend-item"><i style="background:${s.color}"></i>${STATUS_LABEL[s.key] || s.key} ${s.value}</span>`
-    ).join("");
-    return `<div class="donut-wrap">
-        <svg viewBox="0 0 120 120" class="donut-svg">${arcs}<text x="60" y="64" text-anchor="middle" class="donut-total">${total}</text></svg>
-        <div class="donut-legend">${legend}</div>
-    </div>`;
-}
-
-function barsMarkup(items) {
-    const rows = items.filter(([name, count]) => count > 0);
-    if (!rows.length) return '<div class="empty-state"><div class="emoji">📊</div>暂无数据</div>';
-    const max = Math.max(...rows.map(([, count]) => count));
-    return `<div class="bars">${rows.map(([name, count]) => `
-        <div class="bar-row" title="${esc(name)}">
-            <span class="bar-label">${esc(name)}</span>
-            <div class="bar-track"><div class="bar-fill" style="width:${max ? (count / max) * 100 : 0}%"></div></div>
-            <span class="bar-num">${count}</span>
-        </div>`).join("")}</div>`;
-}
-
-function courseCounts(resources) {
-    const map = new Map();
-    for (const item of resources) {
-        const course = courseOf(item);
-        if (course && course !== "—") map.set(course, (map.get(course) || 0) + 1);
-    }
-    const byDomain = new Map();
-    for (const [course, count] of map) {
-        const domain = DOMAIN_MAP[course] || "其他";
-        const bucket = byDomain.get(domain) || [];
-        bucket.push([course, count]);
-        byDomain.set(domain, bucket);
-    }
-    const rows = [];
-    for (const domain of DOMAIN_ORDER) {
-        if (byDomain.has(domain)) rows.push([domain + "（合计）", byDomain.get(domain).reduce((s, [, c]) => s + c, 0)]);
-    }
-    for (const [domain, bucket] of byDomain) {
-        if (!DOMAIN_ORDER.includes(domain)) rows.push([domain, bucket.reduce((s, [, c]) => s + c, 0)]);
-    }
-    return rows;
-}
+/* 十期：流水线按课程统计——总课程数 = catalog targets 去重 course_id（动态，不再硬编码）；
+ * 发现下载（宽松）：课程下存在任一资源即算完成；
+ * 评估确认（严格）：课程有资源且课程内无待评估资源（status ∉ candidate/pending_manual）才算完成。 */
+const PIPELINE_STAGES = [
+    { key: "discover", name: "发现下载", hint: "课程下已有候选/备选/确认资源（宽松口径）" },
+    { key: "confirm", name: "评估确认", hint: "课程内候选全部评估完毕（严格口径）" },
+    { key: "parse", name: "解析", hint: "文档解析进度（Axiom-Flow 管线）" },
+    { key: "organize", name: "知识整理", hint: "知识结构整理（数据管线）" },
+];
 
 async function loadDashboard() {
     refreshConfigBanner();
-    const stats = [
-        ["candidate", "候选资源"],
-        ["confirmed", "已确认下载"],
-        ["downloaded", "已下载"],
-        ["approved", "已验收"],
-    ];
-    const nums = {};
-    let running = "—";
-    let ok = true;
+    loadHealthPanel();
+    const pipeline = $("pipeline");
+    if (!pipeline) return;
+    let totalCourses = null;
+    let discoverDone = 0;
+    let confirmDone = 0;
     try {
-        const [resources, tasks] = await Promise.all([
+        const [catalog, resources] = await Promise.all([
+            fetchJson(TRACKER_BASE + "/catalogs/math-qe"),
             fetchJson(TRACKER_BASE + ENDPOINTS.resources),
-            fetchJson(TRACKER_BASE + ENDPOINTS.tasks),
         ]);
         state.resources = resources;
-        const counts = {};
-        for (const item of resources) counts[item.status] = (counts[item.status] || 0) + 1;
-        for (const [status] of stats) nums[status] = counts[status] || 0;
-        running = tasks.filter((t) => t.status === "queued" || t.status === "running").length;
-        $("donut-chart").innerHTML = donutMarkup(counts);
-        $("course-bars").innerHTML = barsMarkup(courseCounts(resources));
-        await populateCourseSelects();
+        // 分母：catalog targets 去重 course_id
+        const courseIds = new Set((catalog.targets || []).map((t) => t.course_id).filter(Boolean));
+        totalCourses = courseIds.size;
+        // 课程聚合：每门课的资源状态集合
+        const byCourse = {};
+        for (const item of resources) {
+            const cid = courseOf(item);
+            (byCourse[cid] = byCourse[cid] || []).push(item.status);
+        }
+        for (const cid of courseIds) {
+            const statuses = byCourse[cid] || [];
+            if (statuses.length) discoverDone += 1; // 宽松：有任一资源
+            if (statuses.length && !statuses.some((s) => s === "candidate" || s === "pending_manual")) {
+                confirmDone += 1; // 严格：无待评估资源
+            }
+        }
     } catch (_) {
-        ok = false;
-        $("donut-chart").innerHTML = '<div class="empty-state"><div class="emoji">📊</div>8901 离线</div>';
-        $("course-bars").innerHTML = '<div class="empty-state"><div class="emoji">📊</div>8901 离线</div>';
+        // 8901 离线：流水线整体离线提示
     }
-    const cards = stats
-        .map(([status, label]) => `<div class="stat-card"><div class="stat-num">${ok ? nums[status] : "—"}</div><div class="stat-label">${label}</div></div>`)
-        .join("");
-    const runningCard = `<div class="stat-card"><div class="stat-num">${running}</div><div class="stat-label">任务进行中</div></div>`;
-    $("stat-grid").innerHTML = cards + runningCard;
+    const stageData = [
+        { name: "发现下载", done: discoverDone, note: totalCourses !== null ? "课程下已有候选/备选/确认资源" : "QED-Tracker 8901 离线" },
+        { name: "评估确认", done: confirmDone, note: totalCourses !== null ? "课程内候选全部评估完毕" : "QED-Tracker 8901 离线" },
+        { name: "解析", done: null, note: "未启用（Axiom-Flow 管线未就绪）" },
+        { name: "知识整理", done: null, note: "未启用（数据管线未就绪）" },
+    ];
+    pipeline.innerHTML = stageData.map((s) => {
+        const pct = s.done === null || totalCourses === null ? 0 : Math.round((s.done / totalCourses) * 100);
+        const num = s.done === null ? "—" : `已完成 ${s.done} / ${totalCourses} 课程`;
+        return `<div class="pipeline-stage">
+            <div class="stage-name">${esc(s.name)}</div>
+            <div class="stage-num">${esc(num)}</div>
+            <div class="stage-bar"><div class="stage-fill" style="width:${s.done === null || totalCourses === null ? 0 : Math.min(100, pct)}%"></div></div>
+            <div class="stage-note">${esc(s.note)}</div>
+        </div>`;
+    }).join("");
+    if (totalCourses === null) pipeline.classList.add("offline");
+    else pipeline.classList.remove("offline");
+    // 仪表大盘同时预热课程下拉（与知识点共用）
+    populateCourseSelects();
 }
 
-/* ---------- 文件下载管理（领域树 + 事务面板） ---------- */
+/* 服务健康分组面板：后台服务 / LLM配置 / 数据库配置，异常展开问题文案 */
+
+async function loadHealthPanel() {
+    const panel = $("health-panel");
+    const servicesBox = $("health-services");
+    const llmBox = $("health-llm");
+    const dbBox = $("health-db");
+    const mk = healthStatusMarkup();
+    if (!panel || !servicesBox || !llmBox || !dbBox) return;
+    // 后台服务：探测 8901/8902/8900 健康端点（名称带核心任务备注；正常不写原因，仅绿点+名称）
+    const probes = [
+        ["QED-Tracker（文档下载服务）", TRACKER_BASE + ENDPOINTS.health],
+        ["Axiom-Flow（文档解析服务）", AXIOM_BASE + ENDPOINTS.health],
+        ["QED 管理服务（后台管理服务）", CONFIG_BASE + ENDPOINTS.health],
+    ];
+    const results = await Promise.all(probes.map(async ([name, url]) => {
+        try {
+            await fetchJson(url);
+            return mk.ok(name);
+        } catch (err) {
+            return mk.bad(name, "离线：" + (err.message || "无法访问"));
+        }
+    }));
+    servicesBox.innerHTML = results.join("");
+    // LLM配置：8900 models 模型路由表——只显示三个实际使用模型（主模型/视图模型/Embedding）
+    try {
+        const models = await fetchJson(CONFIG_BASE + ENDPOINTS.models);
+        const routes = [
+            ["主模型", models.default],
+            ["视图模型", models.ocr],
+            ["Embedding", models.embedding],
+        ].filter(([label, r]) => r && r.configured);
+        if (!routes.length) llmBox.innerHTML = mk.dim("LLM", "未配置任何模型");
+        else llmBox.innerHTML = routes.map(([label, r]) => mk.ok(label, r.model)).join("");
+    } catch (err) {
+        llmBox.innerHTML = mk.bad("LLM", "管理服务离线：" + (err.message || "无法访问"));
+    }
+    // 数据库配置：8900 database（当前仅 MySQL）
+    try {
+        const db = await fetchJson(CONFIG_BASE + ENDPOINTS.database);
+        dbBox.innerHTML =
+            (db.configured
+                ? (db.reachable ? mk.ok("MySQL", "联通") : mk.bad("MySQL", "连接失败：" + (db.error || "认证/网络异常")))
+                : mk.dim("MySQL", "未配置"));
+    } catch (err) {
+        dbBox.innerHTML = mk.bad("MySQL", "管理服务离线：" + (err.message || "无法访问"));
+    }
+}
+
+/* ---------- 知识点（三层知识链路树 + 事务面板） ---------- */
+
+/* 五期：资源所属学科领域（与树领域层一致：catalog_id → 学科名） */
+function itemDomain(item) {
+    const ref = item.catalog_ref || {};
+    return domainOf(ref.catalog_id || "math-qe");
+}
 
 function scopeMatches(item, selection) {
     if (!selection) return true;
-    if (selection.kind === "domain") return DOMAIN_MAP[courseOf(item)] === selection.id;
+    if (selection.kind === "domain") return itemDomain(item) === selection.id;
     if (selection.kind === "course") return courseOf(item) === selection.id;
     if (selection.kind === "target") {
         const ref = item.catalog_ref || {};
@@ -335,15 +431,15 @@ async function loadResources() {
 }
 
 function renderPanel() {
-    // 四期（ARCH-004 D3）：筛选栏（领域/课程/状态）与树选择独立叠加（AND）
-    const status = $("filter-status").value;
-    const domain = $("filter-domain").value;
-    const course = $("filter-course").value;
+    // 四期/五期（ARCH-004 D3 + ARCH-005 D7）：筛选器（领域/课程/状态）与树选择独立叠加（AND）
+    const status = state.filters.status;
+    const domain = state.filters.domain;
+    const course = state.filters.course;
     const sel = state.selection;
     let items = state.resources.filter(
         (it) =>
             (!status || it.status === status) &&
-            (!domain || DOMAIN_MAP[courseOf(it)] === domain) &&
+            (!domain || itemDomain(it) === domain) &&
             (!course || courseOf(it) === course) &&
             scopeMatches(it, sel)
     );
@@ -364,6 +460,22 @@ function renderPanel() {
     else if (sel.kind === "domain") ctx.textContent = "领域：" + sel.id;
     else if (sel.kind === "course") ctx.textContent = "课程：" + sel.id + "（评估视图：中文优先）";
     else ctx.textContent = "书籍目标：" + sel.id;
+    // 十三期：控制台化——选中课程时显示课程操作条（① 搜索书籍 + 步骤进度）
+    const consoleEl = $("course-console");
+    if (consoleEl) {
+        if (sel && sel.kind === "course") {
+            consoleEl.classList.remove("hidden");
+            $("course-steps").innerHTML = courseSteps(sel.id);
+        } else {
+            consoleEl.classList.add("hidden");
+        }
+    }
+    // 十二期：有选中范围时展示该范围全部书籍（未生成资源的显示「待评估」占位）
+    const rangeTargets = rangeTargetsOf(sel);
+    if (rangeTargets) {
+        renderPanelByTargets(items, rangeTargets);
+        return;
+    }
     if (!items.length) {
         $("resource-list").innerHTML = '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无资源记录）</div>';
         return;
@@ -383,7 +495,57 @@ function renderPanel() {
     $("resource-list").innerHTML = html;
 }
 
-/* ---------- 领域树（catalog targets + 资源状态计数） ---------- */
+/* 选中范围的全部书籍目标（十二期）：领域→其下所有课程书籍；课程→全部书籍；书籍→单本；
+ * 无选中（全目录）返回 null（保持只列资源）。按学习深度顺序排序。 */
+function rangeTargetsOf(sel) {
+    if (!sel || !state.catalog.length) return null;
+    let targets = [];
+    if (sel.kind === "domain") {
+        targets = state.catalog.filter((t) => domainOf(t.catalog_id || "math-qe") === sel.id);
+    } else if (sel.kind === "course") {
+        targets = state.catalog.filter((t) => t.course_id === sel.id);
+    } else if (sel.kind === "target") {
+        targets = state.catalog.filter((t) => t.id === sel.id);
+    } else {
+        return null;
+    }
+    return targets.sort((a, b) => {
+        const ca = COURSE_ORDER.indexOf(a.course_id);
+        const cb = COURSE_ORDER.indexOf(b.course_id);
+        return ((ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb)) || a.id.localeCompare(b.id);
+    });
+}
+
+/* 按范围全部书籍渲染：每组一本目标，有资源出卡片、无资源出「待评估」占位卡 */
+function renderPanelByTargets(items, targets) {
+    const byTarget = new Map();
+    for (const it of items) {
+        const tid = (it.catalog_ref && it.catalog_ref.target_id) || "";
+        if (!byTarget.has(tid)) byTarget.set(tid, []);
+        byTarget.get(tid).push(it);
+    }
+    let html = "";
+    for (const t of targets) {
+        const list = byTarget.get(t.id) || [];
+        const title = `${esc(t.title)}（${esc((t.authors || []).join("、") || "佚名")}）【${esc(bookTypeLabel(t.kind))}】`;
+        html += `<div class="eval-group-title">${title}</div>`;
+        if (list.length) {
+            html += `<div class="card-grid">${list.map(resourceCard).join("")}</div>`;
+        } else {
+            html += `<div class="card-grid"><div class="card card-pending">
+                <div class="card-head">
+                    <div><div class="card-title">${esc(t.title)}</div>
+                    <div class="card-sub">${esc((t.authors || []).join("、") || "作者未知")}</div></div>
+                    <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
+                </div>
+                <div class="verdict">待评估：尚未生成候选资源，点击「① 搜索书籍」后由 AI 检索候选。</div>
+            </div></div>`;
+        }
+    }
+    $("resource-list").innerHTML = html || '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无书籍）</div>';
+}
+
+/* ---------- 知识点树（十一期：三层知识链路 领域→课程→书籍，学习深度排序） ---------- */
 
 async function loadTree() {
     const tree = $("domain-tree");
@@ -403,60 +565,119 @@ async function loadTree() {
     renderTree();
 }
 
-function countFor(courseId) {
-    return state.resources.filter((r) => courseOf(r) === courseId).length;
+/* 领域自适应（五期 D6）：catalog 无领域字段，按 catalog_id 映射学科领域；
+ * 未来 catalog 增加领域字段后优先取数据源，前端映射只作兜底。 */
+const CATALOG_DOMAIN_MAP = { "math-qe": "数学" };
+
+function domainOf(catalogId) {
+    return CATALOG_DOMAIN_MAP[catalogId] || "其他";
 }
 
+/* 课程学习深度顺序（十一期）：先学的在前，后学（依赖前置知识）的在后；
+ * 未列入的新课程排尾部（localeCompare 兜底）。 */
+const COURSE_ORDER = [
+    "01_math_analysis", "02_linear_algebra", "03_topology", "04_real_analysis",
+    "05_complex_analysis", "06_functional_analysis", "07_ode", "08_pde",
+    "09_abstract_algebra", "11_probability", "12_stochastic_processes",
+    "13_high_dim_prob", "10_qe_prep",
+];
+
+/* 书籍类型徽标（十一期）：kind → 显示名（book 教材 / exercise 习题集 / 其他 资料） */
+function bookTypeLabel(kind) {
+    if (kind === "book") return "教材";
+    if (kind === "exercise") return "习题集";
+    return "资料";
+}
+
+/* 课程完成判定（十一期）：≥1 本教材 + ≥1 本习题集均人工验证（approved 验收通过）才算完成 */
+function courseCompletion(courseId) {
+    const targets = state.catalog.filter((t) => t.course_id === courseId);
+    const approvedTargets = new Set();
+    for (const r of state.resources) {
+        const tid = (r.catalog_ref || {}).target_id;
+        if (r.status === "approved" && tid) approvedTargets.add(tid);
+    }
+    let bookApproved = 0, bookTotal = 0, exApproved = 0, exTotal = 0;
+    for (const t of targets) {
+        if (t.kind === "book") { bookTotal += 1; if (approvedTargets.has(t.id)) bookApproved += 1; }
+        else if (t.kind === "exercise") { exTotal += 1; if (approvedTargets.has(t.id)) exApproved += 1; }
+    }
+    return { done: bookTotal > 0 && exTotal > 0 && bookApproved >= 1 && exApproved >= 1, bookApproved, bookTotal, exApproved, exTotal };
+}
+
+/* 知识点树（十一期）：三层知识链路 领域 → 课程 → 书籍，
+ * PyCharm 式交互：箭头=展开/折叠（不触发选中），名称=选中过滤面板。 */
 function renderTree() {
     const tree = $("domain-tree");
-    const byDomain = new Map();
     const courses = new Map();
     for (const t of state.catalog) {
         if (!courses.has(t.course_id)) courses.set(t.course_id, { id: t.course_id, name: t.course_name, targets: [] });
         courses.get(t.course_id).targets.push(t);
     }
-    const order = [...courses.keys()].sort();
-    for (const courseId of order) {
-        const domain = DOMAIN_MAP[courseId] || "其他";
+    const byDomain = new Map(); // 领域名 -> [课程]
+    for (const course of courses.values()) {
+        const catalogId = course.targets[0].catalog_id || "math-qe";
+        const domain = domainOf(catalogId);
         if (!byDomain.has(domain)) byDomain.set(domain, []);
-        byDomain.get(domain).push(courses.get(courseId));
+        byDomain.get(domain).push(course);
     }
-    const domainList = DOMAIN_ORDER.filter((d) => byDomain.has(d)).concat(["其他"].filter((d) => byDomain.has(d)));
-    tree.innerHTML = domainList.map((domain) => {
-        const domainCount = byDomain.get(domain).reduce((s, c) => s + countFor(c.id), 0);
-        const coursesHtml = byDomain.get(domain).map((c) => {
-            const cCount = countFor(c.id);
-            const targetsHtml = c.targets.map((t) => `
-                <div class="tree-node tree-target" data-kind="target" data-id="${esc(t.id)}" data-label="${esc(t.title)}">
-                    <span class="tree-name">${esc(t.title)}</span>
-                </div>`).join("");
-            return `
-                <div class="tree-node tree-course" data-kind="course" data-id="${esc(c.id)}" data-label="${esc(c.name)}">
-                    <span class="tree-caret">▾</span><span class="tree-name">${esc(c.name)}</span>
-                    <span class="tree-badge">${cCount ? cCount + " 资源" : ""}</span>
-                    <div class="tree-children">${targetsHtml}</div>
-                </div>`;
-        }).join("");
+    const domainsHtml = [...byDomain.entries()].map(([domain, courseList]) => {
+        const coursesHtml = courseList
+            .sort((a, b) => {
+                const ia = COURSE_ORDER.indexOf(a.id);
+                const ib = COURSE_ORDER.indexOf(b.id);
+                return ((ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)) || a.id.localeCompare(b.id);
+            })
+            .map((c) => {
+                const done = courseCompletion(c.id);
+                const badge = done.done
+                    ? `<span class="course-done">✅ 已完成</span>`
+                    : `<span class="course-progress">教材 ${done.bookApproved}/${done.bookTotal} · 习题集 ${done.exApproved}/${done.exTotal}</span>`;
+                const targetsHtml = c.targets.map((t) => `
+                    <div class="tree-node tree-target" data-kind="target" data-id="${esc(t.id)}" data-label="${esc(t.title)}">
+                        <span class="tree-name" title="${esc(t.title)}">${esc(t.title)}</span>
+                        <span class="tree-author">${esc((t.authors || []).join("、"))}</span>
+                        <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
+                    </div>`).join("");
+                return `
+                    <div class="tree-node tree-course collapsed" data-kind="course" data-id="${esc(c.id)}" data-label="${esc(c.name)}">
+                        <span class="tree-caret">▸</span><span class="tree-name">${esc(c.name)}</span>
+                        ${badge}
+                        <div class="tree-children" style="display:none">${targetsHtml}</div>
+                    </div>`;
+            }).join("");
         return `
             <div class="tree-node tree-domain" data-kind="domain" data-id="${esc(domain)}" data-label="${esc(domain)}">
                 <span class="tree-caret">▾</span><span class="tree-name">${esc(domain)}</span>
-                <span class="tree-badge">${domainCount ? domainCount + " 资源" : ""}</span>
+                <span class="tree-count">${courseList.length} 门课程</span>
                 <div class="tree-children">${coursesHtml}</div>
             </div>`;
     }).join("");
-    // 树节点点击：展开/折叠；双击或点击名称选中节点 → 面板过滤
+    tree.innerHTML = domainsHtml || `<div class="empty-state">暂无课程目录</div>`;
+    // PyCharm 式交互：箭头=展开/折叠；名称=选中（领域/课程/书籍均可选）
     tree.querySelectorAll(".tree-node").forEach((node) => {
-        node.addEventListener("click", (ev) => {
-            const isCaret = ev.target.classList.contains("tree-caret");
-            const children = node.querySelector(":scope > .tree-children");
-            if (children && (isCaret || node.classList.contains("tree-course") || node.classList.contains("tree-domain"))) {
+        const children = node.querySelector(":scope > .tree-children");
+        const caret = node.querySelector(":scope > .tree-caret");
+        if (caret) {
+            caret.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                if (!children) return;
                 const collapsed = node.classList.toggle("collapsed");
-                if (children) children.style.display = collapsed ? "none" : "";
-            } else if (node.classList.contains("tree-target") || !children) {
-                selectNode(node.dataset.kind, node.dataset.id);
-            }
+                children.style.display = collapsed ? "none" : "";
+            });
+        }
+        node.addEventListener("click", (ev) => {
+            if (ev.target === caret) return; // 已由箭头处理
+            ev.stopPropagation(); // 十三期修复：阻止冒泡到父级行（点课程不再覆盖成领域）
+            selectNode(node.dataset.kind, node.dataset.id);
         });
     });
+}
+
+/* 课程所属领域（十二期）：经课程任一 target 的 catalog_id → 领域映射 */
+function courseDomain(courseId) {
+    const t = state.catalog.find((x) => x.course_id === courseId);
+    return t ? domainOf(t.catalog_id || "math-qe") : "";
 }
 
 function selectNode(kind, id) {
@@ -464,6 +685,15 @@ function selectNode(kind, id) {
     document.querySelectorAll(".tree-node").forEach((n) => n.classList.remove("selected"));
     const node = document.querySelector(`.tree-node[data-kind="${kind}"][data-id="${CSS.escape(id)}"]`);
     if (node) node.classList.add("selected");
+    // 十二期：树→筛选器单向联动——点领域/课程同步弹层筛选，书籍级不改筛选
+    if (kind === "domain") {
+        state.filters.domain = id;
+        state.filters.course = "";
+    } else if (kind === "course") {
+        state.filters.domain = courseDomain(id) || state.filters.domain;
+        state.filters.course = id;
+    }
+    renderResourceFilters();
     renderPanel();
 }
 
@@ -521,25 +751,31 @@ function resourceCard(it) {
     </div>`;
 }
 
+/* 十三期：控制台化——「① 搜索书籍」按当前选中课程发起 AI 搜索评估（控制台以课程为单位操作） */
 async function triggerEvaluate() {
-    // 四期：评估范围跟随「课程」筛选下拉（未选 = 全目录）
-    const courseId = $("filter-course").value || null;
-    const btn = $("btn-evaluate");
+    const sel = state.selection;
+    const courseId = sel && sel.kind === "course" ? sel.id : (state.filters.course || null);
+    const btn = $("btn-course-search");
+    if (!courseId) {
+        alert("请先在左侧选择一门课程");
+        return;
+    }
+    if (!btn) return;
     btn.disabled = true;
     btn.textContent = "任务创建中…";
     try {
         const task = await fetchJson(TRACKER_BASE + ENDPOINTS.evaluate, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(courseId ? { course_id: courseId } : {}),
+            body: JSON.stringify({ course_id: courseId }),
         });
-        alert("评估任务已创建：" + task.task_id);
+        alert("搜索评估任务已创建：" + task.task_id);
         loadTasks();
     } catch (err) {
-        alert("触发评估失败：" + err.message);
+        alert("触发搜索评估失败：" + err.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = "触发评估";
+        btn.textContent = "① 搜索书籍";
     }
 }
 
@@ -566,10 +802,10 @@ function taskCard(t) {
 }
 
 function renderTasks() {
-    // 四期（ARCH-004 D3）：任务按 状态 / 类型 / 课程 前端过滤
-    const fStatus = $("filter-task-status").value;
-    const fType = $("filter-task-type").value;
-    const fCourse = $("filter-task-course").value;
+    // 四期/五期：任务按 状态 / 类型 / 课程 前端过滤（弹层筛选器）
+    const fStatus = state.taskFilters.status;
+    const fType = state.taskFilters.type;
+    const fCourse = state.taskFilters.course;
     let items = state.tasks;
     if (fStatus) items = items.filter((t) => (t.status || "").toLowerCase() === fStatus);
     if (fType) items = items.filter((t) => (t.type || "") === fType);
@@ -591,6 +827,37 @@ async function loadTasks() {
         return;
     }
     renderTasks();
+    // 十三期：任务轮询后刷新课程操作条步骤进度（若课程选中）
+    const sel = state.selection;
+    const steps = $("course-steps");
+    if (sel && sel.kind === "course" && steps) steps.innerHTML = courseSteps(sel.id);
+}
+
+/* 十三期控制台：课程步骤进度（搜索 → 确认 → 下载 → 验收）
+ * - 搜索：该课程最近 evaluate 任务状态（无任务=未开始）
+ * - 确认：已确认 / 候选+待评估（无待评估=完成）
+ * - 下载：已下载+已验收 / 已确认+下载中
+ * - 验收：已验收 / 已下载 */
+function courseSteps(courseId) {
+    const res = state.resources.filter((r) => courseOf(r) === courseId);
+    const pending = res.filter((r) => r.status === "candidate" || r.status === "pending_manual").length;
+    const confirmed = res.filter((r) => r.status === "confirmed").length;
+    const downloading = res.filter((r) => r.status === "downloading").length;
+    const downloaded = res.filter((r) => r.status === "downloaded").length;
+    const approved = res.filter((r) => r.status === "approved").length;
+    const evalTasks = (state.tasks || []).filter(
+        (t) => t.type === "catalog/evaluate" && (t.params || {}).course_id === courseId
+    );
+    const lastTask = evalTasks.length ? evalTasks[evalTasks.length - 1] : null;
+    const searchState = !lastTask ? "idle" : (lastTask.status === "succeeded" ? "done" : "run");
+    const step = (label, st, detail) => `<span class="step-item ${st}">${esc(label)} ${esc(detail)}</span>`;
+    const arrow = `<span class="step-arrow">→</span>`;
+    return [
+        step("搜索", searchState, !lastTask ? "未开始" : (lastTask.status === "succeeded" ? "✓" : "进行中")),
+        step("确认", pending === 0 && res.length ? "done" : (res.length ? "run" : "idle"), `${confirmed}/${confirmed + pending}`),
+        step("下载", downloaded + approved > 0 ? "done" : (confirmed + downloading > 0 ? "run" : "idle"), `${downloaded + approved}/${confirmed + downloading}`),
+        step("验收", approved > 0 ? "done" : (downloaded > 0 ? "run" : "idle"), `${approved}/${downloaded}`),
+    ].join(arrow);
 }
 
 function startTaskPolling() {
@@ -687,19 +954,16 @@ async function submitReason() {
 
 function bindEvents() {
     $("btn-admin").addEventListener("click", () => { location.hash = "#/admin"; });
+    $("btn-help").addEventListener("click", () => openHelpModal());
+    $("help-close").addEventListener("click", () => $("help-modal").classList.add("hidden"));
     $("menu-toggle").addEventListener("click", () => $("sidebar").classList.toggle("open"));
     document.querySelectorAll(".sidebar .nav-item").forEach((a) => {
         a.addEventListener("click", () => $("sidebar").classList.remove("open"));
     });
-    $("btn-evaluate").addEventListener("click", triggerEvaluate);
+    $("btn-course-search").addEventListener("click", triggerEvaluate);
     $("btn-refresh").addEventListener("click", loadResources);
     $("btn-refresh-tree").addEventListener("click", loadTree);
-    $("filter-status").addEventListener("change", renderPanel);
-    $("filter-domain").addEventListener("change", renderPanel);
-    $("filter-course").addEventListener("change", renderPanel);
-    $("filter-task-status").addEventListener("change", renderTasks);
-    $("filter-task-type").addEventListener("change", renderTasks);
-    $("filter-task-course").addEventListener("change", renderTasks);
+    initPopovers();
     $("modal-cancel").addEventListener("click", () => $("modal").classList.add("hidden"));
     $("modal-ok").addEventListener("click", submitReason);
     $("detail-close").addEventListener("click", () => $("detail-modal").classList.add("hidden"));
@@ -718,29 +982,29 @@ function bindEvents() {
     initTreeResizer();
 }
 
-/* ---------- 领域树可变边框（四期 ARCH-004 D6） ----------
- * 拖拽手柄调整树宽，范围 240-560px，宽度记忆到 localStorage（键 qed-tree-w）。 */
+/* ---------- 知识点树宽可调（四期 ARCH-004 D6，十一期：默认 400px、范围 280-640px） ----------
+ * 拖拽手柄调整树宽，宽度记忆到 localStorage（键 qed-tree-w）。 */
 
 function initTreeResizer() {
     const resizer = $("tree-resizer");
     const layout = $("download-layout");
     if (!resizer || !layout) return;
     const saved = Number(localStorage.getItem("qed-tree-w"));
-    if (saved >= 240 && saved <= 560) layout.style.setProperty("--tree-w", saved + "px");
+    if (saved >= 280 && saved <= 640) layout.style.setProperty("--tree-w", saved + "px");
     resizer.addEventListener("mousedown", (e) => {
         e.preventDefault();
         const startX = e.clientX;
         const side = $("download-side");
-        const startW = side ? side.offsetWidth : layout.offsetWidth * 0.62;
+        const startW = side ? side.offsetWidth : 400;
         const onMove = (ev) => {
-            const w = Math.min(560, Math.max(240, startW + (ev.clientX - startX)));
+            const w = Math.min(640, Math.max(280, startW + (ev.clientX - startX)));
             layout.style.setProperty("--tree-w", w + "px");
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
             document.removeEventListener("mouseup", onUp);
             const side2 = $("download-side");
-            localStorage.setItem("qed-tree-w", String(side2 ? Math.round(side2.offsetWidth) : 300));
+            localStorage.setItem("qed-tree-w", String(side2 ? Math.round(side2.offsetWidth) : 400));
         };
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
@@ -754,7 +1018,7 @@ function targetInfo(targetId) {
     if (!targetId) return null;
     const t = state.catalog.find((x) => x.id === targetId);
     if (!t) return null;
-    return { title: t.title, courseId: t.course_id, courseName: t.course_name || t.course_id, domain: DOMAIN_MAP[t.course_id] || "其他" };
+    return { title: t.title, courseId: t.course_id, courseName: t.course_name || t.course_id, domain: domainOf(t.catalog_id || "math-qe") };
 }
 
 /* 四期：语言 → 中/英 标签（详情「中英」字段） */
@@ -881,13 +1145,11 @@ async function openDetailModal(kind, id) {
     }
 }
 
-/* ---------- 筛选下拉（四期：领域 / 课程 / 任务课程，来自 catalog targets） ---------- */
+/* ---------- 筛选选项数据（五期：来自 catalog targets，供按钮弹层渲染） ---------- */
+
+const filterData = { domainOptions: [], courseOptions: [] };
 
 async function populateCourseSelects() {
-    const domainSel = $("filter-domain");
-    const courseSel = $("filter-course");
-    const taskCourseSel = $("filter-task-course");
-    if (!domainSel || !courseSel || !taskCourseSel) return;
     if (!state.catalog.length) {
         try {
             const catalog = await fetchJson(TRACKER_BASE + "/catalogs/math-qe");
@@ -905,23 +1167,74 @@ async function populateCourseSelects() {
         }
     }
     const courseList = [...courses.entries()].sort(([a], [b]) => a.localeCompare(b));
-    // 领域下拉：严格三领域
-    domainSel.innerHTML = '<option value="">全部领域</option>'
-        + DOMAIN_ORDER.filter((d) => courseList.some(([id]) => DOMAIN_MAP[id] === d))
-            .map((d) => `<option value="${esc(d)}">${esc(d)}</option>`)
-            .join("");
-    // 课程下拉：按领域分组
-    courseSel.innerHTML = '<option value="">全部课程</option>'
-        + DOMAIN_ORDER.map((d) => {
-            const group = courseList.filter(([id]) => DOMAIN_MAP[id] === d);
-            if (!group.length) return "";
-            return `<optgroup label="${esc(d)}">${group.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("")}</optgroup>`;
-        }).join("")
-        + courseList.filter(([id]) => !DOMAIN_ORDER.some((d) => DOMAIN_MAP[id] === d))
-            .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
-    // 任务课程筛选
-    taskCourseSel.innerHTML = '<option value="">课程</option>'
-        + courseList.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+    filterData.courseOptions = courseList.map(([id, name]) => [id, name]);
+    // 领域选项：自适应（按 catalog_id 推导学科领域；当前 math-qe → 数学）
+    const domains = [...new Set(state.catalog.map((t) => domainOf(t.catalog_id || "math-qe")))].sort();
+    filterData.domainOptions = domains.map((d) => [d, d]);
+    renderResourceFilters();
+    renderTaskFilters();
+}
+
+function domainOptions() {
+    return [["", "全部"]].concat(filterData.domainOptions);
+}
+
+function courseOptions() {
+    // 十二期：课程选项随领域收窄——领域已选时只列该领域课程
+    const d = state.filters.domain;
+    if (d) {
+        const narrowed = filterData.courseOptions.filter(([id]) => courseDomain(id) === d);
+        return [["", "全部"]].concat(narrowed.length ? narrowed : [["", "（该领域暂无课程）"]]);
+    }
+    return [["", "全部"]].concat(filterData.courseOptions);
+}
+
+/* ---------- 内置操作手册（五期：纯前端内容） ---------- */
+
+const HELP_SECTIONS = [
+    {
+        title: "学习界面",
+        steps: [
+            "首页提供三项学习功能：知识点梳理 / 学习 / 刷题模式（建设中，随数据管线逐步开放）。",
+            "右上角「管理后台」进入管理功能；「使用手册」随时打开本说明。",
+        ],
+    },
+    {
+        title: "仪表大盘",
+        steps: [
+            "流程进度：四阶段流水线（发现下载 → 评估确认 → 解析 → 知识整理），未就绪的阶段显示「未启用」，不会伪造数据。",
+            "服务健康：分组查看后台服务（QED-Tracker 文档下载服务 / Axiom-Flow 文档解析服务 / QED 管理服务）、LLM配置（当前配置模型）与数据库配置（MySQL）状态；异常项直接显示问题文案（如「离线：无法访问」）。",
+            "所有服务离线不影响页面展示，数据为空的模块显示离线提示。",
+        ],
+    },
+    {
+        title: "知识点",
+        steps: [
+            "左侧为知识点树，三层知识链路：领域（如数学）→ 课程（按学习深度排序，先学的在前）→ 具体书籍（书名 + 作者 + 类型徽标【教材/习题集/资料】），点击节点展开/折叠；课程行显示完成徽标：教材 + 习题集均验收通过（approved）才算课程完成。",
+            "筛选栏：领域 / 课程 / 状态三个按钮，点击弹出选项（与树选择叠加过滤）；选择「全部」恢复。",
+            "资源卡片三态评估：确定（候选→已确认）、备选（候选→备选，可转正或放弃）、否定（填原因留痕）；已确认后可「开始下载」，下载完成可「验收通过」。",
+            "「① 搜索书籍」按钮（选中课程后出现在面板顶部操作条）：按该课程发起 AI 搜索评估任务（生成候选资源），任务在下方「评估任务」列表轮询进度；未生成候选的书籍在面板显示「待评估」占位。",
+            "评估任务列表按 状态 / 类型 / 课程 筛选；「① 搜索书籍」按选中课程发起搜索评估（控制台以课程为单位）。",
+        ],
+    },
+    {
+        title: "常见问题",
+        steps: [
+            "离线提示含义：对应服务未启动（如 QED-Tracker 未运行）时相关模块显示离线，不影响其他模块。",
+            "下拉筛选文字看不清？已改为按钮弹层样式（浅底深字），不会再出现白色文字问题。",
+        ],
+    },
+];
+
+function openHelpModal() {
+    const modal = $("help-modal");
+    const body = $("help-body");
+    if (!modal || !body) return;
+    body.innerHTML = HELP_SECTIONS.map((s) => `
+        <div class="detail-section"><h3>${esc(s.title)}</h3>
+            <ol class="help-steps">${s.steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>
+        </div>`).join("");
+    modal.classList.remove("hidden");
 }
 
 /* ---------- 启动 ---------- */
@@ -929,8 +1242,6 @@ async function populateCourseSelects() {
 async function init() {
     bindEvents();
     startTaskPolling();
-    refreshServiceStatus();
-    setInterval(refreshServiceStatus, 5000);
     route();
     // 主体界面兜底：即使 8901 离线也给出提示（已由各视图处理）
 }
