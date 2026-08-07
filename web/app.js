@@ -104,6 +104,7 @@ const state = {
     filters: { domain: "", course: "", status: "" }, // 资源筛选（与树选择 AND 叠加）
     pollTimer: null,
     modalAction: null, // {type, id}
+    coursePage: 0, // 十五期：领域视图课程分页页码
 };
 
 /* 筛选器选项定义（值 → 标签；空串 = 全部） */
@@ -151,6 +152,15 @@ function initPopovers() {
     });
     document.addEventListener("click", () => {
         document.querySelectorAll(".popover-menu").forEach((m) => m.classList.add("hidden"));
+    });
+    // 十五期：领域视图分页控件（◀ 上一页 / 下一页 ▶）
+    $("resource-list").addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-pager]");
+        if (!btn || btn.disabled) return;
+        const pages = Math.max(1, Math.ceil(coursesOfSelectedDomain().length / PAGE_SIZE));
+        if (btn.dataset.pager === "prev" && state.coursePage > 0) state.coursePage -= 1;
+        else if (btn.dataset.pager === "next" && state.coursePage < pages - 1) state.coursePage += 1;
+        renderPanel();
     });
 }
 
@@ -452,6 +462,11 @@ function renderPanel() {
     }
     // 十二期：有选中范围时展示该范围全部书籍（未生成资源的显示「待评估」占位）
     const rangeTargets = rangeTargetsOf(sel);
+    // 十五期：领域级按课程分页视图（配套教材/习题集并排）；课程级/书籍级保持现状
+    if (sel && sel.kind === "domain" && rangeTargets) {
+        renderPanelByCourses(items, rangeTargets);
+        return;
+    }
     if (rangeTargets) {
         renderPanelByTargets(items, rangeTargets);
         return;
@@ -525,6 +540,106 @@ function renderPanelByTargets(items, targets) {
     $("resource-list").innerHTML = html || '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无书籍）</div>';
 }
 
+/* ---------- 十五期：领域级按课程分页视图 + 配套对并排 ---------- */
+
+/* 领域视图每页课程数（十五期 D3）：最多 3 门课程一页，防右侧面板过长 */
+const PAGE_SIZE = 3;
+
+/* 配套对判定（十五期 D4）：同课程内 kind=book 与 kind=exercise 作者集相同（排序后 join、非空）
+ * 视为配套（如 01 陈纪修 教材/习题集、02 Axler、04 周民强、09 冯克勤、11 严士健）；
+ * 返回 Map：作者键 -> { books: [target], exercises: [target] }；无作者或有单侧缺位的键不视为配套。 */
+function pairedCourseTargets(courseTargets) {
+    const groups = new Map();
+    for (const t of courseTargets) {
+        const authors = (t.authors || []).slice().sort().join("、");
+        if (!authors) continue; // 无作者的习题/资料不参与配套
+        if (!groups.has(authors)) groups.set(authors, { books: [], exercises: [] });
+        const g = groups.get(authors);
+        if (t.kind === "book") g.books.push(t);
+        else if (t.kind === "exercise") g.exercises.push(t);
+    }
+    return groups;
+}
+
+/* 分页控件（十五期 D3）：◀ 上一页 / 页码 / 下一页 ▶ */
+function coursePagerHtml(page, pages) {
+    if (pages <= 1) return "";
+    return `<div class="course-pager">
+        <button class="btn ghost" data-pager="prev" ${page <= 0 ? "disabled" : ""}>◀ 上一页</button>
+        <span class="pager-page">${page + 1} / ${pages}</span>
+        <button class="btn ghost" data-pager="next" ${page >= pages - 1 ? "disabled" : ""}>下一页 ▶</button>
+    </div>`;
+}
+
+/* 当前选中领域的课程数（十五期分页用）；未选领域返回空数组 */
+function coursesOfSelectedDomain() {
+    const sel = state.selection;
+    if (!sel || sel.kind !== "domain" || !state.catalog.length) return [];
+    return state.catalog.filter((t) => domainOf(t.catalog_id || "math-qe") === sel.id);
+}
+
+/* 领域级渲染（十五期 D3/D4）：按课程分组（COURSE_ORDER 学习深度排序）→ 分页切片 →
+ * 每门课程一行：配套对（教材+习题集）横向并排，非配套单卡单独展示。 */
+function renderPanelByCourses(items, targets) {
+    const byCourse = new Map();
+    for (const t of targets) {
+        if (!byCourse.has(t.course_id)) byCourse.set(t.course_id, []);
+        byCourse.get(t.course_id).push(t);
+    }
+    const courseIds = [...byCourse.keys()].sort((a, b) => {
+        const ia = COURSE_ORDER.indexOf(a);
+        const ib = COURSE_ORDER.indexOf(b);
+        return ((ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)) || a.localeCompare(b);
+    });
+    const pages = Math.max(1, Math.ceil(courseIds.length / PAGE_SIZE));
+    if (state.coursePage >= pages) state.coursePage = pages - 1;
+    if (state.coursePage < 0) state.coursePage = 0;
+    const pageCourseIds = courseIds.slice(state.coursePage * PAGE_SIZE, (state.coursePage + 1) * PAGE_SIZE);
+    const byTarget = new Map();
+    for (const it of items) {
+        const tid = (it.catalog_ref && it.catalog_ref.target_id) || "";
+        if (!byTarget.has(tid)) byTarget.set(tid, []);
+        byTarget.get(tid).push(it);
+    }
+    const targetCard = (t) => {
+        const list = byTarget.get(t.id) || [];
+        if (list.length) return list.map(resourceCard).join("");
+        return `<div class="card card-pending">
+            <div class="card-head">
+                <div><div class="card-title">${esc(t.title)}</div>
+                <div class="card-sub">${esc((t.authors || []).join("、") || "作者未知")}</div></div>
+                <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
+            </div>
+            <div class="verdict">待评估：尚未生成候选资源，点击「① 搜索书籍」后由 AI 检索候选。</div>
+        </div>`;
+    };
+    let html = "";
+    for (const cid of pageCourseIds) {
+        const ts = byCourse.get(cid);
+        const courseName = (state.catalog.find((x) => x.course_id === cid) || {}).course_name || cid;
+        const done = courseCompletion(cid);
+        const badge = done.done
+            ? `<span class="course-done">✅ 已完成</span>`
+            : `<span class="course-progress">教材 ${done.bookApproved}/${done.bookTotal} · 习题集 ${done.exApproved}/${done.exTotal}</span>`;
+        html += `<div class="course-row">
+            <div class="course-row-head"><span class="course-row-name">${esc(courseName)}</span> ${badge}</div>`;
+        // 配套对并排（十五期 D4）：同作者 book+exercise 各取卡并排一行；剩余目标单卡展示
+        const paired = pairedCourseTargets(ts);
+        const pairedKeys = [...paired.keys()].filter((k) => paired.get(k).books.length && paired.get(k).exercises.length);
+        const pairedHtml = pairedKeys.map((k) => {
+            const g = paired.get(k);
+            const cards = [...g.books, ...g.exercises].map(targetCard).join("");
+            return `<div class="paired-row">${cards}</div>`;
+        }).join("");
+        if (pairedHtml) html += pairedHtml;
+        const alone = ts.filter((t) => !pairedKeys.some((k) => paired.get(k).books.includes(t) || paired.get(k).exercises.includes(t)));
+        for (const t of alone) html += `<div class="card-grid">${targetCard(t)}</div>`;
+        html += `</div>`;
+    }
+    html += coursePagerHtml(state.coursePage, pages);
+    $("resource-list").innerHTML = html || '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无书籍）</div>';
+}
+
 /* ---------- 知识点树（十一期：三层知识链路 领域→课程→书籍，学习深度排序） ---------- */
 
 async function loadTree() {
@@ -564,10 +679,11 @@ const COURSE_ORDER = [
     "13_high_dim_prob", "10_qe_prep",
 ];
 
-/* 书籍类型徽标（十一期）：kind → 显示名（book 教材 / exercise 习题集 / 其他 资料） */
+/* 书籍类型徽标（十一期）：kind → 显示名（book 教材 / exercise 习题集 / supplement 配套资料 / 其他 资料） */
 function bookTypeLabel(kind) {
     if (kind === "book") return "教材";
     if (kind === "exercise") return "习题集";
+    if (kind === "supplement") return "配套资料";
     return "资料";
 }
 
@@ -664,6 +780,7 @@ function courseDomain(courseId) {
 
 function selectNode(kind, id) {
     state.selection = { kind, id };
+    state.coursePage = 0; // 十五期：切换选择时重置领域分页页码
     document.querySelectorAll(".tree-node").forEach((n) => n.classList.remove("selected"));
     const node = document.querySelector(`.tree-node[data-kind="${kind}"][data-id="${CSS.escape(id)}"]`);
     if (node) node.classList.add("selected");
@@ -719,6 +836,17 @@ function resourceCard(it) {
     const noteInput = it.status === "candidate" || it.status === "backup"
         ? `<input type="text" class="review-note" data-note-for="${esc(it.resource_id)}" placeholder="填一句评审建议（可选）…" value="${esc(it.review_note || "")}">`
         : "";
+    // 十六期（QED-021）：发现专用来源（libgen_li）无直链——展示人工下载方案（links）
+    const links = (source.links || []).length
+        ? `<div class="download-links">下载方案：${source.links.map((l) =>
+            `<a href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.kind || "link")}">${esc(l.label)}</a>`
+        ).join(" · ")}</div>`
+        : "";
+    // 十六期（QED-021）：待人工补充——登记表单（数据根内相对路径，登记后转已下载）
+    const registerForm = it.status === "pending_manual"
+        ? `<div class="register-row"><input type="text" class="register-path" data-register-for="${esc(it.resource_id)}" placeholder="数据根内相对路径，如 raw/books/math-qe/01_math_analysis/x.pdf" value="${esc(it.relative_path || "")}">`
+            + `<button class="btn primary" data-act="register" data-id="${esc(it.resource_id)}">人工下载登记</button></div>`
+        : "";
     const sub = [it.language || "—", (it.authors || []).join("、") || "—", link].join('<span class="sep">·</span>');
     return `<div class="card">
         <div class="card-head">
@@ -729,6 +857,7 @@ function resourceCard(it) {
             <span class="badge course">${esc(courseOf(it))}</span>
         </div>
         ${scoreMarkup(it.llm_evaluation)}
+        ${links}
         ${reason}
         ${review}
         <div class="card-actions">
@@ -737,6 +866,7 @@ function resourceCard(it) {
             <button class="btn ghost" data-act="detail" data-kind="resource" data-id="${esc(it.resource_id)}">详情</button>
         </div>
         ${noteInput}
+        ${registerForm}
     </div>`;
 }
 
@@ -877,6 +1007,30 @@ async function downloadResource(id) {
     }
 }
 
+/* 十六期（QED-021）：人工下载登记——按 libgen 等方案下载后放入数据根，
+ * 提交相对路径由服务端校验 PDF + SHA-256，登记为已下载。 */
+async function registerResource(id) {
+    const input = document.querySelector(`.register-path[data-register-for="${CSS.escape(id)}"]`);
+    const relativePath = input ? input.value.trim() : "";
+    if (!relativePath) {
+        alert("请填写数据根内相对路径（relative_path）");
+        return;
+    }
+    try {
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.register, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ relative_path: relativePath }),
+        });
+        alert("人工下载已登记：" + res.status + "（sha256:" + (res.sha256 || "").slice(0, 8) + "）");
+    } catch (err) {
+        alert("人工登记失败：" + err.message);
+    }
+    loadResources();
+    loadTree();
+    if (currentRoute().view === "dashboard") loadDashboard();
+}
+
 async function approveResource(id) {
     try {
         const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.approve, { method: "POST" });
@@ -943,6 +1097,7 @@ function bindEvents() {
         if (act === "confirm") confirmResource(id);
         else if (act === "backup") backupResource(id);
         else if (act === "download") downloadResource(id);
+        else if (act === "register") registerResource(id);
         else if (act === "approve") approveResource(id);
         else if (act === "reject") openReasonModal(id);
         else if (act === "detail") openDetailModal(kind, id);
@@ -1075,6 +1230,14 @@ function renderResourceDetail(r) {
     const reject = r.reject_reason ? `<div class="detail-section error-box"><h3>拒绝/删除记录</h3><p class="section-note">${esc(r.reject_reason)}</p></div>` : "";
     // 十四期：人工评审建议展示（QED-020 review_note）
     const review = r.review_note ? `<div class="detail-section"><h3>评审建议</h3><p class="section-note">${esc(r.review_note)}</p></div>` : "";
+    // 十六期（QED-021）：发现专用来源的人工下载方案（torrent/IPFS/ed2k）详情展示
+    const downloadPlan = (src.links || []).length
+        ? `<div class="detail-section"><h3>人工下载方案（无直链，按方案下载后登记）</h3>
+            <ul class="section-list">${src.links.map((l) =>
+                `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}（${esc(l.kind || "link")}）</a></li>`
+            ).join("")}</ul>
+            <p class="section-note">下载后放入数据根目录，在资源卡「人工下载登记」填写相对路径完成登记。</p></div>`
+        : "";
     return `
         ${kvTable({
             resource_id: r.resource_id, title: r.title, status: r.status,

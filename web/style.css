@@ -720,7 +720,7 @@ body {
   display: grid;
   grid-template-columns: minmax(280px, var(--tree-w)) 8px minmax(0, 1fr);
   gap: 0;
-  align-items: start;
+  align-items: stretch; /* 十五期：左右两栏等高（原 start 不等高） */
 }
 
 .download-side {
@@ -752,6 +752,28 @@ body {
   max-height: calc(100vh - 200px);
   overflow-y: auto;
 }
+
+/* 十五期：领域级课程分页视图——课程行、配套对并排、翻页控件 */
+.course-row { margin-bottom: 14px; }
+.course-row-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+  padding: 4px 2px 8px;
+}
+.course-row-name { color: var(--text); }
+.paired-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.course-pager {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+.pager-page { font-size: 13px; color: var(--text-faint); }
 
 .side-head {
   display: flex;

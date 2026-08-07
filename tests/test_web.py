@@ -87,6 +87,10 @@ TREE_COUNT_TOKENS = ("本）",)
 # 十五期：进入文档下载管理默认选中「数学」领域（loadTree 完成后无选择时触发一次）
 DEFAULT_DOMAIN_TOKENS = ('selectNode("domain", "数学")', "state.selection", "数学")
 
+# 十五期：领域级按课程分页（每页 PAGE_SIZE=3）+ 配套对并排（同课程 book+exercise 同作者）
+COURSE_PAGER_TOKENS = ("PAGE_SIZE", "coursePage", "renderPanelByCourses", "coursePagerHtml", "pairedCourseTargets")
+PAIRED_ROW_TOKENS = ("paired-row", "course-row")
+
 # 十一期：课程按学习深度排序（先学在前、依赖后续在后；未列入新课程排尾）
 COURSE_ORDER_TOKENS = ("COURSE_ORDER", "01_math_analysis", "10_qe_prep")
 
@@ -490,6 +494,27 @@ def test_default_select_math_domain():
         assert token in js, f"app.js 缺少默认选中数学领域逻辑：{token}"
     # 默认选中必须发生在 renderTree 之后（树节点已就绪），且仅当尚无选择
     assert js.index("renderTree()") < js.index('selectNode("domain", "数学")'), "默认选中应在树渲染后"
+
+
+def test_domain_course_pager():
+    """领域级课程分页（十五期）：renderPanelByCourses 按课程分组、每页 PAGE_SIZE=3 门、带翻页控件。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in COURSE_PAGER_TOKENS:
+        assert token in js, f"app.js 缺少课程分页逻辑：{token}"
+    assert "PAGE_SIZE = 3" in js, "PAGE_SIZE 应为 3"
+    assert "slice(" in js, "分页应切片课程列表"
+
+
+def test_paired_course_targets():
+    """配套对判定（十五期）：同课程 book+exercise 作者集相同（排序后 join、非空）才算配套。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    fn = "function pairedCourseTargets"
+    assert fn in js, "app.js 缺少配套对判定函数"
+    seg = js[js.index(fn):js.index(fn) + 600]
+    assert "sort()" in seg and "join" in seg, "配套判定应基于作者集排序后 join"
+    assert '"book"' in seg and '"exercise"' in seg, "配套判定应区分 book/exercise"
+    for token in PAIRED_ROW_TOKENS:
+        assert token in js, f"app.js 缺少配套并排行样式类：{token}"
 
 
 # 十六期（QED-021）：配套资料分类 + 人工下载登记——libgen 等发现专用来源无直链，
