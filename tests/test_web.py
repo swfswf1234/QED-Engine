@@ -113,6 +113,14 @@ FILTER_TOKENS = ("filter-domain", "filter-course")
 # 评估任务筛选（四期）：任务状态 / 类型 / 课程，前端过滤
 TASK_FILTER_TOKENS = ("filter-task-status", "filter-task-type", "filter-task-course")
 
+# 十四期裁决：知识点界面尾部「评估任务」区块无意义，移除（任务列表 + 三个筛选器）
+REMOVED_TASK_CENTER_TOKENS = ("task-list", "filter-task-status", "filter-task-type", "filter-task-course")
+# 课程操作条步骤条保留（用户裁决：只去尾部列表，保留 搜索→确认→下载→验收）
+CONSOLE_KEPT_TOKENS = ("course-console", "btn-course-search", "course-steps")
+
+# 十四期：人工评审建议（review_note）落库——资源卡建议输入框随三态提交
+REVIEW_NOTE_TOKENS = ("review-note", "评审建议", "review_note")
+
 # 领域树可变边框（四期）：拖拽手柄 + localStorage 记忆宽度
 TREE_RESIZE_TOKENS = ("tree-resizer", "qed-tree-w")
 
@@ -239,13 +247,24 @@ def test_download_filters_present():
         assert token in js, f"app.js 缺少筛选逻辑：{token}"
 
 
-def test_task_filters_present():
-    """评估任务筛选（四期）：任务状态 / 类型 / 课程三组下拉，前端过滤。"""
+def test_task_center_removed():
+    """评估任务区块移除（十四期）：知识点界面尾部任务列表与三个筛选器不再存在；
+    课程操作条步骤条（搜索→确认→下载→验收）保留。"""
     html = (WEB / "index.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    for token in TASK_FILTER_TOKENS:
-        assert token in html, f"index.html 缺少任务筛选下拉：{token}"
-        assert token in js, f"app.js 缺少任务筛选逻辑：{token}"
+    for token in REMOVED_TASK_CENTER_TOKENS:
+        assert token not in html, f"index.html 不应再含评估任务区块：{token}"
+    for token in CONSOLE_KEPT_TOKENS:
+        assert token in html, f"index.html 应保留课程操作条：{token}"
+    assert "courseSteps" in js, "app.js 应保留课程步骤进度逻辑"
+
+
+def test_review_note_present():
+    """人工评审建议（十四期）：资源卡三态按钮旁有建议输入框（选填），
+    随确定/备选/否定一并提交落库；卡片与详情展示既有建议。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in REVIEW_NOTE_TOKENS:
+        assert token in js, f"app.js 缺少评审建议逻辑：{token}"
 
 
 def test_tree_resizable():

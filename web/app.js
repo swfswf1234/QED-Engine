@@ -101,7 +101,6 @@ const state = {
     catalog: [], // catalog targets（8901 /catalogs/math-qe）
     selection: null, // {kind: "domain"|"course"|"target", id: string}
     filters: { domain: "", course: "", status: "" }, // 资源筛选（与树选择 AND 叠加）
-    taskFilters: { status: "", type: "", course: "" }, // 任务筛选（前端过滤）
     pollTimer: null,
     modalAction: null, // {type, id}
 };
@@ -112,13 +111,6 @@ const RESOURCE_STATUS_OPTIONS = [
     ["downloading", "下载中"], ["downloaded", "已下载"], ["approved", "已验收"],
     ["rejected", "已拒绝"], ["failed", "失败"], ["pending_manual", "待人工补充"],
 ];
-const TASK_STATUS_OPTIONS = [
-    ["", "全部"], ["pending", "待评估"], ["processing", "评估中"],
-    ["queued", "排队中"], ["running", "运行中"], ["succeeded", "已完成"], ["failed", "失败"],
-];
-const TASK_TYPE_OPTIONS = [
-    ["", "全部"], ["catalog_evaluate", "目录评估"], ["books/download", "书籍下载"],
-];
 
 /* 渲染弹层选项：按钮 + popover 菜单 */
 function renderPopover(popKey, options, label) {
@@ -126,7 +118,7 @@ function renderPopover(popKey, options, label) {
     const menu = document.querySelector(`[data-menu="${popKey}"]`);
     if (!btn || !menu) return;
     const short = popKey.replace("filter-", "");
-    const current = state.filters[short] ?? state.taskFilters[short] ?? "";
+    const current = state.filters[short] ?? "";
     const curLabel = options.find(([v]) => v === current);
     btn.textContent = label + "：" + (curLabel ? curLabel[1] : "全部");
     menu.innerHTML = options.map(([value, text]) =>
@@ -135,7 +127,7 @@ function renderPopover(popKey, options, label) {
 }
 
 function initPopovers() {
-    const popKeys = ["filter-domain", "filter-course", "filter-status", "filter-task-status", "filter-task-type", "filter-task-course"];
+    const popKeys = ["filter-domain", "filter-course", "filter-status"];
     popKeys.forEach((key) => {
         const btn = $("btn-" + key);
         if (!btn) return;
@@ -150,16 +142,9 @@ function initPopovers() {
         if (menu) menu.addEventListener("click", (ev) => {
             const opt = ev.target.closest(".popover-option");
             if (!opt) return;
-            const value = opt.dataset.value;
-            if (key.startsWith("filter-task-")) {
-                state.taskFilters[key.replace("filter-task-", "")] = value;
-                renderTaskFilters();
-                renderTasks();
-            } else {
-                state.filters[key.replace("filter-", "")] = value;
-                renderResourceFilters();
-                renderPanel();
-            }
+            state.filters[key.replace("filter-", "")] = opt.dataset.value;
+            renderResourceFilters();
+            renderPanel();
             menu.classList.add("hidden");
         });
     });
@@ -172,12 +157,6 @@ function renderResourceFilters() {
     renderPopover("filter-domain", domainOptions(), "领域");
     renderPopover("filter-course", courseOptions(), "课程");
     renderPopover("filter-status", RESOURCE_STATUS_OPTIONS, "状态");
-}
-
-function renderTaskFilters() {
-    renderPopover("filter-task-status", TASK_STATUS_OPTIONS, "任务状态");
-    renderPopover("filter-task-type", TASK_TYPE_OPTIONS, "任务类型");
-    renderPopover("filter-task-course", courseOptions(), "课程");
 }
 
 /* ---------- 通用 ---------- */
@@ -732,6 +711,11 @@ function resourceCard(it) {
         actions.push(`<button class="btn danger" data-act="reject" data-id="${esc(it.resource_id)}">删除（填原因）</button>`);
     }
     const reason = it.reject_reason ? `<div class="reject-note">拒因：${esc(it.reject_reason)}</div>` : "";
+    const review = it.review_note ? `<div class="reject-note review-note">评审建议：${esc(it.review_note)}</div>` : "";
+    // 十四期：人工评审建议（review_note）——三态按钮旁建议输入框，随三态一并提交（QED-020）
+    const noteInput = it.status === "candidate" || it.status === "backup"
+        ? `<input type="text" class="review-note" data-note-for="${esc(it.resource_id)}" placeholder="填一句评审建议（可选）…" value="${esc(it.review_note || "")}">`
+        : "";
     const sub = [it.language || "—", (it.authors || []).join("、") || "—", link].join('<span class="sep">·</span>');
     return `<div class="card">
         <div class="card-head">
@@ -743,12 +727,20 @@ function resourceCard(it) {
         </div>
         ${scoreMarkup(it.llm_evaluation)}
         ${reason}
+        ${review}
         <div class="card-actions">
             <span class="status-badge status-${esc(it.status || "unknown")}">${esc(STATUS_LABEL[it.status] || it.status)}</span>
             ${actions.join("")}
             <button class="btn ghost" data-act="detail" data-kind="resource" data-id="${esc(it.resource_id)}">详情</button>
         </div>
+        ${noteInput}
     </div>`;
+}
+
+/* 十四期：随三态一并提交的评审建议（QED-020，选填） */
+function noteOf(resourceId) {
+    const input = document.querySelector(`.review-note[data-note-for="${CSS.escape(resourceId)}"]`);
+    return input ? input.value.trim() : "";
 }
 
 /* 十三期：控制台化——「① 搜索书籍」按当前选中课程发起 AI 搜索评估（控制台以课程为单位操作） */
@@ -779,54 +771,17 @@ async function triggerEvaluate() {
     }
 }
 
-/* ---------- 任务中心（8901 /tasks，1s 轮询） ---------- */
-
-function taskCard(t) {
-    const progress = Number(t.progress) || 0;
-    const result = JSON.stringify(t.result ?? t.error ?? "");
-    return `<div class="card task-card">
-        <div class="card-head">
-            <div class="task-id">${esc(t.task_id)}</div>
-            <span class="status-badge status-${esc((t.status || "unknown").toLowerCase())}">${esc(t.status ?? "—")}</span>
-        </div>
-        <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, progress))}%"></div></div>
-        <div class="task-meta">
-            <span>类型：${esc(t.type ?? "—")}</span>
-            <span>进度：${progress}%</span>
-        </div>
-        ${result !== '""' ? `<div class="verdict">${esc(result.length > 120 ? result.slice(0, 120) + "…" : result)}</div>` : ""}
-        <div class="card-actions">
-            <button class="btn ghost" data-act="detail" data-kind="task" data-id="${esc(t.task_id)}">详情</button>
-        </div>
-    </div>`;
-}
-
-function renderTasks() {
-    // 四期/五期：任务按 状态 / 类型 / 课程 前端过滤（弹层筛选器）
-    const fStatus = state.taskFilters.status;
-    const fType = state.taskFilters.type;
-    const fCourse = state.taskFilters.course;
-    let items = state.tasks;
-    if (fStatus) items = items.filter((t) => (t.status || "").toLowerCase() === fStatus);
-    if (fType) items = items.filter((t) => (t.type || "") === fType);
-    if (fCourse) items = items.filter((t) => (t.params && t.params.course_id) === fCourse);
-    const box = $("task-list");
-    if (!items.length) {
-        box.innerHTML = '<div class="empty-state"><div class="emoji">🗂️</div>（无任务记录）</div>';
-        return;
-    }
-    box.innerHTML = `<div class="card-grid">${items.map(taskCard).join("")}</div>`;
-}
+/* ---------- 任务中心（8901 /tasks，1s 轮询；十四期：尾部任务列表已移除，
+ * 任务数据仅用于课程操作条步骤进度条） ---------- */
 
 async function loadTasks() {
-    const box = $("task-list");
     try {
         state.tasks = await fetchJson(TRACKER_BASE + ENDPOINTS.tasks);
     } catch (err) {
-        box.textContent = "QED-Tracker 8901 离线：" + err.message;
+        // 8901 离线：步骤条保持 idle 即可，不中断其他模块（独立性铁律）
+        state.tasks = [];
         return;
     }
-    renderTasks();
     // 十三期：任务轮询后刷新课程操作条步骤进度（若课程选中）
     const sel = state.selection;
     const steps = $("course-steps");
@@ -873,7 +828,12 @@ function startTaskPolling() {
 
 async function confirmResource(id) {
     try {
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.confirm, { method: "POST" });
+        const note = noteOf(id);
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.confirm, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note }),
+        });
         alert("已确认下载：" + res.status);
     } catch (err) {
         alert("确认失败：" + err.message);
@@ -885,7 +845,12 @@ async function confirmResource(id) {
 
 async function backupResource(id) {
     try {
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.backup, { method: "POST" });
+        const note = noteOf(id);
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.backup, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note }),
+        });
         alert("已标记备选（可转正或放弃）：" + res.status);
     } catch (err) {
         alert("标记备选失败：" + err.message);
@@ -937,10 +902,11 @@ async function submitReason() {
     }
     $("modal").classList.add("hidden");
     try {
+        const note = noteOf(id);
         await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.reject, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reason }),
+            body: JSON.stringify({ reason, note }),
         });
         alert("已记录拒绝并留痕");
     } catch (err) {
@@ -1104,6 +1070,8 @@ function renderResourceDetail(r) {
         </div>` : "";
     const catalog = r.catalog_ref ? `<div class="detail-section"><h3>目录匹配</h3>${jsonPre(r.catalog_ref)}</div>` : "";
     const reject = r.reject_reason ? `<div class="detail-section error-box"><h3>拒绝/删除记录</h3><p class="section-note">${esc(r.reject_reason)}</p></div>` : "";
+    // 十四期：人工评审建议展示（QED-020 review_note）
+    const review = r.review_note ? `<div class="detail-section"><h3>评审建议</h3><p class="section-note">${esc(r.review_note)}</p></div>` : "";
     return `
         ${kvTable({
             resource_id: r.resource_id, title: r.title, status: r.status,
@@ -1117,6 +1085,7 @@ function renderResourceDetail(r) {
             <tr><th>页面</th><td>${link}</td></tr></table>
         </div>
         ${evaluation}
+        ${review}
         ${downloadInfo}
         ${catalog}
         ${reject}`;
@@ -1213,8 +1182,8 @@ const HELP_SECTIONS = [
             "左侧为知识点树，三层知识链路：领域（如数学）→ 课程（按学习深度排序，先学的在前）→ 具体书籍（书名 + 作者 + 类型徽标【教材/习题集/资料】），点击节点展开/折叠；课程行显示完成徽标：教材 + 习题集均验收通过（approved）才算课程完成。",
             "筛选栏：领域 / 课程 / 状态三个按钮，点击弹出选项（与树选择叠加过滤）；选择「全部」恢复。",
             "资源卡片三态评估：确定（候选→已确认）、备选（候选→备选，可转正或放弃）、否定（填原因留痕）；已确认后可「开始下载」，下载完成可「验收通过」。",
-            "「① 搜索书籍」按钮（选中课程后出现在面板顶部操作条）：按该课程发起 AI 搜索评估任务（生成候选资源），任务在下方「评估任务」列表轮询进度；未生成候选的书籍在面板显示「待评估」占位。",
-            "评估任务列表按 状态 / 类型 / 课程 筛选；「① 搜索书籍」按选中课程发起搜索评估（控制台以课程为单位）。",
+            "「① 搜索书籍」按钮（选中课程后出现在面板顶部操作条）：按该课程发起 AI 搜索评估任务（生成候选资源），进度在步骤条（搜索→确认→下载→验收）自动刷新；未生成候选的书籍在面板显示「待评估」占位。",
+            "三态评审时可填一句建议（评审建议输入框，选填），随确定/备选/否定一并提交，落库供后续参考。",
         ],
     },
     {

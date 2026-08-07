@@ -639,6 +639,21 @@ body {
   border-radius: 8px;
 }
 
+/* 十四期：人工评审建议（review_note）输入框与展示 */
+.review-note {
+  font-size: 12.5px;
+  color: var(--text);
+  padding: 6px 10px;
+  background: rgba(77, 107, 254, 0.06);
+  border: 1px solid rgba(148, 163, 255, 0.2);
+  border-radius: 8px;
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.review-note::placeholder { color: var(--text-dim); }
+.reject-note.review-note { color: var(--text-dim); background: rgba(77, 107, 254, 0.08); }
+
 .card-actions {
   display: flex;
   gap: 8px;
@@ -652,24 +667,6 @@ body {
 .card-actions a {
   text-decoration: none;
 }
-
-.task-card .progress-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.1);
-  overflow: hidden;
-}
-
-.task-card .progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--gradient);
-  transition: width 0.4s ease;
-}
-
-.task-id { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; color: var(--text-faint); }
-
-.task-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; color: var(--text-dim); }
 
 /* 仪表盘图表（手写 SVG/CSS，无外部依赖） */
 
@@ -754,19 +751,6 @@ body {
   padding: 14px 16px;
   max-height: calc(100vh - 200px);
   overflow-y: auto;
-}
-
-/* 任务筛选行（评估任务标题右侧） */
-
-.task-filters { display: inline-flex; gap: 8px; float: right; }
-
-.task-filters select {
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 12px;
-  padding: 4px 8px;
 }
 
 .side-head {
@@ -872,16 +856,6 @@ body {
 .step-item.done { background: rgba(52, 211, 153, 0.14); color: #34d399; }
 
 .step-arrow { color: var(--text-faint); font-size: 11px; }
-
-.panel-section-head {
-  margin: 20px 0 10px;
-  font-size: 12.5px;
-  color: var(--text-faint);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 6px;
-}
-
-.task-list { display: flex; flex-direction: column; gap: 10px; }
 
 /* 空态数据容器（解析进度/文档对照/追溯：无数据置空） */
 

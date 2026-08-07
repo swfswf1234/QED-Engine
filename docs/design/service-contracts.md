@@ -64,7 +64,8 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 - 前缀 `/api/v1`；`GET /health` 存活检查。
 - 只读查询（搜索、资源列表、选择报告、目录）同步返回；CORS 允许 `http://127.0.0.1:8903` 源
   （8903 下载工作台直连本服务，无代理）。
-- 资源清单与状态机（2026-08-05 用户裁决，人机协同闭环；2026-08-06 QED-017 增补人工评估三态）：
+- 资源清单与状态机（2026-08-05 用户裁决，人机协同闭环；2026-08-06 QED-017 增补人工评估三态；
+  2026-08-07 QED-020 增补评审建议）：
   - `GET /resources?status=&course_id=&kind=&language=`、`GET /resources/{id}` 同步查询；
   - 状态机 `candidate → confirmed → downloading → downloaded → approved / rejected`
     （+ `failed` 终态可重试；`pending_manual`/`not_found` 为登记辅助状态；
@@ -74,6 +75,8 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
     （candidate/pending_manual→backup，人工评估"备选"）、`POST /resources/{id}/approve`
     （downloaded→approved）、`POST /resources/{id}/reject {reason}`（candidate/backup 或
     downloaded→rejected；reason 必填；后者同步硬删文件，DB 记录保留留痕）——同步轻量写操作；
+    confirm/backup/reject 三接口接受可选 `note` 参数（人工评审建议，落 `qt_resources.review_note`，
+    资源查询返回该字段）；
   - 人工评估三态：**确定**=confirm、**备选**=backup（不下载，可转正/放弃）、**否定**=reject；
     中文教材候选确定优先，中文不可得时英文候选由人工决定；评估与下载后验收分离。
 - 写操作（下载、论文推荐、目录批处理、扫描、Axiom 推送、**评估**）一律创建**后台任务**：
@@ -148,7 +151,12 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
     按钮（按选中课程发起 AI 搜索评估，8901 `/tasks/catalog/evaluate`，不选课程提示先选课）+
     **步骤进度条**（搜索→确认→下载→验收，idle/进行/完成 三态，1s 任务轮询自动刷新）；
     工具栏全局「触发评估」按钮移除（评估以课程为单位操作）；树行点击已修复事件冒泡
-    （点课程不再误选为领域，十三期回归守护）。
+    （点课程不再误选为领域，十三期回归守护）；
+    **十四期（人工评审优化，ARCH-006）**：① 知识点界面尾部「评估任务」区块（任务卡片列表 +
+    任务状态/类型/课程三个筛选器）移除（任务数据仅用于步骤条搜索态，`/tasks` 仍拉取）；
+    ② 资源卡三态按钮（确定/备选/否定）旁新增**评审建议输入框**（`review-note`，选填），
+    随三态一并提交 `note` 参数（8901 confirm/backup/reject 落 `qt_resources.review_note`），
+    卡片与详情弹窗展示既有建议（`review_note` 字段）。
   - `#/admin/parsing` 解析进度、`#/admin/compare` 原始文档对照——**事务视图，无数据源时置空**
     （空态提示），数据管线就绪后填充（REQ-015 / ALN-006 / QED-012 前置）；**「追溯」界面
     （#/admin/trace）已随六期裁决移除**；
@@ -169,7 +177,8 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
   `/config/llm-status`（8900）；`/resources`、`/tasks`、`/tasks/catalog/evaluate`、`/confirm`、
    `/backup`、`/reject`、`/approve`、`/file`、`/tasks/books/download`、`/catalogs/math-qe`（8901）；
    路由 `#/admin`（别名直达仪表盘）、`#/admin/dashboard`、`#/admin/downloads`、`#/admin/parsing`、
-   `#/admin/compare`。
+   `#/admin/compare`；十四期守护：`review-note`/`review_note` 在 app.js、`task-list`/任务筛选器
+   不在 index.html。
 - 独立性：8901/8902 离线时各视图显示离线提示、状态卡变红，不白屏不报错（见下节）。
 - **8900（QED 管理服务）角色判定（2026-08-06 架构评审结论：保留）**：浏览器无法直读 `.env`
   且密钥不下发，8900 是 `.env` 的唯一只读语义代理；角色收敛为三——① 配置语义代理
