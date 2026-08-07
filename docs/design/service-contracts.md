@@ -155,12 +155,18 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
     **十四期（人工评审优化，ARCH-006）**：① 知识点界面尾部「评估任务」区块（任务卡片列表 +
     任务状态/类型/课程三个筛选器）移除（任务数据仅用于步骤条搜索态，`/tasks` 仍拉取）；
     ② 资源卡三态按钮（确定/备选/否定）旁新增**评审建议输入框**（`review-note`，选填），
-    随三态一并提交 `note` 参数（8901 confirm/backup/reject 落 `qt_resources.review_note`），
-    卡片与详情弹窗展示既有建议（`review_note` 字段）。
+     随三态一并提交 `note` 参数（8901 confirm/backup/reject 落 `qt_resources.review_note`），
+     卡片与详情弹窗展示既有建议（`review_note` 字段）；
+    **十五期（ARCH-007）**：① 界面名回归——侧边栏菜单与页面标题改回**「文档下载管理」**
+     （树侧栏头保留「知识点」）；② 进入默认选中「数学」领域（`loadTree` 完成后无选择时
+     `selectNode("domain", "数学")`）；③ 领域级右侧按课程分页（`PAGE_SIZE = 3`，`coursePagerHtml`
+     翻页控件，左右两栏等高 align-items: stretch），课程级/书籍级保持现状；
+     ④ 同课程配套教材+习题集（作者集排序后 join 相同）`paired-row` 并排同一行。
   - `#/admin/parsing` 解析进度、`#/admin/compare` 原始文档对照——**事务视图，无数据源时置空**
     （空态提示），数据管线就绪后填充（REQ-015 / ALN-006 / QED-012 前置）；**「追溯」界面
     （#/admin/trace）已随六期裁决移除**；
-  - 侧边栏菜单（六期收敛为四项独立界面；十一期改名）：仪表大盘 / 知识点 / 文档解析进度 / 原始文档对照。
+  - 侧边栏菜单（六期收敛为四项独立界面；十一期改名，十五期界面名回退）：仪表大盘 / 文档下载管理 /
+    文档解析进度 / 原始文档对照。
 - 详情弹窗（四期统一评估视角）：资源/任务详情标注 **课程→书籍（课程名+领域+目标标题）、
   类型/中英/来源（provider + page_url）、LLM 简介评分、下载详情（relative_path/page_count/sha256）、
   解析目标建议徽标（verdict + score）**；任务详情显示 params.course_id 对应的课程与领域。
@@ -178,7 +184,9 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
    `/backup`、`/reject`、`/approve`、`/file`、`/tasks/books/download`、`/catalogs/math-qe`（8901）；
    路由 `#/admin`（别名直达仪表盘）、`#/admin/dashboard`、`#/admin/downloads`、`#/admin/parsing`、
    `#/admin/compare`；十四期守护：`review-note`/`review_note` 在 app.js、`task-list`/任务筛选器
-   不在 index.html。
+   不在 index.html；十五期守护：`文档下载管理` 在 index.html（菜单+标题 ≥2 处）、`知识点` 保留
+   树头、`selectNode("domain", "数学")`/`PAGE_SIZE = 3`/`renderPanelByCourses`/`pairedCourseTargets`
+   在 app.js。
 - 独立性：8901/8902 离线时各视图显示离线提示、状态卡变红，不白屏不报错（见下节）。
 - **8900（QED 管理服务）角色判定（2026-08-06 架构评审结论：保留）**：浏览器无法直读 `.env`
   且密钥不下发，8900 是 `.env` 的唯一只读语义代理；角色收敛为三——① 配置语义代理

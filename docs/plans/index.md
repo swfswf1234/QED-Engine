@@ -20,3 +20,4 @@
 - [2026-08 8903 前端三期改造计划（frontend-redesign-v3）](../trackers/todo.md)（ARCH-003，状态见任务台账）
 - [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../trackers/todo.md)（ARCH-004，状态见任务台账）
 - [2026-08 人工评审优化轮（review-round-v6）](../trackers/todo.md)（ARCH-006，状态见任务台账）
+- [2026-08 文档下载管理课程分页计划（downloads-course-view）](../trackers/todo.md)（ARCH-007，状态见任务台账）
