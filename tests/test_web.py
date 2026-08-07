@@ -43,8 +43,8 @@ CONFIG_ENDPOINT_TOKENS = (
 # 六期：`#/admin` 直达仪表大盘（无卡片墙中间层），独立模块路由（仪表大盘/文档下载管理/文档解析/对照）
 ROUTE_TOKENS = ("#/admin", "#/admin/dashboard", "#/admin/downloads", "#/admin/parsing", "#/admin/compare")
 
-# 后台管理菜单（十一期：仪表大盘/知识点/文档解析进度/原始文档对照 四项独立界面）
-ADMIN_MENU_TOKENS = ("仪表大盘", "知识点", "文档解析进度", "原始文档对照")
+# 后台管理菜单（十五期：文档下载管理界面名回归，树头仍叫知识点）
+ADMIN_MENU_TOKENS = ("仪表大盘", "文档下载管理", "文档解析进度", "原始文档对照")
 
 # 主体学习界面入口（三期收敛为三项：知识点梳理/学习/刷题模式；五期 + 使用手册）
 HOME_ENTRY_TOKENS = ("知识点梳理", "学习", "刷题模式", "管理后台", "使用手册")
@@ -79,9 +79,9 @@ REMOVED_LLM_ROUTE_TOKENS = ("GLM-OCR", "models.glm", "models.deepseek")
 # 八期：向量数据库未配置不展示（避免误会）；MySQL 为当前唯一数据库
 REMOVED_VECTOR_TOKENS = ("向量数据库", "向量库")
 
-# 十一期：知识点树（三层知识链路 领域→课程→书籍；菜单/标题统一命名，旧名移除）
+# 十五期：界面名「文档下载管理」（菜单+标题），树侧栏头保留「知识点」；旧树副标题移除
 KNOWLEDGE_TREE_TOKENS = ("知识点",)
-REMOVED_TREE_TOKENS = ("领域 · 课程 · 书籍", "文档下载管理")
+REMOVED_TREE_TOKENS = ("领域 · 课程 · 书籍",)
 TREE_COUNT_TOKENS = ("本）",)
 
 # 十一期：课程按学习深度排序（先学在前、依赖后续在后；未列入新课程排尾）
@@ -371,12 +371,16 @@ def test_no_vector_db_placeholder():
 
 
 def test_knowledge_tree_naming():
-    """知识点树（十一期）：菜单/标题/树统一命名「知识点」，旧名（文档下载管理）移除。"""
+    """十五期：界面名「文档下载管理」（菜单+标题），树侧栏头保留「知识点」；旧树副标题移除。"""
     html = (WEB / "index.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
     for token in KNOWLEDGE_TREE_TOKENS:
         assert token in html, f"index.html 缺少知识点命名：{token}"
         assert token in js, f"app.js 缺少知识点命名：{token}"
+    for token in ADMIN_MENU_TOKENS:
+        assert token in html, f"index.html 缺少管理菜单：{token}"
+    assert "文档下载管理" in html, "index.html 界面名应为文档下载管理"
+    assert html.count("文档下载管理") >= 2, "菜单与页面标题都应叫文档下载管理"
     for token in REMOVED_TREE_TOKENS:
         assert token not in html, f"index.html 不应再含旧树标题：{token}"
 
