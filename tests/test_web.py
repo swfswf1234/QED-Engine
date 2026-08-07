@@ -84,6 +84,9 @@ KNOWLEDGE_TREE_TOKENS = ("知识点",)
 REMOVED_TREE_TOKENS = ("领域 · 课程 · 书籍",)
 TREE_COUNT_TOKENS = ("本）",)
 
+# 十五期：进入文档下载管理默认选中「数学」领域（loadTree 完成后无选择时触发一次）
+DEFAULT_DOMAIN_TOKENS = ('selectNode("domain", "数学")', "state.selection", "数学")
+
 # 十一期：课程按学习深度排序（先学在前、依赖后续在后；未列入新课程排尾）
 COURSE_ORDER_TOKENS = ("COURSE_ORDER", "01_math_analysis", "10_qe_prep")
 
@@ -478,3 +481,33 @@ def test_dashboard_charts_removed():
     for token in ("donut-chart", "course-bars"):
         assert token not in html, f"index.html 不应再含旧图表容器：{token}"
         assert token not in js, f"app.js 不应再含旧图表逻辑：{token}"
+
+
+def test_default_select_math_domain():
+    """进入文档下载管理默认选中数学领域（十五期）：loadTree 完成后若无既有选择则选中「数学」。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in DEFAULT_DOMAIN_TOKENS:
+        assert token in js, f"app.js 缺少默认选中数学领域逻辑：{token}"
+    # 默认选中必须发生在 renderTree 之后（树节点已就绪），且仅当尚无选择
+    assert js.index("renderTree()") < js.index('selectNode("domain", "数学")'), "默认选中应在树渲染后"
+
+
+# 十六期（QED-021）：配套资料分类 + 人工下载登记——libgen 等发现专用来源无直链，
+# 前端展示下载方案（links）并提供相对路径登记入口（register 端点）
+SUPPLEMENT_TOKENS = ("配套资料", "supplement")
+REGISTER_TOKENS = ("/register", "relative_path", "人工下载登记", "下载方案")
+
+
+def test_supplement_kind_label_present():
+    """配套资料（supplement）类型徽标（QED-021）：book 教材 / exercise 习题集 / supplement 配套资料。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in SUPPLEMENT_TOKENS:
+        assert token in js, f"app.js 缺少 supplement 类型徽标逻辑：{token}"
+
+
+def test_manual_register_and_links_present():
+    """人工下载登记（QED-021）：pending_manual 卡片提供相对路径登记入口（/register），
+    发现专用来源（libgen_li）的下载方案（links）在卡片/详情中展示。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in REGISTER_TOKENS:
+        assert token in js, f"app.js 缺少人工登记/下载方案逻辑：{token}"

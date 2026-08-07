@@ -32,6 +32,7 @@ const ENDPOINTS = {
     approve: "/approve",
     file: "/file",
     download: "/tasks/books/download",
+    register: "/register",
 };
 
 /* 领域静态映射（ARCH-004 决策 D2）：catalog 尚无领域字段，前端映射兜底，
@@ -542,6 +543,8 @@ async function loadTree() {
         return;
     }
     renderTree();
+    // 十五期：进入文档下载管理默认选中「数学」领域（仅当尚无选择；刷新树保留用户既有选择）
+    if (!state.selection) selectNode("domain", "数学");
 }
 
 /* 领域自适应（五期 D6）：catalog 无领域字段，按 catalog_id 映射学科领域；
