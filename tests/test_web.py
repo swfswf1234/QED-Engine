@@ -1,7 +1,7 @@
 """
 模块职责：守护 8903 QED-Engine 前端静态页：三文件就位、路由/入口文本与接口契约引用一致
 （防契约漂移）。
-设计关联（DesignRef）：docs/design/service-contracts.md
+设计关联（DesignRef）：docs/design/web-frontend.md
 实现状态：Current
 被测代码：web/
 """

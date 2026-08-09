@@ -1,7 +1,7 @@
 # 文档规范
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 治理对象：文档分类、写作、元数据、索引、命名、归档与删除
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_document_structure.py`、`tests/contract/test_markdown_links.py`、`tests/contract/test_standard_governance.py`
@@ -51,7 +51,7 @@
 
 - 架构和设计声明设计状态、实现状态、最后更新、关联代码、关联测试和关联 ADR。
 - 标准声明状态、最后更新、治理对象、依据和关联测试，并使用统一公共章节。
-- 计划、ADR 的字段和值分别由任务生命周期和 ADR 治理规定（规范建立后补充）。
+- 计划、ADR 的字段和值分别由任务生命周期和 ADR 治理规定。
 - 指南、索引和 tracker 至少声明 `状态` 与 `最后更新`。
 - 架构/设计的设计状态只允许 `Draft`、`Proposed`、`Accepted`、`Rejected`、`Superseded`、
   `Historical`；实现状态只允许 `Not Started`、`In Progress`、`Implemented`、`Verified`、
@@ -85,6 +85,7 @@
 
 ## 变更与取代
 
-改变文档分类、事实归属、强制元数据、索引入口或归档条件时必须先新增 ADR。措辞、勘误、链接和
+改变文档分类、事实归属、强制元数据、索引入口或归档条件属于 standards 实质规则变更，按
+[ADR 治理规范](adr-governance.md) 先新增 ADR。措辞、勘误、链接和
 不改变语义的结构整理可直接修改。活跃标准和指南不保留版本副本；旧内容按本节规则进入 History
 或从 Git 恢复。

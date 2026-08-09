@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/code-document-traceability.md
 实现状态：Current
 被测代码：docs/architecture
+守护面：架构与设计追溯
+失效后果：架构正文、Mermaid 视图与实现偏差失去同步
 """
 
 import re
@@ -11,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = ROOT / "docs" / "architecture"
 MERMAID_BLOCK = re.compile(r"```mermaid\s*\n(?P<body>.*?)```", re.DOTALL)
-CURRENT_DOCUMENTS = {"four-service-architecture.md"}
+CURRENT_DOCUMENTS = {"four-service-architecture.md", "project-status.md"}
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {
     "Not Started",
@@ -39,6 +41,7 @@ def test_architecture_directory_has_one_index_and_current_documents():
         "index.md",
         "four-service-architecture.md",
         "code-map.md",
+        "project-status.md",
     }
     index = (ARCHITECTURE / "index.md").read_text(encoding="utf-8")
     for document in CURRENT_DOCUMENTS:

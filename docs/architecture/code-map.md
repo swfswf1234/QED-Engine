@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-05
+最后更新：2026-08-09
 维护位置：`docs/architecture/code-map.md`
 关联代码：受管模块清单
 关联测试：`tests/contract/test_code_document_mapping.py`
@@ -16,12 +16,12 @@
 | `src/qed_engine/config.py` | 统一配置读取 | Current | `docs/design/configuration-and-secrets.md` | `tests/test_config.py` | 根 `.env` 唯一事实源，空 key 降级。 |
 | `src/qed_engine/cli.py` | 统一 CLI `qed` | Current | `docs/design/configuration-and-secrets.md` | `tests/test_cli.py` | config 子命令、tracker 客户端子命令、服务发现与最小配置尾注。 |
 | `src/qed_engine/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/service-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/确认-拒绝-验收，transport 可注入。 |
-| `src/qed_engine/api/main.py` | 配置中心 API 入口 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 五接口（health/模型/密钥/数据库/llm-status），密钥不下发，CORS 允许 8900-8903；llm-status 真实探测 LLM 可达性（5s 超时、60s 缓存）；database 真实连接探测（pymysql 3s 超时、60s 缓存）。 |
+| `src/qed_engine/api/main.py` | 配置中心 API 入口 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 五接口（health/模型/密钥/数据库/llm-status），密钥不下发，CORS 允许 8900-8903；llm-status 真实探测 LLM 可达性（5s 超时、60s 缓存）；database 真实连接探测（pymysql 3s 超时、60s 缓存）；服务管理端点按 [service-control.md](../design/service-control.md) 在实现轮扩展。 |
 | `src/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 健康、模型路由、密钥布尔状态、数据库状态（含可达性）与 LLM 可达性。 |
 | `tests/test_config.py` | 配置读取单元测试 | Current | `docs/design/configuration-and-secrets.md` | — | 默认值与空值降级。 |
 | `tests/test_cli.py` | 统一 CLI 契约测试 | Current | `docs/design/configuration-and-secrets.md` | — | 子命令、服务地址与尾注提醒。 |
 | `tests/test_tracker_client.py` | QED-Tracker 客户端契约测试 | Current | `docs/design/service-contracts.md` | — | 方法/路径/请求体、错误响应与任务轮询。 |
-| `tests/test_web.py` | QED-Engine 前端静态页契约测试 | Current | `docs/design/service-contracts.md` | — | 守护 web/ 三文件、hash 路由（#/admin 等）、主界面/后台入口文本、端点引用与响应式断点。 |
+| `tests/test_web.py` | QED-Engine 前端静态页契约测试 | Current | `docs/design/web-frontend.md` | — | 守护 web/ 三文件、hash 路由（#/admin 等）、主界面/后台入口文本、端点引用与响应式断点。 |
 | `tests/test_api.py` | 配置中心 API 契约测试 | Current | `docs/design/config-center-api.md` | — | 密钥值不泄露。 |
 | `tests/contract/test_standard_governance.py` | 标准治理测试 | Current | `docs/standards/documentation.md` | — | 守护标准目录、元数据、索引与 AGENTS 路由。 |
 | `tests/contract/test_adr_governance.py` | ADR 治理测试 | Current | `docs/standards/adr-governance.md` | — | 守护编号、登记表、元数据与取代关系。 |

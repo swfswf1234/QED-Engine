@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/documentation.md
 实现状态：Current
 被测代码：README.md、docs
+守护面：文档结构与导航
+失效后果：文档链接失效，跨文档导航断裂
 """
 
 import re

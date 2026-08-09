@@ -1,7 +1,7 @@
 # 任务台账
 
 状态：Current
-最后更新：2026-08-06
+最后更新：2026-08-09
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -16,6 +16,7 @@
 | ARCH-004 | Plan | 高 | Accepted | [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../plans/2026-08-8903-admin-redesign.md) | 计划状态 Accepted；2026-08-06 用户确认（卡片墙/严格三领域/树主评估窄/详情评估视角）；**四期完成（119 passed + ruff clean + 8901 三态冒烟）**：卡片墙入口、三领域（拓扑/考前并入分析）、树拖拽记忆（qed-tree-w）、领域/课程/状态与任务筛选、详情评估视角；Phase 0（QED-017 提交 5f7c015 + 8901 重启 pid 6772）完成；待用户浏览器验收后归档 |
 | ARCH-006 | Plan | 高 | Accepted | [2026-08 人工评审优化轮（review-round-v6）](../plans/2026-08-review-round.md) | 计划状态 Accepted；2026-08-07 用户确认（同源去重/去尾部评估任务/人工建议落库/存量清理）；REQ-018 请求 QED-Tracker 承接；REQ-006 承接前端执行 |
 | ARCH-007 | Plan | 高 | Accepted | [2026-08 文档下载管理课程分页计划（downloads-course-view）](../plans/2026-08-downloads-course-view.md) | 计划状态 Accepted；2026-08-07 用户确认（界面名回退/默认数学领域/领域级课程分页每页 3 门/配套对并排）；REQ-006 承接执行；待用户浏览器验收后归档 |
+| ARCH-008 | Plan | 高 | Accepted | [2026-08 文档与架构重构轮（docs-refactor-round）](../plans/2026-08-docs-refactor-round.md) | 计划状态 Accepted；2026-08-09 用户确认（v0.1 目标对齐）；W1 adr/ 已完成（ADR 0004-0006 + 治理规范修订 + 契约范本化）；W2 standards/ 已完成（F1 类型枚举收编、F3/F4 占位与去重、F6 状态名统一、7 处 index 规则节清理、2 个新守护，150 passed）；W3 architecture/ 已完成（四服务架构回修到现状 + 技术栈选型 tech-stack.md + 数据库设计 database-design.md，150 passed）；W4 design/ 已完成（8903 前端契约独立 web-frontend.md、service-contracts 瘦身去重、dataset/configuration 过时修复、tech-stack 模型收敛，150 passed）；W5-W9 逐节推进；关闭前置：REQ-024 ADR 重新治理完成 |
 | REQ-013 | 请求 | 高 | 待开始 | QED-Tracker MySQL 资源登记与状态机：qt_resources 表（含 llm_evaluation/catalog_ref/留痕字段）+ confirm/reject/approve 同步端点 + /resources/{id}/file 预览（请求：QED-Tracker） | QED-Tracker todo QED-012/QED-016 承接；2026-08-04 用户裁决统一 qed 库；2026-08-05 人机协同闭环裁决（人工确认后下载、删除硬删+DB 留痕）；**2026-08-06 回执：QED-012/QED-015/QED-016 已实现、QED-017 三态（backup/转正/放弃）已提交 5f7c015 并重启 8901 实测**；剩余：8903/CLI 联调验收（QED-014 冒烟）随本项完成 |
 | REQ-014 | 请求 | 高 | 待开始 | 基础书单 math-qe-v2 + LLM 筛选评估：按课程批量评估任务（搜索源+LLM 评估+候选落库），前端人工确认后才下载（请求：QED-Tracker） | QED-Tracker todo QED-013/QED-015 承接；每课程两组、宁缺勿滥、中文书 pending_manual；候选级拒绝可跳过；**2026-08-06 回执：QED-013 已实现（13 门课程书单 + evaluate 按课程批量落候选）**；剩余：QED-014 全链路联调验收 |
 | REQ-015 | 请求 | 中 | 待开始 | Axiom-Flow 读取 dataset/qed-tracker/raw/ 的批量导入解析接口（Phase 2 前置；请求：Axiom-Flow） | Axiom-Flow todo ALN-006 承接；教材下载轮联调后确认，拆 B/D 类计划执行 |
@@ -31,6 +32,13 @@
 | REQ-016 | 实现 | 中 | 进行中 | LLM 可达性探测：8900 新增 `/config/llm-status`（真实探测 models 接口、5s 超时、60s 缓存、未配置不探测、密钥绝不下发），8903 横幅由 key 布尔改为可达性展示 | 2026-06 完成：端点+探测+缓存已实现（tests 105 passed、ruff 通过），8900 实测 qwen/glm 可达、deepseek 未配置；前端横幅已切换；契约见 docs/design/config-center-api.md；归档条件：用户浏览器验收 8903 横幅与详情弹窗 |
 | REQ-017 | 请求 | 高 | 待开始 | QED-Tracker 服务化遗留三缺口（请求：QED-Tracker）：① 仓库内提供正式启动入口（当前用临时 serve_tracker.py，README 无记录）；② 评估任务进度上报（当前仅 30%/100% 两档，长任务无法观察中间状态）；③ 服务重启后 running 任务恢复（当前需人工干预） | 在 QED-Tracker 仓库建设计文档+todo 任务，用户评审确认后由对方执行 |
 | REQ-018 | 请求 | 高 | 待开始 | 人工评审优化（请求：QED-Tracker）：① evaluate 同源去重——同 provider_id 命中多个目标只登记第一条，其余 skipped 报告（数学分析陈纪修 教材/习题集同 archive 条目重复登记问题）；② qt_resources 增加 review_note 字段，confirm/backup/reject 三接口接受可选 note 参数落库；③ 存量重复清理——陈纪修 exercise candidate（cand_c8977caa0b358ebd71dd0bd585341dd3）与教材 confirmed 同源（archive math_analysis_chenjixiu），经 reject 接口标记 rejected（原因注明重复，留痕） | QED-Tracker todo QED-020 承接；用户 2026-08-07 已确认方案（计划 docs/plans/2026-08-review-round.md）；在其仓库建设计文档+todo 请求，用户评审确认后由对方执行 |
+| REQ-019 | 请求 | 中 | 待开始 | 版本核对（请求：QED-Tracker，设计见 [course-acquisition-flow.md](../design/course-acquisition-flow.md) 阶段 3）：下载验收的系统预检增加「登记版本 vs PDF 首页标题」自动核对，不一致提示人工确认（依赖登记数据含版本字段或可推导） | 用户 2026-08-09 确认设计（管理功能轮第 2 节，登记请求）；由其仓库承接，回执后关闭 |
+| REQ-020 | 实现 | 中 | 待开始 | 榜单数据收集：① 找资料权威性榜单（各教材/版本在数学社区权威性排序，服务第一轮评估选书）；② 找书找得率榜单（各来源渠道命中率/下载成功率实测，回填 QED-Tracker source-discovery 矩阵） | 用户 2026-08-09 确认（管理功能轮设计，见 [course-acquisition-flow.md](../design/course-acquisition-flow.md) 相关榜单小节）；产出回填阶段 1 选书规则，不单独建界面 |
+| REQ-021 | 流程 | 中 | 进行中 | 大变动同步：项目发生大的变动（架构/定位/服务形态变化）时，同步修订 README.md 与 AGENTS.md 的定位与状态表述，保持对外门面与现状一致 | 2026-08-09 用户决定登记；每次大变动评审时执行，与文档治理门禁（REQ-002）协同 |
+| REQ-022 | 请求 | 低 | 待开始 | 治理契约范本对齐（请求：Axiom-Flow）：按根仓库 [governance-contract.md](../standards/governance-contract.md) 范本对齐治理契约测试（契约头六字段/守护面清单/编写约定） | 2026-08-09 用户确认范本化设计（ADR 0006）；由对方仓库评估对齐，回执后关闭 |
+| REQ-023 | 请求 | 低 | 待开始 | 治理契约范本对齐（请求：QED-Tracker）：按根仓库 [governance-contract.md](../standards/governance-contract.md) 范本对齐治理契约测试（契约头六字段/守护面清单/编写约定） | 2026-08-09 用户确认范本化设计（ADR 0006）；由对方仓库评估对齐，回执后关闭 |
+| REQ-024 | 流程 | 中 | 待开始 | 治理 ADR 重新治理（触发：文档与架构重构轮 ARCH-008 完成后）：审查既有 ADR 与治理规范——① 贵精不贵多（合并冗余/撤销过时）；② 合理区分（ADR 与设计文档/标准的边界显式化）；③ 保证合理性（决定可验证）；④ 每次优化必须留记录（勘误/completed.md/契约测试），原则写入 adr-governance.md | 2026-08-09 用户确认登记；触发条件 = ARCH-008 文档重构完成（W1-W8）；执行时更新 adr-governance.md |
+| REQ-025 | 流程 | 中 | 进行中 | 四类设计文档实时同步：架构设计（four-service-architecture.md）、API 契约（config-center-api.md / service-contracts.md）、数据库设计（database-design.md）、技术栈选型（tech-stack.md）随实现状态与决策变化**先文档后实现**更新，变更后运行契约门禁；与 REQ-002（文档治理持续演进）协同，ARCH-008 重构轮完结后由本任务持续承接 | 2026-08-09 用户确认登记；每次影响架构/API/数据库/技术栈的实现与决策变更时执行，project-status 当前主线同步记录 |
 
 ## 规则
 

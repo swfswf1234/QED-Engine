@@ -1,7 +1,7 @@
 # 设计文档索引
 
 状态：Current
-最后更新：2026-08-05
+最后更新：2026-08-09
 
 本目录保存当前契约与接口：服务间通信、dataset 目录约定、统一配置接口、失败语义和质量门槛。
 文档分类与元数据规则见[文档规范](../standards/documentation.md)。
@@ -10,15 +10,13 @@
 
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
-| [service-contracts.md](service-contracts.md) | Accepted | In Progress | 三项目对接规范：边界、数据流、独立性、统一 qed 库与 MySQL 登记契约、差距 |
+| [service-contracts.md](service-contracts.md) | Accepted | In Progress | 三项目对接规范：对接点、统一 qed 库引用、8901 服务接口契约、独立性约定与差距 |
+| [web-frontend.md](web-frontend.md) | Accepted | Implemented | 8903 前端契约：信息架构、交互、视觉、响应式与契约引用（test_web 守护） |
 | [dataset-conventions.md](dataset-conventions.md) | Accepted | In Progress | 根 dataset 目录约定：raw/parsed/meta 契约、资源登记双写 |
 | [configuration-and-secrets.md](configuration-and-secrets.md) | Accepted | In Progress | 统一配置与密钥：供应商 key、OCR 模型、QED_DB_* 统一数据库、映射、原则 |
 | [config-center-api.md](config-center-api.md) | Accepted | Implemented | 配置中心 API 契约：health / 模型路由 / 供应商与数据库状态，密钥不下发 |
-
-## 规则
-
-- 设计文档声明设计状态、实现状态、最后更新、关联代码/测试/ADR。
-- dataset 读写契约是本目录职责，数据文件本身不入库。
-- 子项目内部契约以其自身 `docs/design/` 为准。
-- 实现状态随教材下载轮推进更新（QED-Tracker QED-008~016、Axiom-Flow ALN-002/003 见
-  [任务台账](../trackers/todo.md)）。
+| [service-control.md](service-control.md) | Accepted | Not Started | 控制中心：三 Python 服务启停托管（8900 代理）、仪表盘服务控制区、容器化规划 |
+| [course-acquisition-flow.md](course-acquisition-flow.md) | Accepted | Not Started | 课程收集流程五阶段（先验体系→一轮评估→下载→二轮评估→完成）与 8903 对齐契约 |
+| [learning-center.md](learning-center.md) | Draft | Not Started | 学习中心探索：课程学习 + 知识问答、工具链选型、知识节点模型、里程碑 |
+| [tech-stack.md](tech-stack.md) | Accepted | In Progress | 技术栈选型：三服务/前端/数据库/模型/解析/向量库选型记录 |
+| [database-design.md](database-design.md) | Accepted | In Progress | 数据库设计：共享 qed 库命名空间、qt_*/af_* 表清单与关键字段、迁移、敏感字段规则 |

@@ -1,14 +1,31 @@
 """
 模块职责：守护测试目录边界、根测试文件与文档治理测试的分层一致。
 设计关联（DesignRef）：docs/standards/testing.md
+设计关联（DesignRef）：docs/standards/governance-contract.md
 实现状态：Current
 被测代码：tests、pyproject.toml
+守护面：测试工程与门禁
+失效后果：测试分层、目录或门禁配置漂移，门禁失效
 """
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "tests"
+
+
+def _governance_areas() -> set[str]:
+    """从治理契约规范正文提取守护面清单（表格第一列），保持单一事实源。"""
+    contract = (ROOT / "docs" / "standards" / "governance-contract.md").read_text(encoding="utf-8")
+    areas = set()
+    for line in contract.splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[0] != "治理面" and not cells[0].startswith("---"):
+            areas.add(cells[0])
+    return areas
 
 
 def test_test_directories_are_limited_to_contract_layer():
@@ -42,3 +59,19 @@ def test_contract_tests_reference_a_governing_standard():
         assert "设计关联（DesignRef）：docs/standards/" in content
         reference = content.split("设计关联（DesignRef）：", 1)[1].splitlines()[0].strip()
         assert (standards_dir / reference.removeprefix("docs/standards/")).is_file()
+
+
+def test_contract_tests_declare_complete_contract_headers():
+    areas = _governance_areas()
+    assert areas
+    for path in TESTS.rglob("test_*.py"):
+        if path.parent.name != "contract":
+            continue
+        content = path.read_text(encoding="utf-8")
+        assert "模块职责：" in content, path.name
+        assert "设计关联（DesignRef）：docs/standards/" in content, path.name
+        assert "实现状态：Current" in content, path.name
+        assert "被测代码：" in content, path.name
+        match = re.search(r"^守护面：(.+)$", content, re.MULTILINE)
+        assert match and match.group(1).strip() in areas, path.name
+        assert re.search(r"^失效后果：.+$", content, re.MULTILINE), path.name

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qed-engine"
 version = "0.1.0"
-description = "QED-Engine 统一配置中心：集中管理模型/API-key，向 Axiom-Flow 与 QED-Tracker 提供配置接口"
+description = "QED-Engine 后端包：统一配置中心与统一 CLI（模型/API-key/数据库集中管理），向 Axiom-Flow 与 QED-Tracker 提供配置接口"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.110.0",

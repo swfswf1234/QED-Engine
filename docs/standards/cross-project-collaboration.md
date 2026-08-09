@@ -1,7 +1,7 @@
 # 跨项目协作流程
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 治理对象：三项目间的需求传递、评审、执行与验收回执
 依据 ADR：`docs/adr/0002-frontend-and-port-centralization.md`
 关联测试：`tests/contract/test_cross_project_collaboration.py`

@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/documentation.md
 实现状态：Current
 被测代码：docs/standards、AGENTS.md
+守护面：标准治理
+失效后果：标准目录、元数据或索引漂移，治理规则失去唯一事实源
 """
 
 import re
@@ -17,6 +19,7 @@ STANDARD_FILES = {
     "adr-governance.md",
     "code-document-traceability.md",
     "testing.md",
+    "governance-contract.md",
     "cross-project-collaboration.md",
 }
 REQUIRED_FIELDS = ("状态", "最后更新", "治理对象", "依据 ADR", "关联测试")
@@ -109,3 +112,8 @@ def test_agents_routes_to_all_standard_sources():
     for filename in STANDARD_FILES:
         assert f"docs/standards/{filename}" in content
     assert "数据重建、正式发布和远端推送属于 D 类操作" not in content
+
+
+def test_standards_index_contains_no_rule_body():
+    content = STANDARD_INDEX.read_text(encoding="utf-8")
+    assert "## 规则" not in content, "standards index 只导航，不保存正文事实（见 documentation.md）"

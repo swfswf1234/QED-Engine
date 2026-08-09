@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-04
+最后更新：2026-08-09
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）
 关联测试：无（子项目各自契约测试守护其数据根行为）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
@@ -57,9 +57,11 @@ dataset/                                # QED-Engine 根仓库（git 忽略，�
 - 服务化后写操作任务记录登记目标相对路径（`meta/tasks/`），前端可"任务 → 文件"跳转。
 - 资源登记双写：`meta/resources/<sha256>.json` 保持为文件状态事实，MySQL `qt_resources`（qed 库）
   为查询/展示索引；登记顺序先落盘后登记，失败可重放（统一数据库契约见
-  [service-contracts.md](service-contracts.md)）。
+  [database-design.md](database-design.md)）。
 
 ## 现状与差距
 
-- QED-Tracker 数据根当前为自身 `data/`（books/、papers/、.qed-tracker/），指向 `dataset/qed-tracker/` 属 Phase 2 改造；`.qed-tracker/` 状态目录届时语义化为 `meta/`。
-- Axiom-Flow 产物当前为自身 `data/`（内容寻址目录），指向 `dataset/axiom-flow/parsed/` 属 Phase 3 改造。
+- QED-Tracker 数据根已迁 `dataset/qed-tracker/`（QED-009 落地，books/、exercises/、papers/、
+  meta/、tmp/ 按本契约组织）；`.qed-tracker/` 存量语义化为 `meta/` 的迁移在子项目侧收尾。
+- Axiom-Flow 产物当前为自身 `data/`（内容寻址目录），指向 `dataset/axiom-flow/parsed/` 属
+  Phase 3 改造（ALN-003）。

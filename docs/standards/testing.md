@@ -1,7 +1,7 @@
 # 测试架构与门禁
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 治理对象：测试职责、分层、隔离、替身、门禁与覆盖率证据
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_test_suite_governance.py`
@@ -10,7 +10,8 @@
 
 本标准定义根仓库 `tests/` 如何保护已经采纳的确定性契约（配置中心 API 与文档治理规则）。
 外部模型、提示词或候选路线的质量由冻结评测回答，测试不能替代评测。可复制命令只在
-[开发指南](../guides/development.md)维护。
+[开发指南](../guides/development.md)维护。契约测试的守护面、契约头与新增流程见
+[工程治理契约规范](governance-contract.md)。
 
 ## 强制规则
 

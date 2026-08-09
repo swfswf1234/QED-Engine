@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/code-document-traceability.md
 实现状态：Current
 被测代码：docs/design
+守护面：架构与设计追溯
+失效后果：设计文档元数据或索引漂移，契约事实源失真
 """
 
 import re
@@ -15,6 +17,12 @@ CURRENT_DOCUMENTS = {
     "dataset-conventions.md",
     "configuration-and-secrets.md",
     "config-center-api.md",
+    "service-control.md",
+    "course-acquisition-flow.md",
+    "learning-center.md",
+    "tech-stack.md",
+    "database-design.md",
+    "web-frontend.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

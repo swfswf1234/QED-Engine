@@ -1,7 +1,7 @@
 # 文档与代码双向追溯规范
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 治理对象：code-map、模块 DesignRef、架构/设计关联和语义同步门禁
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_code_document_mapping.py`、`tests/contract/test_architecture_documents.py`、`tests/contract/test_design_documents.py`

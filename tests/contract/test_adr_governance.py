@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/adr-governance.md
 实现状态：Current
 被测代码：docs/adr、docs/history/adr
+守护面：ADR 治理
+失效后果：ADR 编号、元数据或取代关系漂移，长期决策无法追溯
 """
 
 import re
@@ -151,3 +153,8 @@ def test_all_adrs_have_required_sections_in_order():
         content = str(record["content"])
         positions = [content.index(section) for section in REQUIRED_SECTIONS]
         assert positions == sorted(positions), adr_id
+
+
+def test_adr_index_contains_no_rule_body():
+    content = ADR_INDEX.read_text(encoding="utf-8")
+    assert "## 规则" not in content, "ADR index 只导航，不保存正文事实（见 documentation.md）"

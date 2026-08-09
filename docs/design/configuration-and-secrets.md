@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-04
+最后更新：2026-08-09
 关联代码：`scripts/load-env.ps1`（待退役）、根 `.env.example`、`src/qed_engine/config.py`、`src/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](config-center-api.md)）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
@@ -60,7 +60,8 @@
 
 - 映射：Axiom-Flow `AXIOM_MYSQL_*`（存量别名，默认库名随之改为 `qed`，改造后别名退役）；QED-Tracker 服务化轮直接读取本组变量。
 - 存量库（Axiom-Flow `xqfm11`）不迁移、不改名；`qed` 库由各项目 Alembic 独立初始化（建表与迁移见各自仓库门禁）。
-- 数据库配置状态由配置中心 `/config/database` 接口暴露（布尔，密码不下发），见[配置中心 API 契约](config-center-api.md)。
+- 数据库配置状态由配置中心 `/config/database` 接口暴露（configured/reachable/reason，
+  密码不下发），见[配置中心 API 契约](config-center-api.md)。
 
 ## 强制规则
 
@@ -86,5 +87,5 @@
 
 - 修改 `.env.example` 或本表后，人工核对变量名一致（脚本 `check-env-consistency` 或人工对照）。
 - `load-env.ps1` 变更后，在干净 PowerShell 会话执行一次并确认导出的子项目变量名存在。
-- 配置中心变更后：`pytest tests -q` 全绿、`ruff check src tests` 无错误、8900 端口三接口 200。
+- 配置中心变更后：`pytest tests -q` 全绿、`ruff check src tests` 无错误、8900 端口五接口 200。
 - 密钥与模型真实可用性：`python scripts/check_api_keys.py`（不打印密钥；glm 429 余额不足属账户状态）。

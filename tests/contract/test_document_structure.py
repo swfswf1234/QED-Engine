@@ -3,6 +3,8 @@
 设计关联（DesignRef）：docs/standards/documentation.md
 实现状态：Current
 被测代码：README.md、AGENTS.md、docs、pyproject.toml
+守护面：文档结构与导航
+失效后果：文档目录边界、入口或 AGENTS 协议漂移，Agent 无法按约定导航
 """
 
 from pathlib import Path
@@ -70,6 +72,12 @@ def test_docs_index_only_navigates_document_areas():
     assert "```powershell" not in content
     assert " passed" not in content
     assert "GitHub Actions" not in content
+
+
+def test_all_docs_indexes_contain_no_rule_body():
+    for index in DOCS.rglob("index.md"):
+        content = index.read_text(encoding="utf-8")
+        assert "## 规则" not in content, index
 
 
 def test_agents_routes_tasks_problems_and_completion():

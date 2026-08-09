@@ -1,7 +1,7 @@
 # 任务生命周期
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 治理对象：任务分类、计划准入、tracker 状态、实施门禁与关闭交付
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_plan_governance.py`、`tests/contract/test_tracker_governance.py`
@@ -24,18 +24,21 @@ Axiom-Flow `docs/standards/task-lifecycle.md` 并适配根仓库三仓库结构�
 | C 实验性决策 | 模型、提示词、解析路由、供应商选型 | 冻结实验、评分、ADR，再进入 B。 |
 | D 发布/数据操作 | 标签、Release、部署、受保护环境、正式迁移或数据变更 | 备份/回滚、全量门禁、人工复核。 |
 
-普通分支或 `main` 的源码提交与推送是原任务的交付步骤，不单独建立 D 类计划。创建或移动标签、
-GitHub Release、部署、受保护环境变更、正式数据操作和需要独立回滚的发布动作必须使用 D 类计划。
+普通分支或 `main` 的源码提交与推送是原任务的交付步骤，不单独建立 D 类计划；创建或移动标签、
+GitHub Release、部署、受保护环境变更、正式数据操作等按既有操作流程执行，以 git 提交/标签与
+台账证据列留痕。
 
 ### 计划准入与分拆
 
-- B、C、D 类必须在 `docs/plans/` 建立独立计划。跨模块、跨会话或需要显式回滚的非平凡 A 类也
-  必须建立计划；简单措辞、链接和局部无行为修正由差异、验证与提交记录承接。
+- B、C 类必须在 `docs/plans/` 建立独立计划；跨模块、跨会话或需要显式回滚的非平凡 A 类也必须
+  建立计划；简单措辞、链接和局部无行为修正由差异、验证与提交记录承接。
+- D 类（发布/数据操作）不建立独立计划：影响面小且由 git 提交/标签机制天然留痕，操作记录保留
+  在提交信息与任务台账证据列；D 类门禁（备份/回滚、全量门禁、人工复核）仍适用于操作本身。
 - 每份计划只有一个 `任务类型`。C 输出冻结实验、报告和决策 ADR；B 实现已接受的确定性契约；
-  D 执行已经通过实现门禁的发布或真实操作。三类分别关闭。
-- todo 使用稳定 ID 保存全部未关闭 Plan、Defect、Gap 和 Candidate。候选具备范围、前置条件、
-  验证和成功标准后保留原 ID、改为 Plan 并链接 Accepted 计划；缺陷证据与关联计划可使用不同 ID
-  互相引用。
+  B、C 分别关闭。
+- todo 使用稳定 ID 保存全部未关闭任务（类型清单见[任务台账](../trackers/todo.md)规则节）。
+  候选任务具备范围、前置条件、验证和成功标准后升级为 Plan 并链接 Accepted 计划；缺陷证据与
+  关联计划可使用不同 ID 互相引用。
 - 涉及子项目改造的请求在根仓库 todo 登记（标注"请求"与目标仓库），子项目在自己的 todo 承接并
   遵守其门禁；根仓库不直接修改子项目文件。
 
@@ -50,14 +53,14 @@ GitHub Release、部署、受保护环境变更、正式数据操作和需要独
 ```mermaid
 stateDiagram-v2
     [*] --> Accepted
-    Accepted --> InProgress: 开始执行
+    Accepted --> In Progress: 开始执行
     Accepted --> Cancelled
     Accepted --> Superseded
-    InProgress --> Blocked: 原范围暂时不可继续
-    Blocked --> InProgress: 恢复条件满足
-    InProgress --> Completed
-    InProgress --> Cancelled
-    InProgress --> Superseded
+    In Progress --> Blocked: 原范围暂时不可继续
+    Blocked --> In Progress: 恢复条件满足
+    In Progress --> Completed
+    In Progress --> Cancelled
+    In Progress --> Superseded
 ```
 
 `Accepted`、`In Progress`、`Blocked` 可留在活跃 Plans；`Completed`、`Cancelled`、`Superseded`

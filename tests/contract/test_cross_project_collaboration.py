@@ -4,6 +4,8 @@ todo 请求行标注目标仓库、设计文档模板字段齐全。
 设计关联（DesignRef）：docs/standards/cross-project-collaboration.md
 实现状态：Current
 被测代码：docs/trackers/todo.md、.gitignore、docs/standards/cross-project-collaboration.md
+守护面：跨项目协作
+失效后果：跨项目协作登记或边界失控，根仓库越权修改风险
 """
 
 import re
