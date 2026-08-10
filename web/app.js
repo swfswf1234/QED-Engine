@@ -1,7 +1,9 @@
 "use strict";
 /* QED-Engine 前端（8903 静态页）：主体学习界面 + 后台管理（hash 路由）。
- * 数据源：8900 QED 管理服务（横幅/健康）+ 8901 QED-Tracker（目录/资源/任务/统计）。
- * 契约：docs/design/service-contracts.md；离线时各模块独立降级显示（独立性铁律）。
+ * 数据源：8900 QED 管理服务（横幅/健康/目录/资源/任务/统计 + 服务状态；ADR 0007
+ * 前端唯一入口，8901/8902 由 8900 内部适配）。
+ * 契约：docs/design/config-center-api.md（数据域/服务域）、docs/design/service-contracts.md；
+ * 离线时各模块独立降级显示（独立性铁律）。
  * 三期（2026-08-06）：横幅粗粒度化、主界面三卡、仪表盘 SVG 图表、
  * 下载管理「知识点-领域-课程-书籍」树 + 事务面板、解析/对照空态。
  * 四期（2026-08-06）：卡片墙、严格三领域、树主评估窄 + 拖拽记忆、筛选栏、详情评估视角。
@@ -10,15 +12,19 @@
  * 六期（2026-08-06）：取消「模块总览」卡片墙与「追溯」，#/admin 直达仪表大盘。
  * 七期（2026-08-06）：修复管理视图互斥显示（.view 显隐规则）；界面改名
  * 仪表大盘 / 文档下载管理 / 文档解析进度（树根同步改名）。
+ * 重构轮（2026-08-10）：前端唯一入口 8900（ADR 0007），健康面板改经 /services。
  * 视觉规范：DeepSeek 蓝黑风格，样式见 style.css。 */
 
-const CONFIG_BASE = "http://127.0.0.1:8900/api/v1";
-const TRACKER_BASE = "http://127.0.0.1:8901/api/v1";
-const AXIOM_BASE = "http://127.0.0.1:8902/api/v1";
+/* 唯一入口（ADR 0007）：8903 只连 8900。数据域（catalogs/resources/tasks）与
+ * 服务域（/services）均为 8900 自有契约，内部适配 8901/8902；浏览器不再直连子服务。 */
+const API_BASE = "http://127.0.0.1:8900/api/v1";
+const CONFIG_BASE = API_BASE;
+const TRACKER_BASE = API_BASE;
 
 /* 端点引用表（tests/test_web.py 守护与契约一致性，勿随意改名） */
 const ENDPOINTS = {
     health: "/api/v1/health",
+    services: "/services",
     keys: "/config/keys",
     models: "/config/models",
     database: "/config/database",
@@ -99,7 +105,7 @@ const STATUS_LABEL = {
 const state = {
     resources: [],
     tasks: [],
-    catalog: [], // catalog targets（8901 /catalogs/math-qe）
+    catalog: [], // catalog targets（8900 /catalogs/math-qe）
     selection: null, // {kind: "domain"|"course"|"target", id: string}
     filters: { domain: "", course: "", status: "" }, // 资源筛选（与树选择 AND 叠加）
     pollTimer: null,
@@ -274,7 +280,7 @@ async function refreshConfigBanner() {
     }
 }
 
-/* ---------- 仪表大盘（五期：四阶段流水线 + 服务健康分组面板，8901/8900 离线降级） ---------- */
+/* ---------- 仪表大盘（五期：四阶段流水线 + 服务健康分组面板，8900 数据域离线降级） ---------- */
 
 /* 十期：流水线按课程统计——总课程数 = catalog targets 去重 course_id（动态，不再硬编码）；
  * 发现下载（宽松）：课程下存在任一资源即算完成；
@@ -317,7 +323,7 @@ async function loadDashboard() {
             }
         }
     } catch (_) {
-        // 8901 离线：流水线整体离线提示
+        // 8900 数据域离线：流水线整体离线提示
     }
     const stageData = [
         { name: "发现下载", done: discoverDone, note: totalCourses !== null ? "课程下已有候选/备选/确认资源" : "QED-Tracker 8901 离线" },
@@ -343,6 +349,13 @@ async function loadDashboard() {
 
 /* 服务健康分组面板：后台服务 / LLM配置 / 数据库配置，异常展开问题文案 */
 
+/* 服务项界面文案兜底（label 以 8900 /services 返回为准，此处仅缺省回退） */
+const SERVICE_LABELS = {
+    config: "QED 管理服务（后台管理服务）",
+    tracker: "QED-Tracker（文档下载服务）",
+    axiom: "Axiom-Flow（文档解析服务）",
+};
+
 async function loadHealthPanel() {
     const panel = $("health-panel");
     const servicesBox = $("health-services");
@@ -350,21 +363,20 @@ async function loadHealthPanel() {
     const dbBox = $("health-db");
     const mk = healthStatusMarkup();
     if (!panel || !servicesBox || !llmBox || !dbBox) return;
-    // 后台服务：探测 8901/8902/8900 健康端点（名称带核心任务备注；正常不写原因，仅绿点+名称）
-    const probes = [
-        ["QED-Tracker（文档下载服务）", TRACKER_BASE + ENDPOINTS.health],
-        ["Axiom-Flow（文档解析服务）", AXIOM_BASE + ENDPOINTS.health],
-        ["QED 管理服务（后台管理服务）", CONFIG_BASE + ENDPOINTS.health],
-    ];
-    const results = await Promise.all(probes.map(async ([name, url]) => {
-        try {
-            await fetchJson(url);
-            return mk.ok(name);
-        } catch (err) {
-            return mk.bad(name, "离线：" + (err.message || "无法访问"));
-        }
-    }));
-    servicesBox.innerHTML = results.join("");
+    // 后台服务：经 8900 /services 快照获取三服务状态（前端唯一入口，不直连 8901/8902）
+    try {
+        const data = await fetchJson(CONFIG_BASE + ENDPOINTS.services);
+        servicesBox.innerHTML = data.services.map((s) => {
+            const name = s.label || SERVICE_LABELS[s.name] || s.name;
+            if (s.status === "online") return mk.ok(name);
+            const cause = s.status === "offline"
+                ? "离线：" + (s.reason || "无法访问")
+                : s.status + (s.reason ? "：" + s.reason : "");
+            return mk.bad(name, cause);
+        }).join("");
+    } catch (err) {
+        servicesBox.innerHTML = mk.bad("QED 管理服务（后台管理服务）", "离线：" + (err.message || "无法访问"));
+    }
     // LLM配置：8900 models 模型路由表——只显示三个实际使用模型（主模型/视图模型/Embedding）
     try {
         const models = await fetchJson(CONFIG_BASE + ENDPOINTS.models);
@@ -904,14 +916,14 @@ async function triggerEvaluate() {
     }
 }
 
-/* ---------- 任务中心（8901 /tasks，1s 轮询；十四期：尾部任务列表已移除，
+/* ---------- 任务中心（8900 /tasks，1s 轮询；十四期：尾部任务列表已移除，
  * 任务数据仅用于课程操作条步骤进度条） ---------- */
 
 async function loadTasks() {
     try {
         state.tasks = await fetchJson(TRACKER_BASE + ENDPOINTS.tasks);
     } catch (err) {
-        // 8901 离线：步骤条保持 idle 即可，不中断其他模块（独立性铁律）
+        // 8900 数据域离线：步骤条保持 idle 即可，不中断其他模块（独立性铁律）
         state.tasks = [];
         return;
     }

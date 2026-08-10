@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 
 # 8901 资源状态机端点（service-contracts.md）：三态评估（确认/备选/否定）＋验收/预览/下载
+# ADR 0007 后语义归 8900 数据域（路径沿革自 8901 资源契约，见 config-center-api.md）
 TRACKER_ENDPOINT_TOKENS = (
     "/resources",
     "/tasks",
@@ -158,7 +159,7 @@ def test_app_js_references_config_center_endpoints():
 def test_app_js_references_tracker_endpoints():
     content = (WEB / "app.js").read_text(encoding="utf-8")
     for token in TRACKER_ENDPOINT_TOKENS:
-        assert token in content, f"app.js 缺少 8901 端点引用：{token}"
+        assert token in content, f"app.js 缺少数据域端点引用：{token}"
 
 
 def test_app_js_implements_three_way_evaluation():
@@ -536,3 +537,11 @@ def test_manual_register_and_links_present():
     js = (WEB / "app.js").read_text(encoding="utf-8")
     for token in REGISTER_TOKENS:
         assert token in js, f"app.js 缺少人工登记/下载方案逻辑：{token}"
+
+
+def test_app_js_single_entry_8900():
+    """前端唯一入口（ADR 0007）：app.js 不得直连 8901/8902（数据域/服务域均经 8900）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert ":8901" not in js and ":8902" not in js, "app.js 不应直连 8901/8902（唯一入口 8900）"
+    assert 'const API_BASE = "http://127.0.0.1:8900/api/v1"' in js, "app.js 应以 API_BASE 统一 8900"
+    assert "/services" in js, "app.js 服务健康应经 8900 /services 获取"
