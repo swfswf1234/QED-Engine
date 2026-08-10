@@ -10,7 +10,6 @@ import time
 
 import httpx
 import pytest
-
 from qed_engine.tracker_client import TrackerClient, TrackerError
 
 
@@ -230,3 +229,56 @@ def test_wait_task_timeout(monkeypatch):
     monkeypatch.setattr(time, "monotonic", fake_monotonic)
     with pytest.raises(TrackerError):
         client.wait_task("t-1", timeout=0.001)
+
+
+def test_get_catalog_requests_catalog_path():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"course_id": "math-qe", "title": "高等数学（上）"})
+
+    client = _client(handler)
+    result = client.get_catalog("math-qe")
+    assert seen["path"] == "/api/v1/catalogs/math-qe"
+    assert result["course_id"] == "math-qe"
+
+
+def test_register_resource_posts_register():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        return httpx.Response(200, json={"resource_id": "sha256:abc", "status": "downloaded"})
+
+    client = _client(handler)
+    result = client.register_resource("sha256:abc")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/resources/sha256:abc/register"
+    assert result["status"] == "downloaded"
+
+
+def test_get_resource_file_returns_raw_response():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, content=b"%PDF-1.4", headers={"content-type": "application/pdf"})
+
+    client = _client(handler)
+    response = client.get_resource_file("sha256:abc")
+    assert seen["path"] == "/api/v1/resources/sha256:abc/file"
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4"
+    assert response.headers["content-type"] == "application/pdf"
+
+
+def test_tracker_error_carries_status_code():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": "状态机冲突：当前状态 downloading 不允许"})
+
+    client = _client(handler)
+    with pytest.raises(TrackerError) as exc_info:
+        client.confirm_resource("sha256:abc")
+    assert exc_info.value.status_code == 409

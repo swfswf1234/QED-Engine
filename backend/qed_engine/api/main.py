@@ -1,4 +1,5 @@
-"""QED-Engine 配置中心 API：健康检查、模型路由与 LLM 可达性探测，密钥不下发。
+"""QED-Engine 后端 API 入口：配置域（health/models/keys/database/llm-status）+ 数据域
+（catalogs/resources/tasks 语义 API）+ 服务域（/services，见 service-control.md）。
 
 设计关联（DesignRef）：docs/design/config-center-api.md
 实现状态：Current
@@ -10,8 +11,8 @@ from datetime import UTC, datetime
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from qed_engine import __version__
+from qed_engine.api.data import router as data_router
 from qed_engine.api.schemas import (
     DatabaseResponse,
     HealthResponse,
@@ -21,7 +22,10 @@ from qed_engine.api.schemas import (
     ModelRoute,
     ModelsResponse,
 )
+from qed_engine.api.service_manager import configure as configure_services
+from qed_engine.api.service_manager import router as services_router
 from qed_engine.config import Settings
+from qed_engine.tracker_client import TrackerClient
 
 # LLM 可达性探测：调各供应商 models 列表接口（免费、无 token 消耗），5s 超时，结果缓存 60s。
 PROBE_URLS = {
@@ -91,14 +95,19 @@ def _probe_llm(provider: str, api_key: str, url: str) -> tuple[bool, str]:
         return False, type(exc).__name__
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """组装 API；测试可注入确定性 Settings。"""
+def create_app(
+    settings: Settings | None = None,
+    tracker_client: TrackerClient | None = None,
+) -> FastAPI:
+    """组装 API；测试可注入确定性 Settings 与 8901 客户端（MockTransport）。"""
     resolved = settings or Settings()
 
-    app = FastAPI(title="QED-Engine Config", version=__version__)
+    app = FastAPI(title="QED-Engine Backend", version=__version__)
     app.state.settings = resolved
     app.state.llm_status_cache: dict = {}
     app.state.db_status_cache: dict = {}
+    app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url)
+    configure_services(resolved)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -119,6 +128,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    app.include_router(data_router)
+    app.include_router(services_router)
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     def health() -> HealthResponse:

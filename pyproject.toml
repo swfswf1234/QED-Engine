@@ -23,13 +23,13 @@ dev = [
 ]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "backend"}
 
 [project.scripts]
 qed = "qed_engine.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["backend"]
 include = ["qed_engine*"]
 
 [tool.pytest.ini_options]

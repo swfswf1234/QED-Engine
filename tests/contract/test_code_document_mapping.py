@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CODE_MAP = ROOT / "docs" / "architecture" / "code-map.md"
-MANAGED_DIRECTORIES = ("src/qed_engine", "tests")
+MANAGED_DIRECTORIES = ("backend/qed_engine", "tests")
 EXEMPT_FILENAMES = {"__init__.py"}
 ACTIVE_DOCUMENTS = tuple(
     path
@@ -102,7 +102,7 @@ def test_active_architecture_and_design_documents_declare_metadata():
         for code_path in _metadata_references(
             content,
             "关联代码：",
-            ("src/qed_engine/", "tests/"),
+            ("backend/qed_engine/", "tests/"),
         ):
             assert (ROOT / code_path).is_file(), document
             assert code_path in entries_by_path, document

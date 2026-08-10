@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-09
-关联代码：`scripts/load-env.ps1`（待退役）、根 `.env.example`、`src/qed_engine/config.py`、`src/qed_engine/cli.py`
+关联代码：`scripts/load-env.ps1`（待退役）、根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](config-center-api.md)）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
 
@@ -36,7 +36,7 @@
 **单线路策略（2026-08-09 用户裁决）**：一次只启用一条模型线路（当前 qwen 三用途即全部模型选择），
 暂不用备用线路。备选线路变量 `GLM_MODEL`/`GLM_OCR_MODEL`/`DEEPSEEK_MODEL` 已注释于 `.env.example`，
 `/config/models` 只返回三个用途路由。后续需要备用线路时：恢复 `.env.example` 变量 → 在
-`src/qed_engine/config.py` 恢复字段与路由 → 同步本表与本契约 → 恢复测试断言。
+`backend/qed_engine/config.py` 恢复字段与路由 → 同步本表与本契约 → 恢复测试断言。
 
 ### 服务端口与地址（默认值即全局端口规划，可环境变量覆盖）
 
@@ -78,7 +78,7 @@
 
 ## 统一配置中心（QED-Engine 后端）
 
-配置中心（`src/qed_engine/`，端口 8900）读取根 `.env`，提供健康检查、模型路由表与数据库配置
+配置中心（`backend/qed_engine/`，端口 8900）读取根 `.env`，提供健康检查、模型路由表与数据库配置
 状态，**密钥绝不下发**（详见[配置中心 API 契约](config-center-api.md)）。子项目获取 key 的路径：
 现状经 `load-env.ps1` 映射，Phase 2/3 改造为直读根 `.env` 变量后映射层退役。中心接口变更不影响子项目启动。
 

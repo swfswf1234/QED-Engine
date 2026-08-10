@@ -21,7 +21,7 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
-src/*.egg-info/
+backend/*.egg-info/
 
 # Node
 node_modules/
@@ -31,6 +31,14 @@ build/
 # 日志与运行产物
 /logs/
 *.log
+
+# 临时文件
+/tmp/
+
+# 数据库运维产物（备份与清理归档，不入库）
+/database/backups/*
+!/database/backups/.gitkeep
+/database/*.sql.backup
 
 # 环境变量与密钥
 .env
