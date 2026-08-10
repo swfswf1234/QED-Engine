@@ -17,9 +17,6 @@ def _client(monkeypatch, *, qwen="", deepseek="", glm="", db_password=""):
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
     monkeypatch.setenv("QED_OCR_MODEL", "qwen-vl-plus")
     monkeypatch.setenv("QED_EMBEDDING_MODEL", "text-embedding-v4")
-    monkeypatch.setenv("GLM_MODEL", "glm-5.2")
-    monkeypatch.setenv("GLM_OCR_MODEL", "glm-ocr")
-    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     # 统一数据库：环境变量覆盖根 .env，保证测试确定性
     monkeypatch.setenv("QED_DB_HOST", "127.0.0.1")
     monkeypatch.setenv("QED_DB_PORT", "3306")
@@ -40,7 +37,7 @@ def test_health_ok(monkeypatch):
 
 
 def test_models_unconfigured(monkeypatch):
-    """无任何 key 时：返回各供应商推荐模型，configured 均为 False。"""
+    """无任何 key 时：返回单线路（qwen）三个用途的推荐模型，configured 均为 False。"""
     client = _client(monkeypatch)
     response = client.get("/api/v1/config/models")
     assert response.status_code == 200
@@ -49,25 +46,21 @@ def test_models_unconfigured(monkeypatch):
         "default": {"model": "qwen-plus", "provider": "qwen", "configured": False},
         "ocr": {"model": "qwen-vl-plus", "provider": "qwen", "configured": False},
         "embedding": {"model": "text-embedding-v4", "provider": "qwen", "configured": False},
-        "glm": {"model": "glm-5.2", "provider": "glm", "configured": False},
-        "glm_ocr": {"model": "glm-ocr", "provider": "glm", "configured": False},
-        "deepseek": {"model": "deepseek-v4-flash", "provider": "deepseek", "configured": False},
     }
 
 
 def test_models_configured(monkeypatch):
-    """qwen/glm 配 key 后对应路由 configured=True，deepseek 未配仍 False。"""
-    client = _client(monkeypatch, qwen="sk-qwen", glm="sk-glm")
+    """qwen 配 key 后三个用途 configured=True；备选线路不进入模型路由表。"""
+    client = _client(monkeypatch, qwen="sk-qwen")
     response = client.get("/api/v1/config/models")
     assert response.status_code == 200
     body = response.json()
     assert body["default"]["configured"] is True
     assert body["ocr"]["configured"] is True
     assert body["embedding"]["configured"] is True
-    assert body["glm"]["configured"] is True
-    assert body["glm_ocr"]["configured"] is True
-    assert body["deepseek"]["configured"] is False
-    assert body["glm"] == {"model": "glm-5.2", "provider": "glm", "configured": True}
+    assert body["default"] == {"model": "qwen-plus", "provider": "qwen", "configured": True}
+    assert "glm" not in body
+    assert "deepseek" not in body
 
 
 def test_keys_status(monkeypatch):

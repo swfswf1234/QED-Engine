@@ -32,9 +32,6 @@ MODEL_ROUTES = (
     ("主对话", "qed_model", "qwen"),
     ("OCR/视觉", "qed_ocr_model", "qwen"),
     ("嵌入", "qed_embedding_model", "qwen"),
-    ("GLM 对话（切换档）", "glm_model", "glm"),
-    ("GLM 文档 OCR（切换档）", "glm_ocr_model", "glm"),
-    ("deepseek（占位档）", "deepseek_model", "deepseek"),
 )
 
 MINIMAL_CONFIG_HINT = (

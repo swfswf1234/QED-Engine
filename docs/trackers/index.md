@@ -9,4 +9,4 @@
 | --- | --- |
 | [todo.md](todo.md) | 未关闭任务台账 |
 | [roadmap.md](roadmap.md) | 无执行状态的后续能力方向 |
-| *（completed.md 按需创建）* | 已关闭任务简短台账 |
+| [completed.md](completed.md) | 已关闭任务简短台账（按需创建，关闭后从 todo 原子移入） |

@@ -39,25 +39,22 @@
 
 ### GET /api/v1/config/models
 
-模型路由表：返回各供应商/用途的推荐模型，子项目不感知密钥。`default`/`ocr`/`embedding`
-为当前生效档（qwen），`glm`/`glm_ocr` 为切换档（改 `QED_MODEL`/`QED_OCR_MODEL` 两个
-变量即整体切换），`deepseek` 为占位档（key 配置后生效）。
+模型路由表（**单线路**：只返回当前生效用途，qwen 三用途；备选线路启用时恢复路由）：
+`default`/`ocr`/`embedding` 为当前生效档（qwen）。子项目不感知密钥。
 
 ```json
 {
   "default":   {"model": "qwen-plus",    "provider": "qwen",     "configured": true},
   "ocr":       {"model": "qwen-vl-plus", "provider": "qwen",     "configured": true},
-  "embedding": {"model": "text-embedding-v4", "provider": "qwen", "configured": true},
-  "glm":       {"model": "glm-5.2",      "provider": "glm",      "configured": true},
-  "glm_ocr":   {"model": "glm-ocr",      "provider": "glm",      "configured": true},
-  "deepseek":  {"model": "deepseek-v4-flash", "provider": "deepseek", "configured": false}
+  "embedding": {"model": "text-embedding-v4", "provider": "qwen", "configured": true}
 }
 ```
 
 - `configured`：对应供应商 key 是否已配置（空值视为未配置），子项目据此决定降级策略。
 - 模型名全部来自根 `.env`（见[configuration-and-secrets.md](configuration-and-secrets.md) 变量表）。
-- `glm_ocr`（glm-ocr）走智谱文档解析专用接口（布局+文本提取，支持图片/PDF），与
-  qwen-vl 的 chat-completions 形态不同，接入适配在 Axiom-Flow 对接轮完成。
+- 备选线路（GLM 对话/专用文档 OCR、deepseek 对话）变量已注释于 `.env.example`，启用时恢复
+  本接口对应路由；glm-ocr 文档解析专用接口（布局+文本提取，支持图片/PDF）的接入适配在
+  Axiom-Flow 对接轮完成（REQ-008，备选线路启用时恢复）。
 
 ### GET /api/v1/config/keys
 

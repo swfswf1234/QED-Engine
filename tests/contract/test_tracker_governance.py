@@ -41,7 +41,7 @@ def _field(content: str, name: str) -> str:
 def _todo_rows() -> list[dict[str, str]]:
     return _table(
         TRACKERS / "todo.md",
-        ("ID", "类型", "优先级", "状态", "任务", "证据/下一条件"),
+        ("ID", "类别", "类型", "优先级", "状态", "任务", "证据/下一条件"),
     )
 
 
@@ -76,6 +76,15 @@ def test_task_ids_are_stable_unique_and_rows_are_complete():
     assert all(TASK_ID.fullmatch(task_id) for task_id in ids)
     assert len(ids) == len(set(ids))
     assert all(all(row.values()) for row in todo)
+
+
+def test_task_categories_follow_hierarchy_enum():
+    """类别列只允许 主线/支线/长期，且主线/长期必须存在（大类与持续任务不缺位）。"""
+    rows = _todo_rows()
+    categories = {row["类别"] for row in rows}
+    assert categories <= {"主线", "支线", "长期"}
+    assert "主线" in categories
+    assert "长期" in categories
 
 
 def test_todo_plan_rows_exactly_mirror_active_plan_bodies():

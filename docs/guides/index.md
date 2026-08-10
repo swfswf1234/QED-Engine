@@ -10,5 +10,5 @@
 
 | 文档 | 状态 | 内容 |
 | --- | --- | --- |
-| [development.md](development.md) | Current | 配置中心开发/验证/运维命令：安装、测试、启动、密钥检查 |
-| *（四服务启动与联调：Phase 1 后按需创建）* | — | — |
+| [development.md](development.md) | Current | 配置中心开发/验证/运维命令：安装、测试、密钥检查、五接口冒烟、子项目速览 |
+| *（四服务启动与联调：控制中心托管后按需创建，见 [service-control.md](../design/service-control.md)）* | — | — |

@@ -23,9 +23,9 @@ QED-Engine 下，需要明确前端归属与端口规划。
    | 端口 | 服务 | 归属 |
    | --- | --- | --- |
    | 8900 | QED-Engine 配置中心 | 根仓库（已运行） |
-   | 8901 | QED-Tracker 服务（API，后台任务 + 轮询） | 子仓库（服务化轮） |
+   | 8901 | QED-Tracker 服务（API，后台任务 + 轮询） | 子仓库（已服务化） |
    | 8902 | Axiom-Flow API + Worker | 子仓库（端口迁移轮） |
-   | 8903 | QED-Engine 前端（学习+管理+审阅工作台） | 根仓库（规划） |
+   | 8903 | QED-Engine 前端（学习+管理+审阅工作台） | 根仓库（已运行） |
 
 3. **最小配置与提醒**：无 `.env` 时使用代码默认值降级运行（既有行为）；配置中心
    `configured` 布尔与 `check_api_keys.py` 提供提醒；后续管理界面展示未配置横幅。
@@ -44,5 +44,8 @@ QED-Engine 下，需要明确前端归属与端口规划。
 - 关联设计：`docs/design/service-contracts.md`、`docs/design/configuration-and-secrets.md`、
   `docs/design/config-center-api.md`
 - 关联架构：`docs/architecture/four-service-architecture.md`
-- 关联计划：`docs/plans/2026-08-sync-alignment.md`
+- 关联计划：`../history/plans/2026-08/2026-08-sync-alignment.md`（已归档，原登记于
+  `docs/plans/2026-08-sync-alignment.md`，2026-08-10 REQ-024 清理时修正链接）
 - 关联 ADR：[ADR 0001](0001-root-contract-tests.md)（同轮治理对齐）
+- 勘误：2026-08-10（REQ-024 清理）：8901 已服务化、8903 已运行，端口表归属注记更新；
+  关联计划 sync-alignment 已归档，链接改指历史路径。

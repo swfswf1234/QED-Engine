@@ -126,7 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/config/models", response_model=ModelsResponse)
     def models() -> ModelsResponse:
-        """模型路由表：各供应商/用途的推荐模型，子项目不感知密钥。"""
+        """模型路由表：模型选择单线路（qwen 三用途），子项目不感知密钥。"""
         return ModelsResponse(
             default=ModelRoute(
                 model=resolved.qed_model,
@@ -142,21 +142,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 model=resolved.qed_embedding_model,
                 provider="qwen",
                 configured=resolved.has_configured("qwen"),
-            ),
-            glm=ModelRoute(
-                model=resolved.glm_model,
-                provider="glm",
-                configured=resolved.has_configured("glm"),
-            ),
-            glm_ocr=ModelRoute(
-                model=resolved.glm_ocr_model,
-                provider="glm",
-                configured=resolved.has_configured("glm"),
-            ),
-            deepseek=ModelRoute(
-                model=resolved.deepseek_model,
-                provider="deepseek",
-                configured=resolved.has_configured("deepseek"),
             ),
         )
 

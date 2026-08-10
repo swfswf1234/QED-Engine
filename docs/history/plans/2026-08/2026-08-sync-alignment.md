@@ -3,9 +3,9 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-08-04
-关联 ADR：[ADR 0001](../adr/0001-root-contract-tests.md)、[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
-关联设计：[服务契约](../design/service-contracts.md)、[dataset 目录约定](../design/dataset-conventions.md)、[统一配置与密钥规范](../design/configuration-and-secrets.md)、[配置中心 API 契约](../design/config-center-api.md)
-关联 Tracker：`docs/trackers/todo.md`（[任务台账](../trackers/todo.md)，含 ARCH-001、DES-001 及全部子项目请求）
+关联 ADR：[ADR 0001](../../../adr/0001-root-contract-tests.md)、[ADR 0002](../../../adr/0002-frontend-and-port-centralization.md)
+关联设计：[服务契约](../../../design/service-contracts.md)、[dataset 目录约定](../../../design/dataset-conventions.md)、[统一配置与密钥规范](../../../design/configuration-and-secrets.md)、[配置中心 API 契约](../../../design/config-center-api.md)
+关联 Tracker：`docs/trackers/todo.md`（[任务台账](../../../trackers/todo.md)，含 ARCH-001、DES-001 及全部子项目请求）
 归档判定：前端轮与 RAG 知识库轮交付后 Retain 归档至 `history/plans/`（跨轮次总计划），每轮子计划关闭按各自归档判定执行
 
 ## 目标与成功标准

@@ -20,12 +20,11 @@ class ModelRoute(BaseModel):
 
 
 class ModelsResponse(BaseModel):
+    """模型路由表（单线路：qwen 三用途；备选线路启用时恢复字段）。"""
+
     default: ModelRoute
     ocr: ModelRoute
     embedding: ModelRoute
-    glm: ModelRoute
-    glm_ocr: ModelRoute
-    deepseek: ModelRoute
 
 
 class KeysResponse(BaseModel):

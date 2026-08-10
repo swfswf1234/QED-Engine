@@ -21,7 +21,7 @@ TEMPLATE_FIELDS = ("需求方", "目标项目", "接口面", "评审方", "执�
 
 
 def _todo_rows() -> list[dict[str, str]]:
-    columns = ("ID", "类型", "优先级", "状态", "任务", "证据/下一条件")
+    columns = ("ID", "类别", "类型", "优先级", "状态", "任务", "证据/下一条件")
     lines = TODO.read_text(encoding="utf-8").splitlines()
     start = lines.index(f"| {' | '.join(columns)} |") + 2
     rows = []

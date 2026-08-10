@@ -9,8 +9,11 @@
 
 ## 目的与边界
 
-根仓库登记三项目共享 MySQL `qed` 库的命名空间、表清单与关键字段；具体列细节与迁移由各
-子项目仓库维护（`qt_*` 属 QED-Tracker、`af_*` 属 Axiom-Flow），根仓库不复制其定义。
+本文件是根仓库对共享 MySQL `qed` 库的**指引与规划**：只登记命名空间隔离规则、表清单规划与
+跨项目契约要点；**具体表结构与迁移由各子项目仓库确认与维护**（`qt_*` 属 QED-Tracker、
+`af_*` 属 Axiom-Flow），根仓库不复制其定义。子项目确认动作已登记跨项目请求：
+[REQ-026](../trackers/todo.md)（QED-Tracker 确认 qt_* 表设计）、
+[REQ-027](../trackers/todo.md)（Axiom-Flow 确认 af_* 表设计）。
 跨项目对接语义见[三项目对接规范](service-contracts.md)。
 
 ## 库与命名空间
@@ -21,31 +24,28 @@
   [configuration-and-secrets.md](configuration-and-secrets.md) 统一数据库小节）。
 - 存量库 `xqfm11`（Axiom-Flow 运行库）不迁移、不改名。
 
-## 表设计
+## 表清单规划
 
-### qt_resources（QED-Tracker 资源登记查询索引）
+### qt_resources（QED-Tracker，已落地待确认）
 
-资源登记双写契约：下载登记时 `meta/resources/<sha256>.json` 保持为文件状态事实，MySQL
-`qt_resources` 为查询/展示索引；登记顺序**先落盘后登记**，失败可重放（幂等）。
+资源登记查询索引（QED-Tracker 服务化轮已落地）。契约要点（跨项目对齐面）：
 
-关键字段与状态（登记内容）：
+- 双写契约：下载登记时 `meta/resources/<sha256>.json` 为文件状态事实，MySQL `qt_resources`
+  为查询/展示索引；登记顺序**先落盘后登记**，失败可重放（幂等）。
+- 状态机覆盖候选/确认/下载/验收全链路与人工评审留痕（`review_note`）。
 
-- `sha256`：资源唯一标识，与 `meta/resources/<sha256>.json` 对应；
-- 状态机 `candidate → confirmed → downloading → downloaded → approved / rejected`
-  （`failed` 终态可重试；`pending_manual`/`not_found` 为登记辅助状态；`backup` 备选态：
-  candidate→backup→{confirmed,rejected}）；
-- `review_note`：人工评审建议（confirm/backup/reject 可选 `note` 参数落此字段）。
+**表结构明细由 QED-Tracker 确认并维护**（见其 `docs/design/tracker-service.md`），
+确认结果回执后本文件按 REQ-026 关闭。
 
-列细节与迁移由 QED-Tracker 仓库维护（`docs/design/tracker-service.md`）。
+### 任务记录（QED-Tracker）
 
-### 任务记录（QED-Tracker 后台任务）
-
-写操作（下载、评估、目录批处理等）的任务记录落盘 `meta/tasks/<task-id>.json`（JSON 文件，
-非 MySQL），服务重启后历史可见；状态机 `queued → running → succeeded / failed`。
+写操作（下载、评估、目录批处理等）的任务记录落盘 `meta/tasks/<task-id>.json`
+（JSON 文件，非 MySQL），服务重启后历史可见；状态机 `queued → running → succeeded / failed`。
 
 ### af_*（Axiom-Flow，规划）
 
-Axiom-Flow 侧表定义待其仓库设计（端口/解析产物登记轮），完成后在根仓库本节补登记表清单。
+Axiom-Flow 侧表结构待其仓库设计确认（REQ-027），确认后在本文件补登记表清单；根仓库只
+维护命名空间与敏感字段规则。
 
 ## 迁移
 

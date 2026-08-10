@@ -104,7 +104,7 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
 | `src/qed_engine/` | 统一配置中心（FastAPI，端口 8900） |
 | `web/` | QED-Engine 前端（8903，主体学习界面 + 后台管理，原生单页应用） |
-| `scripts/` | 辅助脚本（如 load-env.ps1） |
+| `scripts/` | 辅助脚本（`load-env.ps1` 过渡映射层，子项目直读 `QED_*` 后退役；`check_api_keys.py` 密钥真实检查） |
 | `tests/` | 配置中心测试（pytest + ruff 门禁） |
 | `docs/` | 架构、设计、决策、规范、计划与学习资料 |
 | `AGENTS.md` | Agent 执行总纲 |

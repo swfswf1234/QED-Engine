@@ -1,11 +1,12 @@
 # 开发指南
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-09
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 
 本指南只保存根仓库可重复执行的开发与验证命令。子项目的开发/运维命令以其自身
-`docs/guides/` 为准（Axiom-Flow 见 `Axiom-Flow/docs/guides/development.md`）。
+`docs/guides/` 为准（Axiom-Flow 见 `Axiom-Flow/docs/guides/development.md`，
+QED-Tracker 见 `QED-Tracker/docs/guides/development.md`；跨项目契约只链接不复制）。
 
 ## 环境准备
 
@@ -46,10 +47,13 @@ conda run -n QED_env python -m ruff check src tests
 conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
 ```
 
-- 健康检查：`GET http://127.0.0.1:8900/health`
-- 模型路由：`GET http://127.0.0.1:8900/api/v1/models`
-- 配置状态：`GET http://127.0.0.1:8900/api/v1/config/status`（只返回供应商与 key 是否设置，
+- 健康检查：`GET http://127.0.0.1:8900/api/v1/health`
+- 模型路由：`GET http://127.0.0.1:8900/api/v1/config/models`
+- 配置状态：`GET http://127.0.0.1:8900/api/v1/config/keys`（只返回供应商 key 是否设置的布尔，
   不返回密钥值）
+- 可达性探测：`GET http://127.0.0.1:8900/api/v1/config/llm-status`（真实探测）、
+  `GET http://127.0.0.1:8900/api/v1/config/database`（真实连接探测，首次 3-5s）
+- 五接口契约与响应示例见[配置中心 API 契约](../design/config-center-api.md)
 - 密钥检查脚本：`python scripts/check_api_keys.py`（需要 `scripts/load-env.ps1` 加载 `.env` 后
   运行；未加载或 `.env` 为空时预期输出 `ALL_SET=0`，属正常降级）
 
@@ -64,7 +68,9 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
 
 ## 子项目开发速览
 
-| 项目 | 环境/启动 | 门禁 |
+| 项目 | 现状 | 门禁与启动 |
 | --- | --- | --- |
-| Axiom-Flow | `conda run -n QED_env python -m uvicorn src.axiom_flow.api.main:app --port 8902` | 分支 `release`，本地门禁 + 契约测试 |
-| QED-Tracker | 未启动（CLI 项目，规划中） | 待其 AGENTS.md 确认 |
+| Axiom-Flow | 8902（迁移中，当前 8000） | 分支 `release`，本地门禁 + 契约测试；启动/验证命令见 `Axiom-Flow/docs/guides/development.md` |
+| QED-Tracker | 8901（已服务化，写操作后台任务 + 轮询） | 分支 `dev`→`release`→`main`；启动/验证命令见 `QED-Tracker/docs/guides/development.md` |
+
+四服务启停托管（控制中心）规划中，见[服务控制设计](../design/service-control.md)。

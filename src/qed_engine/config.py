@@ -25,15 +25,10 @@ class Settings(BaseSettings):
     qed_config_center_url: str = "http://127.0.0.1:8900"
     qed_tracker_url: str = "http://127.0.0.1:8901"
     qed_axiom_url: str = "http://127.0.0.1:8902"
-    # 当前生效档（qwen）：主对话 / OCR 视觉 / 嵌入
+    # 模型选择（单线路策略：一次只启用一条线路，当前 qwen 三用途；备选线路启用时恢复）
     qed_model: str = "qwen-plus"
     qed_ocr_model: str = "qwen-vl-plus"
     qed_embedding_model: str = "text-embedding-v4"
-    # 切换档（GLM）：对话 / 专用文档 OCR
-    glm_model: str = "glm-5.2"
-    glm_ocr_model: str = "glm-ocr"
-    # 占位档（deepseek，key 配置后生效）
-    deepseek_model: str = "deepseek-v4-flash"
     # 统一数据库（MySQL 8 qed 库，ADR 0003；QED_DB_* 为三项目唯一事实源）
     qed_db_host: str = "127.0.0.1"
     qed_db_port: int = 3306

@@ -18,7 +18,7 @@
 | 前端 | 原生 HTML/CSS/JS 静态单页应用 | `web/` 学习中心 + 管理后台（8903），无构建步骤，`http.server` 托管 | 已用 |
 | 数据库 | MySQL 8 共享 `qed` 库 | 三项目共用实例与库，`qt_*`/`af_*` 表命名空间隔离（[ADR 0003](../adr/0003-shared-qed-database-independence.md)） | 已用 |
 | 数据库迁移 | Alembic（各项目独立） | 各项目在 `qed` 库内独立初始化自己的表 | 子项目侧落地中 |
-| LLM 模型三档 | 默认档 qwen / 切换档 glm / 占位档 deepseek | 主对话/OCR/Embedding 与切换档、占位档（档位策略与模型名见 [configuration-and-secrets.md](configuration-and-secrets.md) 模型选择表） | 已用 |
+| LLM 模型（单线路） | 默认档 qwen（主对话/OCR/Embedding 三用途） | 一次只用一条线路，暂不用备用线路（策略与模型名见 [configuration-and-secrets.md](configuration-and-secrets.md) 模型选择表） | 已用 |
 | 文档解析 | MinerU | 布局识别、公式还原（Axiom-Flow） | 规划/实验（见 learning） |
 | 向量数据库 | 未选定 | 学习中心知识问答 RAG 检索（候选评估中） | 规划 |
 | 多 Agent 编排 | 未选定（LangChain 学习中） | 知识问答多 Agent（工具链方向与细化项见 [learning-center.md](learning-center.md) §2） | 规划 |
@@ -33,8 +33,9 @@
 - **MySQL 8 共享 qed 库**：三项目数据集中登记与查询，表命名空间隔离保证独立性；见
   [ADR 0003](../adr/0003-shared-qed-database-independence.md) 与
   [database-design.md](database-design.md)。
-- **模型三档切换**：默认档（qwen）稳定运行，切换档（glm）一键整体切换，占位档（deepseek）
-  配置后生效；模型名唯一事实源为根 `.env`（见 [configuration-and-secrets.md](configuration-and-secrets.md)）。
+- **模型单线路**：一次只启用一条线路（当前 qwen 三用途：主对话/OCR/Embedding），备用线路
+  （GLM 切换、deepseek 占位）变量已注释，需要时按启用流程恢复；模型名唯一事实源为根 `.env`
+  （见 [configuration-and-secrets.md](configuration-and-secrets.md)）。
 - **MinerU**：Axiom-Flow 解析管线主选（布局 + 公式还原），评估与实验见 Axiom-Flow 仓库与
   `learning/`；最终结论由 Axiom-Flow 侧登记。
 - **向量库/编排未定**：待学习中心 RAG 与多 Agent 需求明确后单独评估并补记本文件；候选

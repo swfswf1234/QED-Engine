@@ -3,8 +3,8 @@
 状态：Accepted
 任务类型：A
 最后更新：2026-08-09
-关联 ADR：[ADR 0006](../adr/0006-engineering-governance-contract.md)（治理契约范本化，本轮治理基础）
-关联设计：[项目状态快照](../architecture/project-status.md)（当前主线维护）
+关联 ADR：[ADR 0006](../../../adr/0006-engineering-governance-contract.md)（治理契约范本化，本轮治理基础）
+关联设计：[项目状态快照](../../../architecture/project-status.md)（当前主线维护）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-008 登记；REQ-024 承接 ADR 重新治理；REQ-021 大变动同步）
 归档判定：W1-W9 全部完成、REQ-024（ADR 重新治理）完成、门禁全绿、用户确认后关闭并归档
 
@@ -54,11 +54,11 @@
 | W2 | standards/ 小节：task-lifecycle、code-document-traceability、cross-project-collaboration、documentation 复核与回修 | 已完成（2026-08-09：任务类型收编、占位清理、7 处 index 规则节清理、「index 只导航」守护，150 passed） |
 | W3 | architecture/ 小节：four-service-architecture.md 回修（8903 已运行/三中心/控制中心托管/8902 迁移态）、code-map.md 复核、project-status.md 持续更新 | 已完成（2026-08-09：架构文档回修到现状 + 技术栈选型 tech-stack.md + 数据库设计 database-design.md，150 passed） |
 | W4 | design/ 小节：service-contracts、dataset-conventions、configuration-and-secrets、config-center-api 复核与对齐 | 已完成（2026-08-09：8903 前端契约独立成 web-frontend.md、service-contracts 瘦身、dataset 差距表/配置五接口等过时修复、tech-stack 模型收敛、关联 ADR 补齐，150 passed） |
-| W5 | guides/ 小节：development.md 等指南复核（过时命令回修） | 待开始 |
-| W6 | trackers/ 小节：todo 登记完整性、roadmap 与 v0.1 目标对齐、completed 台账 | 待开始 |
-| W7 | plans/ 小节：活跃计划与 todo 镜像核对 | 待开始 |
-| W8 | learning/ + history/ 小节：历史归档合规检查（baselines/plans 归档规则） | 待开始 |
-| W9 | 治理 ADR 重新治理（REQ-024 承接）：既有 ADR 审查（贵精不贵多/边界区分/合理性/优化留痕）、adr-governance.md 原则固化 | 待开始（触发：W1-W8 完成后） |
+| W5 | guides/ 小节：development.md 等指南复核（过时命令回修） | 已完成（2026-08-09：五接口冒烟替代过时三接口、子项目速览更新（QED-Tracker 已服务化）、占位行指向服务控制，150 passed） |
+| W6 | trackers/ 小节：todo 登记完整性、roadmap 与 v0.1 目标对齐、completed 台账 | 已完成（2026-08-09：completed.md 创建（ARCH-005 回填）、REQ-004 回执更新、roadmap 对齐 v0.1/技术学习目标，150 passed） |
+| W7 | plans/ 小节：活跃计划与 todo 镜像核对 | 已完成（2026-08-09：盘点 7 份计划——关闭并归档 ARCH-001（Superseded/Partial）、ARCH-003（Completed/Achieved）至 history/plans/2026-08/；todo 新增「类别」列（主线 3 / 支线 22 / 长期 4）并固化 task-lifecycle 任务层级定义、契约测试适配，150 passed） |
+| W8 | learning/ + history/ 小节：历史归档合规检查（baselines/plans 归档规则） | 已完成（2026-08-10：history/index.md 补登记 4 份归档计划（v03-sync-alignment、sync-alignment、frontend-redesign、display-redesign）并修正「已完成表」链接指向 completed.md；learning/ 导航核对（7 份资料对应）与日期刷新，151 passed） |
+| W9 | 治理 ADR 重新治理（REQ-024 承接）：既有 ADR 审查（贵精不贵多/边界区分/合理性/优化留痕）、adr-governance.md 原则固化 | 已完成（2026-08-10：REQ-024 执行——六份 ADR 逐审（0001/0003/0004/0005/0006 有效、0002 链接修复 + 8901/8903 现状勘误）；领域枚举裁剪 5→2（工程治理/架构与边界）；adr-governance.md 新增「审查与优化留痕」节；单模型线路/数据库归属按用户裁决不升格 ADR；151 passed） |
 
 ## 验证与验收
 

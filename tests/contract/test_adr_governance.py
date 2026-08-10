@@ -20,7 +20,7 @@ ADR_FILE = re.compile(r"(?P<id>\d{4})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\.md")
 ADR_LINK = re.compile(r"\[ADR (?P<id>\d{4})]\((?P<path>[^)]+)\)")
 INDEX_ENTRY = re.compile(r"^\| \[`(?P<id>\d{4})`]\((?P<path>[^)]+\.md)\) \|", re.MULTILINE)
 VALID_STATUSES = {"Proposed", "Accepted", "Rejected", "Superseded"}
-VALID_DOMAINS = {"工程治理", "API 与任务", "数据与持久化", "架构与边界", "质量与评测"}
+VALID_DOMAINS = {"工程治理", "架构与边界"}
 REQUIRED_SECTIONS = ("## 背景", "## 决定", "## 后果", "## 关联")
 
 

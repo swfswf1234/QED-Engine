@@ -25,19 +25,18 @@
 | `QWEN_API_KEY` | 阿里百炼 | OCR/视觉模型与百炼调用 | `AXIOM_API_KEY`（Axiom-Flow）、`DASHSCOPE_API_KEY`（QED-Tracker，Phase 2 后直读本变量，映射退役） |
 | `GLM_API_KEY` | 智谱 | 备选/未来模型（预留） | 无（预留） |
 
-### 模型选择（每供应商推荐模型）
+### 模型选择（单线路：qwen 三用途）
 
 | 变量 | 用途 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `QED_MODEL` | 主对话模型（当前生效档） | `qwen-plus` | 映射：Axiom-Flow/QED-Tracker 文本模型（对接轮启用） |
-| `QED_OCR_MODEL` | OCR/视觉模型（当前生效档） | `qwen-vl-plus` | 映射：Axiom-Flow 读 `AXIOM_VISION_MODEL` |
+| `QED_MODEL` | 主对话模型 | `qwen-plus` | 映射：Axiom-Flow/QED-Tracker 文本模型（对接轮启用） |
+| `QED_OCR_MODEL` | OCR/视觉模型 | `qwen-vl-plus` | 映射：Axiom-Flow 读 `AXIOM_VISION_MODEL` |
 | `QED_EMBEDDING_MODEL` | 嵌入/向量化模型 | `text-embedding-v4` | 三项目检索与知识库共用（RAG 轮启用） |
-| `GLM_MODEL` | GLM 对话推荐（切换档） | `glm-5.2` | GLM-5 系列旗舰，1M 上下文 |
-| `GLM_OCR_MODEL` | GLM 专用文档 OCR（切换档） | `glm-ocr` | 走文档解析专用接口，Axiom-Flow 对接轮适配 |
-| `DEEPSEEK_MODEL` | deepseek 对话推荐（占位档） | `deepseek-v4-flash` | `deepseek-chat` 已退役；key 配置后生效 |
 
-切换策略：测试期用 qwen（三个 `QED_*` 变量）；正式操作期改 `QED_MODEL=glm-5.2`、
-`QED_OCR_MODEL=glm-ocr` 即整体切换到 GLM；deepseek 接入仅需补 key。
+**单线路策略（2026-08-09 用户裁决）**：一次只启用一条模型线路（当前 qwen 三用途即全部模型选择），
+暂不用备用线路。备选线路变量 `GLM_MODEL`/`GLM_OCR_MODEL`/`DEEPSEEK_MODEL` 已注释于 `.env.example`，
+`/config/models` 只返回三个用途路由。后续需要备用线路时：恢复 `.env.example` 变量 → 在
+`src/qed_engine/config.py` 恢复字段与路由 → 同步本表与本契约 → 恢复测试断言。
 
 ### 服务端口与地址（默认值即全局端口规划，可环境变量覆盖）
 

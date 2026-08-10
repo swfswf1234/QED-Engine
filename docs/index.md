@@ -1,7 +1,7 @@
 # QED-Engine 文档索引
 
 状态：Current
-最后更新：2026-08-04
+最后更新：2026-08-10
 
 本文件只负责导航。项目定位、能力和快速启动见[根 README](../README.md)，Agent 执行总纲见
 [AGENTS.md](../AGENTS.md)，文档治理规则见[文档规范](standards/documentation.md)。

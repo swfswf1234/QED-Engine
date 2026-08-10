@@ -8,7 +8,9 @@
 关联 ADR：无
 关联文档：[course-acquisition-flow.md](course-acquisition-flow.md)（课程收集流程）、
 [langchain-notes.md](../learning/langchain-notes.md)、[rag-notes.md](../learning/rag-notes.md)、
-[vector-db-notes.md](../learning/vector-db-notes.md)、[chunking-notes.md](../learning/chunking-notes.md)
+[vector-db-notes.md](../learning/vector-db-notes.md)、[chunking-notes.md](../learning/chunking-notes.md)、
+（规划）[bm25-rerank-notes.md](../learning/bm25-rerank-notes.md)、
+[knowledge-graph-notes.md](../learning/knowledge-graph-notes.md)
 
 ## 1. 定位与边界
 
@@ -16,6 +18,17 @@
 后台管理（管理中心 + 控制中心）是它的准备工作，对用户透明。
 
 学习中心 = **课程学习**（按知识节点推进、课程进度编排）+ **知识问答**（多 Agent 编排）。
+
+**双目标（2026-08-09 用户确认）**：
+
+1. **知识学习**：数学与计算机科学（AI 方向）课程学习，当前以高等数学起步；逐知识点推进、
+   练习与问答，形成个人图书馆式的闭环学习体验。
+2. **技术学习与实践**：以本项目为实验场，完整学习并熟练掌握最新 AI 工程技术——
+   ① **LangChain** 相关知识（LCEL/LangGraph/组件生态，完整学习路线）；
+   ② **多 Agent** 的构建与相关知识（角色划分、协作编排、工具调用）；
+   ③ **向量数据库**及常用操作（切片 chunking、**BM25** 混合检索、**rerank** 重排等）；
+   ④ **知识图谱**相关知识（实体/关系建模、图存储与查询）。
+   学习中心的知识问答链路即上述技术的落地载体，笔记沉淀于根仓库 `learning/` 目录。
 
 - **学科与资料边界**：学习中心覆盖个人核心领域——数学与计算机科学（AI 方向），当前以
   高等数学学习起步（首要目标）；资料类型包含教材、习题集、论文、博客与官方文档
@@ -30,11 +43,12 @@
 
 | 环节 | 方向 | 细化项 | 状态 |
 | --- | --- | --- | --- |
-| 编排框架 | LangChain | LCEL 管道组装（prompt → model → parser），组件化复用 | 已定，笔记见 langchain-notes.md |
-| 多 Agent 编排 | 角色化多 Agent | Agent 角色划分与协作模式（见 §5） | 待细化 |
+| 编排框架 | LangChain | **完整学习路线**：LCEL 管道组装（prompt → model → parser）→ LangGraph 状态图 → 组件生态复用；先学透再用 | 已定，笔记见 langchain-notes.md |
+| 多 Agent 编排 | 角色化多 Agent | **熟练掌握多 Agent 构建**：Agent 角色划分、协作模式、工具调用与状态共享（见 §5） | 待细化 |
 | 模型调用 | QED 配置中心路由 | 经 8900 `/config/models` 取路由，不直接绑定 LangChain 供应商逻辑 | 已定 |
-| 检索 | RAG | 检索链路设计见 rag-notes.md；向量库选型待定（Milvus 等，容器化规划内） | 待细化 |
+| 检索 | RAG（向量 + BM25 + rerank） | **向量数据库学习与实践**：切片（chunking）→ 向量化 → 存储 → **BM25 混合检索** → **rerank 重排** → 融合；检索链路设计见 rag-notes.md；向量库选型待定（Milvus 等，容器化规划内） | 待细化 |
 | 文本切分 | 数学文档感知切分 | 公式/定理块切分策略见 chunking-notes.md | 待细化 |
+| 知识图谱 | 图谱构建与查询 | **知识图谱学习与实践**：解析产物 → 实体/关系建模 → 图存储/查询引擎选型待定（承接 Axiom-Flow 知识图谱产物） | 待细化 |
 | 前端渲染 | 公式 + 图片 | KaTeX（快）/ MathJax（全）对比选型；SVG 与内容图片渲染 | 待细化 |
 
 ## 3. 知识节点模型（待细化）
@@ -42,6 +56,8 @@
 - 层级：**领域 → 课程 → 知识点**（知识点为最小学习单元：定义/定理/证明/例题/习题）。
 - 知识点含**前置依赖**（DAG）：学习顺序编排的依据，源数据来自 Axiom-Flow 解析产物
   （领域、课程、知识点之间的知识图谱——最终目标方向）。
+- **知识图谱实践**：解析产物实体/关系建模（概念、定理、引用关系）与图查询即为知识图谱
+  技术的学习载体；知识点 DAG 与图谱联动。
 - 与现有数据的关系：前端 `COURSE_ORDER`（课程层顺序）→ 扩展为知识点层依赖图。
 
 ## 4. 课程进度编排（待细化）
@@ -52,9 +68,11 @@
 
 ## 5. 知识问答（多 Agent，待细化）
 
-- 典型流程：**检索 Agent**（向量检索 + 关键词混合定位知识点）→ **推理 Agent**（按知识节点
-  上下文组织解答）→ **验证 Agent**（引用追溯、步骤核验）→ **回答呈现**（公式渲染 + 原文
-  引用）。
+- 典型流程：**检索 Agent**（向量 + BM25 混合检索定位知识点，rerank 重排）→ **推理 Agent**
+  （按知识节点上下文组织解答）→ **验证 Agent**（引用追溯、步骤核验，含知识图谱追溯）→
+  **回答呈现**（公式渲染 + 原文引用）。
+- 多 Agent 实践要点：角色划分、协作编排（LangGraph 状态图）、工具调用（检索/图谱查询）与
+  上下文共享——完整学习与构建见 §2 多 Agent 编排环节。
 - 引用追溯：答案必须可回溯到解析产物原文（页/块级），这是 99% 检索成功率的验收口径之一。
 
 ## 6. 数据依赖
@@ -72,6 +90,17 @@ QED-Tracker（教材/习题集收集）→ Axiom-Flow（解析产物 + 知识图
 
 ## 7. 探索里程碑（规划）
 
+**技术学习推进线**（与功能里程碑并行，为双目标之技术学习维度）：
+
+| 学习阶段 | 内容 | 载体 |
+| --- | --- | --- |
+| T1 LangChain 完整学习 | LCEL → LangGraph → 组件生态；笔记沉淀 langchain-notes.md | 独立练习 + 学习中心原型 |
+| T2 多 Agent 构建 | 角色化多 Agent 编排、工具调用、状态共享 | 知识问答原型 |
+| T3 向量库 + RAG 全链路 | 切片（chunking）→ 向量库（选型对比）→ BM25 混合 → rerank | 检索链路 + 99% 目标评测 |
+| T4 知识图谱 | 实体/关系建模、图存储与查询、图谱追溯 | 知识节点模型联动 |
+
+**功能里程碑**：
+
 | 里程碑 | 内容 | 前置 |
 | --- | --- | --- |
 | M1 数据管线贯通 | 教材下载完成 + 解析产物 + 高保真渲染（WEB-001 关闭） | 课程收集流程推进 |
@@ -83,3 +112,7 @@ QED-Tracker（教材/习题集收集）→ Axiom-Flow（解析产物 + 知识图
 
 本设计文档随探索推进更新：每项「待细化」在选型结论后改为「已定」并补充事实；界面样式
 探索单独产出原型（mockup）后并入 §学习交互设计。探索期间的决策记录进入 ADR。
+
+技术学习笔记规划于 `learning/` 目录（随学习进度创建）：已存在 langchain-notes.md、
+rag-notes.md、vector-db-notes.md、chunking-notes.md；规划新增 `bm25-rerank-notes.md`
+（BM25 混合检索与 rerank 重排）、`knowledge-graph-notes.md`（知识图谱建模与查询）。
