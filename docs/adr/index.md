@@ -1,7 +1,7 @@
 # ADR 索引
 
 状态：Current
-最后更新：2026-08-09
+最后更新：2026-08-10
 
 本目录登记影响长期约束的架构决策：决定、理由、后果和取代关系。编号与生命周期规则见
 [ADR 治理规范](../standards/adr-governance.md)。
@@ -16,5 +16,6 @@
 | [`0004`](0004-personal-library-positioning.md) | 项目定位为个人图书馆与三中心形态 | 架构与边界 | v0.1 | Accepted | — |
 | [`0005`](0005-control-center-service-hosting.md) | 控制中心服务托管规划 | 架构与边界 | v0.1 | Accepted | — |
 | [`0006`](0006-engineering-governance-contract.md) | 工程治理契约范本化 | 工程治理 | v0.1 | Accepted | — |
+| [`0007`](0007-qed-engine-backend-gateway.md) | QED-Engine 后端网关化：前端统一入口 8900 | 架构与边界 | v0.1 | Accepted | — |
 
-下一个可用编号：0007
+下一个可用编号：0008
