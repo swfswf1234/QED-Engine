@@ -1,7 +1,7 @@
 # 开发指南
 
 状态：Current
-最后更新：2026-08-09
+最后更新：2026-08-11
 依据 ADR：`docs/adr/0001-root-contract-tests.md`
 
 本指南只保存根仓库可重复执行的开发与验证命令。子项目的开发/运维命令以其自身
@@ -38,10 +38,10 @@ conda run -n QED_env python -m pytest tests -q
 ## 代码质量
 
 ```powershell
-conda run -n QED_env python -m ruff check src tests
+conda run -n QED_env python -m ruff check backend tests
 ```
 
-## 启动配置中心
+## 启动后端（8900 三域）
 
 ```powershell
 conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
@@ -53,13 +53,18 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
   不返回密钥值）
 - 可达性探测：`GET http://127.0.0.1:8900/api/v1/config/llm-status`（真实探测）、
   `GET http://127.0.0.1:8900/api/v1/config/database`（真实连接探测，首次 3-5s）
-- 五接口契约与响应示例见[配置中心 API 契约](../design/config-center-api.md)
+- 数据域（8900 适配 8901）：`GET /catalogs/{course_id}`、`GET /resources`、`GET /tasks`、
+  `POST /resources/{id}/confirm|backup|reject|approve|register`、`GET /resources/{id}/file`
+- 服务域：`GET /services`；`POST /services/{name}/start|stop|restart`（启停托管，过渡窗口
+  15s，见 [服务控制设计](../design/service-control.md)）
+- 三域契约与响应示例见[配置中心 API 契约](../design/config-center-api.md)
+- 统一启停：`scripts/start-all.ps1`（8900/8903 + 探测 8901/8902）、`scripts/stop-all.ps1`
 - 密钥检查脚本：`python scripts/check_api_keys.py`（需要 `scripts/load-env.ps1` 加载 `.env` 后
   运行；未加载或 `.env` 为空时预期输出 `ALL_SET=0`，属正常降级）
 
 ## 文档与映射同步
 
-- 受管模块（`src/qed_engine/` 与 `tests/`）文件头必须声明
+- 受管模块（`backend/qed_engine/` 与 `tests/`）文件头必须声明
   `设计关联（DesignRef）：docs/design/<文档>.md` 与 `实现状态：Current`。
 - 架构或设计契约变化同步 `docs/architecture/code-map.md` 后运行
   `tests/contract/test_code_document_mapping.py`；架构变更运行
@@ -73,4 +78,5 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
 | Axiom-Flow | 8902（迁移中，当前 8000） | 分支 `release`，本地门禁 + 契约测试；启动/验证命令见 `Axiom-Flow/docs/guides/development.md` |
 | QED-Tracker | 8901（已服务化，写操作后台任务 + 轮询） | 分支 `dev`→`release`→`main`；启动/验证命令见 `QED-Tracker/docs/guides/development.md` |
 
-四服务启停托管（控制中心）规划中，见[服务控制设计](../design/service-control.md)。
+四服务启停托管（控制中心）已实装（2026-08-11，ADR 0007 轮），8900 服务域接口见
+[服务控制设计](../design/service-control.md)，统一启停脚本见 `scripts/start-all.ps1`。

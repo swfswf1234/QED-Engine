@@ -1,7 +1,7 @@
 # 任务台账
 
 状态：Current
-最后更新：2026-08-10
+最后更新：2026-08-11
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -14,6 +14,7 @@
 | ARCH-004 | 支线 | Plan | 高 | Accepted | [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../plans/2026-08-8903-admin-redesign.md) | 计划状态 Accepted；2026-08-06 用户确认（卡片墙/严格三领域/树主评估窄/详情评估视角）；**四期完成（119 passed + ruff clean + 8901 三态冒烟）**：卡片墙入口、三领域（拓扑/考前并入分析）、树拖拽记忆（qed-tree-w）、领域/课程/状态与任务筛选、详情评估视角；Phase 0（QED-017 提交 5f7c015 + 8901 重启 pid 6772）完成；待用户浏览器验收后归档 |
 | ARCH-006 | 支线 | Plan | 高 | Accepted | [2026-08 人工评审优化轮（review-round-v6）](../plans/2026-08-review-round.md) | 计划状态 Accepted；2026-08-07 用户确认（同源去重/去尾部评估任务/人工建议落库/存量清理）；REQ-018 请求 QED-Tracker 承接；REQ-006 承接前端执行 |
 | ARCH-007 | 支线 | Plan | 高 | Accepted | [2026-08 文档下载管理课程分页计划（downloads-course-view）](../plans/2026-08-downloads-course-view.md) | 计划状态 Accepted；2026-08-07 用户确认（界面名回退/默认数学领域/领域级课程分页每页 3 门/配套对并排）；REQ-006 承接执行；待用户浏览器验收后归档 |
+| ARCH-009 | 支线 | 实现 | 高 | 进行中 | 后端网关化重构轮（ADR 0007）：前端唯一入口 8900——目录重整（backend/、database/、tmp/、scripts/）、数据域语义 API（data.py）、服务域 /services 实装（service_manager.py）、前端唯一入口切换（app.js）、文档同步 | **2026-08-11 P0-P5 全部完成并冒烟闭环（181 passed + ruff clean + node check）**：ADR 0007 落地；backend/ 迁移 + database/ 建库运维脚本 + start-all/stop-all；tracker_client 扩展（catalog/file/register + 409 detail）；code-map 登记两个新模块；服务管理测试 14 个（含 workdir 几何守护 + Popen 失败句柄守护）；唯一入口测试守护；文档同步（service-contracts/config-center-api/service-control/web-frontend/four-service-architecture/project-status/README/AGENTS/guides/development）；**真实冒烟验证**：数据域真实数据（catalog/30 资源/15 任务）、/services 启停托管闭环（start→online PID 984、窗口内重复 start 409、stop 优雅退出、restart→online PID 9244）、409/422/404 语义、修复 ROOT parents 层级错位（WinError 267）与 Popen 失败句柄泄漏；剩余：用户验收（浏览器 + 服务域操作）后归档 |
 | REQ-001 | 支线 | 请求 | 高 | 待开始 | Axiom-Flow 端口 8000 → 8902 迁移（启动命令、README、指南、CORS）（请求：Axiom-Flow） | Axiom-Flow todo ALN-002 承接；用户已确认（2026-08-04），B 类计划 ALN-007 执行 |
 | REQ-002 | 长期 | 实现 | 中 | 进行中 | 文档治理持续演进：标准/ADR/计划/台账与契约测试随需求同步更新（ADR 0001 已落地） | 每次文档变更前运行 `tests/contract/` 门禁 |
 | REQ-003 | 支线 | 请求 | 高 | 待开始 | Axiom-Flow 数据目录指向根 dataset/axiom-flow/parsed、直读 QED_* 变量（含 QED_DB_*，qed 库）（请求：Axiom-Flow） | Axiom-Flow todo ALN-003 承接；用户已确认（2026-08-04），B 类计划 ALN-007 执行 |
@@ -31,10 +32,10 @@
 | REQ-018 | 支线 | 请求 | 高 | 待开始 | 人工评审优化（请求：QED-Tracker）：① evaluate 同源去重——同 provider_id 命中多个目标只登记第一条，其余 skipped 报告（数学分析陈纪修 教材/习题集同 archive 条目重复登记问题）；② qt_resources 增加 review_note 字段，confirm/backup/reject 三接口接受可选 note 参数落库；③ 存量重复清理——陈纪修 exercise candidate（cand_c8977caa0b358ebd71dd0bd585341dd3）与教材 confirmed 同源（archive math_analysis_chenjixiu），经 reject 接口标记 rejected（原因注明重复，留痕） | QED-Tracker todo QED-020 承接；用户 2026-08-07 已确认方案（计划 docs/plans/2026-08-review-round.md）；在其仓库建设计文档+todo 请求，用户评审确认后由对方执行 |
 | REQ-019 | 支线 | 请求 | 中 | 待开始 | 版本核对（请求：QED-Tracker，设计见 [course-acquisition-flow.md](../design/course-acquisition-flow.md) 阶段 3）：下载验收的系统预检增加「登记版本 vs PDF 首页标题」自动核对，不一致提示人工确认（依赖登记数据含版本字段或可推导） | 用户 2026-08-09 确认设计（管理功能轮第 2 节，登记请求）；由其仓库承接，回执后关闭 |
 | REQ-020 | 支线 | 请求 | 中 | 待开始 | 榜单数据收集（请求：QED-Tracker）：① 找资料权威性榜单（各教材/版本在数学社区权威性排序，服务第一轮评估选书）；② 找书找得率榜单（各来源渠道命中率/下载成功率实测，回填 QED-Tracker source-discovery 矩阵） | 用户 2026-08-09 确认（管理功能轮设计，见 [course-acquisition-flow.md](../design/course-acquisition-flow.md) 相关榜单小节，执行主体为 QED-Tracker）；产出回填阶段 1 选书规则，不单独建界面；由其仓库承接，回执后关闭 |
-| REQ-021 | 长期 | 流程 | 中 | 进行中 | 大变动同步：项目发生大的变动（架构/定位/服务形态变化）时，同步修订 README.md 与 AGENTS.md 的定位与状态表述，保持对外门面与现状一致 | 2026-08-09 用户决定登记；每次大变动评审时执行，与文档治理门禁（REQ-002）协同 |
+| REQ-021 | 长期 | 流程 | 中 | 进行中 | 大变动同步：项目发生大的变动（架构/定位/服务形态变化）时，同步修订 README.md 与 AGENTS.md 的定位与状态表述，保持对外门面与现状一致 | 2026-08-09 用户决定登记；**2026-08-11 ADR 0007 轮已同步 README（四服务表/mermaid/快速开始/仓库结构）与 AGENTS（服务表后端三域）**；每次大变动评审时执行，与文档治理门禁（REQ-002）协同 |
 | REQ-022 | 支线 | 请求 | 低 | 待开始 | 治理契约范本对齐（请求：Axiom-Flow）：按根仓库 [governance-contract.md](../standards/governance-contract.md) 范本对齐治理契约测试（契约头六字段/守护面清单/编写约定） | 2026-08-09 用户确认范本化设计（ADR 0006）；**2026-08-10 已建设计文档（Axiom-Flow docs/design/governance-contract-alignment.md）并登记 ALN-008 承接**；用户评审确认后由其仓库执行，回执后关闭 |
 | REQ-023 | 支线 | 请求 | 低 | 待开始 | 治理契约范本对齐（请求：QED-Tracker）：按根仓库 [governance-contract.md](../standards/governance-contract.md) 范本对齐治理契约测试（契约头六字段/守护面清单/编写约定） | 2026-08-09 用户确认范本化设计（ADR 0006）；**2026-08-10 已建设计文档（QED-Tracker docs/design/governance-contract-alignment.md）并登记 QED-022 承接**；用户评审确认后由其仓库执行，回执后关闭 |
-| REQ-025 | 长期 | 流程 | 中 | 进行中 | 四类设计文档实时同步：架构设计（four-service-architecture.md）、API 契约（config-center-api.md / service-contracts.md）、数据库设计（database-design.md）、技术栈选型（tech-stack.md）随实现状态与决策变化**先文档后实现**更新，变更后运行契约门禁；与 REQ-002（文档治理持续演进）协同，ARCH-008 重构轮完结后由本任务持续承接 | 2026-08-09 用户确认登记；每次影响架构/API/数据库/技术栈的实现与决策变更时执行，project-status 当前主线同步记录 |
+| REQ-025 | 长期 | 流程 | 中 | 进行中 | 四类设计文档实时同步：架构设计（four-service-architecture.md）、API 契约（config-center-api.md / service-contracts.md）、数据库设计（database-design.md）、技术栈选型（tech-stack.md）随实现状态与决策变化**先文档后实现**更新，变更后运行契约门禁；与 REQ-002（文档治理持续演进）协同，ARCH-008 重构轮完结后由本任务持续承接 | 2026-08-09 用户确认登记；**2026-08-11 ADR 0007 轮已同步四服务架构（mermaid/服务表/符合度）、config-center-api（数据域/服务域章节 + ADR 0007）、service-contracts（前端只连 8900 冻结）**；每次影响架构/API/数据库/技术栈的实现与决策变更时执行，project-status 当前主线同步记录 |
 | REQ-026 | 支线 | 请求 | 中 | 待开始 | 数据库设计确认（请求：QED-Tracker）：qt_* 表结构（qt_resources 明细与后续新增表）由 QED-Tracker 确认并维护（其 docs/design/tracker-service.md），回执后根仓库 [database-design.md](../design/database-design.md) 按「指引与规划」收尾 | 2026-08-09 用户裁决（数据库设计先在各子项目确认，根仓库只做指引和规划）；**2026-08-10 已建设计文档（QED-Tracker docs/design/database-schema-ownership.md）并登记 QED-023 承接**；由其仓库确认与回执后关闭 |
 | REQ-027 | 支线 | 请求 | 中 | 待开始 | 数据库设计确认（请求：Axiom-Flow）：af_* 表清单与结构由 Axiom-Flow 设计确认，确认后回执根仓库 [database-design.md](../design/database-design.md) 补登记表清单 | 2026-08-09 用户裁决（数据库设计先在各子项目确认，根仓库只做指引和规划）；**2026-08-10 已建设计文档（Axiom-Flow docs/design/database-schema-ownership.md）并登记 ALN-009 承接**；由其仓库确认与回执后关闭 |
 

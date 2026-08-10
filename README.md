@@ -13,8 +13,10 @@ flowchart LR
     A[QED-Tracker] -->|下载/登记原始 PDF| B[Axiom-Flow]
     B -->|解析产物/知识发布| C[QED-Engine 管理界面]
     C --> D[QED-Engine 学习界面]
-    E[QED-Engine 后端<br/>统一配置中心] -.提供模型/API-key/数据库选择.-> A
-    E -.提供模型/API-key/数据库选择.-> B
+    C -. 前端唯一入口：配置/数据/服务域.-> E[QED-Engine 后端 8900]
+    E -.数据域适配.-> A
+    E -.服务托管/探测.-> A
+    E -.服务托管/探测.-> B
 ```
 
 ## 学习中心（最终形态）
@@ -36,8 +38,8 @@ flowchart LR
 
 | 服务 | 职责 |
 | --- | --- |
-| QED-Engine 前端（8903） | 学习界面 + 管理后台：仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照 |
-| QED-Engine 后端（8900） | 统一配置中心：模型/API-key/数据库选择与状态探测 |
+| QED-Engine 前端（8903） | 学习界面 + 管理后台：仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照；**只连 8900**（ADR 0007） |
+| QED-Engine 后端（8900） | 配置域（模型/API-key/数据库选择与状态探测）+ 数据域网关（目录/资源/任务适配 8901）+ 服务域（服务启停托管，控制中心） |
 | Axiom-Flow（8000 → 8902 迁移中） | 解析、OCR、质量审阅与知识发布 |
 | QED-Tracker（8901） | 下载、校验、登记与交付 |
 
@@ -46,7 +48,7 @@ flowchart LR
 
 ## 快速开始
 
-### QED-Engine 配置中心（本仓库）
+### QED-Engine 后端（本仓库）
 
 ```powershell
 # 0. 使用 conda 环境（Python 3.12）；需要本机 MySQL 8 实例并创建三项目共用的 qed 库
@@ -64,11 +66,23 @@ Invoke-RestMethod http://127.0.0.1:8900/api/v1/health
 Invoke-RestMethod http://127.0.0.1:8900/api/v1/config/models
 ```
 
-接口契约见 [配置中心 API 契约](docs/design/config-center-api.md)。
+接口契约见 [配置中心 API 契约](docs/design/config-center-api.md)
+（配置域 + 数据域 + 服务域）。
+
+### 统一启停（控制中心）
+
+```powershell
+# 一键启动本仓库 8900/8903（scripts/start-all.ps1），并探测 8901/8902 提示显式启停
+.\scripts\start-all.ps1
+# 停止 8900/8903（按 tmp/ 下 PID 文件）
+.\scripts\stop-all.ps1
+# 8900 服务域接口启停子服务（详见 docs/design/service-control.md）
+Invoke-RestMethod -Method Post http://127.0.0.1:8900/api/v1/services/tracker/start
+```
 
 ### QED-Engine 前端（8903）
 
-原生静态单页应用（无构建步骤），浏览器直连 8900/8901 读取数据：
+原生静态单页应用（无构建步骤），浏览器直连 8900 读取数据（唯一入口，不直连 8901/8902）：
 
 ```powershell
 # 在根仓库目录启动（QED_env 环境）
@@ -102,10 +116,13 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `Axiom-Flow/` | 子项目（独立 git 仓库，解析与质量审阅） |
 | `QED-Tracker/` | 子项目（独立 git 仓库，下载与文件管理） |
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
-| `src/qed_engine/` | 统一配置中心（FastAPI，端口 8900） |
+| `backend/qed_engine/` | 统一配置中心 + 数据域网关 + 控制中心（FastAPI，端口 8900） |
 | `web/` | QED-Engine 前端（8903，主体学习界面 + 后台管理，原生单页应用） |
-| `scripts/` | 辅助脚本（`load-env.ps1` 过渡映射层，子项目直读 `QED_*` 后退役；`check_api_keys.py` 密钥真实检查） |
-| `tests/` | 配置中心测试（pytest + ruff 门禁） |
+| `database/` | 根仓库数据目录：建库脚本（init-qed.sql）、备份脚本（backup-qed.ps1）与备份产物 |
+| `scripts/` | 辅助与运维脚本（`load-env.ps1` 过渡映射层；`check_api_keys.py` 密钥真实检查；`start-all.ps1` / `stop-all.ps1` 统一启停 8900/8903） |
+| `logs/` | 服务运行日志（控制中心托管子服务输出） |
+| `tmp/` | 运行时临时文件（PID 文件等，不入版本控制） |
+| `tests/` | 后端测试（pytest + ruff 门禁） |
 | `docs/` | 架构、设计、决策、规范、计划与学习资料 |
 | `AGENTS.md` | Agent 执行总纲 |
 

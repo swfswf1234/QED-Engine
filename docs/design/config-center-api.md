@@ -2,10 +2,10 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-05
-关联代码：`src/qed_engine/api/main.py`、`src/qed_engine/api/schemas.py`
-关联测试：`tests/test_config.py`、`tests/test_api.py`
-关联 ADR：无
+最后更新：2026-08-11
+关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/data.py`（8901 客户端与服务控制模块分别归属[服务契约](service-contracts.md)与[服务控制设计](service-control.md)）
+关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
 
 ## 目的与边界
 
@@ -13,19 +13,21 @@
 健康检查与模型路由。**密钥绝不下发**——子项目不经过中心获取 key，而是直读根 `.env`（或经
 `scripts/load-env.ps1` 映射），中心只回答"用哪个模型、是否已配置"。
 
-**8900 角色判定（2026-08-06 架构评审结论：保留）**：浏览器无法直读 `.env` 且密钥不下发，
-8900 是 `.env` 的唯一只读语义代理；角色收敛为三——① 配置语义代理（`/config/models` 模型路由表，
-前端与子项目「用哪个模型」的答案源）；② 状态探测中心（`/config/llm-status`、`/config/database`
-真实可达性探测）；③ 子项目对接契约（未来 Axiom-Flow OCR 多后端 REQ-008 / QED-Tracker 服务化
-经 `/config/models` 取路由，不感知密钥）。当前子项目零消费 8900（直读 `.env`），
-最小保留面为现有五端点。
+**8900 角色（2026-08-06 架构评审 + 2026-08-11 ADR 0007 网关化扩展）**：浏览器无法直读
+`.env` 且密钥不下发，8900 是 `.env` 的唯一只读语义代理；角色收敛为四——① 配置语义代理
+（`/config/models` 模型路由表，前端与子项目「用哪个模型」的答案源）；② 状态探测中心
+（`/config/llm-status`、`/config/database` 真实可达性探测）；③ **数据域网关**（ADR 0007：
+catalogs / resources / tasks 语义 API 归 8900 所有，内部经 TrackerClient 适配 8901，
+前端唯一入口）；④ **服务域（控制中心）**（ADR 0007 / ADR 0005：/services 端点族启停托管，
+契约事实源为 [service-control.md](service-control.md)）。当前子项目零消费 8900（直读 `.env`）。
 
 ## 服务信息
 
-- 服务名：`qed-engine-config`
+- 服务名：`qed-engine-config`（兼容名；FastAPI 标题 QED-Engine Backend）
 - 端口：`8900`
 - 前缀：`/api/v1`
 - 启动（根仓库目录）：`python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900`
+  （或 `scripts/start-all.ps1` 统一启停）
 
 ## 接口契约
 
@@ -105,21 +107,57 @@
 - `reason`：不可达原因——`未配置`（不探测）/ `超时` / `认证失败` / `连接失败`
   （错误摘要不含密码与主机细节）。
 - 变量来源与别名映射见[configuration-and-secrets.md](configuration-and-secrets.md) 统一数据库小节。
-- 字段变化（如新增库名列表）需同步更新本契约与 `src/qed_engine/api/schemas.py`。
+- 字段变化（如新增库名列表）需同步更新本契约与 `backend/qed_engine/api/schemas.py`。
+
+## 数据域语义 API（ADR 0007 新增：接口归 8900 自有契约）
+
+前端（8903）只连 8900：目录/资源/任务契约归 8900 所有（数据域），路径与 8900 前端接入前
+的 8901 路径一致（前端只换 BASE、零逻辑改动）；内部经 `tracker_client.py`（8901 客户端）
+适配 8901，8901 契约正文以 [service-contracts.md](service-contracts.md) 为事实源。
+
+| 端点 | 语义 | 内部适配 |
+| --- | --- | --- |
+| `GET /catalogs/{course_id}` | 课程目录（知识点树主数据源） | TrackerClient.get_catalog（8901 GET /catalogs/{course_id}） |
+| `GET /resources?status=&course_id=&kind=&language=` | 资源清单（过滤透传） | TrackerClient.list_resources |
+| `GET /resources/{id}` | 资源详情 | TrackerClient.get_resource |
+| `GET /resources/{id}/file` | PDF 预览流（content-type 透传，供 iframe） | TrackerClient.get_resource_file（原始响应转发） |
+| `POST /resources/{id}/confirm` | 人工确认下载（candidate/backup→confirmed） | TrackerClient.confirm_resource |
+| `POST /resources/{id}/backup` | 人工评估「备选」 | TrackerClient.backup_resource |
+| `POST /resources/{id}/approve` | 验收通过（downloaded→approved） | TrackerClient.approve_resource |
+| `POST /resources/{id}/reject` `{"reason"}` | 拒绝（reason 必填，8900 校验 422） | TrackerClient.reject_resource |
+| `POST /resources/{id}/register` | 人工下载登记（pending_manual→downloaded） | TrackerClient.register_resource |
+| `GET /tasks` / `GET /tasks/{id}` | 任务列表与轮询 | TrackerClient.list_tasks / get_task |
+| `POST /tasks/catalog/evaluate` `{"course_id"}` | 按课程批量评估（缺省=全目录） | TrackerClient.create_evaluate |
+| `POST /tasks/books/download` `{"resource_id"}` | 创建下载任务 | TrackerClient.create_download |
+
+**错误映射**：8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409
+处理生效）；8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，
+独立性铁律）。reject 缺 reason 由 8900 校验直接 422，不请求 8901。
+
+## 服务域（/services，ADR 0007 落实 ADR 0005）
+
+`GET /services` 与 `POST /services/{name}/start|stop|restart` 端点族由
+[service-control.md](service-control.md) 契约事实源定义（服务注册表/过渡窗口/错误语义），
+实现于 `backend/qed_engine/api/service_manager.py`；8903 服务健康面板改经 `GET /services`
+获取三服务状态（不再直连 8901/8902 健康端点）。
 
 ## 强制规则
 
-- 五个接口任何时刻都必须可用（离线自启动）：缺 `.env` 或 key/密码为空时按未配置降级，不报错。
+- 五端点（配置域）任何时刻都必须可用（离线自启动）：缺 `.env` 或 key/密码为空时按未配置降级，
+  不报错。
+- 数据域/服务域在 8901/8902 离线时返回 503/409 等明确语义，**不影响配置域五端点**。
 - 密钥值（API key、数据库密码）不得出现在任何响应体、日志或异常信息中。
 - 子项目不依赖本中心获取 key；中心接口变更不影响子项目启动与降级运行。
 - CORS 白名单按全局端口规划（ADR 0002）：允许 8900（配置中心自身）、8901（QED-Tracker）、
   8902（Axiom-Flow）、8903（前端）及 8000（Axiom-Flow 迁移前兼容）的 127.0.0.1/localhost
-  来源；白名单外来源拒绝预检（400）。
+  来源；白名单外来源拒绝预检（400）。子项目 CORS 收窄为后续可选请求（ADR 0007 决定 6）。
 
 ## 验证
 
-- `pytest tests -q` 全绿；`ruff check src tests` 无错误。
-- uvicorn 启动后五个接口均返回 200（`/config/llm-status` 与 `/config/database` 首次请求
+- `pytest tests -q` 全绿；`ruff check backend tests` 无错误。
+- uvicorn 启动后五个配置域接口均返回 200（`/config/llm-status` 与 `/config/database` 首次请求
   3-5s 内返回，之后走缓存）。
+- 8901 在线时 `/catalogs/math-qe`、`/resources` 返回真实数据；8901 离线时返回 503 且配置域
+  不受影响（独立性铁律）。
 - `python scripts/check_api_keys.py` 真实调用验证各供应商 key（不打印密钥；
   glm 当前返回 429 余额不足时以智谱账户状态为准，不影响中心降级运行）。

@@ -55,7 +55,8 @@ def test_four_service_architecture_declares_metadata_and_diagram():
     for field in ("关联代码", "关联测试", "关联 ADR"):
         _field(content, field)
     assert len(_mermaid("four-service-architecture.md")) >= 1
-    for label in ("QED-Engine 前端", "配置中心", "Axiom-Flow", "QED-Tracker"):
+    # 四服务（ADR 0007 后：节点命名「QED-Engine 后端」承载配置/数据/服务三域）
+    for label in ("QED-Engine 前端", "QED-Engine 后端", "Axiom-Flow", "QED-Tracker"):
         assert label in _mermaid("four-service-architecture.md")[0]
 
 

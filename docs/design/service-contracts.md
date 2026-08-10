@@ -2,10 +2,10 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-09
-关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`scripts/load-env.ps1`、`src/qed_engine/tracker_client.py`（8901 客户端实现）
+最后更新：2026-08-11
+关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`scripts/load-env.ps1`、`backend/qed_engine/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0003](../adr/0003-shared-qed-database-independence.md)
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0003](../adr/0003-shared-qed-database-independence.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
 
 ## 目的与边界
 
@@ -25,7 +25,8 @@
 | QED-Tracker → Axiom-Flow | HTTP handoff：`axiom push`（默认 `http://127.0.0.1:8000`） | 地址默认 `http://127.0.0.1:8902`，由配置注入（`QED_AXIOM_URL`） |
 | QED-Tracker → dataset/raw | 已迁 `dataset/qed-tracker/`（QED-009） | 冻结（Phase 2 落地） |
 | Axiom-Flow → dataset/parsed | 产物写入自身 `data/` | 写入 `dataset/axiom-flow/parsed/`（Phase 3，ALN-003） |
-| QED-Engine 统一 CLI/前端 → 子项目 | 无 | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
+| QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
+| 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 密钥直读根 `.env`（经 `load-env.ps1` 映射） | 子项目直读 `QED_*` 变量，映射层退役 |
 | 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`，`QED_DB_*` 唯一事实源 |
 | QED-Tracker → 资源登记 | JSON `meta/resources/` + MySQL `qt_resources` 双写（QED-012 已落地） | JSON 保留文件状态事实 + MySQL 查询索引（双写契约见[数据库设计](database-design.md)） |
@@ -40,9 +41,9 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 
 ## QED-Tracker 服务接口契约（8901，Phase 2 落地）
 
-- 前缀 `/api/v1`；`GET /health` 存活检查。
-- 只读查询（搜索、资源列表、选择报告、目录）同步返回；CORS 允许 `http://127.0.0.1:8903` 源
-  （8903 下载工作台直连本服务，无代理）。
+- 前缀 `/api/v1`；`GET /api/v1/health` 存活检查。
+- 只读查询（搜索、资源列表、选择报告、目录）同步返回；8903 浏览器已不直连本服务
+  （ADR 0007，经 8900 数据域语义 API 访问）；8900 后端服务端到服务端调用不受 CORS 限制。
 - 资源清单与状态机（2026-08-05 用户裁决，人机协同闭环；2026-08-06 QED-017 增补人工评估三态；
   2026-08-07 QED-020 增补评审建议）：
   - `GET /resources?status=&course_id=&kind=&language=`、`GET /resources/{id}` 同步查询；
@@ -67,13 +68,15 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
   - `POST /tasks/catalog/evaluate {course_id?}`：按课程批量评估任务（搜索源 → qwen 评估 →
     候选落库，candidate 状态；course_id 缺省=全目录；缺模型密钥时降级跳过评估仅落候选）；
     已评估目标（backup/approved/rejected 行）跳过不重复推荐。
-- 该接口同时供统一 CLI（等待模式）与 QED-Engine 前端（轮询/展示模式）调用。
+- 该接口同时供统一 CLI（等待模式，直连 8901）与 8900 数据域语义 API（适配层，契约见
+  [配置中心 API 契约](config-center-api.md)）调用；8903 前端只经 8900 访问。
 
 ## 8903 前端对接
 
 8903 前端（`web/`）的组成、信息架构、交互、视觉与响应式契约见[8903 前端契约](web-frontend.md)；
-本文件只记录其对接要点：浏览器直连 8900（配置横幅）与 8901（资源/任务），无后端代理；
-CORS 允许 `http://127.0.0.1:8903` 源。8900（QED 管理服务）角色判定（2026-08-06 架构评审结论）
+本文件只记录其对接要点：**前端只连 8900**（ADR 0007，QED-Engine 后端网关化）——配置域
+（横幅/健康）、数据域（目录/资源/任务）、服务域（/services 服务状态）全部经 8900 获取，
+浏览器不直连 8901/8902；子项目 CORS 收窄为可选后续请求（本轮不做）。8900 的接口族与角色
 见[配置中心 API 契约](config-center-api.md)。
 
 ## 独立性约定

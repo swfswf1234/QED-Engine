@@ -1,11 +1,11 @@
 # 控制中心：服务托管与启停契约
 
 设计状态：Accepted
-实现状态：Not Started
-最后更新：2026-08-09
-关联代码：无（Not Started；实现轮新增服务管理模块 src/qed_engine/api/service_manager.py 后，登记 code-map 并回填本字段）
+实现状态：Implemented
+最后更新：2026-08-11
+关联代码：`backend/qed_engine/api/service_manager.py`
 关联测试：`tests/test_api.py`、`tests/test_web.py`
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
 
 ## 目的与边界
 
@@ -129,9 +129,21 @@
 
 容器化统一托管方案（端口/健康检查/日志/编排）在容器化轮单独设计，本期不占 UI。
 
+## 实现注记（2026-08-11，ADR 0007 轮）
+
+- 端点族实现于 `backend/qed_engine/api/service_manager.py`，接入 `backend/qed_engine/api/main.py`；
+  服务注册表自 `Settings`（QED_*_URL）解析端口（config 8900 / tracker 8901 / axiom 8902，均可
+  被 `.env` 覆盖），日志落根 `logs/<unit>.log`（启动时确保目录存在）。
+- 状态判定：config 恒 online；其余优先 15s 过渡窗口（starting/stopping），其次 HTTP 端口探测
+  （3s 超时）；8900 重启后 PID 记录丢失，以探测为准（pid 可为 null）。
+- 启停：Popen（CREATE_NEW_PROCESS_GROUP）+ 根 `.env` 环境继承；优雅停止 CTRL_BREAK 5s 宽限后
+  taskkill 强杀（`停止超时强杀` reason）；同一服务 15s 窗口内重复同向操作 409；restart 先停后启
+  （未托管时直接启动）；worker 目录为各子项目目录（`QED-Tracker/`、`Axiom-Flow/`）。
+- 子进程环境注入细节（conda 环境解析、子项目直读 `.env`）在真实冒烟轮校准。
+
 ## 验证
 
-- `pytest tests -q` 全绿；`ruff check src tests` 无错误。
+- `pytest tests -q` 全绿；`ruff check backend tests` 无错误。
 - 定向测试：服务注册表完整性、状态探测（注入假 transport）、启停端点（mock Popen/信号）、
   `config` 409、未知服务 404、并发 409。
 - 真实冒烟（人工）：8900 在线时启动/停止/重启 8901（观察 8903 服务控制区状态流转与日志
