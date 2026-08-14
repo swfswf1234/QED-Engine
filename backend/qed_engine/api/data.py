@@ -1,8 +1,9 @@
-"""QED-Engine 数据域语义 API：catalogs / resources / tasks 契约归 8900 所有。
+"""QED-Engine 数据域语义 API：catalogs / tasks / selections / downloads 归 8900 所有。
 
-前端（8903）只连 8900（ADR 0007）：目录、资源清单/详情/状态机/PDF 预览、任务四端点
-统一由本模块暴露，内部经 TrackerClient 适配 8901。路径与前端既有 token 一致，
-响应形状对齐 8901 当前结构（契约在 config-center-api.md 数据域章节登记）。
+前端（8903）只连 8900（ADR 0007）：目录、任务四端点、三表语义（表1 选课表 / 表2 册级明细 /
+表3 渠道来源）统一由本模块暴露，内部经 TrackerClient 适配 8901。路径与前端既有 token 一致，
+响应形状对齐 8901 当前结构（契约在 config-center-api.md 数据域章节登记；三表契约见
+downloads-three-table-model.md §3.2）。qt_resources 旧 /resources 端点已随 QED-030 退役。
 
 错误映射：8901 返回 4xx（如 409 状态机冲突）→ 同码透传 detail；连接失败/5xx → 503
 + 明确提示（前端据此降级显示，独立性铁律）。
@@ -12,9 +13,7 @@
 关联测试：tests/test_api.py
 """
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import BaseModel
 from qed_engine.tracker_client import TrackerClient, TrackerError
 
@@ -24,16 +23,34 @@ router = APIRouter(prefix="/api/v1", tags=["data"])
 _UPSTREAM_UNAVAILABLE = 503
 
 
-class RejectBody(BaseModel):
+# --- 三表（downloads-three-table-model §3.2）：表1 生命周期 / 表2 册级 / 表3 来源 ---
+
+
+class SelectionStateBody(BaseModel):
+    note: str | None = None
+
+
+class SelectionRejectBody(BaseModel):
+    reason: str
+    note: str | None = None
+
+
+class SupersedeBody(BaseModel):
     reason: str
 
 
-class EvaluateBody(BaseModel):
-    course_id: str | None = None
+class DownloadCreateBody(BaseModel):
+    selection_id: str
+    vol: str | None = None
+    file_hint: str | None = None
 
 
-class DownloadBody(BaseModel):
-    resource_id: str
+class DownloadRejectBody(BaseModel):
+    reason: str
+
+
+class DownloadRegisterBody(BaseModel):
+    relative_path: str
 
 
 def _tracker(request: Request) -> TrackerClient:
@@ -62,79 +79,6 @@ def get_catalog(course_id: str, request: Request) -> dict:
     return _call(request, _tracker(request).get_catalog, course_id)
 
 
-# --- 资源（清单 / 详情 / 预览 / 状态机） ---
-
-
-@router.get("/resources")
-def list_resources(
-    request: Request,
-    status: str | None = None,
-    course_id: str | None = None,
-    kind: str | None = None,
-    language: str | None = None,
-) -> list:
-    """资源清单（按状态/课程/类型/语言过滤，候选视图主数据源）。"""
-    return _call(request, _tracker(request).list_resources, status, course_id, kind, language)
-
-
-@router.get("/resources/{resource_id}")
-def get_resource(resource_id: str, request: Request) -> dict:
-    """资源详情（详情面板）。"""
-    return _call(request, _tracker(request).get_resource, resource_id)
-
-
-@router.get("/resources/{resource_id}/file")
-def resource_file(resource_id: str, request: Request) -> Response:
-    """资源原文件（PDF 预览流）：content-type 透传，供 iframe 直读。"""
-    tracker = _tracker(request)
-    try:
-        upstream = tracker.get_resource_file(resource_id)
-    except TrackerError as exc:
-        raise HTTPException(
-            status_code=_UPSTREAM_UNAVAILABLE,
-            detail=f"QED-Tracker 服务不可达：{exc}",
-        ) from exc
-    if upstream.status_code >= 400:
-        status = upstream.status_code if upstream.status_code < 500 else _UPSTREAM_UNAVAILABLE
-        detail = _upstream_detail(upstream)
-        raise HTTPException(status_code=status, detail=detail)
-    media_type = upstream.headers.get("content-type", "application/octet-stream")
-    return Response(content=upstream.content, media_type=media_type)
-
-
-def _upstream_detail(upstream: httpx.Response) -> str:
-    try:
-        body = upstream.json()
-    except ValueError:
-        return upstream.text
-    detail = body.get("detail") if isinstance(body, dict) else None
-    return detail if isinstance(detail, str) else upstream.text
-
-
-def _state_endpoint(action: str):
-    """状态机动作端点工厂：confirm / backup / approve / register。"""
-
-    def endpoint(resource_id: str, request: Request) -> dict:
-        return _call(request, getattr(_tracker(request), f"{action}_resource"), resource_id)
-
-    return endpoint
-
-
-for _action in ("confirm", "backup", "approve", "register"):
-    router.add_api_route(
-        f"/resources/{{resource_id}}/{_action}",
-        _state_endpoint(_action),
-        methods=["POST"],
-        tags=["data"],
-    )
-
-
-@router.post("/resources/{resource_id}/reject")
-def reject_resource(resource_id: str, body: RejectBody, request: Request) -> dict:
-    """拒绝（候选级或验收级）：reason 必填（8900 校验 422），转发 8901 留痕。"""
-    return _call(request, _tracker(request).reject_resource, resource_id, body.reason)
-
-
 # --- 任务（后台任务 + 轮询） ---
 
 
@@ -150,13 +94,86 @@ def get_task(task_id: str, request: Request) -> dict:
     return _call(request, _tracker(request).get_task, task_id)
 
 
-@router.post("/tasks/catalog/evaluate")
-def create_evaluate(body: EvaluateBody, request: Request) -> dict:
-    """按课程批量评估任务；缺省=全目录。"""
-    return _call(request, _tracker(request).create_evaluate, body.course_id)
+# --- 三表（downloads-three-table-model §3.2）：选课表 / 册级明细 / 渠道来源 ---
 
 
-@router.post("/tasks/books/download")
-def create_download(body: DownloadBody, request: Request) -> dict:
-    """创建下载任务；仅 confirmed 状态可触发（上游 409 透传）。"""
-    return _call(request, _tracker(request).create_download, body.resource_id)
+@router.get("/selections")
+def list_selections(
+    request: Request,
+    course_id: str | None = None,
+    status: str | None = None,
+) -> list:
+    """表1 选课表列表（按课程/状态过滤）；rejected/superseded 彻底隐藏由上游数据层保证。"""
+    return _call(request, _tracker(request).list_selections, course_id, status)
+
+
+@router.get("/selections/{selection_id}")
+def get_selection(selection_id: str, request: Request) -> dict:
+    """表1 套书详情（含该条目表2 册明细列表）。"""
+    return _call(request, _tracker(request).get_selection, selection_id)
+
+
+@router.post("/selections/{selection_id}/confirm")
+def confirm_selection(selection_id: str, body: SelectionStateBody, request: Request) -> dict:
+    """表1 候选→确认入书单（可选评审建议 note）。"""
+    return _call(request, _tracker(request).confirm_selection, selection_id, body.note)
+
+
+@router.post("/selections/{selection_id}/backup")
+def backup_selection(selection_id: str, body: SelectionStateBody, request: Request) -> dict:
+    """表1 候选→备选（可选评审建议 note，可转正/放弃）。"""
+    return _call(request, _tracker(request).backup_selection, selection_id, body.note)
+
+
+@router.post("/selections/{selection_id}/reject")
+def reject_selection(selection_id: str, body: SelectionRejectBody, request: Request) -> dict:
+    """表1 否定（reason 必填 422，可选 note）；rejected 终态彻底隐藏。"""
+    return _call(request, _tracker(request).reject_selection, selection_id, body.reason, body.note)
+
+
+@router.post("/selections/{selection_id}/supersede")
+def supersede_selection(selection_id: str, body: SupersedeBody, request: Request) -> dict:
+    """表1 confirmed→superseded（被新版本替代，reason 必填）；旧版本前端不再可见。"""
+    return _call(request, _tracker(request).supersede_selection, selection_id, body.reason)
+
+
+@router.get("/resources/{selection_id}/downloads")
+def list_selection_downloads(selection_id: str, request: Request) -> list:
+    """表2 册级明细（按 selection_id 过滤）；rejected/failed 默认过滤由上游数据层保证。"""
+    return _call(request, _tracker(request).list_selection_downloads, selection_id)
+
+
+@router.post("/downloads")
+def create_download_candidate(body: DownloadCreateBody, request: Request) -> list:
+    """表2 新建候选册（下载预登记，先登记再下载）；vol 省略时上游按表1 vols 生成全部候选册。"""
+    return _call(
+        request,
+        _tracker(request).create_download_candidate,
+        body.selection_id,
+        body.vol,
+        body.file_hint,
+    )
+
+
+@router.post("/downloads/{download_id}/approve")
+def approve_download(download_id: str, request: Request) -> dict:
+    """表2 册级验收通过（审理达预期）。"""
+    return _call(request, _tracker(request).approve_download, download_id)
+
+
+@router.post("/downloads/{download_id}/reject")
+def reject_download(download_id: str, body: DownloadRejectBody, request: Request) -> dict:
+    """表2 册级否定（reason 必填 422，硬删 + 留痕）。"""
+    return _call(request, _tracker(request).reject_download, download_id, body.reason)
+
+
+@router.post("/downloads/{download_id}/register")
+def register_download(download_id: str, body: DownloadRegisterBody, request: Request) -> dict:
+    """表2 人工下载登记（数据根内相对路径，校验后 downloaded）。"""
+    return _call(request, _tracker(request).register_download, download_id, body.relative_path)
+
+
+@router.get("/downloads/{download_id}/sources")
+def list_download_sources(download_id: str, request: Request) -> list:
+    """表3 渠道尝试列表（详情弹窗）；失败尝试留痕不展示由上游过滤。"""
+    return _call(request, _tracker(request).list_download_sources, download_id)

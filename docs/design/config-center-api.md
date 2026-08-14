@@ -118,17 +118,28 @@ catalogs / resources / tasks 语义 API 归 8900 所有，内部经 TrackerClien
 | 端点 | 语义 | 内部适配 |
 | --- | --- | --- |
 | `GET /catalogs/{course_id}` | 课程目录（知识点树主数据源） | TrackerClient.get_catalog（8901 GET /catalogs/{course_id}） |
-| `GET /resources?status=&course_id=&kind=&language=` | 资源清单（过滤透传） | TrackerClient.list_resources |
-| `GET /resources/{id}` | 资源详情 | TrackerClient.get_resource |
-| `GET /resources/{id}/file` | PDF 预览流（content-type 透传，供 iframe） | TrackerClient.get_resource_file（原始响应转发） |
-| `POST /resources/{id}/confirm` | 人工确认下载（candidate/backup→confirmed） | TrackerClient.confirm_resource |
-| `POST /resources/{id}/backup` | 人工评估「备选」 | TrackerClient.backup_resource |
-| `POST /resources/{id}/approve` | 验收通过（downloaded→approved） | TrackerClient.approve_resource |
-| `POST /resources/{id}/reject` `{"reason"}` | 拒绝（reason 必填，8900 校验 422） | TrackerClient.reject_resource |
-| `POST /resources/{id}/register` | 人工下载登记（pending_manual→downloaded） | TrackerClient.register_resource |
 | `GET /tasks` / `GET /tasks/{id}` | 任务列表与轮询 | TrackerClient.list_tasks / get_task |
-| `POST /tasks/catalog/evaluate` `{"course_id"}` | 按课程批量评估（缺省=全目录） | TrackerClient.create_evaluate |
-| `POST /tasks/books/download` `{"resource_id"}` | 创建下载任务 | TrackerClient.create_download |
+
+> 旧 `/resources` 清单/详情/预览/状态机端点与 `/tasks/catalog/evaluate`、`/tasks/books/download`
+> 已随 QED-030（qt_resources 退役）移除，本表不再登记。
+
+> 三表语义 API（qt_selections / qt_downloads / qt_sources）契约事实源为
+> [downloads-three-table-model.md](downloads-three-table-model.md) §3.2，本表登记其 8900 端点。
+
+| 端点 | 语义 | 内部适配 |
+| --- | --- | --- |
+| `GET /selections?course_id=&status=` | 表1 选课表列表（rejected/superseded 彻底隐藏由上游数据层保证） | TrackerClient.list_selections |
+| `GET /selections/{id}` | 表1 套书详情（含表2 册明细） | TrackerClient.get_selection |
+| `POST /selections/{id}/confirm` `{"note"}` | 表1 候选→确认入书单 | TrackerClient.confirm_selection |
+| `POST /selections/{id}/backup` `{"note"}` | 表1 候选→备选（可转正/放弃） | TrackerClient.backup_selection |
+| `POST /selections/{id}/reject` `{"reason","note"}` | 表1 否定（reason 必填 422；终态彻底隐藏） | TrackerClient.reject_selection |
+| `POST /selections/{id}/supersede` `{"reason"}` | 表1 confirmed→superseded（被新版本替代） | TrackerClient.supersede_selection |
+| `GET /resources/{id}/downloads` | 表2 册级明细（按 selection_id；rejected/failed 默认过滤） | TrackerClient.list_selection_downloads |
+| `POST /downloads` `{"selection_id","vol","file_hint"}` | 表2 新建候选册（下载预登记；vol 省略按表1 vols 生成） | TrackerClient.create_download_candidate |
+| `POST /downloads/{id}/approve` | 表2 册级验收通过 | TrackerClient.approve_download |
+| `POST /downloads/{id}/reject` `{"reason"}` | 表2 册级否定（reason 必填 422，硬删+留痕） | TrackerClient.reject_download |
+| `POST /downloads/{id}/register` `{"relative_path"}` | 表2 人工下载登记（candidate→downloaded） | TrackerClient.register_download |
+| `GET /downloads/{id}/sources` | 表3 渠道尝试列表（详情弹窗） | TrackerClient.list_download_sources |
 
 **错误映射**：8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409
 处理生效）；8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，

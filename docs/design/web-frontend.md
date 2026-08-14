@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-11
+最后更新：2026-08-14
 关联代码：`web/index.html`、`web/app.js`、`web/style.css`
 关联测试：`tests/test_web.py`
 关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0007-qed-engine-backend-gateway.md`
@@ -14,8 +14,15 @@
 见[learning-center.md](learning-center.md)（Draft）——本文件描述**当前实现**，学习中心描述
 **目标形态**，冲突时以各自状态标注为准。
 
+> 十七期（2026-08-14，ARCH-010）：**文档下载管理数据层切换三表**（表1 选课条目 / 表2 册级
+> 明细 / 表3 渠道来源），前端对齐契约以
+> [downloads-three-table-model.md](downloads-three-table-model.md) §4 为事实源——树第三层为
+> 表1 条目（tree-selection）、课程面板为套书卡 + 册明细展开、步骤条四步语义（① 选择→② 评估→
+> ③ 下载→④ 审理）、旧 /resources 与「开始下载」废除。本文件下文的历史期描述（资源卡、
+> 配套对并排、/resources 端点等）在十七期后不再适用，保留仅作演进沿革。
+
 - 原生静态单页应用（无构建步骤），`python -m http.server 8903 --directory web` 直接托管；
-  **浏览器只连 8900**（ADR 0007 唯一入口：配置域横幅 + 数据域 catalogs/resources/tasks +
+  **浏览器只连 8900**（ADR 0007 唯一入口：配置域横幅 + 数据域 catalogs/selections/tasks +
   服务域 /services 全部经 8900，内部适配 8901/8902），无后端代理、浏览器不直连 8901/8902。
 - 组成：`web/index.html`（页面外壳）、`web/app.js`（hash 路由与数据渲染）、`web/style.css`（样式）。
 
@@ -74,16 +81,16 @@
   ② **树→筛选器单向联动**：点领域→领域筛选=该领域、课程清空；点课程→领域=所属领域、
   课程=该课程（`courseDomain` 映射），点书籍不改筛选；③ **课程筛选项随领域收窄**（领域已选时
   只列该领域课程）；
-**十三期：控制台化**——选中课程后面板顶部出现**课程操作条**（`course-console`）：「① 搜索书籍」
-   按钮（按选中课程发起 AI 搜索评估，8900 `/tasks/catalog/evaluate`，不选课程提示先选课）+
-  **步骤进度条**（搜索→确认→下载→验收，idle/进行/完成 三态，1s 任务轮询自动刷新）；
+**十三期：控制台化**——选中课程后面板顶部出现**课程操作条**（`course-console`）：「② 评估书单」
+    按钮（刷新该课程表1 书单；AI 搜索评估任务已随 QED-030 退役，评估=人工三态决策）+
+  **步骤进度条**（选择→评估→下载→审理，idle/进行/完成 三态）；
   工具栏全局「触发评估」按钮移除（评估以课程为单位操作）；树行点击已修复事件冒泡
   （点课程不再误选为领域，十三期回归守护）；
 **十四期（人工评审优化，ARCH-006）**：① 知识点界面尾部「评估任务」区块（任务卡片列表 +
    任务状态/类型/课程三个筛选器）移除（任务数据仅用于步骤条搜索态，8900 `/tasks` 仍拉取）；
    ② 资源卡三态按钮（确定/备选/否定）旁新增**评审建议输入框**（`review-note`，选填），
-   随三态一并提交 `note` 参数（8900 confirm/backup/reject 落 `qt_resources.review_note`），
-   卡片与详情弹窗展示既有建议（`review_note` 字段）；
+   随三态一并提交 `note` 参数（8900 confirm/backup/reject 落表1 `note`/表2 `review_note`），
+   卡片与详情弹窗展示既有建议；
   **十五期（ARCH-007）**：① 界面名回归——侧边栏菜单与页面标题改回**「文档下载管理」**
   （树侧栏头保留「知识点」）；② 进入默认选中「数学」领域（`loadTree` 完成后无选择时
   `selectNode("domain", "数学")`）；③ 领域级右侧按课程分页（`PAGE_SIZE = 3`，`coursePagerHtml`
@@ -126,9 +133,9 @@ DeepSeek 蓝黑风格，非纯黑：背景 `#0e1424` + 顶部蓝紫光晕；卡�
 - 8900 端点：
   - 配置域：`/api/v1/health`、`/config/keys`、`/config/models`、`/config/database`、`/config/llm-status`；
   - 服务域：`/services`（三服务状态快照）；
-  - 数据域：`/resources`、`/tasks`、`/tasks/catalog/evaluate`、`/confirm`、`/backup`、`/reject`、
-    `/approve`、`/file`、`/tasks/books/download`、`/catalogs/math-qe`（路径沿革自 8901 资源契约，
-    8900 背书后语义归数据域，详见[配置中心 API 契约](config-center-api.md)）；
+  - 数据域：`/selections`、`/downloads`、`/sources`、`/tasks`、`/confirm`、`/backup`、`/reject`、
+    `/approve`、`/register`、`/catalogs/math-qe`（三表端点语义归 8900 数据域，旧 `/resources`
+    端点随 QED-030 退役，详见[配置中心 API 契约](config-center-api.md)）；
 - 路由：`#/admin`（别名直达仪表盘）、`#/admin/dashboard`、`#/admin/downloads`、`#/admin/parsing`、
   `#/admin/compare`；
 - 十四期守护：`review-note`/`review_note` 在 app.js、`task-list`/任务筛选器不在 index.html；

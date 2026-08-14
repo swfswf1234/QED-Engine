@@ -13,15 +13,22 @@
  * 七期（2026-08-06）：修复管理视图互斥显示（.view 显隐规则）；界面改名
  * 仪表大盘 / 文档下载管理 / 文档解析进度（树根同步改名）。
  * 重构轮（2026-08-10）：前端唯一入口 8900（ADR 0007），健康面板改经 /services。
+ * 十七期（2026-08-14，downloads-three-table）：文档下载管理主数据源切换三表——
+ * 表1 qt_selections（套书/选课条目，树第三层叶子）、表2 qt_downloads（册级明细，
+ * 套书卡内展开）、表3 qt_sources（渠道，详情弹窗）；旧 /resources 资源卡与
+ * 「开始下载」自动任务废除（表2 先登记候选册 → 人工下载 → register 登记 → approve 验收）；
+ * 步骤条四步语义：① 选择 → ② 评估 → ③ 下载 → ④ 审理（下载后绝对路径人工审理）。
  * 视觉规范：DeepSeek 蓝黑风格，样式见 style.css。 */
 
-/* 唯一入口（ADR 0007）：8903 只连 8900。数据域（catalogs/resources/tasks）与
+/* 唯一入口（ADR 0007）：8903 只连 8900。数据域（catalogs/selections/tasks）与
  * 服务域（/services）均为 8900 自有契约，内部适配 8901/8902；浏览器不再直连子服务。 */
 const API_BASE = "http://127.0.0.1:8900/api/v1";
 const CONFIG_BASE = API_BASE;
 const TRACKER_BASE = API_BASE;
 
-/* 端点引用表（tests/test_web.py 守护与契约一致性，勿随意改名） */
+/* 端点引用表（tests/test_web.py 守护与契约一致性，勿随意改名）。
+ * 十七期：selections/downloads/sources 三表端点；旧 /resources、旧自动下载任务与
+ * AI 搜索评估任务端点（QED-030）已退役移除。 */
 const ENDPOINTS = {
     health: "/api/v1/health",
     services: "/services",
@@ -29,15 +36,14 @@ const ENDPOINTS = {
     models: "/config/models",
     database: "/config/database",
     llmStatus: "/config/llm-status",
-    resources: "/resources",
+    selections: "/selections",
+    downloads: "/downloads",
+    sources: "/sources",
     tasks: "/tasks",
-    evaluate: "/tasks/catalog/evaluate",
     confirm: "/confirm",
     backup: "/backup",
     reject: "/reject",
     approve: "/approve",
-    file: "/file",
-    download: "/tasks/books/download",
     register: "/register",
 };
 
@@ -103,21 +109,19 @@ const STATUS_LABEL = {
 /* ---------- 按钮弹层筛选器（五期：替代原生 select，浅底深字） ---------- */
 
 const state = {
-    resources: [],
+    selections: [], // 表1 条目（套书/选课条目，含 downloads 册明细 + download_stats 聚合）
     tasks: [],
-    catalog: [], // catalog targets（8900 /catalogs/math-qe）
-    selection: null, // {kind: "domain"|"course"|"target", id: string}
+    catalog: [], // catalog targets（8900 /catalogs/math-qe，领域/课程结构与课程名）
+    selection: null, // {kind: "domain"|"course"|"selection", id: string}
     filters: { domain: "", course: "", status: "" }, // 资源筛选（与树选择 AND 叠加）
     pollTimer: null,
     modalAction: null, // {type, id}
     coursePage: 0, // 十五期：领域视图课程分页页码
 };
 
-/* 筛选器选项定义（值 → 标签；空串 = 全部） */
+/* 筛选器选项定义（值 → 标签；空串 = 全部）。十七期：按表1 生命周期（候选/备选/已确认） */
 const RESOURCE_STATUS_OPTIONS = [
     ["", "全部"], ["candidate", "候选"], ["backup", "备选"], ["confirmed", "已确认"],
-    ["downloading", "下载中"], ["downloaded", "已下载"], ["approved", "已验收"],
-    ["rejected", "已拒绝"], ["failed", "失败"], ["pending_manual", "待人工补充"],
 ];
 
 /* 渲染弹层选项：按钮 + popover 菜单 */
@@ -199,12 +203,6 @@ function esc(text) {
     return div.innerHTML;
 }
 
-function courseOf(item) {
-    const ref = item.catalog_ref;
-    if (ref && ref.course_id) return ref.course_id;
-    return item.course_id || "—";
-}
-
 /* ---------- 路由 ---------- */
 
 function currentRoute() {
@@ -236,7 +234,7 @@ function showAdminView(view) {
     if (view === "dashboard") loadDashboard();
     else if (view === "downloads") {
         loadTree();
-        loadResources();
+        loadSelections();
         loadTasks();
         populateCourseSelects();
     }
@@ -301,25 +299,25 @@ async function loadDashboard() {
     let discoverDone = 0;
     let confirmDone = 0;
     try {
-        const [catalog, resources] = await Promise.all([
+        const [catalog, selections] = await Promise.all([
             fetchJson(TRACKER_BASE + "/catalogs/math-qe"),
-            fetchJson(TRACKER_BASE + ENDPOINTS.resources),
+            fetchJson(TRACKER_BASE + ENDPOINTS.selections),
         ]);
-        state.resources = resources;
+        state.selections = selections;
         // 分母：catalog targets 去重 course_id
         const courseIds = new Set((catalog.targets || []).map((t) => t.course_id).filter(Boolean));
         totalCourses = courseIds.size;
-        // 课程聚合：每门课的资源状态集合
+        // 课程聚合：每门课的表1 条目状态集合（十七期：资源状态 → 三表条目状态）
         const byCourse = {};
-        for (const item of resources) {
-            const cid = courseOf(item);
+        for (const item of selections) {
+            const cid = item.course_id;
             (byCourse[cid] = byCourse[cid] || []).push(item.status);
         }
         for (const cid of courseIds) {
             const statuses = byCourse[cid] || [];
-            if (statuses.length) discoverDone += 1; // 宽松：有任一资源
-            if (statuses.length && !statuses.some((s) => s === "candidate" || s === "pending_manual")) {
-                confirmDone += 1; // 严格：无待评估资源
+            if (statuses.length) discoverDone += 1; // 宽松：有任一表1 条目
+            if (statuses.length && !statuses.some((s) => s === "candidate")) {
+                confirmDone += 1; // 严格：无待评估（candidate）条目
             }
         }
     } catch (_) {
@@ -364,15 +362,28 @@ async function loadHealthPanel() {
     const mk = healthStatusMarkup();
     if (!panel || !servicesBox || !llmBox || !dbBox) return;
     // 后台服务：经 8900 /services 快照获取三服务状态（前端唯一入口，不直连 8901/8902）
+    // 十六期（service-control 前端契约）：每行按状态渲染操作按钮（online→停止/重启，offline→启动，
+    // starting/stopping→禁用「操作中…」）；config（8900 自身）不经控制中心启停 → 无按钮。
     try {
         const data = await fetchJson(CONFIG_BASE + ENDPOINTS.services);
         servicesBox.innerHTML = data.services.map((s) => {
             const name = s.label || SERVICE_LABELS[s.name] || s.name;
-            if (s.status === "online") return mk.ok(name);
+            const rowCls = s.status === "online" ? "ok" : s.status === "offline" ? "bad" : "dim";
             const cause = s.status === "offline"
                 ? "离线：" + (s.reason || "无法访问")
-                : s.status + (s.reason ? "：" + s.reason : "");
-            return mk.bad(name, cause);
+                : s.status === "online" ? "" : s.status + (s.reason ? "：" + s.reason : "");
+            let acts = "";
+            if (s.name !== "config") {
+                if (s.status === "online") {
+                    acts = `<button class="btn btn-sm" data-svc="${esc(s.name)}" data-service-act="restart">重启</button>`
+                        + `<button class="btn btn-sm danger" data-svc="${esc(s.name)}" data-service-act="stop">停止</button>`;
+                } else if (s.status === "offline") {
+                    acts = `<button class="btn btn-sm primary" data-svc="${esc(s.name)}" data-service-act="start">启动</button>`;
+                } else {
+                    acts = `<span class="h-detail">操作中…</span>`;
+                }
+            }
+            return `<div class="health-item ${rowCls}"><span class="h-dot"></span><span class="h-label">${esc(name)}</span>${cause ? `<span class="h-detail">${esc(cause)}</span>` : ""}<span class="service-acts">${acts}</span></div>`;
         }).join("");
     } catch (err) {
         servicesBox.innerHTML = mk.bad("QED 管理服务（后台管理服务）", "离线：" + (err.message || "无法访问"));
@@ -402,34 +413,33 @@ async function loadHealthPanel() {
     }
 }
 
-/* ---------- 知识点（三层知识链路树 + 事务面板） ---------- */
+/* ---------- 知识点（三层知识链路树 + 事务面板，十七期：数据源 = 表1 条目） ---------- */
 
-/* 五期：资源所属学科领域（与树领域层一致：catalog_id → 学科名） */
-function itemDomain(item) {
-    const ref = item.catalog_ref || {};
-    return domainOf(ref.catalog_id || "math-qe");
+function courseOf(item) {
+    return item.course_id || "—";
 }
 
 function scopeMatches(item, selection) {
     if (!selection) return true;
-    if (selection.kind === "domain") return itemDomain(item) === selection.id;
+    if (selection.kind === "domain") return courseDomain(item.course_id) === selection.id;
     if (selection.kind === "course") return courseOf(item) === selection.id;
-    if (selection.kind === "target") {
-        const ref = item.catalog_ref || {};
-        if (ref.target_id) return ref.target_id === selection.id;
-        return false; // target 级只匹配带 catalog_ref 的评估资源
-    }
+    if (selection.kind === "selection") return item.selection_id === selection.id;
     return true;
 }
 
-async function loadResources() {
+async function loadSelections() {
     try {
-        state.resources = await fetchJson(TRACKER_BASE + ENDPOINTS.resources);
+        state.selections = await fetchJson(TRACKER_BASE + ENDPOINTS.selections);
     } catch (err) {
         $("resource-list").textContent = "QED-Tracker 8901 离线：" + err.message;
         return;
     }
     renderPanel();
+}
+
+/* 空态提示：该范围暂无表1 条目（待评估），提示人工评估 */
+function emptyStateHtml() {
+    return '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无表1 条目：待评估，点击「② 评估书单」刷新或经 CLI/三表接口录入候选）</div>';
 }
 
 function renderPanel() {
@@ -438,31 +448,19 @@ function renderPanel() {
     const domain = state.filters.domain;
     const course = state.filters.course;
     const sel = state.selection;
-    let items = state.resources.filter(
+    let items = state.selections.filter(
         (it) =>
             (!status || it.status === status) &&
-            (!domain || itemDomain(it) === domain) &&
+            (!domain || courseDomain(it.course_id) === domain) &&
             (!course || courseOf(it) === course) &&
             scopeMatches(it, sel)
     );
-    // 按课程评估视图（QED-017 中文优先裁决）：中文候选排前，组内按 target 分组、评分降序
-    if (sel && sel.kind === "course") {
-        items = [...items].sort((a, b) => {
-            const zhA = a.language === "zh" ? 0 : 1;
-            const zhB = b.language === "zh" ? 0 : 1;
-            if (zhA !== zhB) return zhA - zhB;
-            const targetA = (a.catalog_ref && a.catalog_ref.target_id) || "";
-            const targetB = (b.catalog_ref && b.catalog_ref.target_id) || "";
-            if (targetA !== targetB) return targetA.localeCompare(targetB);
-            return (Number(b.llm_evaluation && b.llm_evaluation.score) || 0) - (Number(a.llm_evaluation && a.llm_evaluation.score) || 0);
-        });
-    }
     const ctx = $("panel-context");
-    if (!sel) ctx.textContent = "全目录（未选择节点，展示全部资源）";
+    if (!sel) ctx.textContent = "全目录（未选择节点，展示全部表1 条目）";
     else if (sel.kind === "domain") ctx.textContent = "领域：" + sel.id;
-    else if (sel.kind === "course") ctx.textContent = "课程：" + sel.id + "（评估视图：中文优先）";
-    else ctx.textContent = "书籍目标：" + sel.id;
-    // 十三期：控制台化——选中课程时显示课程操作条（① 搜索书籍 + 步骤进度）
+    else if (sel.kind === "course") ctx.textContent = "课程：" + sel.id;
+    else ctx.textContent = "套书：" + sel.id;
+    // 十三期/十七期：控制台化——选中课程时显示课程操作条（② 评估书单 + 步骤进度）
     const consoleEl = $("course-console");
     if (consoleEl) {
         if (sel && sel.kind === "course") {
@@ -472,105 +470,34 @@ function renderPanel() {
             consoleEl.classList.add("hidden");
         }
     }
-    // 十二期：有选中范围时展示该范围全部书籍（未生成资源的显示「待评估」占位）
-    const rangeTargets = rangeTargetsOf(sel);
-    // 十五期：领域级按课程分页视图（配套教材/习题集并排）；课程级/书籍级保持现状
-    if (sel && sel.kind === "domain" && rangeTargets) {
-        renderPanelByCourses(items, rangeTargets);
-        return;
-    }
-    if (rangeTargets) {
-        renderPanelByTargets(items, rangeTargets);
+    // 十五期：领域级按课程分页视图；课程级/套书级按条目卡列表
+    if (sel && sel.kind === "domain") {
+        renderPanelByCourses(items);
         return;
     }
     if (!items.length) {
-        $("resource-list").innerHTML = '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无资源记录）</div>';
+        $("resource-list").innerHTML = emptyStateHtml();
         return;
     }
-    // 按 target 分组成段，组内卡片网格
-    const groups = new Map();
-    for (const it of items) {
-        const key = (it.catalog_ref && it.catalog_ref.target_id) || "";
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(it);
-    }
-    let html = "";
-    for (const [key, list] of groups) {
-        if (key) html += `<div class="eval-group-title">${esc(key)}</div>`;
-        html += `<div class="card-grid">${list.map(resourceCard).join("")}</div>`;
-    }
-    $("resource-list").innerHTML = html;
-}
-
-/* 选中范围的全部书籍目标（十二期）：领域→其下所有课程书籍；课程→全部书籍；书籍→单本；
- * 无选中（全目录）返回 null（保持只列资源）。按学习深度顺序排序。 */
-function rangeTargetsOf(sel) {
-    if (!sel || !state.catalog.length) return null;
-    let targets = [];
-    if (sel.kind === "domain") {
-        targets = state.catalog.filter((t) => domainOf(t.catalog_id || "math-qe") === sel.id);
-    } else if (sel.kind === "course") {
-        targets = state.catalog.filter((t) => t.course_id === sel.id);
-    } else if (sel.kind === "target") {
-        targets = state.catalog.filter((t) => t.id === sel.id);
-    } else {
-        return null;
-    }
-    return targets.sort((a, b) => {
+    // 课程级/套书级/全目录：套书卡列表（按课程 + 套号排序）
+    const list = [...items].sort((a, b) => {
         const ca = COURSE_ORDER.indexOf(a.course_id);
         const cb = COURSE_ORDER.indexOf(b.course_id);
-        return ((ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb)) || a.id.localeCompare(b.id);
+        return ((ca === -1 ? 999 : ca) - (cb === -1 ? 999 : cb)) || setNoOf(a).localeCompare(setNoOf(b));
     });
+    $("resource-list").innerHTML = `<div class="card-grid">${list.map(selectionCard).join("")}</div>`;
 }
 
-/* 按范围全部书籍渲染：每组一本目标，有资源出卡片、无资源出「待评估」占位卡 */
-function renderPanelByTargets(items, targets) {
-    const byTarget = new Map();
-    for (const it of items) {
-        const tid = (it.catalog_ref && it.catalog_ref.target_id) || "";
-        if (!byTarget.has(tid)) byTarget.set(tid, []);
-        byTarget.get(tid).push(it);
-    }
-    let html = "";
-    for (const t of targets) {
-        const list = byTarget.get(t.id) || [];
-        const title = `${esc(t.title)}（${esc((t.authors || []).join("、") || "佚名")}）【${esc(bookTypeLabel(t.kind))}】`;
-        html += `<div class="eval-group-title">${title}</div>`;
-        if (list.length) {
-            html += `<div class="card-grid">${list.map(resourceCard).join("")}</div>`;
-        } else {
-            html += `<div class="card-grid"><div class="card card-pending">
-                <div class="card-head">
-                    <div><div class="card-title">${esc(t.title)}</div>
-                    <div class="card-sub">${esc((t.authors || []).join("、") || "作者未知")}</div></div>
-                    <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
-                </div>
-                <div class="verdict">待评估：尚未生成候选资源，点击「① 搜索书籍」后由 AI 检索候选。</div>
-            </div></div>`;
-        }
-    }
-    $("resource-list").innerHTML = html || '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无书籍）</div>';
-}
-
-/* ---------- 十五期：领域级按课程分页视图 + 配套对并排 ---------- */
+/* ---------- 十五期：领域级按课程分页视图（十七期：课程行内嵌表1 套书卡） ---------- */
 
 /* 领域视图每页课程数（十五期 D3）：最多 3 门课程一页，防右侧面板过长 */
 const PAGE_SIZE = 3;
 
-/* 配套对判定（十五期 D4）：同课程内 kind=book 与 kind=exercise 作者集相同（排序后 join、非空）
- * 视为配套（如 01 陈纪修 教材/习题集、02 Axler、04 周民强、09 冯克勤、11 严士健）；
- * 返回 Map：作者键 -> { books: [target], exercises: [target] }；无作者或有单侧缺位的键不视为配套。 */
-function pairedCourseTargets(courseTargets) {
-    const groups = new Map();
-    for (const t of courseTargets) {
-        const authors = (t.authors || []).slice().sort().join("、");
-        if (!authors) continue; // 无作者的习题/资料不参与配套
-        if (!groups.has(authors)) groups.set(authors, { books: [], exercises: [] });
-        const g = groups.get(authors);
-        if (t.kind === "book") g.books.push(t);
-        else if (t.kind === "exercise") g.exercises.push(t);
-    }
-    return groups;
+/* 课程学习深度排序（十一期 COURSE_ORDER 的通用比较器） */
+function courseOrderCmp(a, b) {
+    const ia = COURSE_ORDER.indexOf(a);
+    const ib = COURSE_ORDER.indexOf(b);
+    return ((ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)) || a.localeCompare(b);
 }
 
 /* 分页控件（十五期 D3）：◀ 上一页 / 页码 / 下一页 ▶ */
@@ -583,73 +510,112 @@ function coursePagerHtml(page, pages) {
     </div>`;
 }
 
-/* 当前选中领域的课程数（十五期分页用）；未选领域返回空数组 */
+/* 当前选中领域的课程数（十五期分页用，十七期：按表1 条目所属课程推导）；未选领域返回空数组 */
 function coursesOfSelectedDomain() {
     const sel = state.selection;
-    if (!sel || sel.kind !== "domain" || !state.catalog.length) return [];
-    return state.catalog.filter((t) => domainOf(t.catalog_id || "math-qe") === sel.id);
+    if (!sel || sel.kind !== "domain") return [];
+    return [...new Set(state.selections.filter((it) => courseDomain(it.course_id) === sel.id).map((it) => it.course_id))];
 }
 
-/* 领域级渲染（十五期 D3/D4）：按课程分组（COURSE_ORDER 学习深度排序）→ 分页切片 →
- * 每门课程一行：配套对（教材+习题集）横向并排，非配套单卡单独展示。 */
-function renderPanelByCourses(items, targets) {
+/* 领域级渲染（十五期 D3 + 十七期三表）：按课程分组（学习深度排序）→ 分页切片 →
+ * 每门课程一行（course-row）：课程名 + 完成徽标 + 该课程表1 套书卡列表。 */
+function renderPanelByCourses(items) {
     const byCourse = new Map();
-    for (const t of targets) {
-        if (!byCourse.has(t.course_id)) byCourse.set(t.course_id, []);
-        byCourse.get(t.course_id).push(t);
+    for (const it of items) {
+        if (!byCourse.has(it.course_id)) byCourse.set(it.course_id, []);
+        byCourse.get(it.course_id).push(it);
     }
-    const courseIds = [...byCourse.keys()].sort((a, b) => {
-        const ia = COURSE_ORDER.indexOf(a);
-        const ib = COURSE_ORDER.indexOf(b);
-        return ((ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)) || a.localeCompare(b);
-    });
+    const courseIds = [...byCourse.keys()].sort(courseOrderCmp);
     const pages = Math.max(1, Math.ceil(courseIds.length / PAGE_SIZE));
     if (state.coursePage >= pages) state.coursePage = pages - 1;
     if (state.coursePage < 0) state.coursePage = 0;
     const pageCourseIds = courseIds.slice(state.coursePage * PAGE_SIZE, (state.coursePage + 1) * PAGE_SIZE);
-    const byTarget = new Map();
-    for (const it of items) {
-        const tid = (it.catalog_ref && it.catalog_ref.target_id) || "";
-        if (!byTarget.has(tid)) byTarget.set(tid, []);
-        byTarget.get(tid).push(it);
-    }
-    const targetCard = (t) => {
-        const list = byTarget.get(t.id) || [];
-        if (list.length) return list.map(resourceCard).join("");
-        return `<div class="card card-pending">
-            <div class="card-head">
-                <div><div class="card-title">${esc(t.title)}</div>
-                <div class="card-sub">${esc((t.authors || []).join("、") || "作者未知")}</div></div>
-                <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
-            </div>
-            <div class="verdict">待评估：尚未生成候选资源，点击「① 搜索书籍」后由 AI 检索候选。</div>
-        </div>`;
-    };
     let html = "";
     for (const cid of pageCourseIds) {
-        const ts = byCourse.get(cid);
+        const list = byCourse.get(cid);
         const courseName = (state.catalog.find((x) => x.course_id === cid) || {}).course_name || cid;
         const done = courseCompletion(cid);
-        const badge = done.done
-            ? `<span class="course-done">✅ 已完成</span>`
-            : `<span class="course-progress">教材 ${done.bookApproved}/${done.bookTotal} · 习题集 ${done.exApproved}/${done.exTotal}</span>`;
+        const badge = courseDoneBadge(done);
         html += `<div class="course-row">
-            <div class="course-row-head"><span class="course-row-name">${esc(courseName)}</span> ${badge}</div>`;
-        // 配套对并排（十五期 D4）：同作者 book+exercise 各取卡并排一行；剩余目标单卡展示
-        const paired = pairedCourseTargets(ts);
-        const pairedKeys = [...paired.keys()].filter((k) => paired.get(k).books.length && paired.get(k).exercises.length);
-        const pairedHtml = pairedKeys.map((k) => {
-            const g = paired.get(k);
-            const cards = [...g.books, ...g.exercises].map(targetCard).join("");
-            return `<div class="paired-row">${cards}</div>`;
-        }).join("");
-        if (pairedHtml) html += pairedHtml;
-        const alone = ts.filter((t) => !pairedKeys.some((k) => paired.get(k).books.includes(t) || paired.get(k).exercises.includes(t)));
-        for (const t of alone) html += `<div class="card-grid">${targetCard(t)}</div>`;
-        html += `</div>`;
+            <div class="course-row-head"><span class="course-row-name">${esc(courseName)}</span> ${badge}</div>
+            ${renderCourseSets(list)}
+        </div>`;
     }
     html += coursePagerHtml(state.coursePage, pages);
-    $("resource-list").innerHTML = html || '<div class="empty-state"><div class="emoji">📭</div>（该范围暂无书籍）</div>';
+    $("resource-list").innerHTML = html || emptyStateHtml();
+}
+
+/* 二十期（用户裁决）：右侧每套一行——套行 = 一行介绍（book-intro 书名合并，一套一名
+ * 不写卷几）+ 册明细列表直接展示（该套全部册，volumeRow 带书名）；已确认无套号归
+ * 「已确认 · 未编套」行；候选/备选归「待评估」行（保留书卡，含三态操作）。 */
+function renderCourseSets(list) {
+    const sets = new Map();
+    const unreconciled = [];
+    const pending = [];
+    for (const it of list) {
+        const sn = setNoOf(it);
+        if (it.status === "confirmed") {
+            if (sn) {
+                if (!sets.has(sn)) sets.set(sn, []);
+                sets.get(sn).push(it);
+            } else {
+                unreconciled.push(it);
+            }
+        } else {
+            pending.push(it);
+        }
+    }
+    const setKeys = [...sets.keys()].sort((a, b) => (Number(a) || 0) - (Number(b) || 0) || String(a).localeCompare(b));
+    let html = "";
+    for (const k of setKeys) html += setRowHtml(`套${k}`, sets.get(k), false, k);
+    if (unreconciled.length) html += setRowHtml("已确认 · 未编套", unreconciled, false, null);
+    if (pending.length) html += setRowHtml("待评估", pending, true, null);
+    return html;
+}
+
+function setRowHtml(label, items, isPending = false, setNo = null) {
+    if (isPending) {
+        // 待评估：书卡一排（三态操作仍在卡上）
+        return `<div class="set-row pending">
+            <div class="set-head">
+                <span class="set-label">${esc(label)}</span>
+                <span class="set-roles">候选中</span>
+            </div>
+            <div class="card-grid">${items.map(selectionCard).join("")}</div>
+        </div>`;
+    }
+    // 已确认套：一行介绍（书名合并）+ 册明细列表（全部册，volumeRow 带书名）
+    const intro = items.map(bookIntroHtml).join("");
+    const vols = [];
+    const createBtns = [];
+    for (const s of items) {
+        const ds = (s.downloads || []).filter((d) => d.status !== "rejected" && d.status !== "failed");
+        for (const d of ds) vols.push(volumeRow(d, s.title));
+        if (!ds.length) {
+            createBtns.push(`<button class="btn primary" data-act="create-downloads" data-id="${esc(s.selection_id)}">${esc(shortSetTitle(s))} 新建候选册</button>`);
+        }
+    }
+    const setKey = setNo !== null && setNo !== undefined ? `${(items[0] || {}).course_id || ""}::${setNo}` : "";
+    return `<div class="set-row"${setKey ? ` data-set="${esc(setKey)}"` : ""}>
+        <div class="set-head">
+            <span class="set-label">${esc(label)}</span>
+            <span class="set-roles">${intro}</span>
+            ${createBtns.join("")}
+        </div>
+        ${vols.length ? `<ul class="volume-list set-volumes">${vols.join("")}</ul>` : '<div class="tree-empty">（该套暂无册明细）</div>'}
+    </div>`;
+}
+
+/* 二十期：套内书籍一行介绍——role《书名》（一套一名称，卷几合并，不逐卷展开） */
+function bookIntroHtml(s) {
+    const role = (s.roles && s.roles.length ? roleLabels(s.roles) : "书目");
+    return `<span class="book-intro">${esc(role)}《${esc(s.title)}》</span>`;
+}
+
+/* 跨览：selectionCard 内册明细折叠区按钮文案用（新建候选册按钮），书名截断避免按钮过宽 */
+function shortSetTitle(s) {
+    const t = s.title || "";
+    return t.length > 12 ? t.slice(0, 12) + "…" : t;
 }
 
 /* ---------- 知识点树（十一期：三层知识链路 领域→课程→书籍，学习深度排序） ---------- */
@@ -660,10 +626,10 @@ async function loadTree() {
     try {
         const catalog = await fetchJson(TRACKER_BASE + "/catalogs/math-qe");
         state.catalog = Array.isArray(catalog.targets) ? catalog.targets : [];
-        if (!state.resources.length) {
+        if (!state.selections.length) {
             try {
-                state.resources = await fetchJson(TRACKER_BASE + ENDPOINTS.resources);
-            } catch (_) { /* 资源离线不影响树结构 */ }
+                state.selections = await fetchJson(TRACKER_BASE + ENDPOINTS.selections);
+            } catch (_) { /* 数据域离线不影响树结构 */ }
         }
     } catch (err) {
         tree.innerHTML = `<div class="empty-state">QED-Tracker 8901 离线：${esc(err.message)}</div>`;
@@ -691,69 +657,134 @@ const COURSE_ORDER = [
     "13_high_dim_prob", "10_qe_prep",
 ];
 
-/* 书籍类型徽标（十一期）：kind → 显示名（book 教材 / exercise 习题集 / supplement 配套资料 / 其他 资料） */
-function bookTypeLabel(kind) {
-    if (kind === "book") return "教材";
-    if (kind === "exercise") return "习题集";
-    if (kind === "supplement") return "配套资料";
-    return "资料";
+/* ---------- 十六期/十七期（course-acquisition-flow 对齐契约 + 三表聚合）：套归属 + 版本徽标 + 两套完成判定 ---------- */
+
+/* 苏版名单（十六期）：中译版 + 作者命中名单 → 苏版徽标（菲赫金哥尔茨/吉米多维奇/费定晖/阿诺德/卓里奇） */
+const SOVIET_AUTHORS = ["菲赫金哥尔茨", "吉米多维奇", "费定晖", "阿诺德", "卓里奇"];
+
+/* 套归属（十七期）：表1 条目 set_no 权威字段（"1"~"4" / "en" / 空） */
+function setNoOf(sel) {
+    const s = sel || {};
+    return String(s.set_no || "").trim();
 }
 
-/* 课程完成判定（十一期）：≥1 本教材 + ≥1 本习题集均人工验证（approved 验收通过）才算完成 */
+/* 套标记徽标（十七期）：表1 set_no → 「套N」/「英文对照」；无套号不渲染 */
+function setBadgeHtml(sel) {
+    const sn = setNoOf(sel);
+    if (!sn) return "";
+    const label = sn === "en" ? "英文对照" : "套" + sn;
+    return `<span class="version-badge set-badge" title="套标记">${esc(label)}</span>`;
+}
+
+/* 角色徽标（十七期）：表1 roles（textbook/exercises/solutions/reference/supplement）→ 中文标签 */
+function roleLabels(roles) {
+    const map = { textbook: "教材", exercises: "习题集", solutions: "答案", reference: "参考", supplement: "配套资料" };
+    return (roles || []).map((r) => map[r] || r).join(" / ");
+}
+
+/* 版本徽标（十六期，course-acquisition-flow 对齐契约 2；十七期：字段来源兼容表1 version.language）：
+ * language 中译（zh/chi）+ 作者命中苏版名单 → 苏版；中译 → 中译本；
+ * 英文（en/eng）→ 英文版；其余 → 其他。target 与表1 条目均适用。 */
+function versionBadge(target) {
+    const t = target || {};
+    const v = t.version || {};
+    const lang = t.language || v.language || "";
+    const zh = lang === "zh" || lang === "chi";
+    const en = lang === "en" || lang === "eng";
+    const authors = (t.authors || []).join("");
+    const soviet = zh && SOVIET_AUTHORS.some((a) => authors.includes(a));
+    const label = soviet ? "苏版" : zh ? "中译本" : en ? "英文版" : "其他";
+    const cls = soviet ? "soviet" : zh ? "zh" : en ? "en" : "other";
+    return `<span class="version-badge ${cls}" title="版本徽标（中译/英文/苏版判定）">${label}</span>`;
+}
+
+/* 课程完成判定（十六期 + 十七期三表聚合，course-acquisition-flow 对齐契约 1）：
+ * 按表1 条目 set_no 聚合「套」——套完成 = 套内 ≥1 教材（roles 含 textbook 且表2 有 approved 册）
+ * + ≥1 习题集（roles 含 exercises 且表2 有 approved 册）；
+ * 完成标准：≥2 套 approved（固定两套底线）；三套及以上全部完成时 extra 提示 +N 余量；
+ * 无套号条目（如英文对照）独立成组，计入 教材/习题集 进度但不计入套数。 */
 function courseCompletion(courseId) {
-    const targets = state.catalog.filter((t) => t.course_id === courseId);
-    const approvedTargets = new Set();
-    for (const r of state.resources) {
-        const tid = (r.catalog_ref || {}).target_id;
-        if (r.status === "approved" && tid) approvedTargets.add(tid);
+    const sels = state.selections.filter((s) => s.course_id === courseId);
+    // 套分组：按 setNoOf 聚合；无套号条目独立成组
+    const groups = new Map();
+    for (const s of sels) {
+        if (s.status !== "confirmed") continue;
+        const set = setNoOf(s);
+        const key = set ? "套" + set : "独" + s.selection_id;
+        if (!groups.has(key)) groups.set(key, { set: !!set, bookT: 0, exT: 0, bookA: 0, exA: 0 });
+        const g = groups.get(key);
+        const approved = (s.download_stats || {}).approved > 0;
+        const roles = s.roles || [];
+        if (roles.includes("textbook")) { g.bookT += 1; if (approved) g.bookA += 1; }
+        if (roles.includes("exercises")) { g.exT += 1; if (approved) g.exA += 1; }
     }
-    let bookApproved = 0, bookTotal = 0, exApproved = 0, exTotal = 0;
-    for (const t of targets) {
-        if (t.kind === "book") { bookTotal += 1; if (approvedTargets.has(t.id)) bookApproved += 1; }
-        else if (t.kind === "exercise") { exTotal += 1; if (approvedTargets.has(t.id)) exApproved += 1; }
+    let setsApproved = 0, setTotal = 0, bookApproved = 0, bookTotal = 0, exApproved = 0, exTotal = 0;
+    for (const g of groups.values()) {
+        if (g.set) setTotal += 1;
+        // 十八期：进度数字只算套内（无套号条目如独立英文原版/独立习题集不掺水）
+        if (!g.set) continue;
+        bookTotal += g.bookT; exTotal += g.exT;
+        bookApproved += g.bookA; exApproved += g.exA;
+        if (g.bookT > 0 && g.exT > 0 && g.bookA >= 1 && g.exA >= 1) setsApproved += 1;
     }
-    return { done: bookTotal > 0 && exTotal > 0 && bookApproved >= 1 && exApproved >= 1, bookApproved, bookTotal, exApproved, exTotal };
+    const done = setsApproved >= 2;
+    return { done, setsApproved, setTotal, bookApproved, bookTotal, exApproved, exTotal, extra: done && setsApproved > 2 ? setsApproved - 2 : 0 };
 }
 
-/* 知识点树（十一期）：三层知识链路 领域 → 课程 → 书籍，
- * PyCharm 式交互：箭头=展开/折叠（不触发选中），名称=选中过滤面板。 */
+/* 二十期：课程徽标——三态颜色（已完成=绿 >=2 套完整 / 进行中=黄 / 未开始=无填充描边）
+ * 保留，数字明细恢复：套数 x/y · 教材 a/b · 习题集 c/d（教材/习题集只算套内）。 */
+function courseDoneBadge(done) {
+    const tag = done.setTotal > 0
+        ? `套数 ${done.setsApproved}/${done.setTotal} · 教材 ${done.bookApproved}/${done.bookTotal} · 习题集 ${done.exApproved}/${done.exTotal}`
+        : "未开始";
+    if (done.done) {
+        return `<span class="course-done">${tag}</span>`;
+    }
+    if (done.setTotal > 0 || done.bookTotal > 0 || done.exTotal > 0) {
+        return `<span class="course-progress">${tag}</span>`;
+    }
+    return `<span class="course-idle">${tag}</span>`;
+}
+
+/* 知识点树（十一期 + 十七期 + 二十期）：三层知识链路 领域 → 课程 → 套（表1 按 set_no 聚合），
+ * 套内书行（教材/习题集合并书名，一套一名不写卷几）；候选/备选仍为独立 selection 叶子；
+ * 册明细不进树（右侧套行内展示）。PyCharm 式交互：箭头=展开/折叠（不触发选中），名称=选中过滤面板。 */
 function renderTree() {
     const tree = $("domain-tree");
+    // 表1 条目按课程分组（树叶子数据源；拒绝/过时条目已由数据层过滤，前端无查看入口）
+    const byCourseSel = new Map();
+    for (const s of state.selections) {
+        if (!byCourseSel.has(s.course_id)) byCourseSel.set(s.course_id, []);
+        byCourseSel.get(s.course_id).push(s);
+    }
     const courses = new Map();
     for (const t of state.catalog) {
-        if (!courses.has(t.course_id)) courses.set(t.course_id, { id: t.course_id, name: t.course_name, targets: [] });
-        courses.get(t.course_id).targets.push(t);
+        if (!courses.has(t.course_id)) courses.set(t.course_id, { id: t.course_id, name: t.course_name, catalogId: t.catalog_id || "math-qe", selections: [] });
+        courses.get(t.course_id).selections = byCourseSel.get(t.course_id) || [];
+    }
+    // 表1 条目属于但 catalog 未列出的课程兜底补入
+    for (const [cid, list] of byCourseSel) {
+        if (!courses.has(cid)) courses.set(cid, { id: cid, name: cid, catalogId: "math-qe", selections: list });
     }
     const byDomain = new Map(); // 领域名 -> [课程]
     for (const course of courses.values()) {
-        const catalogId = course.targets[0].catalog_id || "math-qe";
-        const domain = domainOf(catalogId);
+        const domain = domainOf(course.catalogId);
         if (!byDomain.has(domain)) byDomain.set(domain, []);
         byDomain.get(domain).push(course);
     }
     const domainsHtml = [...byDomain.entries()].map(([domain, courseList]) => {
         const coursesHtml = courseList
-            .sort((a, b) => {
-                const ia = COURSE_ORDER.indexOf(a.id);
-                const ib = COURSE_ORDER.indexOf(b.id);
-                return ((ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)) || a.id.localeCompare(b.id);
-            })
+            // 十八期回归：courseOrderCmp 接收课程 id（直接传对象会 localeCompare 崩溃）
+            .sort((a, b) => courseOrderCmp(a.id, b.id))
             .map((c) => {
                 const done = courseCompletion(c.id);
-                const badge = done.done
-                    ? `<span class="course-done">✅ 已完成</span>`
-                    : `<span class="course-progress">教材 ${done.bookApproved}/${done.bookTotal} · 习题集 ${done.exApproved}/${done.exTotal}</span>`;
-                const targetsHtml = c.targets.map((t) => `
-                    <div class="tree-node tree-target" data-kind="target" data-id="${esc(t.id)}" data-label="${esc(t.title)}">
-                        <span class="tree-name" title="${esc(t.title)}">${esc(t.title)}</span>
-                        <span class="tree-author">${esc((t.authors || []).join("、"))}</span>
-                        <span class="tree-type">${esc(bookTypeLabel(t.kind))}</span>
-                    </div>`).join("");
+                const badge = courseDoneBadge(done);
+                const leavesHtml = courseSetNodesHtml(c.id, c.selections);
                 return `
                     <div class="tree-node tree-course collapsed" data-kind="course" data-id="${esc(c.id)}" data-label="${esc(c.name)}">
                         <span class="tree-caret">▸</span><span class="tree-name">${esc(c.name)}</span>
                         ${badge}
-                        <div class="tree-children" style="display:none">${targetsHtml}</div>
+                        <div class="tree-children" style="display:none">${leavesHtml || '<div class="tree-empty">（暂无表1 条目）</div>'}</div>
                     </div>`;
             }).join("");
         return `
@@ -764,7 +795,7 @@ function renderTree() {
             </div>`;
     }).join("");
     tree.innerHTML = domainsHtml || `<div class="empty-state">暂无课程目录</div>`;
-    // PyCharm 式交互：箭头=展开/折叠；名称=选中（领域/课程/书籍均可选）
+    // PyCharm 式交互：箭头=展开/折叠；名称=选中（领域/课程/套/候选叶子均可选）
     tree.querySelectorAll(".tree-node").forEach((node) => {
         const children = node.querySelector(":scope > .tree-children");
         const caret = node.querySelector(":scope > .tree-caret");
@@ -784,6 +815,59 @@ function renderTree() {
     });
 }
 
+/* 二十期：课程树叶子按套聚合——confirmed 按 set_no 归入套节点（tree-set，套内书行 tree-book），
+ * 无套号 confirmed 归「未编套」节点；候选/备选保持独立 selection 叶子（setBadgeHtml 原样）。 */
+function courseSetNodesHtml(courseId, selections) {
+    const sets = new Map();
+    const unreconciled = [];
+    const pending = [];
+    for (const s of selections) {
+        const sn = setNoOf(s);
+        if (s.status === "confirmed") {
+            if (sn) {
+                if (!sets.has(sn)) sets.set(sn, []);
+                sets.get(sn).push(s);
+            } else {
+                unreconciled.push(s);
+            }
+        } else {
+            pending.push(s);
+        }
+    }
+    const setKeys = [...sets.keys()].sort((a, b) => (Number(a) || 0) - (Number(b) || 0) || String(a).localeCompare(b));
+    let html = "";
+    for (const k of setKeys) html += setTreeNodeHtml(`${courseId}::${k}`, `套${k}`, sets.get(k));
+    if (unreconciled.length) html += setTreeNodeHtml(`${courseId}::none`, "已确认 · 未编套", unreconciled);
+    for (const s of pending) {
+        html += `
+            <div class="tree-node tree-selection" data-kind="selection" data-id="${esc(s.selection_id)}" data-label="${esc(s.title)}">
+                <span class="tree-name" title="${esc(s.title)}">${esc(s.title)}</span>
+                ${setBadgeHtml(s)}
+                <span class="tree-type">${esc(roleLabels(s.roles))}</span>
+            </div>`;
+    }
+    return html;
+}
+
+/* 二十期：套节点 + 套内书行（一套一名：教材/习题集合并书名，不逐卷展开） */
+function setTreeNodeHtml(id, label, items) {
+    const bookRows = items.map((s) => {
+        const role = (s.roles && s.roles.length ? roleLabels(s.roles) : "书目");
+        const count = (s.downloads || []).length;
+        return `
+            <div class="tree-book">
+                <span class="tree-book-label">${esc(role)}</span>
+                <span class="tree-name">《${esc(s.title)}》${count ? `（${count} 册合并）` : ""}</span>
+            </div>`;
+    }).join("");
+    return `
+        <div class="tree-node tree-set collapsed" data-kind="set" data-id="${esc(id)}" data-label="${esc(label)}">
+            <span class="tree-caret">▸</span><span class="tree-name">${esc(label)}</span>
+            <span class="tree-type">${items.length} 项</span>
+            <div class="tree-children" style="display:none">${bookRows}</div>
+        </div>`;
+}
+
 /* 课程所属领域（十二期）：经课程任一 target 的 catalog_id → 领域映射 */
 function courseDomain(courseId) {
     const t = state.catalog.find((x) => x.course_id === courseId);
@@ -796,13 +880,27 @@ function selectNode(kind, id) {
     document.querySelectorAll(".tree-node").forEach((n) => n.classList.remove("selected"));
     const node = document.querySelector(`.tree-node[data-kind="${kind}"][data-id="${CSS.escape(id)}"]`);
     if (node) node.classList.add("selected");
-    // 十二期：树→筛选器单向联动——点领域/课程同步弹层筛选，书籍级不改筛选
+    // 十二期：树→筛选器单向联动——点领域/课程同步弹层筛选，套书级不改筛选
     if (kind === "domain") {
         state.filters.domain = id;
         state.filters.course = "";
     } else if (kind === "course") {
         state.filters.domain = courseDomain(id) || state.filters.domain;
         state.filters.course = id;
+    } else if (kind === "set") {
+        // 二十期：点套节点 → 筛选到所属课程，面板渲染后定位并高亮该套行
+        const cid = String(id).split("::")[0];
+        state.filters.domain = courseDomain(cid) || state.filters.domain;
+        state.filters.course = cid;
+        renderResourceFilters();
+        renderPanel();
+        const target = document.querySelector(`.set-row[data-set="${CSS.escape(id)}"]`);
+        if (target) {
+            target.classList.add("tree-linked");
+            target.scrollIntoView({ block: "start", behavior: "smooth" });
+            setTimeout(() => target.classList.remove("tree-linked"), 2000);
+        }
+        return;
     }
     renderResourceFilters();
     renderPanel();
@@ -821,65 +919,96 @@ function scoreMarkup(evaluation) {
     </div>${summary}`;
 }
 
-function resourceCard(it) {
-    const source = it.source || {};
-    const link = source.page_url
-        ? `<a href="${esc(source.page_url)}" target="_blank" rel="noopener">来源页 ↗</a>`
-        : (source.provider || "来源：—");
+/* 十七期：表1 套书卡——title/authors/版本徽标/套标记/roles 徽标/LLM 预填评价/评审建议/
+ * 册完成度（download_stats）；confirmed 无册出「新建候选册」；有册内嵌表2 册明细。
+ * 候选条目（candidate/backup）仅评估态出现（表1 三态操作：确定/备选/否定/转正）。 */
+function selectionCard(sel) {
     const actions = [];
-    if (it.status === "candidate") {
-        // 人工评估三态（QED-017）：确定 / 备选 / 否定
-        actions.push(`<button class="btn primary" data-act="confirm" data-id="${esc(it.resource_id)}">确定</button>`);
-        actions.push(`<button class="btn" data-act="backup" data-id="${esc(it.resource_id)}">备选</button>`);
-        actions.push(`<button class="btn danger" data-act="reject" data-id="${esc(it.resource_id)}">否定</button>`);
-    } else if (it.status === "backup") {
-        // 备选：可转正下载，或放弃（填原因）
-        actions.push(`<button class="btn primary" data-act="confirm" data-id="${esc(it.resource_id)}">转正</button>`);
-        actions.push(`<button class="btn danger" data-act="reject" data-id="${esc(it.resource_id)}">放弃</button>`);
-    } else if (it.status === "confirmed") {
-        actions.push(`<button class="btn primary" data-act="download" data-id="${esc(it.resource_id)}">开始下载</button>`);
-    } else if (it.status === "downloaded") {
-        actions.push(`<button class="btn primary" data-act="approve" data-id="${esc(it.resource_id)}">验收通过</button>`);
-        actions.push(`<button class="btn danger" data-act="reject" data-id="${esc(it.resource_id)}">删除（填原因）</button>`);
+    const version = sel.version || {};
+    const stats = sel.download_stats || {};
+    const deleteAction = sel.status === "candidate" || sel.status === "backup"
+        ? `<button class="btn danger" data-act="reject" data-id="${esc(sel.selection_id)}">${sel.status === "backup" ? "放弃" : "否定"}</button>`
+        : "";
+    if (sel.status === "candidate" || sel.status === "backup") {
+        actions.push(`<button class="btn primary" data-act="confirm" data-id="${esc(sel.selection_id)}">${sel.status === "backup" ? "转正" : "确定"}</button>`);
+        if (sel.status === "candidate") actions.push(`<button class="btn" data-act="backup" data-id="${esc(sel.selection_id)}">备选</button>`);
+        actions.push(deleteAction);
     }
-    const reason = it.reject_reason ? `<div class="reject-note">拒因：${esc(it.reject_reason)}</div>` : "";
-    const review = it.review_note ? `<div class="reject-note review-note">评审建议：${esc(it.review_note)}</div>` : "";
     // 十四期：人工评审建议（review_note）——三态按钮旁建议输入框，随三态一并提交（QED-020）
-    const noteInput = it.status === "candidate" || it.status === "backup"
-        ? `<input type="text" class="review-note" data-note-for="${esc(it.resource_id)}" placeholder="填一句评审建议（可选）…" value="${esc(it.review_note || "")}">`
+    const noteInput = sel.status === "candidate" || sel.status === "backup"
+        ? `<input type="text" class="review-note" data-note-for="${esc(sel.selection_id)}" placeholder="填一句评审建议（可选）…" value="${esc(sel.review_note || sel.note || "")}">`
         : "";
-    // 十六期（QED-021）：发现专用来源（libgen_li）无直链——展示人工下载方案（links）
-    const links = (source.links || []).length
-        ? `<div class="download-links">下载方案：${source.links.map((l) =>
-            `<a href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.kind || "link")}">${esc(l.label)}</a>`
-        ).join(" · ")}</div>`
-        : "";
-    // 十六期（QED-021）：待人工补充——登记表单（数据根内相对路径，登记后转已下载）
-    const registerForm = it.status === "pending_manual"
-        ? `<div class="register-row"><input type="text" class="register-path" data-register-for="${esc(it.resource_id)}" placeholder="数据根内相对路径，如 raw/books/math-qe/01_math_analysis/x.pdf" value="${esc(it.relative_path || "")}">`
-            + `<button class="btn primary" data-act="register" data-id="${esc(it.resource_id)}">人工下载登记</button></div>`
-        : "";
-    const sub = [it.language || "—", (it.authors || []).join("、") || "—", link].join('<span class="sep">·</span>');
-    return `<div class="card">
+    // 十八期（用户裁决）：不加载表2 放弃/失败册——rejected/failed 由数据层过滤，前端双保险
+    const downloads = (sel.downloads || []).filter((d) => d.status !== "rejected" && d.status !== "failed");
+    let volumes = "";
+    if (sel.status === "confirmed" || downloads.length) {
+        if (downloads.length) {
+            // 十八期：册明细收敛为卡内折叠区（默认收起），不占卡片层级——右侧只见套书卡
+            volumes = `<details class="volume-collapse"><summary>册明细（${downloads.length} 册）</summary>
+                <ul class="volume-list">${downloads.map((d) => volumeRow(d, sel.title)).join("")}</ul></details>`;
+        } else {
+            actions.push(`<button class="btn primary" data-act="create-downloads" data-id="${esc(sel.selection_id)}">新建候选册</button>`);
+        }
+    }
+    const evalHtml = scoreMarkup(sel.evaluation);
+    const note = sel.note ? `<div class="reject-note">评审建议：${esc(sel.note)}</div>` : "";
+    const sub = [langLabel(version.language || ""), (sel.authors || []).join("、") || "—"].join('<span class="sep">·</span>');
+    const roleBadges = (sel.roles || []).map((r) => `<span class="tree-type">${esc(roleLabels([r]))}</span>`).join(" ");
+    return `<div class="card selection-card">
         <div class="card-head">
             <div>
-                <div class="card-title">${esc(it.title ?? it.resource_id)}</div>
+                <div class="card-title">${esc(sel.title)}</div>
                 <div class="card-sub">${sub}</div>
             </div>
-            <span class="badge course">${esc(courseOf(it))}</span>
+            <span class="card-head-badges">${versionBadge(sel)}${setBadgeHtml(sel)}${roleBadges}</span>
         </div>
-        ${scoreMarkup(it.llm_evaluation)}
-        ${links}
-        ${reason}
-        ${review}
+        ${evalHtml}
+        <div class="card-meta">册完成度：${stats.approved}/${stats.total} 已验收（表2 册级明细）</div>
+        ${note}
         <div class="card-actions">
-            <span class="status-badge status-${esc(it.status || "unknown")}">${esc(STATUS_LABEL[it.status] || it.status)}</span>
+            <span class="status-badge status-${esc(sel.status || "unknown")}">${esc(STATUS_LABEL[sel.status] || sel.status)}</span>
             ${actions.join("")}
-            <button class="btn ghost" data-act="detail" data-kind="resource" data-id="${esc(it.resource_id)}">详情</button>
+            <button class="btn ghost" data-act="detail" data-kind="selection" data-id="${esc(sel.selection_id)}">详情</button>
         </div>
         ${noteInput}
-        ${registerForm}
+        ${volumes}
     </div>`;
+}
+
+/* 十七期：表2 册级明细行——书名（二十期：套行合并展示时带所属书名）/vol/file_hint/
+ * intro（LLM 简介）/文件相对路径（审理提示）/状态；
+ * 操作：downloaded → 验收通过/否定（填原因）；candidate → 人工下载登记（填相对路径）。 */
+function volumeRow(d, bookTitle) {
+    const actions = [];
+    if (d.status === "downloaded") {
+        actions.push(`<button class="btn primary" data-act="approve" data-kind="download" data-id="${esc(d.download_id)}">验收通过</button>`);
+        actions.push(`<button class="btn danger" data-act="reject" data-kind="download" data-id="${esc(d.download_id)}">否定（填原因）</button>`);
+    }
+    // 十七期（D7 先登记再下载）：candidate 册出登记表单（相对路径由服务端校验 PDF + SHA-256）
+    const registerForm = d.status === "candidate"
+        ? `<div class="register-row"><input type="text" class="register-path" data-register-for="${esc(d.download_id)}" placeholder="数据根内相对路径，如 raw/books/math-qe/01_math_analysis/x.pdf">`
+            + `<button class="btn primary" data-act="register" data-kind="download" data-id="${esc(d.download_id)}">人工下载登记</button></div>`
+        : "";
+    const intro = d.intro ? `<div class="verdict">简介：${esc(d.intro)}</div>` : "";
+    const pathTip = d.relative_path
+        ? `<div class="reject-note">文件绝对路径：${esc(d.relative_path)}（请打开文件人工审理是否达到预期，审理通过后点「验收通过」）</div>`
+        : "";
+    const titleTag = bookTitle
+        ? `<span class="volume-book">《${esc(bookTitle)}》</span>`
+        : "";
+    return `<li class="volume-row">
+        <div class="volume-head">
+            ${titleTag}<span class="volume-title">卷：${esc(d.vol || "整册")}${d.file_hint ? `（${esc(d.file_hint)}）` : ""}</span>
+            <span class="status-badge status-${esc(d.status || "unknown")}">${esc(STATUS_LABEL[d.status] || d.status)}</span>
+        </div>
+        ${intro}
+        ${pathTip}
+        <div class="volume-actions">
+            ${actions.join("")}
+            <button class="btn ghost" data-act="detail" data-kind="download" data-id="${esc(d.download_id)}">详情</button>
+        </div>
+        ${registerForm}
+    </li>`;
 }
 
 /* 十四期：随三态一并提交的评审建议（QED-020，选填） */
@@ -888,7 +1017,8 @@ function noteOf(resourceId) {
     return input ? input.value.trim() : "";
 }
 
-/* 十三期：控制台化——「① 搜索书籍」按当前选中课程发起 AI 搜索评估（控制台以课程为单位操作） */
+/* 十七期：控制台化——「② 评估书单」刷新当前课程表1 书单（AI 搜索评估任务已随
+ * QED-030 退役；评估=人工对 candidate 做确认/备选/否定决策） */
 async function triggerEvaluate() {
     const sel = state.selection;
     const courseId = sel && sel.kind === "course" ? sel.id : (state.filters.course || null);
@@ -899,20 +1029,16 @@ async function triggerEvaluate() {
     }
     if (!btn) return;
     btn.disabled = true;
-    btn.textContent = "任务创建中…";
+    btn.textContent = "刷新中…";
     try {
-        const task = await fetchJson(TRACKER_BASE + ENDPOINTS.evaluate, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ course_id: courseId }),
-        });
-        alert("搜索评估任务已创建：" + task.task_id);
+        await loadSelections();
+        alert("书单已刷新（表1 共 " + state.selections.length + " 条）");
         loadTasks();
     } catch (err) {
-        alert("触发搜索评估失败：" + err.message);
+        alert("刷新书单失败：" + err.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = "① 搜索书籍";
+        btn.textContent = "② 评估书单";
     }
 }
 
@@ -933,30 +1059,27 @@ async function loadTasks() {
     if (sel && sel.kind === "course" && steps) steps.innerHTML = courseSteps(sel.id);
 }
 
-/* 十三期控制台：课程步骤进度（搜索 → 确认 → 下载 → 验收）
- * - 搜索：该课程最近 evaluate 任务状态（无任务=未开始）
- * - 确认：已确认 / 候选+待评估（无待评估=完成）
- * - 下载：已下载+已验收 / 已确认+下载中
- * - 验收：已验收 / 已下载 */
+/* 十三期控制台 + 十七期四步语义（downloads-three-table §4.2）：
+ * ① 选择：进入课程展示表1 书单（confirmed 套书 / 表1 条目总数）
+ * ② 评估：决定究竟要哪一份（无 candidate 且表1 有 confirmed = 完成）
+ * ③ 下载：表2 册级（已下载+已验收册 / 应下载册总数）
+ * ④ 审理：下载完毕展示绝对路径，人工审理后逐册 approve（已验收册 / 已下载册） */
 function courseSteps(courseId) {
-    const res = state.resources.filter((r) => courseOf(r) === courseId);
-    const pending = res.filter((r) => r.status === "candidate" || r.status === "pending_manual").length;
-    const confirmed = res.filter((r) => r.status === "confirmed").length;
-    const downloading = res.filter((r) => r.status === "downloading").length;
-    const downloaded = res.filter((r) => r.status === "downloaded").length;
-    const approved = res.filter((r) => r.status === "approved").length;
-    const evalTasks = (state.tasks || []).filter(
-        (t) => t.type === "catalog/evaluate" && (t.params || {}).course_id === courseId
-    );
-    const lastTask = evalTasks.length ? evalTasks[evalTasks.length - 1] : null;
-    const searchState = !lastTask ? "idle" : (lastTask.status === "succeeded" ? "done" : "run");
+    const sels = state.selections.filter((s) => s.course_id === courseId);
+    const confirmed = sels.filter((s) => s.status === "confirmed").length;
+    const pending = sels.filter((s) => s.status === "candidate" || s.status === "backup").length;
+    const allDownloads = [];
+    for (const s of sels) allDownloads.push(...(s.downloads || []));
+    const downloaded = allDownloads.filter((d) => d.status === "downloaded").length;
+    const approved = allDownloads.filter((d) => d.status === "approved").length;
+    const expected = allDownloads.length;
     const step = (label, st, detail) => `<span class="step-item ${st}">${esc(label)} ${esc(detail)}</span>`;
     const arrow = `<span class="step-arrow">→</span>`;
     return [
-        step("搜索", searchState, !lastTask ? "未开始" : (lastTask.status === "succeeded" ? "✓" : "进行中")),
-        step("确认", pending === 0 && res.length ? "done" : (res.length ? "run" : "idle"), `${confirmed}/${confirmed + pending}`),
-        step("下载", downloaded + approved > 0 ? "done" : (confirmed + downloading > 0 ? "run" : "idle"), `${downloaded + approved}/${confirmed + downloading}`),
-        step("验收", approved > 0 ? "done" : (downloaded > 0 ? "run" : "idle"), `${approved}/${downloaded}`),
+        step("① 选择", sels.length ? "run" : "idle", `${confirmed}/${sels.length}`),
+        step("② 评估", pending === 0 && confirmed > 0 ? "done" : (sels.length ? "run" : "idle"), `${confirmed}/${confirmed + pending}`),
+        step("③ 下载", downloaded + approved > 0 ? "done" : (expected > 0 ? "run" : "idle"), `${downloaded + approved}/${expected}`),
+        step("④ 审理", approved > 0 ? "done" : (downloaded > 0 ? "run" : "idle"), `${approved}/${downloaded}`),
     ].join(arrow);
 }
 
@@ -969,29 +1092,33 @@ function startTaskPolling() {
     }, 1000);
 }
 
-/* ---------- 状态迁移与弹窗 ---------- */
+/* ---------- 状态迁移与弹窗（十七期：表1 三态 / 表2 册级操作 / 新建候选册） ---------- */
 
-async function confirmResource(id) {
-    try {
-        const note = noteOf(id);
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.confirm, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ note }),
-        });
-        alert("已确认下载：" + res.status);
-    } catch (err) {
-        alert("确认失败：" + err.message);
-    }
-    loadResources();
+function refreshAll() {
+    loadSelections();
     loadTree();
     if (currentRoute().view === "dashboard") loadDashboard();
 }
 
-async function backupResource(id) {
+async function confirmSelection(id) {
     try {
         const note = noteOf(id);
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.backup, {
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.selections + "/" + encodeURIComponent(id) + ENDPOINTS.confirm, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note }),
+        });
+        alert("已确认入书单：" + res.status);
+    } catch (err) {
+        alert("确认失败：" + err.message);
+    }
+    refreshAll();
+}
+
+async function backupSelection(id) {
+    try {
+        const note = noteOf(id);
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.selections + "/" + encodeURIComponent(id) + ENDPOINTS.backup, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ note }),
@@ -1000,28 +1127,27 @@ async function backupResource(id) {
     } catch (err) {
         alert("标记备选失败：" + err.message);
     }
-    loadResources();
-    loadTree();
-    if (currentRoute().view === "dashboard") loadDashboard();
+    refreshAll();
 }
 
-async function downloadResource(id) {
+/* 十七期（D7 先登记再下载）：confirmed 无册条目 → 按表1 vols 生成全部候选册（POST /downloads） */
+async function createDownloads(id) {
     try {
-        const task = await fetchJson(TRACKER_BASE + ENDPOINTS.download, {
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.downloads, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ resource_id: id }),
+            body: JSON.stringify({ selection_id: id }),
         });
-        alert("下载任务已创建：" + task.task_id);
-        loadTasks();
+        alert("候选册已创建：" + (res.length || res.some ? (res.length + " 册") : JSON.stringify(res)));
     } catch (err) {
-        alert("下载任务创建失败：" + err.message);
+        alert("新建候选册失败：" + err.message);
     }
+    refreshAll();
 }
 
-/* 十六期（QED-021）：人工下载登记——按 libgen 等方案下载后放入数据根，
- * 提交相对路径由服务端校验 PDF + SHA-256，登记为已下载。 */
-async function registerResource(id) {
+/* 十七期：表2 人工下载登记——按下载方案人工下载后放入数据根，提交相对路径由服务端校验 PDF + SHA-256，
+ * 登记为已下载（candidate → downloaded 直转）。 */
+async function registerDownload(id) {
     const input = document.querySelector(`.register-path[data-register-for="${CSS.escape(id)}"]`);
     const relativePath = input ? input.value.trim() : "";
     if (!relativePath) {
@@ -1029,7 +1155,7 @@ async function registerResource(id) {
         return;
     }
     try {
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.register, {
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.downloads + "/" + encodeURIComponent(id) + ENDPOINTS.register, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ relative_path: relativePath }),
@@ -1038,41 +1164,74 @@ async function registerResource(id) {
     } catch (err) {
         alert("人工登记失败：" + err.message);
     }
-    loadResources();
-    loadTree();
-    if (currentRoute().view === "dashboard") loadDashboard();
+    refreshAll();
 }
 
-async function approveResource(id) {
+async function approveDownload(id) {
     try {
-        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.approve, { method: "POST" });
+        const res = await fetchJson(TRACKER_BASE + ENDPOINTS.downloads + "/" + encodeURIComponent(id) + ENDPOINTS.approve, { method: "POST" });
         alert("已验收通过：" + res.status);
     } catch (err) {
         alert("验收失败：" + err.message);
     }
-    loadResources();
-    loadTree();
+    refreshAll();
 }
 
-function openReasonModal(id) {
-    state.modalAction = { action: "reject-candidate", id };
+function openReasonModal(id, kind) {
+    state.modalAction = { action: "reject", id, kind: kind || "selection" };
     $("modal-title").textContent = "删除/拒绝书目";
     $("modal-reason").value = "";
+    $("modal-reason").style.display = "";
+    $("modal-hint").textContent = "说明拒绝/删除原因，留痕可追溯：";
     $("modal").classList.remove("hidden");
     $("modal-reason").focus();
 }
 
+/* ---------- 十六期（service-control 前端契约）：服务控制区操作（经 8900 /services/{name}/{action}） ---------- */
+
+const SERVICE_ACTIONS = { start: "启动", stop: "停止", restart: "重启" };
+
+/* 破坏性操作（停止/重启）复用 reason modal 作为确认框（无需填原因） */
+function openServiceConfirm(svc, act) {
+    state.modalAction = { action: "service", svc, act };
+    $("modal-title").textContent = SERVICE_ACTIONS[act] + "服务确认";
+    $("modal-reason").style.display = "none";
+    const stopNote = act === "stop" ? "停止后该服务不可用，可随时在控制中心重新启动。" : "重启期间服务短暂不可用。";
+    $("modal-hint").textContent = `确定${SERVICE_ACTIONS[act]}「${svc}」吗？${stopNote}`;
+    $("modal").classList.remove("hidden");
+}
+
+async function serviceAct(svc, act) {
+    try {
+        const res = await fetchJson(CONFIG_BASE + "/services/" + encodeURIComponent(svc) + "/" + encodeURIComponent(act), { method: "POST" });
+        alert(`${SERVICE_ACTIONS[act] || act}请求已受理` + (res.status ? "：" + res.status : ""));
+    } catch (err) {
+        alert(`${SERVICE_ACTIONS[act] || act}失败：${err.message}`);
+    }
+    loadHealthPanel(); // 操作后立即刷新（starting/stopping 流转由轮询兜底）
+}
+
 async function submitReason() {
-    const { id } = state.modalAction || {};
+    const { id, action, svc, act } = state.modalAction || {};
+    // 服务控制确认：无需填原因，直接执行操作
+    if (action === "service") {
+        $("modal").classList.add("hidden");
+        await serviceAct(svc, act);
+        return;
+    }
     const reason = $("modal-reason").value.trim();
     if (!reason) {
         alert("原因必填（留痕可追溯）");
         return;
     }
     $("modal").classList.add("hidden");
+    const { kind } = state.modalAction || {};
     try {
         const note = noteOf(id);
-        await fetchJson(TRACKER_BASE + ENDPOINTS.resources + "/" + encodeURIComponent(id) + ENDPOINTS.reject, {
+        const url = kind === "download"
+            ? TRACKER_BASE + ENDPOINTS.downloads + "/" + encodeURIComponent(id) + ENDPOINTS.reject
+            : TRACKER_BASE + ENDPOINTS.selections + "/" + encodeURIComponent(id) + ENDPOINTS.reject;
+        await fetchJson(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ reason, note }),
@@ -1081,8 +1240,7 @@ async function submitReason() {
     } catch (err) {
         alert("拒绝失败：" + err.message);
     }
-    loadResources();
-    loadTree();
+    refreshAll();
 }
 
 /* ---------- 事件绑定 ---------- */
@@ -1096,22 +1254,28 @@ function bindEvents() {
         a.addEventListener("click", () => $("sidebar").classList.remove("open"));
     });
     $("btn-course-search").addEventListener("click", triggerEvaluate);
-    $("btn-refresh").addEventListener("click", loadResources);
+    $("btn-refresh").addEventListener("click", loadSelections);
     $("btn-refresh-tree").addEventListener("click", loadTree);
     initPopovers();
     $("modal-cancel").addEventListener("click", () => $("modal").classList.add("hidden"));
     $("modal-ok").addEventListener("click", submitReason);
     $("detail-close").addEventListener("click", () => $("detail-modal").classList.add("hidden"));
     document.addEventListener("click", (ev) => {
+        // 十六期（service-control 前端契约）：服务控制区按钮（启动/停止/重启）优先处理
+        const svcBtn = ev.target.closest("button[data-service-act]");
+        if (svcBtn) {
+            openServiceConfirm(svcBtn.dataset.svc, svcBtn.dataset.serviceAct);
+            return;
+        }
         const btn = ev.target.closest("button[data-act]");
         if (!btn) return;
         const { act, id, kind } = btn.dataset;
-        if (act === "confirm") confirmResource(id);
-        else if (act === "backup") backupResource(id);
-        else if (act === "download") downloadResource(id);
-        else if (act === "register") registerResource(id);
-        else if (act === "approve") approveResource(id);
-        else if (act === "reject") openReasonModal(id);
+        if (act === "confirm") confirmSelection(id);
+        else if (act === "backup") backupSelection(id);
+        else if (act === "create-downloads") createDownloads(id);
+        else if (act === "register") registerDownload(id);
+        else if (act === "approve") approveDownload(id);
+        else if (act === "reject") openReasonModal(id, kind);
         else if (act === "detail") openDetailModal(kind, id);
     });
     window.addEventListener("hashchange", route);
@@ -1212,61 +1376,58 @@ function renderTaskDetail(t) {
         ${error}`;
 }
 
-function renderResourceDetail(r) {
-    const ev = r.llm_evaluation || {};
-    const src = r.source || {};
-    const link = src.page_url ? `<a href="${esc(src.page_url)}" target="_blank" rel="noopener">${esc(src.page_url)}</a>` : (src.provider || "—");
-    // 四期（ARCH-004 D4）：解析目标建议（catalog target → 课程/领域/目标标题 + 评分徽标）
-    const target = r.catalog_ref ? targetInfo(r.catalog_ref.target_id) : null;
+/* ---------- 十七期：套书详情（表1 全字段） + 册详情（表2 + 表3 来源） ---------- */
+
+function renderSelectionDetail(sel) {
+    const v = sel.version || {};
+    const target = state.catalog.find((t) => t.course_id === sel.course_id);
     const parseGoal = target ? `
         <div class="detail-section">
             <h3>解析目标</h3>
             <div class="goal-line">
-                <span class="badge course">${esc(target.domain)}</span>
-                <span class="goal-text">${esc(target.courseName)} → ${esc(target.title)}</span>
-                ${ev.verdict ? `<span class="badge verdict-${esc(ev.verdict)}">${esc(ev.verdict)} ${ev.score ? "· " + Number(ev.score).toFixed(1) : ""}</span>` : ""}
+                <span class="badge course">${esc(domainOf(target.catalog_id || "math-qe"))}</span>
+                <span class="goal-text">${esc(target.course_name || sel.course_id)} → ${esc(sel.title)}</span>
             </div>
         </div>` : "";
-    // 下载详情（已下载后展示文件信息，供追溯/解析对接）
-    const downloadInfo = r.status === "downloaded" || r.relative_path ? `
-        <div class="detail-section"><h3>下载详情</h3>
-            ${kvTable({ status: r.status, relative_path: r.relative_path, page_count: r.page_count, sha256: r.sha256 })}
-        </div>` : "";
-    const evaluation = ev.overall_score !== undefined ? `
-        <div class="detail-section">
-            <h3>LLM 评估（${esc(ev.model || "—")}，${esc(ev.evaluated_at || "—")}）</h3>
-            ${kvTable({ score: ev.overall_score, verdict: ev.verdict })}
-            ${ev.summary ? `<p class="section-note">${esc(ev.summary)}</p>` : ""}
-        </div>` : "";
-    const catalog = r.catalog_ref ? `<div class="detail-section"><h3>目录匹配</h3>${jsonPre(r.catalog_ref)}</div>` : "";
-    const reject = r.reject_reason ? `<div class="detail-section error-box"><h3>拒绝/删除记录</h3><p class="section-note">${esc(r.reject_reason)}</p></div>` : "";
-    // 十四期：人工评审建议展示（QED-020 review_note）
-    const review = r.review_note ? `<div class="detail-section"><h3>评审建议</h3><p class="section-note">${esc(r.review_note)}</p></div>` : "";
-    // 十六期（QED-021）：发现专用来源的人工下载方案（torrent/IPFS/ed2k）详情展示
-    const downloadPlan = (src.links || []).length
-        ? `<div class="detail-section"><h3>人工下载方案（无直链，按方案下载后登记）</h3>
-            <ul class="section-list">${src.links.map((l) =>
-                `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}（${esc(l.kind || "link")}）</a></li>`
-            ).join("")}</ul>
-            <p class="section-note">下载后放入数据根目录，在资源卡「人工下载登记」填写相对路径完成登记。</p></div>`
-        : "";
+    const vols = (sel.downloads || []).map((d) =>
+        `<li>${esc(d.vol || "整册")}【${esc(STATUS_LABEL[d.status] || d.status)}】${d.relative_path ? " · " + esc(d.relative_path) : ""}</li>`).join("");
     return `
         ${kvTable({
-            resource_id: r.resource_id, title: r.title, status: r.status,
-            course: courseOf(r), 中英: langLabel(r.language),
-            authors: r.authors, year: r.year, edition: r.edition, kind: r.kind,
-            created_at: r.created_at, updated_at: r.updated_at,
+            selection_id: sel.selection_id, title: sel.title, status: sel.status, course: courseOf(sel),
+            中英: langLabel(v.language || ""), authors: sel.authors, roles: roleLabels(sel.roles),
+            version: [v.edition, v.publisher, v.year].filter(Boolean).join(" / ") || "—",
+            set_no: setNoOf(sel) || "—", vols: (sel.vols || []).join("、") || "—",
+            created_at: sel.created_at, confirmed_at: sel.confirmed_at,
         })}
+        <p class="section-note">版本徽标：${versionBadge(sel)}（中译/英文/苏版判定，苏版 = 中译 + 作者命中苏版名单）</p>
         ${parseGoal}
-        <div class="detail-section"><h3>来源</h3>
-            <table class="detail-table"><tr><th>来源</th><td>${src.provider || "—"}（${src.provider_id || "—"}）</td></tr>
-            <tr><th>页面</th><td>${link}</td></tr></table>
-        </div>
-        ${evaluation}
-        ${review}
-        ${downloadInfo}
-        ${catalog}
-        ${reject}`;
+        ${sel.evaluation ? `<div class="detail-section"><h3>LLM 预填评价</h3>${jsonPre(sel.evaluation)}</div>` : ""}
+        ${sel.note ? `<div class="detail-section"><h3>评审建议</h3><p class="section-note">${esc(sel.note)}</p></div>` : ""}
+        ${sel.reject_reason ? `<div class="detail-section error-box"><h3>拒绝记录</h3><p class="section-note">${esc(sel.reject_reason)}</p></div>` : ""}
+        <div class="detail-section"><h3>册明细（表2）</h3><ul class="section-list">${vols || "<li>（暂无册明细，可先「新建候选册」）</li>"}</ul></div>
+    `;
+}
+
+async function renderDownloadDetail(d) {
+    // 表3 来源（渠道尝试：manual / internet_archive / open_library / google_books / libgen_li）
+    let sources = [];
+    try {
+        sources = await fetchJson(TRACKER_BASE + ENDPOINTS.downloads + "/" + encodeURIComponent(d.download_id) + ENDPOINTS.sources);
+    } catch (_) { /* 8900 离线：来源不可用不阻断详情（独立性铁律） */ }
+    const srcRows = sources.map((s) =>
+        `<li>${esc(s.channel)}（${esc(s.provider_id || "—")}）${s.page_url ? ` → <a href="${esc(s.page_url)}" target="_blank" rel="noopener">${esc(s.page_url)}</a>` : ""}${s.ok ? " ✓" : ""}</li>`).join("");
+    return `
+        ${kvTable({
+            download_id: d.download_id, selection_id: d.selection_id, vol: d.vol || "整册",
+            status: d.status, file_hint: d.file_hint, roles: roleLabels(d.roles),
+            relative_path: d.relative_path, page_count: d.page_count, sha256: d.sha256,
+            created_at: d.created_at, downloaded_at: d.downloaded_at, approved_at: d.approved_at,
+        })}
+        ${d.intro ? `<div class="detail-section"><h3>简介</h3><p class="section-note">${esc(d.intro)}</p></div>` : ""}
+        ${d.review_note ? `<div class="detail-section"><h3>评审建议</h3><p class="section-note">${esc(d.review_note)}</p></div>` : ""}
+        ${d.reject_reason ? `<div class="detail-section error-box"><h3>拒绝记录</h3><p class="section-note">${esc(d.reject_reason)}</p></div>` : ""}
+        <div class="detail-section"><h3>来源与下载方案（表3 渠道）</h3><ul class="section-list">${srcRows || "<li>（暂无渠道记录）</li>"}</ul></div>
+    `;
 }
 
 async function openDetailModal(kind, id) {
@@ -1281,11 +1442,21 @@ async function openDetailModal(kind, id) {
                 || await fetchJson(TRACKER_BASE + "/tasks/" + encodeURIComponent(id));
             $("detail-title").textContent = "任务详情";
             body.innerHTML = renderTaskDetail(payload);
+        } else if (kind === "selection") {
+            payload = state.selections.find((s) => s.selection_id === id)
+                || await fetchJson(TRACKER_BASE + ENDPOINTS.selections + "/" + encodeURIComponent(id));
+            $("detail-title").textContent = "套书详情（表1）";
+            body.innerHTML = renderSelectionDetail(payload);
         } else {
-            payload = state.resources.find((r) => r.resource_id === id)
-                || await fetchJson(TRACKER_BASE + "/resources/" + encodeURIComponent(id));
-            $("detail-title").textContent = "书目资源详情";
-            body.innerHTML = renderResourceDetail(payload);
+            // 表2 册详情：从表1 条目下册明细中查找（rejected/failed 已由数据层过滤隐藏）
+            payload = null;
+            for (const s of state.selections) {
+                const d = (s.downloads || []).find((x) => x.download_id === id);
+                if (d) { payload = d; break; }
+            }
+            if (!payload) throw new Error("册明细不存在（可能已被拒绝/失败隐藏）");
+            $("detail-title").textContent = "册详情（表2）";
+            body.innerHTML = await renderDownloadDetail(payload);
         }
     } catch (err) {
         body.innerHTML = `<div class="detail-section error-box"><h3>加载失败</h3><p class="section-note">${esc(err.message)}</p></div>`;
@@ -1308,7 +1479,7 @@ async function populateCourseSelects() {
         if (t.course_id && !courses.has(t.course_id)) courses.set(t.course_id, t.course_name || t.course_id);
     }
     if (!courses.size) {
-        for (const item of state.resources) {
+        for (const item of state.selections) {
             const id = courseOf(item);
             if (id && !courses.has(id)) courses.set(id, id);
         }
@@ -1357,11 +1528,22 @@ const HELP_SECTIONS = [
     {
         title: "知识点",
         steps: [
-            "左侧为知识点树，三层知识链路：领域（如数学）→ 课程（按学习深度排序，先学的在前）→ 具体书籍（书名 + 作者 + 类型徽标【教材/习题集/资料】），点击节点展开/折叠；课程行显示完成徽标：教材 + 习题集均验收通过（approved）才算课程完成。",
+            "左侧为知识点树，三层知识链路：领域（如数学）→ 课程（按学习深度排序，先学的在前）→ 套书（表1 条目，书名 + 套标记 + 角色徽标【教材/习题集/答案/参考】），点击节点展开/折叠；课程行显示完成徽标：教材 + 习题集均验收通过（approved）才算课程完成。",
             "筛选栏：领域 / 课程 / 状态三个按钮，点击弹出选项（与树选择叠加过滤）；选择「全部」恢复。",
-            "资源卡片三态评估：确定（候选→已确认）、备选（候选→备选，可转正或放弃）、否定（填原因留痕）；已确认后可「开始下载」，下载完成可「验收通过」。",
-            "「① 搜索书籍」按钮（选中课程后出现在面板顶部操作条）：按该课程发起 AI 搜索评估任务（生成候选资源），进度在步骤条（搜索→确认→下载→验收）自动刷新；未生成候选的书籍在面板显示「待评估」占位。",
+            "套书卡三态评估：确定（候选→已确认）、备选（候选→备选，可转正或放弃）、否定（填原因留痕）；已确认且无册的套书点「新建候选册」生成册级明细。",
+            "册级明细（表2）：每册一卡，候选册按「人工下载登记」填数据根相对路径完成登记；已下载册展示文件绝对路径，打开文件人工审理是否达到预期，审理通过点「验收通过」，不达预期「否定」填原因。",
+            "「② 评估书单」按钮（选中课程后出现在面板顶部操作条）：刷新该课程表1 书单（AI 搜索评估任务已随 QED-030 退役，评估=人工对候选做三态决策），进度在步骤条（① 选择→② 评估→③ 下载→④ 审理）展示。",
             "三态评审时可填一句建议（评审建议输入框，选填），随确定/备选/否定一并提交，落库供后续参考。",
+        ],
+    },
+    {
+        title: "课程收集流程（五阶段）",
+        steps: [
+            "阶段 0｜先验课程体系：选定课程范围与参考书目（catalog 章程登记套一/套二/套三底线：每套 ≥1 本教材 + ≥1 本习题集，两套全部验收通过即课程完成）。",
+            "阶段 1｜第一轮评估：刷新书单（「② 评估书单」）后候选条目人工三态确认（确定/备选/否定），候选确认入书单（表1）。",
+            "阶段 2｜下载与登记：确认后的套书点「新建候选册」生成表2 册级候选；按下载方案人工下载后填相对路径「人工下载登记」（服务端校验 PDF + SHA-256）。",
+            "阶段 3｜审理与验收：下载完毕展示文件绝对路径，人工打开审理是否达到预期 → 逐册「验收通过」（approved）或「否定」；验收通过的册卡与详情展示版本徽标（中译本/英文版/苏版）。",
+            "阶段 4｜第二轮评估、一轮课程完成：验收通过资源进入解析管线（Axiom-Flow）与质量审阅，为知识整理供料；课程内 ≥2 套（每套教材 + 习题集均 approved）即显示「已完成」，套数 3+ 全部完成时徽标显示 +N 余量。",
         ],
     },
     {

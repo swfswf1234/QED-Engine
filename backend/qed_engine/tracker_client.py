@@ -48,77 +48,109 @@ class TrackerClient:
     def close(self) -> None:
         self._client.close()
 
-    # --- 资源（人机协同闭环：candidate→confirmed→downloaded→approved/rejected） ---
-
-    def list_resources(
-        self,
-        status: str | None = None,
-        course_id: str | None = None,
-        kind: str | None = None,
-        language: str | None = None,
-    ) -> list:
-        """资源清单（按状态/课程/类型/语言过滤，前端候选视图主数据源）。"""
-        params = {}
-        for key, value in (
-            ("status", status),
-            ("course_id", course_id),
-            ("kind", kind),
-            ("language", language),
-        ):
-            if value:
-                params[key] = value
-        return self._request("GET", f"{API_PREFIX}/resources", params=params)
-
-    def get_resource(self, resource_id: str) -> dict:
-        return self._request("GET", f"{API_PREFIX}/resources/{resource_id}")
+    # --- 目录 ---
 
     def get_catalog(self, course_id: str) -> dict:
         """课程目录（知识点树，前端下载管理主数据源之一）。"""
         return self._request("GET", f"{API_PREFIX}/catalogs/{course_id}")
 
-    def get_resource_file(self, resource_id: str) -> httpx.Response:
-        """资源原文件（PDF 预览流）：返回原始响应（含 content-type），由调用方转发。"""
-        return self._client.get(f"{API_PREFIX}/resources/{resource_id}/file")
-
-    def confirm_resource(self, resource_id: str) -> dict:
-        """人工确认下载：candidate → confirmed。"""
-        return self._request("POST", f"{API_PREFIX}/resources/{resource_id}/confirm")
-
-    def backup_resource(self, resource_id: str) -> dict:
-        """人工评估「备选」：candidate/pending_manual → backup（不下载，可转正/放弃）。"""
-        return self._request("POST", f"{API_PREFIX}/resources/{resource_id}/backup")
-
-    def reject_resource(self, resource_id: str, reason: str) -> dict:
-        """拒绝（候选级或验收级）；reason 必填，downloaded 拒绝时服务侧硬删文件留痕。"""
-        if not reason:
-            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
-        return self._request("POST", f"{API_PREFIX}/resources/{resource_id}/reject", json={"reason": reason})
-
-    def approve_resource(self, resource_id: str) -> dict:
-        """验收通过：downloaded → approved（待 Axiom-Flow 解析）。"""
-        return self._request("POST", f"{API_PREFIX}/resources/{resource_id}/approve")
-
-    def register_resource(self, resource_id: str) -> dict:
-        """人工下载登记：pending_manual → downloaded（数据根内路径由人工输入）。"""
-        return self._request("POST", f"{API_PREFIX}/resources/{resource_id}/register")
-
     # --- 任务（后台任务 + 轮询） ---
-
-    def create_download(self, resource_id: str) -> dict:
-        """创建下载任务；仅 confirmed 状态可触发（否则 8901 返回 409）。"""
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/tasks/books/download",
-            json={"resource_id": resource_id},
-        )
-
-    def create_evaluate(self, course_id: str | None = None) -> dict:
-        """按课程批量评估任务（搜索源 → LLM 评估 → 候选落库）；缺省=全目录。"""
-        body = {"course_id": course_id} if course_id else {}
-        return self._request("POST", f"{API_PREFIX}/tasks/catalog/evaluate", json=body)
 
     def list_tasks(self) -> list:
         return self._request("GET", f"{API_PREFIX}/tasks")
+
+    # --- 三表（qt_selections / qt_downloads / qt_sources，downloads-three-table-model §3.1） ---
+
+    def list_selections(
+        self,
+        course_id: str | None = None,
+        status: str | None = None,
+    ) -> list:
+        """表1 选课表列表（按课程/状态过滤）；rejected/superseded 彻底隐藏由上游数据层保证。"""
+        params = {}
+        for key, value in (("course_id", course_id), ("status", status)):
+            if value:
+                params[key] = value
+        return self._request("GET", f"{API_PREFIX}/selections", params=params)
+
+    def get_selection(self, selection_id: str) -> dict:
+        """表1 套书详情（含该条目表2 册明细列表）。"""
+        return self._request("GET", f"{API_PREFIX}/selections/{selection_id}")
+
+    def confirm_selection(self, selection_id: str, note: str | None = None) -> dict:
+        """表1 候选→确认入书单（可选评审建议 note）。"""
+        body = {"note": note} if note else {}
+        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/confirm", json=body)
+
+    def backup_selection(self, selection_id: str, note: str | None = None) -> dict:
+        """表1 候选→备选（可选评审建议 note）。"""
+        body = {"note": note} if note else {}
+        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/backup", json=body)
+
+    def reject_selection(self, selection_id: str, reason: str, note: str | None = None) -> dict:
+        """表1 否定（reason 必填留痕，可选 note）；rejected 为终态稍后彻底隐藏。"""
+        if not reason:
+            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
+        body = {"reason": reason}
+        if note:
+            body["note"] = note
+        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/reject", json=body)
+
+    def supersede_selection(self, selection_id: str, reason: str) -> dict:
+        """表1 confirmed→superseded（被新版本替代，reason 必填）；旧版本前端不再可见。"""
+        if not reason:
+            raise TrackerError("标记过时必须提供原因（reason）")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/selections/{selection_id}/supersede",
+            json={"reason": reason},
+        )
+
+    def list_selection_downloads(self, selection_id: str) -> list:
+        """表2 册级明细（按 selection_id）；rejected/failed 默认过滤由上游数据层保证。"""
+        return self._request("GET", f"{API_PREFIX}/resources/{selection_id}/downloads")
+
+    def create_download_candidate(
+        self,
+        selection_id: str,
+        vol: str | None = None,
+        file_hint: str | None = None,
+    ) -> list:
+        """表2 新建候选册（下载预登记）；vol 省略时上游按表1 vols 生成全部候选册。"""
+        body = {"selection_id": selection_id}
+        if vol:
+            body["vol"] = vol
+        if file_hint:
+            body["file_hint"] = file_hint
+        return self._request("POST", f"{API_PREFIX}/downloads", json=body)
+
+    def approve_download(self, download_id: str) -> dict:
+        """表2 册级验收通过：downloaded → approved。"""
+        return self._request("POST", f"{API_PREFIX}/downloads/{download_id}/approve")
+
+    def reject_download(self, download_id: str, reason: str) -> dict:
+        """表2 册级否定（reason 必填，硬删 + 留痕）。"""
+        if not reason:
+            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/downloads/{download_id}/reject",
+            json={"reason": reason},
+        )
+
+    def register_download(self, download_id: str, relative_path: str) -> dict:
+        """表2 人工下载登记：candidate → downloaded（数据根内相对路径由人工输入）。"""
+        if not relative_path:
+            raise TrackerError("人工下载登记必须提供数据根内相对路径（relative_path）")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/downloads/{download_id}/register",
+            json={"relative_path": relative_path},
+        )
+
+    def list_download_sources(self, download_id: str) -> list:
+        """表3 渠道尝试列表（详情弹窗用；失败尝试 ok=0 留痕不展示由上游过滤）。"""
+        return self._request("GET", f"{API_PREFIX}/downloads/{download_id}/sources")
 
     def get_task(self, task_id: str) -> dict:
         return self._request("GET", f"{API_PREFIX}/tasks/{task_id}")

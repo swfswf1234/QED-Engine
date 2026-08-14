@@ -53,8 +53,10 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
   不返回密钥值）
 - 可达性探测：`GET http://127.0.0.1:8900/api/v1/config/llm-status`（真实探测）、
   `GET http://127.0.0.1:8900/api/v1/config/database`（真实连接探测，首次 3-5s）
-- 数据域（8900 适配 8901）：`GET /catalogs/{course_id}`、`GET /resources`、`GET /tasks`、
-  `POST /resources/{id}/confirm|backup|reject|approve|register`、`GET /resources/{id}/file`
+- 数据域（8900 适配 8901）：`GET /catalogs/{course_id}`、`GET /selections`、`GET /tasks`、
+  `POST /selections/{id}/confirm|backup|reject|supersede`、`GET /resources/{id}/downloads`、
+  `POST /downloads/{id}/approve|reject|register`、`GET /downloads/{id}/sources`
+  （旧 /resources 清单/状态机端点已随 QED-030 退役）
 - 服务域：`GET /services`；`POST /services/{name}/start|stop|restart`（启停托管，过渡窗口
   15s，见 [服务控制设计](../design/service-control.md)）
 - 三域契约与响应示例见[配置中心 API 契约](../design/config-center-api.md)

@@ -266,6 +266,33 @@ body {
 
 .badge.coming { color: var(--warn); border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.08); }
 
+/* ---------- 十六期：版本徽标（中译本/英文版/苏版）+ 卡头徽标组 ---------- */
+
+.card-head-badges { display: flex; align-items: center; gap: 8px; flex: none; }
+
+.version-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.version-badge.zh { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.1); }
+
+.version-badge.en { color: #9bb1ff; border-color: rgba(77, 107, 254, 0.45); background: rgba(77, 107, 254, 0.1); }
+
+.version-badge.soviet { color: #fbbf24; border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.12); }
+
+/* ---------- 十六期：服务控制区按钮 ---------- */
+
+.service-acts { display: inline-flex; gap: 6px; margin-left: auto; flex: none; }
+
+.btn.btn-sm { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
+
 /* ---------- 后台管理（侧边栏布局） ---------- */
 
 .admin-shell {
@@ -568,6 +595,94 @@ body {
   box-shadow: none;
 }
 
+/* 十七期（downloads-three-table）：套书卡（表1）元信息行 + 内嵌册明细（表2） */
+.card-meta {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* 十八期：册明细折叠区（套书卡内，默认收起——右侧只见套书卡，册明细不占卡片层级） */
+.volume-collapse {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.volume-collapse summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--accent);
+  user-select: none;
+}
+
+.volume-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.volume-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(148, 163, 255, 0.06);
+  border: 1px solid rgba(148, 163, 255, 0.14);
+  border-radius: var(--radius);
+}
+
+.volume-row:hover {
+  background: rgba(148, 163, 255, 0.1);
+}
+
+.volume-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 二十期：套行合并册明细时行头《书名》标签（一卷一名合并展示） */
+.volume-book {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  flex: none;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volume-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.volume-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 十七期：树叶子套标记徽标（set_no → 套N/英文对照） */
+.set-badge {
+  color: #c4b5fd;
+  border-color: rgba(196, 181, 253, 0.4);
+  background: rgba(196, 181, 253, 0.1);
+}
+
+.tree-empty {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
 .card:hover {
   transform: translateY(-2px);
   background: var(--card-hover);
@@ -581,9 +696,10 @@ body {
   gap: 10px;
 }
 
-.card-title { font-size: 14.5px; font-weight: 600; line-height: 1.45; }
+/* 十九期：字号调大（书名/栏目可读性） */
+.card-title { font-size: 16px; font-weight: 600; line-height: 1.45; }
 
-.card-sub { margin-top: 4px; font-size: 12.5px; color: var(--text-faint); }
+.card-sub { margin-top: 4px; font-size: 13.5px; color: var(--text-faint); }
 
 .card-sub .sep { margin: 0 6px; opacity: 0.5; }
 
@@ -629,13 +745,15 @@ body {
 
 .score-text { color: var(--text-dim); white-space: nowrap; }
 
-.verdict { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.verdict { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 
+/* 十九期：评审建议（reject/review note）不标红展示——红色仅保留给真警告（回退/失败）；
+ * 统一蓝底灰字，语义由文字本身表达 */
 .reject-note {
   font-size: 12.5px;
-  color: var(--bad);
+  color: var(--text-dim);
   padding: 6px 10px;
-  background: rgba(248, 113, 113, 0.08);
+  background: rgba(77, 107, 254, 0.08);
   border-radius: 8px;
 }
 
@@ -757,7 +875,7 @@ body {
 .course-row { margin-bottom: 14px; }
 .course-row-head {
   display: flex; align-items: center; gap: 8px;
-  font-size: 13.5px; font-weight: 600; color: var(--text);
+  font-size: 15px; font-weight: 600; color: var(--text);
   padding: 4px 2px 8px;
 }
 .course-row-name { color: var(--text); }
@@ -802,7 +920,13 @@ body {
 
 .tree-node:hover { background: rgba(255, 255, 255, 0.05); }
 
-.tree-node.selected { background: rgba(77, 107, 254, 0.18); color: #fff; }
+/* 十九期：树选中态修复——此前浅蓝底+白字看不清；改深字 + 左侧强调条 */
+.tree-node.selected {
+  background: rgba(77, 107, 254, 0.14);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 rgba(77, 107, 254, 0.85);
+}
 
 .tree-caret {
   font-size: 9px;
@@ -817,18 +941,85 @@ body {
 
 .tree-node.collapsed > .tree-caret { transform: rotate(0deg); }
 
-.tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 
-.tree-author { font-size: 11px; color: var(--text-faint); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
+.tree-author { font-size: 12px; color: var(--text-faint); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
 
-.tree-type { font-size: 10.5px; color: #9bb1ff; background: rgba(77, 107, 254, 0.14); padding: 1px 7px; border-radius: 999px; flex: none; }
+.tree-type { font-size: 12px; color: #9bb1ff; background: rgba(77, 107, 254, 0.14); padding: 1px 7px; border-radius: 999px; flex: none; }
 
-.tree-count { font-size: 11px; color: var(--text-faint); flex: none; }
+.tree-count { font-size: 12px; color: var(--text-faint); flex: none; }
 
-/* 课程完成徽标：✅ 已完成（教材+习题集均验收通过）/ 未完成进度 */
-.course-done { font-size: 11px; color: #34d399; flex: none; white-space: nowrap; }
+/* 十九期：课程徽标颜色态——已完成=绿填充 / 进行中=黄填充 / 未开始=无填充描边 */
+.course-done {
+  font-size: 12px;
+  color: #065f46;
+  background: rgba(52, 211, 153, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.55);
+  padding: 2px 10px;
+  border-radius: 999px;
+  flex: none;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.course-progress {
+  font-size: 12px;
+  color: #92600a;
+  background: rgba(250, 204, 21, 0.18);
+  border: 1px solid rgba(250, 204, 21, 0.55);
+  padding: 2px 10px;
+  border-radius: 999px;
+  flex: none;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.course-idle {
+  font-size: 12px;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  padding: 2px 10px;
+  border-radius: 999px;
+  flex: none;
+  white-space: nowrap;
+}
 
-.course-progress { font-size: 10.5px; color: var(--text-faint); flex: none; white-space: nowrap; }
+/* 十九期+二十期：右侧按套分组展示——套行（套N + 一行介绍 + 册明细直接展示；
+ * 待评估行弱化）；tree-linked = 树点套节点后的定位高亮 */
+.set-row { margin-bottom: 12px; }
+.set-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 2px 8px;
+}
+.set-label { font-size: 14px; font-weight: 700; color: var(--text); }
+.set-roles { font-size: 13px; color: var(--text-dim); }
+.set-row.pending { opacity: 0.85; }
+.set-row.pending .set-head { border-bottom: 1px dashed var(--border); padding-bottom: 6px; }
+.set-row.tree-linked {
+  background: rgba(77, 107, 254, 0.1);
+  border-radius: var(--radius);
+  padding: 6px;
+  transition: background 0.6s;
+}
+.book-intro { display: inline-block; margin-right: 4px; }
+.set-volumes { margin-top: 2px; }
+
+/* 二十期：套内书籍一行介绍（树内书行） */
+.tree-book {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  color: var(--text-dim);
+}
+.tree-book-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  flex: none;
+}
 
 /* 三层层级与缩进引导线（PyCharm 风格） */
 .tree-domain { font-weight: 600; margin-top: 4px; }

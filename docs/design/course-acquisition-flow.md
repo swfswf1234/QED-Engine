@@ -41,16 +41,16 @@
 
 - 定义：**一套 = 教材 + 配套习题集**（同作者/同系列配套，如「套一」Rudin 中译 + 吉米多维奇
   习题集 + 费定晖解析；英文原版对照单独计为英文套）。
-- 评估动作：按课程发起 AI 搜索评估（8901 `/tasks/catalog/evaluate`），候选落库后人工三态
-  （确定 confirm / 备选 backup / 否定 reject），中文候选优先展示（既有契约，见
-  [service-contracts.md](service-contracts.md)）。
+- 评估动作：表1 候选人工三态（确定 confirm / 备选 backup / 否定 reject，可带评审建议 note），
+  中文候选优先展示；AI 搜索评估任务端点已随 QED-030 退役（候选经 CLI/目录运行/人工录入，
+  见 [service-contracts.md](service-contracts.md) 与[三表模型](downloads-three-table-model.md)）。
 
 ### 阶段 2：下载
 
 - 一个课程阶段一个课程阶段推进：**当前课程的书籍全部按套下载完成后，才进入下一课程**。
-- 下载动作：`POST /tasks/books/download`（仅 confirmed 可触发），成品落
-  `dataset/qed-tracker/raw/` 对应类型目录（既有契约）。
-- 不可自动下载的中文版本经**人工下载登记**链路（register 端点）补齐（QED-Tracker 承接）。
+- 下载动作：教材下载经目录运行/CLI（`BookService.download` → 三表登记，QED-030），成品落
+  `dataset/qed-tracker/raw/` 对应类型目录；不可自动下载的中文版本经**人工下载登记**链路
+  （表2 `POST /downloads/{id}/register`，QED-Tracker 承接）。
 
 ### 阶段 3：第二轮评估（人工审核）
 

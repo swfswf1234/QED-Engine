@@ -132,10 +132,10 @@
                 <button id="btn-refresh" class="btn ghost">刷新</button>
               </div>
               <div id="panel-context" class="panel-context">全目录</div>
-              <!-- 课程操作条（十三期：控制台化——选中课程后出现，① 搜索书籍 + 步骤进度） -->
+              <!-- 课程操作条（十三期：控制台化——选中课程后出现，② 评估书单 + 步骤进度） -->
               <div id="course-console" class="course-console hidden">
                 <div class="console-row">
-                  <button id="btn-course-search" class="btn primary">① 搜索书籍</button>
+                  <button id="btn-course-search" class="btn primary">② 评估书单</button>
                   <div id="course-steps" class="course-steps"></div>
                 </div>
               </div>
@@ -185,7 +185,7 @@
   <div id="modal" class="modal hidden">
     <div class="modal-box">
       <h2 id="modal-title">填写原因</h2>
-      <p class="modal-hint">必填：说明拒绝/删除原因（留痕可追溯）</p>
+      <p id="modal-hint" class="modal-hint">必填：说明拒绝/删除原因（留痕可追溯）</p>
       <textarea id="modal-reason" rows="3" placeholder="输入拒绝/删除原因…"></textarea>
       <div class="modal-actions">
         <button id="modal-cancel" class="btn">取消</button>

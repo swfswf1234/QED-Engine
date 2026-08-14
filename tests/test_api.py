@@ -4,6 +4,7 @@
 实现状态：Current
 被测代码：backend/qed_engine/api/main.py、backend/qed_engine/api/schemas.py
 """
+
 import json
 
 import httpx
@@ -168,7 +169,7 @@ def _probe_calls(monkeypatch, probe):
     monkeypatch.setattr(
         api_main,
         "_probe_llm",
-        lambda provider, key, url: (calls.append((provider, url)) or probe(provider, key, url)),
+        lambda provider, key, url: calls.append((provider, url)) or probe(provider, key, url),
     )
     return calls
 
@@ -246,7 +247,7 @@ def _probe_mysql_calls(monkeypatch, probe):
     from qed_engine.api import main as api_main
 
     calls: list = []
-    monkeypatch.setattr(api_main, "_probe_mysql", lambda settings: (calls.append(settings) or probe(settings)))
+    monkeypatch.setattr(api_main, "_probe_mysql", lambda settings: calls.append(settings) or probe(settings))
     return calls
 
 
@@ -300,7 +301,7 @@ def test_database_cached_within_ttl(monkeypatch):
     assert len(calls) == first + 1, "TTL 过期后应重新探测"
 
 
-# ---------- 语义 API（数据域：catalogs / resources / tasks，8900 自有契约） ----------
+# ---------- 语义 API（数据域：catalogs / tasks / selections，8900 自有契约） ----------
 
 
 def _tracker_client(handler) -> TrackerClient:
@@ -309,6 +310,7 @@ def _tracker_client(handler) -> TrackerClient:
 
 def test_catalogs_via_semantic_api(monkeypatch):
     """GET /api/v1/catalogs/{course_id}：前端目录树改经 8900 获取。"""
+
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/catalogs/math-qe"
         return httpx.Response(200, json={"course_id": "math-qe", "nodes": []})
@@ -319,130 +321,213 @@ def test_catalogs_via_semantic_api(monkeypatch):
     assert response.json() == {"course_id": "math-qe", "nodes": []}
 
 
-def test_resources_list_forwards_filters(monkeypatch):
-    """GET /api/v1/resources：查询参数透传 8901（状态/课程/类型/语言）。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/resources"
-        assert dict(request.url.params) == {"status": "candidate", "kind": "book"}
-        return httpx.Response(200, json=[{"resource_id": "sha256:abc", "status": "candidate"}])
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/resources", params={"status": "candidate", "kind": "book"})
-    assert response.status_code == 200
-    assert response.json() == [{"resource_id": "sha256:abc", "status": "candidate"}]
-
-
-def test_resource_state_actions_via_semantic_api(monkeypatch):
-    """POST /resources/{id}/confirm|backup|approve|register：状态机操作经 8900。"""
-    seen = {"count": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["count"] += 1
-        return httpx.Response(200, json={"resource_id": "sha256:abc", "status": "changed"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    for action in ("confirm", "backup", "approve", "register"):
-        response = client.post(f"/api/v1/resources/sha256:abc/{action}")
-        assert response.status_code == 200, action
-        assert response.json()["resource_id"] == "sha256:abc"
-    assert seen["count"] == 4
-
-
-def test_reject_forwards_reason_via_semantic_api(monkeypatch):
-    """POST /resources/{id}/reject：reason 必填并转发 8901（留痕可追溯）。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/resources/sha256:abc/reject"
-        assert json.loads(request.read()) == {"reason": "缺页"}
-        return httpx.Response(200, json={"resource_id": "sha256:abc", "status": "rejected"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/resources/sha256:abc/reject", json={"reason": "缺页"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
-
-
-def test_reject_without_reason_via_semantic_api(monkeypatch):
-    """reject 缺 reason：8900 直接 422（FastAPI 校验），不发 8901。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("不应请求 8901")
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/resources/sha256:abc/reject", json={})
-    assert response.status_code == 422
-
-
 def test_tasks_endpoints_via_semantic_api(monkeypatch):
-    """任务四端点：列表/详情/评估创建/下载创建。"""
+    """任务端点：列表与详情经 8900（创建任务走 8901 泛型端点，QED-030 后无 8900 专属任务端点）。"""
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/v1/tasks":
             return httpx.Response(200, json=[{"task_id": "t-1", "status": "succeeded"}])
         if path == "/api/v1/tasks/t-1":
             return httpx.Response(200, json={"task_id": "t-1", "status": "succeeded"})
-        if path == "/api/v1/tasks/catalog/evaluate":
-            assert json.loads(request.read()) == {"course_id": "01"}
-            return httpx.Response(200, json={"task_id": "t-e", "status": "running"})
-        if path == "/api/v1/tasks/books/download":
-            assert json.loads(request.read()) == {"resource_id": "sha256:abc"}
-            return httpx.Response(200, json={"task_id": "t-d", "status": "running"})
         return httpx.Response(404, json={"detail": f"unexpected {path}"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
     assert client.get("/api/v1/tasks").json() == [{"task_id": "t-1", "status": "succeeded"}]
     assert client.get("/api/v1/tasks/t-1").json()["status"] == "succeeded"
-    response = client.post("/api/v1/tasks/catalog/evaluate", json={"course_id": "01"})
-    assert response.status_code == 200
-    assert response.json()["task_id"] == "t-e"
-    response = client.post("/api/v1/tasks/books/download", json={"resource_id": "sha256:abc"})
-    assert response.status_code == 200
-    assert response.json()["task_id"] == "t-d"
-
-
-def test_task_get_resource_via_semantic_api(monkeypatch):
-    """GET /resources/{id}：资源详情（详情面板）经 8900。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/resources/sha256:abc"
-        return httpx.Response(200, json={"resource_id": "sha256:abc", "title": "高等数学"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/resources/sha256:abc")
-    assert response.status_code == 200
-    assert response.json() == {"resource_id": "sha256:abc", "title": "高等数学"}
-
-
-def test_resource_file_preview_via_semantic_api(monkeypatch):
-    """GET /resources/{id}/file：PDF 预览流经 8900 转发（content-type 透传）。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/resources/sha256:abc/file"
-        return httpx.Response(200, content=b"%PDF-1.4", headers={"content-type": "application/pdf"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/resources/sha256:abc/file")
-    assert response.status_code == 200
-    assert response.content == b"%PDF-1.4"
-    assert response.headers["content-type"] == "application/pdf"
-
-
-def test_tracker_offline_returns_503(monkeypatch):
-    """8901 离线：数据域端点返回 503 + 明确提示（前端降级显示依据）。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/resources")
-    assert response.status_code == 503
-    assert "QED-Tracker" in response.json()["detail"]
 
 
 def test_upstream_conflict_passthrough(monkeypatch):
     """8901 返回 409（状态机冲突）：8900 同码透传 detail，前端既有 409 处理生效。"""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(409, json={"detail": "状态机冲突：当前状态 downloading 不允许"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/resources/sha256:abc/confirm")
+    response = client.post("/api/v1/selections/cand_abc/confirm", json={})
     assert response.status_code == 409
     assert response.json()["detail"] == "状态机冲突：当前状态 downloading 不允许"
+
+
+# ---------- 三表语义 API（selections / downloads / sources，downloads-three-table-model §3.2） ----------
+
+
+def test_selections_list_via_semantic_api(monkeypatch):
+    """GET /api/v1/selections：查询参数透传 8901（默认过滤由上游数据层保证）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/selections"
+        assert dict(request.url.params) == {"course_id": "01_math_analysis", "status": "confirmed"}
+        return httpx.Response(200, json=[{"selection_id": "cand_abc", "status": "confirmed"}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get(
+        "/api/v1/selections",
+        params={"course_id": "01_math_analysis", "status": "confirmed"},
+    )
+    assert response.status_code == 200
+    assert response.json() == [{"selection_id": "cand_abc", "status": "confirmed"}]
+
+
+def test_selection_detail_via_semantic_api(monkeypatch):
+    """GET /api/v1/selections/{id}：套书详情（含册明细）经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/selections/cand_abc"
+        return httpx.Response(200, json={"selection_id": "cand_abc", "title": "微积分学教程"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get("/api/v1/selections/cand_abc")
+    assert response.status_code == 200
+    assert response.json()["title"] == "微积分学教程"
+
+
+def test_selection_state_actions_via_semantic_api(monkeypatch):
+    """POST /selections/{id}/confirm|backup|supersede：表1 生命周期动作经 8900。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"selection_id": "cand_abc", "status": "changed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    for action in ("confirm", "backup", "supersede"):
+        body = {"reason": "过时"} if action == "supersede" else {"note": "备注"}
+        response = client.post(f"/api/v1/selections/cand_abc/{action}", json=body)
+        assert response.status_code == 200, action
+    assert seen == [
+        "/api/v1/selections/cand_abc/confirm",
+        "/api/v1/selections/cand_abc/backup",
+        "/api/v1/selections/cand_abc/supersede",
+    ]
+
+
+def test_selection_reject_forwards_reason_and_note(monkeypatch):
+    """POST /selections/{id}/reject：reason 必填 + note 转发 8901。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/selections/cand_abc/reject"
+        assert json.loads(request.read()) == {"reason": "版本过旧", "note": "换新版"}
+        return httpx.Response(200, json={"selection_id": "cand_abc", "status": "rejected"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/selections/cand_abc/reject", json={"reason": "版本过旧", "note": "换新版"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_selection_reject_without_reason_is_422(monkeypatch):
+    """表1 reject 缺 reason：8900 直接 422，不发 8901。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/selections/cand_abc/reject", json={})
+    assert response.status_code == 422
+
+
+def test_selection_downloads_list_via_semantic_api(monkeypatch):
+    """GET /resources/{id}/downloads：表2 册明细（按 selection_id）经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/resources/cand_abc/downloads"
+        return httpx.Response(200, json=[{"download_id": "download_1", "status": "downloaded"}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get("/api/v1/resources/cand_abc/downloads")
+    assert response.status_code == 200
+    assert response.json() == [{"download_id": "download_1", "status": "downloaded"}]
+
+
+def test_download_create_candidate_via_semantic_api(monkeypatch):
+    """POST /api/v1/downloads：新建表2 候选册（vol/file_hint 可选）经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/downloads"
+        assert json.loads(request.read()) == {"selection_id": "cand_abc", "vol": "v2", "file_hint": "第二卷"}
+        return httpx.Response(200, json=[{"download_id": "download_1", "status": "candidate"}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/downloads", json={"selection_id": "cand_abc", "vol": "v2", "file_hint": "第二卷"})
+    assert response.status_code == 200
+    assert response.json()[0]["status"] == "candidate"
+
+
+def test_download_create_candidate_requires_selection(monkeypatch):
+    """POST /api/v1/downloads 缺 selection_id：8900 直接 422。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/downloads", json={})
+    assert response.status_code == 422
+
+
+def test_download_actions_via_semantic_api(monkeypatch):
+    """POST /downloads/{id}/approve|reject|register：表2 册级动作经 8900。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, json.loads(request.content.decode("utf-8") or b"{}")))
+        return httpx.Response(200, json={"download_id": "download_1", "status": "changed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    assert client.post("/api/v1/downloads/download_1/approve").status_code == 200
+    assert client.post("/api/v1/downloads/download_1/reject", json={"reason": "扫描缺页"}).status_code == 200
+    response = client.post(
+        "/api/v1/downloads/download_1/register",
+        json={"relative_path": "raw/books/math-qe/01/v2.pdf"},
+    )
+    assert response.status_code == 200
+    assert seen == [
+        ("/api/v1/downloads/download_1/approve", {}),
+        ("/api/v1/downloads/download_1/reject", {"reason": "扫描缺页"}),
+        ("/api/v1/downloads/download_1/register", {"relative_path": "raw/books/math-qe/01/v2.pdf"}),
+    ]
+
+
+def test_download_reject_without_reason_is_422(monkeypatch):
+    """表2 reject 缺 reason：8900 直接 422。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/downloads/download_1/reject", json={})
+    assert response.status_code == 422
+
+
+def test_download_sources_via_semantic_api(monkeypatch):
+    """GET /downloads/{id}/sources：表3 来源记录经 8900（详情弹窗）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/downloads/download_1/sources"
+        return httpx.Response(200, json=[{"source_id": "src_1", "channel": "libgen_li", "ok": 1}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get("/api/v1/downloads/download_1/sources")
+    assert response.status_code == 200
+    assert response.json()[0]["channel"] == "libgen_li"
+
+
+def test_three_table_offline_returns_503(monkeypatch):
+    """8901 离线：三表端点同样 503 + 明确提示（前端降级显示依据）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    for path in (
+        "/api/v1/selections",
+        "/api/v1/selections/cand_abc",
+        "/api/v1/resources/cand_abc/downloads",
+        "/api/v1/downloads/download_1/sources",
+    ):
+        response = client.get(path)
+        assert response.status_code == 503, path
+        assert "QED-Tracker" in response.json()["detail"]
 
 
 # ---------- 服务域（控制中心 /services：service-control.md 契约） ----------

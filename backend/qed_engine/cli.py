@@ -3,8 +3,8 @@
 提供 config 子命令与服务发现：三服务地址来自根 .env 的 QED_*_URL（可覆盖），
 无 .env / 缺 key 时输出最小配置尾注提醒。密钥值绝不打印。
 
-tracker 子命令为 QED-Tracker 8901 服务的 HTTP 客户端（人机协同闭环）：
-books list/download、resources confirm/reject/approve、tasks 轮询；
+tracker 子命令为 QED-Tracker 8901 服务的 HTTP 客户端（tasks 轮询；旧 books/resources
+闭环命令已随 QED-030 qt_resources 退役，三表闭环由 8903 前端承担）：
 契约见 docs/design/service-contracts.md。
 
 设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/design/service-contracts.md
@@ -34,18 +34,10 @@ MODEL_ROUTES = (
     ("嵌入", "qed_embedding_model", "qwen"),
 )
 
-MINIMAL_CONFIG_HINT = (
-    "最小配置：在 QED-Engine 根目录创建 .env 并填写 QWEN_API_KEY=...；"
-    "或设置环境变量 QWEN_API_KEY。"
-)
+MINIMAL_CONFIG_HINT = "最小配置：在 QED-Engine 根目录创建 .env 并填写 QWEN_API_KEY=...；或设置环境变量 QWEN_API_KEY。"
 
 TRACKER_USAGE = """\
 tracker 子命令（QED-Tracker 8901 服务客户端）：
-  qed tracker books list [--status S] [--course C] [--kind K] [--language L] [--json]
-  qed tracker books download <resource_id> [--no-wait] [--json]
-  qed tracker resources confirm <resource_id> [--json]
-  qed tracker resources reject <resource_id> --reason <原因> [--json]
-  qed tracker resources approve <resource_id> [--json]
   qed tracker tasks [--id <task_id>] [--wait] [--json]
 """
 
@@ -58,10 +50,7 @@ def _reminder(settings: Settings) -> str | None:
 
 
 def _service_lines(settings: Settings) -> list[str]:
-    return [
-        f"  {name:>12}  {getattr(settings, field)}"
-        for name, field in SERVICES
-    ]
+    return [f"  {name:>12}  {getattr(settings, field)}" for name, field in SERVICES]
 
 
 def _print_usage(settings: Settings) -> None:
@@ -69,7 +58,7 @@ def _print_usage(settings: Settings) -> None:
     print()
     print("子命令：")
     print("  config    查看配置状态（模型路由、密钥布尔状态、服务地址）")
-    print("  tracker   QED-Tracker 8901 服务客户端（books/resources/tasks）")
+    print("  tracker   QED-Tracker 8901 服务客户端（tasks 轮询）")
     print()
     print("服务地址（QED_*_URL 可覆盖）：")
     print("\n".join(_service_lines(settings)))
@@ -116,69 +105,6 @@ def _dispatch_tracker(argv: list[str], client: TrackerClient) -> None:
     group = argv[0]
     args = argv[1:]
 
-    if group == "books":
-        parser = argparse.ArgumentParser(prog="qed tracker books")
-        sub = parser.add_subparsers(dest="action", required=True)
-        list_p = sub.add_parser("list")
-        list_p.add_argument("--status")
-        list_p.add_argument("--course", dest="course")
-        list_p.add_argument("--kind")
-        list_p.add_argument("--language")
-        list_p.add_argument("--json", action="store_true")
-        dl = sub.add_parser("download")
-        dl.add_argument("resource_id")
-        dl.add_argument("--no-wait", action="store_true")
-        dl.add_argument("--json", action="store_true")
-        parsed = parser.parse_args(args)
-        if parsed.action == "list":
-            resources = client.list_resources(
-                status=parsed.status,
-                course_id=parsed.course,
-                kind=parsed.kind,
-                language=parsed.language,
-            )
-            if parsed.json:
-                _emit(resources, True)
-            elif not resources:
-                print("（无资源记录）")
-            else:
-                for item in resources:
-                    course = item.get("course_id", "—")
-                    title = item.get("title", item.get("resource_id", "?"))
-                    status = item.get("status", "?")
-                    print(f"  [{course}] {title}  [{status}]")
-        elif parsed.action == "download":
-            task = client.create_download(parsed.resource_id)
-            if parsed.no_wait:
-                _emit(f"task_id: {task['task_id']}", parsed.json)
-            else:
-                done = client.wait_task(task["task_id"])
-                _emit(f"任务 {task['task_id']}：{done.get('status')} {done.get('result')}", parsed.json)
-        return
-
-    if group == "resources":
-        parser = argparse.ArgumentParser(prog="qed tracker resources")
-        sub = parser.add_subparsers(dest="action", required=True)
-        for name in ("confirm", "approve"):
-            p = sub.add_parser(name)
-            p.add_argument("resource_id")
-            p.add_argument("--json", action="store_true")
-        reject_p = sub.add_parser("reject")
-        reject_p.add_argument("resource_id")
-        reject_p.add_argument("--reason", required=True)
-        reject_p.add_argument("--json", action="store_true")
-        parsed = parser.parse_args(args)
-        if parsed.action == "confirm":
-            resource = client.confirm_resource(parsed.resource_id)
-            _emit(f"资源 {parsed.resource_id} 已确认，状态：{resource.get('status')}", parsed.json)
-        elif parsed.action == "reject":
-            resource = client.reject_resource(parsed.resource_id, reason=parsed.reason)
-            _emit(f"资源 {parsed.resource_id} 已拒绝，状态：{resource.get('status')}", parsed.json)
-        elif parsed.action == "approve":
-            resource = client.approve_resource(parsed.resource_id)
-            _emit(f"资源 {parsed.resource_id} 已验收，状态：{resource.get('status')}", parsed.json)
-        return
-
     if group == "tasks":
         parser = argparse.ArgumentParser(prog="qed tracker tasks")
         parser.add_argument("--id", dest="task_id")
@@ -196,7 +122,9 @@ def _dispatch_tracker(argv: list[str], client: TrackerClient) -> None:
                 print("（无任务记录）")
             else:
                 for task in tasks:
-                    print(f"  {task.get('task_id', '?')}  {task.get('type', '?')}  {task.get('status', '?')}  {task.get('progress', '')}")
+                    print(
+                        f"  {task.get('task_id', '?')}  {task.get('type', '?')}  {task.get('status', '?')}  {task.get('progress', '')}"
+                    )
         return
 
     print(f"未知 tracker 子命令：{group}")
@@ -231,4 +159,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

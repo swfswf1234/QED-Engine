@@ -20,3 +20,4 @@
 | [learning-center.md](learning-center.md) | Draft | Not Started | 学习中心探索：课程学习 + 知识问答、工具链选型、知识节点模型、里程碑 |
 | [tech-stack.md](tech-stack.md) | Accepted | In Progress | 技术栈选型：三服务/前端/数据库/模型/解析/向量库选型记录 |
 | [database-design.md](database-design.md) | Accepted | In Progress | 数据库设计：共享 qed 库命名空间、qt_*/af_* 表清单与关键字段、迁移、敏感字段规则 |
+| [downloads-three-table-model.md](downloads-three-table-model.md) | Draft | Not Started | 文档下载管理三表模型：qt_selections/qt_downloads/qt_sources 模型视图、状态机、API 对齐、前端契约与一次性迁移 |

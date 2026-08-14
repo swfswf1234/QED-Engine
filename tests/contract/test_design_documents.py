@@ -23,6 +23,7 @@ CURRENT_DOCUMENTS = {
     "tech-stack.md",
     "database-design.md",
     "web-frontend.md",
+    "downloads-three-table-model.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

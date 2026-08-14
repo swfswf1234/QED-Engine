@@ -29,7 +29,7 @@
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 密钥直读根 `.env`（经 `load-env.ps1` 映射） | 子项目直读 `QED_*` 变量，映射层退役 |
 | 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`，`QED_DB_*` 唯一事实源 |
-| QED-Tracker → 资源登记 | JSON `meta/resources/` + MySQL `qt_resources` 双写（QED-012 已落地） | JSON 保留文件状态事实 + MySQL 查询索引（双写契约见[数据库设计](database-design.md)） |
+| QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 三表 `qt_selections`/`qt_downloads`/`qt_sources`（QED-028/029 落地；qt_resources 已退役 QED-030） | JSON 保留文件状态事实 + MySQL 册级明细登记（三表契约见[三表模型](downloads-three-table-model.md)） |
 
 ## 统一数据库（MySQL 8，qed 库）
 
@@ -44,30 +44,21 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 - 前缀 `/api/v1`；`GET /api/v1/health` 存活检查。
 - 只读查询（搜索、资源列表、选择报告、目录）同步返回；8903 浏览器已不直连本服务
   （ADR 0007，经 8900 数据域语义 API 访问）；8900 后端服务端到服务端调用不受 CORS 限制。
-- 资源清单与状态机（2026-08-05 用户裁决，人机协同闭环；2026-08-06 QED-017 增补人工评估三态；
-  2026-08-07 QED-020 增补评审建议）：
-  - `GET /resources?status=&course_id=&kind=&language=`、`GET /resources/{id}` 同步查询；
-  - 状态机 `candidate → confirmed → downloading → downloaded → approved / rejected`
-    （+ `failed` 终态可重试；`pending_manual`/`not_found` 为登记辅助状态；
-    `backup` 备选态：candidate→backup→{confirmed,rejected}，pending_manual 可直接转 backup）；
-  - `GET /resources/{id}/file` 返回 PDF 预览流（仅 downloaded/approved 可访问，供 8903 验收台）；
-  - `POST /resources/{id}/confirm`（candidate/backup→confirmed）、`POST /resources/{id}/backup`
-    （candidate/pending_manual→backup，人工评估"备选"）、`POST /resources/{id}/approve`
-    （downloaded→approved）、`POST /resources/{id}/reject {reason}`（candidate/backup 或
-    downloaded→rejected；reason 必填；后者同步硬删文件，DB 记录保留留痕）——同步轻量写操作；
-    confirm/backup/reject 三接口接受可选 `note` 参数（人工评审建议，落 `qt_resources.review_note`，
-    资源查询返回该字段）；
-  - 人工评估三态：**确定**=confirm、**备选**=backup（不下载，可转正/放弃）、**否定**=reject；
-    中文教材候选确定优先，中文不可得时英文候选由人工决定；评估与下载后验收分离。
-- 写操作（下载、论文推荐、目录批处理、扫描、Axiom 推送、**评估**）一律创建**后台任务**：
+- 三表语义契约（QED-028/029；qt_resources 时代的人机协同闭环已随 QED-030 退役）：
+  - 表1 选课 `GET /selections?course_id=&status=`（详情 `GET /selections/{id}`，rejected/superseded
+    彻底隐藏）、状态机 `candidate → confirmed / backup / rejected / superseded`；
+  - 表2 册级明细 `GET /resources/{id}/downloads`、`POST /downloads`（新建候选册）、
+    `POST /downloads/{id}/approve|reject|register`（`{relative_path}` 人工下载登记）；
+  - 表3 渠道尝试 `GET /downloads/{id}/sources`（失败留痕不展示）；
+  - 完整契约与状态机见[三表模型](downloads-three-table-model.md) §3；`InvalidTransition` 返回 409 透传。
+- 写操作（下载、论文推荐、扫描、Axiom 推送）一律创建**后台任务**：
   - `POST /tasks/...` 立即返回 `task_id`；`GET /tasks/{id}` 轮询状态与结果；
   - 状态机 `queued → running → succeeded / failed`；进度字段 0–100；
   - 任务记录落盘 `meta/tasks/<task-id>.json`，服务重启后历史可见；
   - 下载任务完成后 `result.relative_path` 指向 `dataset/qed-tracker/raw/` 内成品路径；
   - 同 sha256 已登记时直接 `succeeded` 并复用既有记录（幂等）；
-  - `POST /tasks/catalog/evaluate {course_id?}`：按课程批量评估任务（搜索源 → qwen 评估 →
-    候选落库，candidate 状态；course_id 缺省=全目录；缺模型密钥时降级跳过评估仅落候选）；
-    已评估目标（backup/approved/rejected 行）跳过不重复推荐。
+  - 旧 `POST /tasks/catalog/evaluate`（AI 搜索评估）与 `POST /tasks/books/download` 已随
+    QED-030 退役；教材下载走目录运行/CLI 经 `BookService` 直接切三表登记。
 - 该接口同时供统一 CLI（等待模式，直连 8901）与 8900 数据域语义 API（适配层，契约见
   [配置中心 API 契约](config-center-api.md)）调用；8903 前端只经 8900 访问。
 

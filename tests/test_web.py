@@ -12,25 +12,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 
-# 8901 资源状态机端点（service-contracts.md）：三态评估（确认/备选/否定）＋验收/预览/下载
-# ADR 0007 后语义归 8900 数据域（路径沿革自 8901 资源契约，见 config-center-api.md）
+# 数据域端点（config-center-api.md）：表1/表2 状态机（确认/备选/否定/验收/登记）与任务端点，
+# ADR 0007 后语义归 8900 数据域；十七期（downloads-three-table）主数据源切三表后
+# /resources 旧端点、/tasks/books/download（旧自动下载）与 /tasks/catalog/evaluate
+# （AI 搜索评估任务，QED-030 退役）不再被前端引用。
 TRACKER_ENDPOINT_TOKENS = (
-    "/resources",
     "/tasks",
-    "/tasks/catalog/evaluate",
     "/confirm",
     "/backup",
     "/reject",
     "/approve",
-    "/file",
-    "/tasks/books/download",
+    "/register",
 )
 
-# 人工评估三态（QED-017）：候选三态按钮、备选转正/放弃、确定后开始下载
-EVAL_THREEWAY_TOKENS = ("备选", "转正", "开始下载")
+# 十七期（downloads-three-table 前端契约）：三表端点引用——
+# 表1 /selections（书单列表）、表2 /downloads（新建候选册 + 册级 approve/reject/register/sources）、
+# 表3 来源经 /downloads/{id}/sources
+THREE_TABLE_ENDPOINT_TOKENS = ("/selections", "/downloads", "/sources")
 
-# 按课程评估视图：中文候选优先展示（中文优先裁决）
-EVAL_COURSE_VIEW_TOKENS = ("中文优先",)
+# 人工评估三态（QED-017 + D9 backup 转正）：候选三态按钮、备选转正/放弃；
+# 「开始下载」随旧自动下载任务废除（十七期：表2 先登记候选册 → 人工下载 → register）
+EVAL_THREEWAY_TOKENS = ("备选", "转正")
 
 # 8900 配置中心横幅数据源（config-center-api.md）
 CONFIG_ENDPOINT_TOKENS = (
@@ -88,9 +90,9 @@ TREE_COUNT_TOKENS = ("本）",)
 # 十五期：进入文档下载管理默认选中「数学」领域（loadTree 完成后无选择时触发一次）
 DEFAULT_DOMAIN_TOKENS = ('selectNode("domain", "数学")', "state.selection", "数学")
 
-# 十五期：领域级按课程分页（每页 PAGE_SIZE=3）+ 配套对并排（同课程 book+exercise 同作者）
-COURSE_PAGER_TOKENS = ("PAGE_SIZE", "coursePage", "renderPanelByCourses", "coursePagerHtml", "pairedCourseTargets")
-PAIRED_ROW_TOKENS = ("paired-row", "course-row")
+# 十五期：领域级按课程分页（每页 PAGE_SIZE=3）（十七期：配套对并排随 catalog 目标层移除）
+COURSE_PAGER_TOKENS = ("PAGE_SIZE", "coursePage", "renderPanelByCourses", "coursePagerHtml")
+PAIRED_ROW_TOKENS = ("course-row",)
 
 # 十一期：课程按学习深度排序（先学在前、依赖后续在后；未列入新课程排尾）
 COURSE_ORDER_TOKENS = ("COURSE_ORDER", "01_math_analysis", "10_qe_prep")
@@ -163,9 +165,9 @@ def test_app_js_references_tracker_endpoints():
 
 
 def test_app_js_implements_three_way_evaluation():
-    """人工评估三态（QED-017）：备选按钮、备选转正/放弃、确定后开始下载、中文优先视图。"""
+    """人工评估三态（QED-017 + D9）：备选按钮、备选转正/放弃；「开始下载」已随旧自动下载废除。"""
     content = (WEB / "app.js").read_text(encoding="utf-8")
-    for token in EVAL_THREEWAY_TOKENS + EVAL_COURSE_VIEW_TOKENS:
+    for token in EVAL_THREEWAY_TOKENS:
         assert token in content, f"app.js 缺少三态评估 UI：{token}"
     assert "backup" in content, "app.js 缺少 backup 端点/状态处理"
 
@@ -363,9 +365,10 @@ def test_llm_config_models():
 
 
 def test_health_online_no_detail():
-    """后台服务在线不写原因（九期）：在线仅绿点+名称（mk.ok(name) 无 detail），离线附原因。"""
+    """后台服务在线不写原因（九期，十六期改版）：在线行 cause 为空（不渲染原因文案），离线附原因。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    assert "mk.ok(name)" in js, "app.js 后台服务在线不应附带原因文案"
+    causeSeg = js[js.index("const cause = s.status"):js.index("const cause = s.status") + 300]
+    assert "online" in causeSeg and '""' in causeSeg, "app.js 后台服务在线不应附带原因文案"
     assert "离线：" in js, "app.js 后台服务离线应附原因文案"
 
 
@@ -394,10 +397,10 @@ def test_knowledge_tree_naming():
 
 
 def test_tree_three_levels():
-    """知识点树三层结构（十一期）：领域 → 课程 → 书籍，无总根节点。"""
+    """知识点树三层结构（十一期，十七期：第三层为表1 条目）：领域 → 课程 → 套书，无总根节点。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
     assert "tree-root" not in js, "app.js 不应再有总根节点渲染"
-    for token in ("tree-domain", "tree-course", "tree-target"):
+    for token in ("tree-domain", "tree-course", "tree-selection"):
         assert token in js, f"app.js 缺少树层级：{token}"
 
 
@@ -416,11 +419,12 @@ def test_book_type_and_course_done():
         assert token in js, f"app.js 缺少类型/完成徽标逻辑：{token}"
 
 
-def test_panel_shows_all_books():
-    """面板展示范围全部书籍（十二期）：选中范围按目标渲染，未生成候选显示「待评估」占位。"""
+def test_panel_shows_selection_cards():
+    """面板展示表1 条目卡（十七期，downloads-three-table 前端契约）：选中课程渲染套书卡
+    （selectionCard），无条目的课程显示「待评估」空态提示创建候选。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    assert "rangeTargetsOf" in js, "app.js 缺少范围书籍收集逻辑"
-    assert "待评估" in js, "app.js 缺少待评估占位文案"
+    assert "selectionCard" in js, "app.js 缺少表1 套书卡渲染逻辑"
+    assert "待评估" in js, "app.js 缺少待评估空态文案"
 
 
 def test_tree_filter_linkage():
@@ -439,15 +443,16 @@ def test_tree_click_no_bubble():
 
 
 def test_course_console():
-    """课程操作条（十三期控制台）：选中课程显示操作条（① 搜索书籍 + 步骤进度），
-    工具栏全局「触发评估」移除。"""
+    """课程操作条（十三期控制台 + QED-030）：选中课程显示操作条（② 评估书单 + 步骤进度），
+    AI 搜索评估任务已随 QED-030 退役，按钮改为人工评估语义。"""
     html = (WEB / "index.html").read_text(encoding="utf-8")
     js = (WEB / "app.js").read_text(encoding="utf-8")
     for token in ("course-console", "btn-course-search"):
         assert token in html, f"index.html 缺少课程操作条：{token}"
     assert "btn-evaluate" not in html, "index.html 不应再有全局触发评估按钮"
     assert "courseSteps" in js, "app.js 缺少课程步骤进度逻辑"
-    assert "① 搜索书籍" in js, "app.js 缺少搜索书籍按钮文案"
+    assert "评估书单" in js, "app.js 缺少评估书单按钮文案"
+    assert "/tasks/catalog/evaluate" not in js, "app.js 不应再引用已退役评估任务端点"
 
 
 def test_admin_views_are_exclusive():
@@ -506,16 +511,13 @@ def test_domain_course_pager():
     assert "slice(" in js, "分页应切片课程列表"
 
 
-def test_paired_course_targets():
-    """配套对判定（十五期）：同课程 book+exercise 作者集相同（排序后 join、非空）才算配套。"""
+def test_domain_course_rows():
+    """领域级课程行（十五期分页 + 十七期三表）：课程行（course-row）内嵌表1 套书卡，
+    分页切片保留（配套对判定随 catalog 目标层移除，教程条目 roles 已含教材+习题集）。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    fn = "function pairedCourseTargets"
-    assert fn in js, "app.js 缺少配套对判定函数"
-    seg = js[js.index(fn):js.index(fn) + 600]
-    assert "sort()" in seg and "join" in seg, "配套判定应基于作者集排序后 join"
-    assert '"book"' in seg and '"exercise"' in seg, "配套判定应区分 book/exercise"
     for token in PAIRED_ROW_TOKENS:
-        assert token in js, f"app.js 缺少配套并排行样式类：{token}"
+        assert token in js, f"app.js 缺少课程行样式类：{token}"
+    assert "selectionCard" in js, "领域级课程行应渲染表1 套书卡"
 
 
 # 十六期（QED-021）：配套资料分类 + 人工下载登记——libgen 等发现专用来源无直链，
@@ -545,3 +547,213 @@ def test_app_js_single_entry_8900():
     assert ":8901" not in js and ":8902" not in js, "app.js 不应直连 8901/8902（唯一入口 8900）"
     assert 'const API_BASE = "http://127.0.0.1:8900/api/v1"' in js, "app.js 应以 API_BASE 统一 8900"
     assert "/services" in js, "app.js 服务健康应经 8900 /services 获取"
+
+
+# 十六期/十七期（course-acquisition-flow 对齐契约 1 + 三表聚合）：课程完成判定「两套」标准——
+# 套归属 setNoOf（表1 set_no 权威字段）、完成 = ≥2 套 approved（表1 条目下册均 approved）、
+# 进度文案「套数 x/2 · 教材 a/b · 习题集 c/d」（数据源从 resources 聚合改为表1/表2 聚合）
+TWO_SET_TOKENS = ("setNoOf", "set_no", "套数")
+TWO_SET_DONE_TOKENS = ("套数 x", "已完成")
+COURSE_PROGRESS_TEXT_TOKENS = ("套数", "教材", "习题集")
+
+
+def test_course_completion_two_sets():
+    """课程完成判定（十六期/十七期，course-acquisition-flow 对齐契约 1 + 三表聚合）：
+    courseCompletion 按「套」聚合（setNoOf 读取表1 条目 set_no 字段），
+    ≥2 套 approved（表2 册均验收）才显示完成；进度文案为「套数 x/2 · 教材 a/b · 习题集 c/d」。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in TWO_SET_TOKENS:
+        assert token in js, f"app.js 缺少两套判定逻辑：{token}"
+    fn = "function setNoOf"
+    assert fn in js, "app.js 缺少套归属函数 setNoOf"
+    seg = js[js.index(fn):js.index(fn) + 400]
+    assert "set_no" in seg, "setNoOf 应读取表1 set_no 字段"
+    comp = js[js.index("function courseCompletion"):js.index("function courseCompletion") + 1500]
+    assert ">= 2" in comp or ">=2" in comp, "完成判定应为 ≥2 套"
+    assert "2" in comp, "courseCompletion 应含两套底线分母"
+
+
+def test_version_badge_present():
+    """版本徽标（十六期，course-acquisition-flow 对齐契约 2）：
+    versionBadge 推导 中译本 / 英文版 / 苏版 / 其他（language + 苏版名单常量），
+    资源卡与详情均可渲染。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    fn = "function versionBadge"
+    assert fn in js, "app.js 缺少版本徽标函数"
+    seg = js[js.index(fn):js.index(fn) + 500]
+    for token in ("中译本", "英文版", "苏版", "其他"):
+        assert token in seg, f"versionBadge 缺少版本标签：{token}"
+    # 苏版名单：中译 + 作者命中名单 → 苏版（菲赫金哥尔茨/吉米多维奇等）
+    soviet = js[js.index("SOVIET"):js.index("SOVIET") + 200]
+    assert "菲赫金哥尔茨" in soviet, "苏版名单应含菲赫金哥尔茨"
+    assert "吉米多维奇" in soviet, "苏版名单应含吉米多维奇"
+    assert "chi" in js or "zh" in js, "版本判定应兼容 language 中译取值（zh/chi）"
+
+
+def test_manual_five_stages_present():
+    """使用手册五阶段说明（十六期，course-acquisition-flow 对齐契约 3）：
+    HELP_SECTIONS 补充课程收集流程五阶段（先验课程体系 → 第一轮评估 → 下载 →
+    第二轮评估 → 一轮课程完成）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in ("先验课程体系", "第一轮评估", "第二轮评估", "一轮课程完成", "两套"):
+        assert token in js, f"app.js 手册缺少课程收集流程阶段说明：{token}"
+    assert js.index("先验课程体系") < js.index("一轮课程完成"), "五阶段说明应按流程顺序"
+
+
+# 十六期（service-control 前端契约）：仪表大盘服务控制区——后台服务每行操作按钮
+# （online→停止+重启 / offline→启动 / starting/stopping→禁用）、8900 行无按钮、
+# 破坏性操作确认 + 操作后轮询刷新
+SERVICE_CONTROL_TOKENS = ("service-act", "data-svc", "停止", "重启", "启动")
+
+
+def test_health_panel_service_control_buttons():
+    """服务控制区按钮（十六期，service-control 前端契约）：
+    后台服务行按状态渲染操作按钮（停止/重启/启动），经 8900 /services/{name}/{action} 操作。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in SERVICE_CONTROL_TOKENS:
+        assert token in js, f"app.js 缺少服务控制区按钮逻辑：{token}"
+    assert "/services/" in js, "app.js 应调用 8900 /services/{name}/{action} 端点"
+    assert "confirm" in js, "破坏性操作（停止/重启）应弹确认框"
+    # 8900 自身（config 单元）不可经控制中心启停——不渲染按钮
+    assert "config" in js, "服务控制区应识别 config 单元（8900 无按钮）"
+
+
+# 十七期（downloads-three-table 前端契约）：三表展示——套书树叶子、套书卡、册级明细、
+# 步骤条四步语义（选择/评估/下载/审理）、绝对路径审理提示、彻底隐藏 rejected/superseded
+SELECTION_TREE_TOKENS = ("tree-selection",)
+SELECTION_CARD_TOKENS = ("download_stats", "新建候选册", "roles")
+VOLUME_ROW_TOKENS = ("vol", "intro", "人工下载登记", "验收通过")
+STEPS_FOUR_TOKENS = ("① 选择", "② 评估", "③ 下载", "④ 审理")
+REVIEW_PATH_TOKENS = ("绝对路径", "审理")
+
+
+def test_app_js_references_three_table_endpoints():
+    """三表端点引用（十七期）：app.js 主数据源为表1 /selections，册级操作经 /downloads，
+    表3 来源经 /sources（8900 数据域适配）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in THREE_TABLE_ENDPOINT_TOKENS:
+        assert token in js, f"app.js 缺少三表端点引用：{token}"
+
+
+def test_tree_third_level_is_selection():
+    """树第三层为表1 条目（十七期）：tree-selection 叶子（套书），册明细不进树。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in SELECTION_TREE_TOKENS:
+        assert token in js, f"app.js 缺少套书树叶子类：{token}"
+
+
+def test_selection_card_and_volume_rows():
+    """套书卡 + 册级明细（十七期）：套书卡含 roles 徽标/册完成度（download_stats）/新建候选册；
+    册行含 vol/intro/人工下载登记/验收通过（表2 操作）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in SELECTION_CARD_TOKENS + VOLUME_ROW_TOKENS:
+        assert token in js, f"app.js 缺少套书卡/册明细逻辑：{token}"
+
+
+def test_steps_four_three_table_semantics():
+    """步骤条四步语义（十七期，downloads-three-table §4.2）：选择 → 评估 → 下载 → 审理，
+    下载后展示绝对路径并提示人工审理。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    for token in STEPS_FOUR_TOKENS + REVIEW_PATH_TOKENS:
+        assert token in js, f"app.js 缺少步骤条四步/审理提示：{token}"
+    assert js.index("① 选择") < js.index("④ 审理"), "步骤条四步应按流程顺序"
+
+
+def test_no_hidden_selection_entry():
+    """彻底隐藏（十七期，downloads-three-table §4.1）：rejected/superseded 由数据层过滤，
+    前端不得调用 supersede 端点、无查看入口。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "supersede" not in js, "app.js 不应有 superseded 查看/操作入口（数据层过滤）"
+
+
+def test_selection_card_declares_actions():
+    """套书卡操作数组必须声明（白屏回归守护）：selectionCard 体内先 `const actions = [];`
+    再 push 按钮，缺失会导致右侧面板 ReferenceError 整块空白（token 守护与语法检查均测不出）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function selectionCard[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 selectionCard 套书卡渲染函数"
+    assert "const actions = [];" in m.group(0), (
+        "app.js selectionCard 体内必须先声明 const actions = [] 再 push 按钮（防 ReferenceError 白屏）"
+    )
+
+
+def test_course_done_badge_shows_numbers():
+    """课程徽标（十九期+二十期）：三态颜色（绿/黄/无填充）保留，数字明细恢复——
+    「套数 x/y · 教材 a/b · 习题集 c/d」（教材/习题集只算套内）；无「✅ 已完成」文字。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function courseDoneBadge[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 courseDoneBadge 公共徽标函数"
+    body = m.group(0)
+    for token in ("course-done", "course-progress", "course-idle", "套数", "教材", "习题集"):
+        assert token in body, f"courseDoneBadge 缺少徽标态/数字明细：{token}"
+    assert "✅ 已完成" not in body, "courseDoneBadge 不应再显示 ✅ 已完成 文字（颜色表达）"
+
+
+def test_panel_sets_one_row_with_volume_detail():
+    """右侧每套一行（二十期，用户裁决）：套行 = 一行介绍（book-intro 书名合并，不写卷几）
+    + 册明细列表直接展示（volume-list，引用 volumeRow 带书名）；待评估行仍保留书卡
+    （card-grid + selectionCard，含三态操作）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderCourseSets[\s\S]*function bookIntroHtml[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderCourseSets/setRowHtml/bookIntroHtml 按套分组渲染函数"
+    body = m.group(0)
+    for token in ("set-row", "set-head", "待评估", "未编套", "set-label", "book-intro", "set-volumes"):
+        assert token in body, f"renderCourseSets/setRowHtml 缺少分组/册明细结构：{token}"
+    assert "volumeRow(" in body, "套行册明细应复用 volumeRow 渲染（带书名）"
+    assert "card-grid" in body and "selectionCard" in body, "待评估行应保留书卡（三态操作）"
+
+
+def test_tree_sets_grouped_with_book_names():
+    """树展开按套聚合（二十期）：课程节点下 = 套节点（tree-set，含套序号）+ 套内书行
+    （tree-book：教材/习题集合并书名，一套一个名称不写卷几）；候选条目仍为独立 selection 叶子。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderTree[\s\S]*function setTreeNodeHtml[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderTree/courseSetNodesHtml/setTreeNodeHtml 渲染函数"
+    for token in ("tree-set", "tree-book", "tree-book-label", "tree-selection"):
+        assert token in m.group(0), f"renderTree 缺少按套聚合树结构：{token}"
+    assert "合并" in m.group(0) or "教材" in m.group(0), "树套内书行应显示教材/习题集合并书名"
+
+
+def test_course_completion_counts_sets_only():
+    """进度数字只算套内（十八期）：教材/习题集总数仅累加 set_no 非空的套内条目，
+    无套号条目（独立英文原版/独立习题集）不掺水——01 课程应为教材 3/3 · 习题集 2/2。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function courseCompletion[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 courseCompletion 聚合函数"
+    assert "if (!g.set) continue" in m.group(0), "courseCompletion 应跳过无套号条目（只算套内）"
+
+
+def test_volume_rows_collapsed_in_selection_card():
+    """册明细收敛进套书卡折叠区（十八期，源头避免「多出书册」）：右侧只显示 12 张套书卡，
+    册明细以 details 折叠区内紧凑行呈现（默认收起），volumeRow 不再以卡片形态平铺。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function selectionCard[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 selectionCard 套书卡渲染函数"
+    for token in ("volume-collapse", "<details", "<summary", "册明细"):
+        assert token in m.group(0), f"selectionCard 缺少册明细折叠区：{token}"
+    v = re.search(r"function volumeRow[\s\S]*?\n}\n", js)
+    assert v, "app.js 应提供 volumeRow 册行渲染函数"
+    assert "card volume-row" not in v.group(0), "volumeRow 不应再以卡片形态渲染（从源头避免多出书册）"
+    assert '<li class="volume-row">' in v.group(0), "volumeRow 应为套书卡内紧凑行"
+
+
+def test_tree_sort_passes_course_id():
+    """树课程排序（十八期回归守护）：renderTree 内 courseList 排序必须传对象的 course_id
+    （courseOrderCmp(a.id, b.id)），直接传对象会 TypeError（localeCompare 非函数）导致树空白。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderTree 渲染函数"
+    assert re.search(r"\.sort\(\(a, b\) => courseOrderCmp\(a\.id, b\.id\)\)", m.group(0)), (
+        "renderTree 的 courseList 排序应传对象的 course_id（防 TypeError 树空白）"
+    )
+
+
+def test_volume_rows_filter_rejected():
+    """册明细不加载放弃/失败册（十八期，用户裁决）：套书卡渲染前过滤 rejected/failed
+    （数据层已过滤，前端双保险）——右侧册明细只含有效状态（candidate/downloaded/approved）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function selectionCard[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 selectionCard 套书卡渲染函数"
+    assert re.search(r"\.filter\(\(d\) => [^)]*rejected[^)]*\)", m.group(0)), (
+        "selectionCard 应过滤放弃/失败册（rejected/failed 不加载）"
+    )

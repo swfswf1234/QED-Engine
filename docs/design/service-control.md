@@ -25,13 +25,13 @@
 | --- | --- | --- | --- | --- | --- |
 | `config` | QED 管理服务（配置中心） | 8900 | `/api/v1/health` | 单进程 | `python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900` |
 | `tracker` | QED-Tracker 文档下载服务 | 8901 | `/api/v1/health` | 单进程 | `qed-tracker serve`（等价 `python -m qed_tracker.cli serve`） |
-| `axiom` | Axiom-Flow 文档解析服务 | 8902（迁移前 8000） | `/api/v1/health` | **双进程**（API + Worker） | `python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8902` + `python -m axiom_flow.worker` |
+| `axiom` | Axiom-Flow 文档解析服务 | 8902 | `/api/v1/health` | **双进程**（API + Worker） | `python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8902` + `python -m axiom_flow.worker` |
 
 规则：
 
 - 端口与启动命令来自服务注册表配置，**以当前实际生效端口为准**：Axiom-Flow 端口迁移
-  （8000 → 8902，Axiom-Flow ALN-002）完成前，`axiom` 单元端口/探测 URL 为 8000，
-  迁移完成后同步为 8902。
+  （8000 → 8902，Axiom-Flow ALN-002）已完成（2026-08-11），`axiom` 单元端口/探测 URL 为
+  8902；8000 侧 CORS 兼容保留至前端迁移完成。
 
 - `axiom` 作为**单一启停单元**：启动时 API 与 Worker 同时拉起，停止/重启时两者一起处理，
   前端不暴露 Worker 的独立控制。
