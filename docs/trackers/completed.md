@@ -1,7 +1,7 @@
 # 已关闭任务台账
 
 状态：Current
-最后更新：2026-08-12
+最后更新：2026-08-16
 
 本文件登记已关闭任务（终态时从[任务台账](todo.md)原子移除并移入本表）。关闭结果枚举：
 Achieved（达成）/ Rejected（未采纳）/ Partial（部分达成）/ Not Applicable（不适用）。
@@ -17,3 +17,18 @@ Achieved（达成）/ Rejected（未采纳）/ Partial（部分达成）/ Not Ap
 | REQ-008 | 实现 | Axiom-Flow OCR 多后端：qwen-vl-plus → glm-ocr 适配（请求：Axiom-Flow） | Rejected | 2026-08-12 用户裁决取消：glm 实际不通、无可行性；Axiom-Flow 侧 ALN-005 同步取消，GLM 模型暂注释于 .env.example 维持现状 |
 | REQ-009 | 实现 | deepseek 接入：DEEPSEEK_API_KEY 配置后启用 deepseek-v4-flash 路由 | Rejected | 2026-08-12 用户裁决取消：暂时不做 |
 | REQ-016 | 实现 | LLM 可达性探测：8900 新增 `/config/llm-status`（真实探测 models 接口、5s 超时、60s 缓存、未配置不探测、密钥绝不下发），8903 横幅由 key 布尔改为可达性展示 | Achieved | 2026-08 完成并验收：端点+探测+缓存已实现（backend/qed_engine/api/main.py、tests 105 passed、ruff 通过），8900 实测 qwen/glm 可达、deepseek 未配置；前端横幅已切换（web/app.js）；契约见 docs/design/config-center-api.md；2026-08-12 用户确认验收后关闭 |
+| ARCH-009 | 实现 | 后端网关化重构轮（ADR 0007）：前端唯一入口 8900——目录重整、数据域语义 API（data.py）、服务域 /services 实装（service_manager.py）、前端唯一入口切换（app.js）、文档同步 | Achieved | 2026-08-11 P0-P5 全部完成并冒烟闭环（181 passed + ruff clean + node check），真实冒烟验证数据域/服务域闭环（start→online、409 窗口、优雅停止、ROOT parents 修复）；浏览器验收由后续轮次持续验证（服务域/数据域现运行于 8900）；2026-08-16 ARCH-013 轮关闭归档（待办由 ARCH-012/013 承接） |
+| ARCH-004 | Plan | [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../history/plans/2026-08/2026-08-8903-admin-redesign.md) | Achieved | 四期完成（119 passed + ruff clean + 8901 三态冒烟）：卡片墙入口、严格三领域、树拖拽记忆、筛选栏、详情评估视角；实现已随 REQ-006 十四期~十五期持续验证；浏览器验收并入 ARCH-011 前端重构轮（旧前端将退役）；2026-08-16 ARCH-013 轮关闭归档 |
+| ARCH-006 | Plan | [2026-08 人工评审优化轮（review-round-v6）](../history/plans/2026-08/2026-08-review-round.md) | Achieved | 2026-08-07 用户确认方案；REQ-018 由 QED-Tracker QED-020 承接实现（同源去重 + review_note 落库 + 存量清理），根仓库前端评审建议输入框已落地（REQ-006 十四期）；浏览器验收并入 ARCH-011（旧前端退役）；2026-08-16 ARCH-013 轮关闭归档 |
+| ARCH-007 | Plan | [2026-08 文档下载管理课程分页计划（downloads-course-view）](../history/plans/2026-08/2026-08-downloads-course-view.md) | Achieved | 十五期完成（150 passed + ruff clean）：界面名回退/默认数学领域/领域级课程分页/配套对并排；实现已随 REQ-006 运行验证；浏览器验收并入 ARCH-011（旧前端退役）；2026-08-16 ARCH-013 轮关闭归档 |
+| ARCH-010 | Plan | [2026-08 文档下载管理三表统一轮（downloads-three-table）](../history/plans/2026-08/2026-08-downloads-three-table.md) | Achieved | 三表模型全链路落地（QED-028/029/030 回执 + 根仓库后端适配 24 新测试 + 前端三表切换 56 passed + 196 passed 门禁）；其后被 **QED-031 知识层次重构**（qed_domain/qed_course + qt_knowledge/qt_books/qt_sources）演进取代（2026-08-16），契约事实源转 QED-Tracker database-schema.md；2026-08-16 ARCH-013 轮关闭归档 |
+| REQ-005 | 实现 | Axiom-Flow web/ 前端迁入根仓库 web/，子项目退役 web/ | Not Applicable | 2026-08-16 ARCH-013 轮裁决关闭：迁移形态过时——前端统一方向由 ARCH-011（web-ui/ 重建 8903）承载，Axiom-Flow web/ 退役方向保留在 roadmap（QED-Engine 前端行），不再按「迁入根仓库 web/」旧形态执行 |
+| REQ-013 | 请求 | QED-Tracker MySQL 资源登记与状态机：qt_resources 表 + confirm/reject/approve 同步端点 + /resources/{id}/file 预览（请求：QED-Tracker） | Achieved | QED-012/015/016/017 已实现并实测（三态 backup/转正/放弃 + 留痕字段）；qt_resources 已随 QED-030 退役（三表模型取代）、QED-031 再演进为知识层次五表；能力与验收由 QED-014 联调（ARCH-002 主线）承接；2026-08-16 ARCH-013 轮关闭 |
+| REQ-018 | 请求 | 人工评审优化（请求：QED-Tracker）：① evaluate 同源去重；② qt_resources review_note + note 参数；③ 存量重复清理 | Achieved | QED-020 已实现 ①②（同源去重 + review_note 落库，8901 confirm/backup/reject 可选 note）；③ 存量清理对象 qt_resources 已随 QED-030 退役，其数据由三表/QED-031 迁移承接；2026-08-16 ARCH-013 轮关闭 |
+| REQ-026 | 请求 | 数据库设计确认（请求：QED-Tracker）：qt_* 表结构由 QED-Tracker 确认并维护 | Achieved | QED-Tracker `docs/design/database-schema.md` 已确立为 qed 库全部 qed_*/qt_* 表**唯一事实源**（QED-031，取代 database-schema-ownership.md / three-table-schema.md）；根仓库 database-design.md 已按「指引与规划」收尾登记；2026-08-16 ARCH-013 轮回执关闭 |
+| REQ-029 | 请求 | 三表数据库重构（请求：QED-Tracker，设计见 downloads-three-table-model.md §2/§5） | Achieved | QED-028 回执完成（三表 DDL + 状态机 + 迁移 + 教程归并 + 数据修复 + LLM 简介 12 册）；其后被 **QED-031 知识层次重构**取代（qt_selections/qt_downloads 迁移后退役，五层模型）；2026-08-16 ARCH-013 轮关闭 |
+| REQ-030 | 请求 | 三表 API 改造（请求：QED-Tracker，设计见 downloads-three-table-model.md §3） | Achieved | QED-029 回执完成（8901 三表端点实测）+ QED-030 退役完成（旧 /resources 全链路移除，196 passed）；其后 8901 契约随 QED-031 新表模型冻结更新（service-contracts.md 登记）；2026-08-16 ARCH-013 轮关闭 |
+| REQ-021 | 流程 | 大变动同步：同步修订 README.md 与 AGENTS.md 的定位与状态表述 | Not Applicable | 2026-08-16 ARCH-013 轮**合并**：并入 REQ-002「文档治理与同步」（README/AGENTS 服务表已随 ARCH-012/013 轮同步）；后续大变动同步由 REQ-002 承接 |
+| REQ-025 | 流程 | 四类设计文档实时同步：架构设计/API 契约/数据库设计/技术栈选型先文档后实现更新 | Not Applicable | 2026-08-16 ARCH-013 轮**合并**：并入 REQ-002「文档治理与同步」（本轮已完成四类文档同步：four-service-architecture/config-center-api/service-contracts/database-design）；后续由 REQ-002 承接 |
+| REQ-004 | 请求 | QED-Tracker 服务化 8901：API + 后台任务 + 轮询；数据根迁 dataset/qed-tracker/（请求：QED-Tracker） | Achieved | 服务化轮 QED-008~010 完成、8901 已服务化、数据根已迁 dataset/qed-tracker/（QED-009）；剩余 QED-014 全链路联调冒烟与根仓库 8901 客户端联调验收并入 ARCH-002 主线（行内体现）；2026-08-16 ARCH-013 轮关闭 |
+| REQ-014 | 请求 | 基础书单 math-qe-v2 + LLM 筛选评估：按课程批量评估任务（请求：QED-Tracker） | Achieved | QED-013 已实现（13 门课程书单 + evaluate 按课程批量落候选）；剩余 QED-014 全链路联调验收并入 ARCH-002 主线；2026-08-16 ARCH-013 轮关闭 |

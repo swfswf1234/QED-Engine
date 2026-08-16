@@ -51,8 +51,9 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
 - 模型路由：`GET http://127.0.0.1:8900/api/v1/config/models`
 - 配置状态：`GET http://127.0.0.1:8900/api/v1/config/keys`（只返回供应商 key 是否设置的布尔，
   不返回密钥值）
-- 可达性探测：`GET http://127.0.0.1:8900/api/v1/config/llm-status`（真实探测）、
-  `GET http://127.0.0.1:8900/api/v1/config/database`（真实连接探测，首次 3-5s）
+- 启动自检（8900 启动时探测一次，ARCH-014）：LLM 供应商可达性写启动日志；
+  `GET http://127.0.0.1:8900/api/v1/config/database`（读启动快照，不再按需探测；
+  `/config/llm-status` 已删除）
 - 数据域（8900 适配 8901）：`GET /catalogs/{course_id}`、`GET /selections`、`GET /tasks`、
   `POST /selections/{id}/confirm|backup|reject|supersede`、`GET /resources/{id}/downloads`、
   `POST /downloads/{id}/approve|reject|register`、`GET /downloads/{id}/sources`
@@ -61,6 +62,17 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
   15s，见 [服务控制设计](../design/service-control.md)）
 - 三域契约与响应示例见[配置中心 API 契约](../design/config-center-api.md)
 - 统一启停：`scripts/start-all.ps1`（8900/8903 + 探测 8901/8902）、`scripts/stop-all.ps1`
+
+## 启动前端（8903）
+
+```powershell
+python scripts/serve_web.py
+```
+
+- 静态服务仓库 `web/`，监听 8903；响应统一 `Cache-Control: no-store`
+  （21 期：`python -m http.server` 无缓存头，浏览器启发式缓存旧 app.js/style.css，
+  改版后硬刷新前不可见，已改用本脚本根治）
+- 打开 `http://127.0.0.1:8903`；改版后普通刷新即可生效（无需 Ctrl+F5）
 - 密钥检查脚本：`python scripts/check_api_keys.py`（需要 `scripts/load-env.ps1` 加载 `.env` 后
   运行；未加载或 `.env` 为空时预期输出 `ALL_SET=0`，属正常降级）
 
@@ -77,7 +89,7 @@ conda run -n QED_env python -m uvicorn qed_engine.api.main:app --port 8900
 
 | 项目 | 现状 | 门禁与启动 |
 | --- | --- | --- |
-| Axiom-Flow | 8902（迁移中，当前 8000） | 分支 `release`，本地门禁 + 契约测试；启动/验证命令见 `Axiom-Flow/docs/guides/development.md` |
+| Axiom-Flow | 8902（已迁移，2026-08-11 ALN-002；8000 兼容保留） | 分支 `release`，本地门禁 + 契约测试；启动/验证命令见 `Axiom-Flow/docs/guides/development.md` |
 | QED-Tracker | 8901（已服务化，写操作后台任务 + 轮询） | 分支 `dev`→`release`→`main`；启动/验证命令见 `QED-Tracker/docs/guides/development.md` |
 
 四服务启停托管（控制中心）已实装（2026-08-11，ADR 0007 轮），8900 服务域接口见

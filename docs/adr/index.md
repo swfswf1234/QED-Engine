@@ -18,5 +18,6 @@
 | [`0006`](0006-engineering-governance-contract.md) | 工程治理契约范本化 | 工程治理 | v0.1 | Accepted | — |
 | [`0007`](0007-qed-engine-backend-gateway.md) | QED-Engine 后端网关化：前端统一入口 8900 | 架构与边界 | v0.1 | Accepted | — |
 | [`0008`](0008-frontend-react-refactor.md) | 前端框架与工程化选型：React 全家桶重构 8903 | 架构与边界 | v0.2 | Accepted | — |
+| [`0009`](0009-shared-qed-tables.md) | qed 库新增 qed_* 共享表族（课程体系元数据跨项目共享） | 架构与边界 | v0.1 | Accepted | — |
 
-下一个可用编号：0009
+下一个可用编号：0010

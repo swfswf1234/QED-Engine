@@ -36,8 +36,8 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 | 服务 | 位置 | 端口 | 实现状态 | 职责 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 本仓库 `web/` | 8903 | 已运行 | 学习中心（建设中）+ 管理后台：仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照；**只连 8900**（ADR 0007） |
-| QED-Engine 后端 | 本仓库 `backend/qed_engine/` | 8900 | 已运行 | 配置域（模型/API-key/数据库选择与状态探测，密钥不下发）+ 数据域网关（目录/资源/任务适配 8901）+ 服务域（/services 启停托管，控制中心已实装） |
+| QED-Engine 前端 | 本仓库 `web/` | 8903 | 已运行 | 学习中心（建设中）+ 管理后台：仪表大盘 / 文档下载管理 / 文档解析管理（含解析进度、原始文档对照两个子视图）；**只连 8900**（ADR 0007） |
+| QED-Engine 后端 | 本仓库 `backend/qed_engine/` | 8900 | 已运行 | 三域组织（ARCH-012）：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（目录/三表/任务适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发 |
 | Axiom-Flow | 子仓库 | 8000 → 8902 迁移中 | 已实现 | 下载后文档的解析、OCR、图表/公式还原、质量审阅 |
 | QED-Tracker | 子仓库 | 8901 | 已服务化 | 教材/习题集/论文的发现、下载、校验、登记 |
 
@@ -65,15 +65,27 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 - 技能清单（精简保留）：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`requesting-code-review`、`receiving-code-review`。
 - 已移出禁用：`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
-- **跨项目协作**：需要对方项目配合时，在对方仓库建设计文档 + todo 任务（请求），用户评审
-  确认后由对方执行；不直接修改对方项目代码。规则见
+- **跨项目协作（硬性边界，2026-08-16 亡羊补牢强化）**：根仓库 agent（含派发的 subagent）
+  在 Axiom-Flow / QED-Tracker 工作区的合法动作**仅限：① 读取；② 修改其文档（设计/计划/
+  todo 登记等）**——**不得产生任何代码改动**。任何涉及子项目代码的任务，一律走：
+  根仓库 todo 登记请求（标注「请求：<目标仓库>」）→ 在对方仓库建设计文档 + todo 条目
+  （我们只写文档）→ 用户评审确认 → 由对方项目执行 → 回执。**用户口头指令「优化/改造某
+  子项目服务」不豁免此流程**（代码改动必须由对方仓库执行）。误产生的子项目代码改动须登记
+  移交（对方审阅后自行提交）。规则见
   [跨项目协作流程](docs/standards/cross-project-collaboration.md)；收到对方发起的配合需求时，
   先评审后执行。
+- **子项目 git 操作边界（2026-08-16 用户裁决固化）**：**Axiom-Flow / QED-Tracker 的 git
+  提交与推送一律不归根仓库 agent 执行**——即使其工作区存在未提交改动（无论改动由谁产生）、
+  即使「上传 GitHub」之类的用户指令包含子项目，根仓库 agent 也只做**只读检查**（git status/
+  log/diff 等）并向用户报告状态，提交/推送由用户或对方仓库自行执行；用户明确逐个授权
+  例外时才可代执行。
 - 中文交流；文档默认中文，标识符/API 字段保持英文。
 
 ## 完成检查
 
 1. 不把子项目文件或 dataset 数据加入本仓库索引。
-2. 涉及子项目的改动在其仓库内完成并遵守其门禁。
-3. 声称完成前已运行验证命令并展示输出。
-4. 未获得明确要求不提交 git。
+2. **未在 Axiom-Flow / QED-Tracker 工作区产生代码改动**（文档修改与任务登记除外；若产生，
+   已登记移交由对方审阅）。
+3. 涉及子项目的改动在其仓库内完成并遵守其门禁。
+4. 声称完成前已运行验证命令并展示输出。
+5. 未获得明确要求不提交 git。

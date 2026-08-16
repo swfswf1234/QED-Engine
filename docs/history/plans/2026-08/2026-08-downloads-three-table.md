@@ -4,7 +4,7 @@
 任务类型：C
 最后更新：2026-08-14
 关联 ADR：无（数据库归属沿用 REQ-026/027 裁决）
-关联设计：[三表模型设计](../design/downloads-three-table-model.md)（REQ-029/030 依据）
+关联设计：[三表模型设计](../../../design/downloads-three-table-model.md)（REQ-029/030 依据）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-010 登记；REQ-029/030 跨项目请求；REQ-006 承接执行）
 归档判定：用户审阅两份设计文档与计划 → QED-Tracker 回执完成（QED-028/029）→ 根仓库侧
 8900 适配 + 前端三表切换 + 知识点展示同步完成 → 联调验收后 Completed，归档至
@@ -57,7 +57,7 @@
 
 范围内（根仓库侧，QED-Tracker 回执后执行）：
 - `backend/qed_engine/api/data.py` + 相关数据域模块：新增 selections/downloads/sources
-  适配端点（对齐 [三表模型设计 §3.2](../design/downloads-three-table-model.md)）。
+  适配端点（对齐 [三表模型设计 §3.2](../../../design/downloads-three-table-model.md)）。
 - `web/app.js` / `web/index.html` / `web/style.css`：树到套书、面板书单+册明细、
   详情弹窗来源、步骤条四步语义（含绝对路径审理提示）、册级验收操作。
 - `tests/test_web.py` + `backend/tests/`：三表端点守护、前端三表 token 守护。

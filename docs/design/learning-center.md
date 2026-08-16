@@ -1,11 +1,16 @@
 # 学习中心：课程学习与知识问答（探索中）
 
 设计状态：Draft
-实现状态：Not Started
-最后更新：2026-08-09
-关联代码：无（探索阶段，未动代码）
-关联测试：无
+实现状态：In Progress
+最后更新：2026-08-14
+关联代码：web/index.html（learn-layout/learn-side/learn-main，学习中心框架）、
+web/app.js（renderLearningCenter/renderLearnCourseList/renderLearnCourse）、
+web/style.css（.learn-*）
+关联测试：tests/test_web.py（test_learning_center_framework、test_loadtree_fully_guarded、
+test_tree_load_guard_timer 等）
 关联 ADR：无
+> 进度说明（2026-08-14）：主界面学习中心框架已搭——领域→课程→章节/知识点浏览（数学试点，
+> 章节空态等解析产物管线填充，见 §3 框架进度）。
 关联文档：[course-acquisition-flow.md](course-acquisition-flow.md)（课程收集流程）、
 [langchain-notes.md](../learning/langchain-notes.md)、[rag-notes.md](../learning/rag-notes.md)、
 [vector-db-notes.md](../learning/vector-db-notes.md)、[chunking-notes.md](../learning/chunking-notes.md)、
@@ -59,12 +64,21 @@
 - **知识图谱实践**：解析产物实体/关系建模（概念、定理、引用关系）与图查询即为知识图谱
   技术的学习载体；知识点 DAG 与图谱联动。
 - 与现有数据的关系：前端 `COURSE_ORDER`（课程层顺序）→ 扩展为知识点层依赖图。
+- **框架进度（2026-08-14，两次迭代）**：初版曾将学习中心框架直接嵌入主界面 home 页，
+  用户裁决调整为——**home 页还原**（hero + 三张占位卡，「知识点梳理」卡可点击），
+  知识点浏览为**独立界面 `#/knowledge`**（独立路由页：左侧领域/课程列表 catalog 13 门 +
+  右侧选中课程的章节/知识点结构区空态；**只显示结构，不显示课程资料书单**）。
+  **章节/知识点数据接入点**：`renderKnowledgeCenter`/`renderLearnCourse` 的 `learn-chapters`
+  区——解析产物管线（Axiom-Flow 知识图谱产物）就绪后按本节模型填充
+  （领域→课程→知识点 + 前置依赖字段）。
 
 ## 4. 课程进度编排（待细化）
 
 - 按知识节点设置课程进度：每个知识点（教材章节/习题组）一个进度单元，自动解锁依赖
   前置完成的知识点；「温故知新」按遗忘曲线/依赖关系回访。
-- 进度数据落库（qed 库新表或独立 schema，待定）；与解析产物、向量检索数据联动。
+- 进度数据入 DB（元数据默认存数据库，2026-08-16 裁决）：课程进度/练习记录/问答会话等
+  学习元数据归「QED-Engine 学习表族」（规划，暂缓——归属 M2 里程碑启动时裁决，见
+  [database-design.md](database-design.md) 表清单规划）；与解析产物、向量检索数据联动。
 
 ## 5. 知识问答（多 Agent，待细化）
 

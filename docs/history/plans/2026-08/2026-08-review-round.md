@@ -3,8 +3,8 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-08-07
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
-关联设计：[服务契约](../design/service-contracts.md)
+关联 ADR：[ADR 0002](../../../adr/0002-frontend-and-port-centralization.md)
+关联设计：[服务契约](../../../design/service-contracts.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-006 登记；REQ-006 承接前端执行；REQ-018 跨项目请求 QED-Tracker）
 归档判定：用户确认计划（转 Accepted）→ 跨项目请求由 QED-Tracker 承接执行 → 前端门禁全绿 + 浏览器验收后 Completed，归档至 `history/plans/2026-08/`
 

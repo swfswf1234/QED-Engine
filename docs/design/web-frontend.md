@@ -106,6 +106,9 @@
   （#/admin/trace）已随六期裁决移除**；
 - 侧边栏菜单（六期收敛为四项独立界面；十一期改名，十五期界面名回退）：仪表大盘 / 文档下载管理 /
   文档解析进度 / 原始文档对照。
+  > **认知更新（2026-08-16 用户确认）**：「解析进度」与「原始文档对照」为**包含关系**——
+  > 同属「文档解析管理」的两个子视图；旧前端十六期后退役不改界面组织，合并由前端轮
+  > web-ui 后续轮实现（见 [frontend-react-refactor.md](frontend-react-refactor.md) 后续轮界面）。
 
 ## 详情弹窗
 
@@ -115,10 +118,10 @@
 
 ## 横幅
 
-三期粗粒度化；八期去向量库占位：只显示「LLM评估模块连接：OK / MySQL数据库连接：OK」，
-不透露 provider 名单与主机细节。判定：LLM=任一已配置供应商可达（8900 `/config/llm-status` 探测）；
-MySQL=8900 `/config/database` 真实连接探测（pymysql）；未配置显示「未配置」，配置但不可达显示
-「不可用/连接失败」。
+三期粗粒度化；八期去向量库占位：只显示「MySQL数据库连接：OK」，不透露主机细节。
+判定：MySQL=8900 `/config/database` **启动快照**（8900 启动时真实连接探测一次，ARCH-014）；
+未配置显示「未配置」，不可达显示「连接失败」。LLM 供应商可达性不再展示（ARCH-014：
+8900 启动自检写日志，`/config/llm-status` 端点已删除）。
 
 ## 视觉规范
 
@@ -136,7 +139,8 @@ DeepSeek 蓝黑风格，非纯黑：背景 `#0e1424` + 顶部蓝紫光晕；卡�
 - 唯一入口（ADR 0007）：`API_BASE = http://127.0.0.1:8900/api/v1`，app.js 不得出现
   `:8901`/`:8902` 直连；配置/数据/服务域全部经 8900；
 - 8900 端点：
-  - 配置域：`/api/v1/health`、`/config/keys`、`/config/models`、`/config/database`、`/config/llm-status`；
+  - 配置域：`/api/v1/health`、`/config/keys`、`/config/models`、`/config/database`（启动快照；
+    `/config/llm-status` 已随 ARCH-014 删除）；
   - 服务域：`/services`（三服务状态快照）；
   - 数据域：`/selections`、`/downloads`、`/sources`、`/tasks`、`/confirm`、`/backup`、`/reject`、
     `/approve`、`/register`、`/catalogs/math-qe`（三表端点语义归 8900 数据域，旧 `/resources`

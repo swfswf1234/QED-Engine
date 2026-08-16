@@ -38,8 +38,8 @@ flowchart LR
 
 | 服务 | 职责 |
 | --- | --- |
-| QED-Engine 前端（8903） | 学习界面 + 管理后台：仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照；**只连 8900**（ADR 0007） |
-| QED-Engine 后端（8900） | 配置域（模型/API-key/数据库选择与状态探测）+ 数据域网关（目录/资源/任务适配 8901）+ 服务域（服务启停托管，控制中心） |
+| QED-Engine 前端（8903） | 学习界面 + 管理后台：仪表大盘 / 文档下载管理 / 文档解析管理（解析进度、原始文档对照）；**只连 8900**（ADR 0007） |
+| QED-Engine 后端（8900） | 三域（ARCH-012）：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/*、/self-restart 监控诊断）+ 数据域·QED-Tracker（目录/三表/任务适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发 |
 | Axiom-Flow（8000 → 8902 迁移中） | 解析、OCR、质量审阅与知识发布 |
 | QED-Tracker（8901） | 下载、校验、登记与交付 |
 
@@ -116,9 +116,9 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `Axiom-Flow/` | 子项目（独立 git 仓库，解析与质量审阅） |
 | `QED-Tracker/` | 子项目（独立 git 仓库，下载与文件管理） |
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
-| `backend/qed_engine/` | 统一配置中心 + 数据域网关 + 控制中心（FastAPI，端口 8900） |
+| `backend/qed_engine/` | QED-Engine 后端：控制域 + 数据域·Tracker + 数据域·Axiom（预留）（FastAPI，端口 8900） |
+| `backend/database/` | qed 库建库与运维：建库脚本（init-qed.sql）、备份脚本（backup-qed.ps1）与备份产物（表结构由子项目 Alembic 管理） |
 | `web/` | QED-Engine 前端（8903，主体学习界面 + 后台管理，原生单页应用） |
-| `database/` | 根仓库数据目录：建库脚本（init-qed.sql）、备份脚本（backup-qed.ps1）与备份产物 |
 | `scripts/` | 辅助与运维脚本（`load-env.ps1` 过渡映射层；`check_api_keys.py` 密钥真实检查；`start-all.ps1` / `stop-all.ps1` 统一启停 8900/8903） |
 | `logs/` | 服务运行日志（控制中心托管子服务输出） |
 | `tmp/` | 运行时临时文件（PID 文件等，不入版本控制） |

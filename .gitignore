@@ -36,9 +36,9 @@ build/
 /tmp/
 
 # 数据库运维产物（备份与清理归档，不入库）
-/database/backups/*
-!/database/backups/.gitkeep
-/database/*.sql.backup
+/backend/database/backups/*
+!/backend/database/backups/.gitkeep
+/backend/database/*.sql.backup
 
 # 环境变量与密钥
 .env
