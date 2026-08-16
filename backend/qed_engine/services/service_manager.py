@@ -1,39 +1,43 @@
-"""服务控制：8900 对 8901/8902 的启停托管与状态展示（控制中心，service-control.md 契约）。
+"""服务控制能力层（控制域）：8900 对 8901/8902 的启停托管、状态探测与自身重启。
 
-前端（8903）只连 8900（ADR 0007）：/services 端点族查询/启动/停止/重启三 Python 服务；
-8900 自身（config 单元）只显示状态不可经自身启停（避免自掘）。状态判定优先 HTTP 端口
-探测（3s 超时）；启停为同步轻量操作（Popen 创建/信号发送即返回），状态收敛由前端轮询
-/services 观察（操作后 15s 过渡窗口）。
+前端（8903）只连 8900（ADR 0007）：/services 端点族契约见 docs/design/service-control.md；
+本模块只暴露能力函数（无路由），路由与 HTTP 映射在 api/control.py。状态判定优先 HTTP
+端口探测（3s 超时）；启停为同步轻量操作（Popen 创建/信号发送即返回），状态收敛由前端轮询
+/services 观察（操作后 15s 过渡窗口）。错误以 ServiceError（含 status_code）表达。
 
 设计关联（DesignRef）：docs/design/service-control.md
 实现状态：Current
-关联测试：tests/test_api.py
+关联测试：tests/test_api.py、tests/test_self_restart.py
 """
 
 import os
 import signal
+import socket
 import subprocess
+import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+
 from qed_engine.config import Settings
 
-router = APIRouter(prefix="/api/v1", tags=["services"])
-
-PROBE_TIMEOUT = 3.0
+PROBE_CONNECT_TIMEOUT = 0.5  # socket 预检：未监听端口快速判定（Windows 防火墙丢包场景）
+PROBE_TIMEOUT = 1.0  # HTTP 确认超时（端口已监听时健康检查）
 TRANSITION_WINDOW = 15.0
 STOP_GRACE_SECONDS = 5.0
-# backend/qed_engine/api/service_manager.py → parents[3] = 仓库根（P1 目录迁移后 src/ → backend/）
+# backend/qed_engine/services/service_manager.py → parents[3] = 仓库根（P1 目录迁移后 src/ → backend/）
 ROOT = Path(__file__).resolve().parents[3]
 LOG_DIR = ROOT / "logs"
 
 NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM)
+
+RESTART_DELAY_SECONDS = 2.0  # 新进程延迟启动秒数（ping -n N 近似等待，N = delay+1）
+RESTART_EXIT_DELAY_SECONDS = 1.0  # 旧进程延迟退出：先确认新进程 spawn 成功
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,7 @@ _SPECS: dict[str, ServiceSpec] = {}
 _LOCKED: set[str] = set()
 _OPS: dict[str, tuple[str, float]] = {}
 _MANAGED: dict[str, ManagedProcess] = {}
+_RESTARTING = False  # self-restart 并发防抖标志
 
 
 def _port_of(url: str, default: int) -> int:
@@ -76,12 +81,25 @@ def configure(settings: Settings | None = None) -> None:
     """按 Settings（QED_*_URL 可覆盖端口）构建服务注册表并确保日志目录存在。"""
     resolved = settings or Settings()
     specs: dict[str, ServiceSpec] = {}
+    config_port = _port_of(resolved.qed_config_center_url, 8900)
     specs["config"] = ServiceSpec(
         name="config",
         label="QED 管理服务（配置中心）",
-        port=_port_of(resolved.qed_config_center_url, 8900),
+        port=config_port,
         log_name="config",
-        commands=(),
+        # 启动命令仅供 restart_self 使用；config 单元不可经 /services 启停（路由层 409）
+        commands=(
+            (
+                "python",
+                "-m",
+                "uvicorn",
+                "qed_engine.api.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(config_port),
+            ),
+        ),
         workdir=str(ROOT),
     )
     specs["tracker"] = ServiceSpec(
@@ -122,7 +140,17 @@ def configure(settings: Settings | None = None) -> None:
 
 
 def _probe_http(port: int) -> bool:
-    """HTTP 端口探测：/api/v1/health 200 即 online（3s 超时，测试可注入）。"""
+    """端口 + HTTP 双重探测：socket 预检 → HTTP 200 确认。
+
+    本机 Windows 上未监听端口的 connect 可能被防火墙静默丢弃（非 RST 拒绝），
+    httpx 直连会等待到超时（曾实测最坏 3s×2）；socket 预检让未启动服务
+    在 PROBE_CONNECT_TIMEOUT 内判定 offline。已监听端口再走 HTTP 健康确认。
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=PROBE_CONNECT_TIMEOUT):
+            pass
+    except OSError:
+        return False
     try:
         with httpx.Client(timeout=PROBE_TIMEOUT) as client:
             response = client.get(f"http://127.0.0.1:{port}/api/v1/health")
@@ -186,27 +214,41 @@ def service_status(spec: ServiceSpec) -> dict:
     return {**base, "status": "offline", "pid": managed.pid if managed else None, "started_at": None, "reason": reason}
 
 
-# --- 进程托管 ---
+# --- 能力层异常与公开接口 ---
 
 
-def _require(name: str) -> ServiceSpec:
+class ServiceError(RuntimeError):
+    """服务控制错误：status_code 语义（404 未知服务 / 409 操作冲突 / 500 自身重启失败）。"""
+
+    def __init__(self, message: str, status_code: int = 409) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+
+
+def require_service(name: str) -> ServiceSpec:
+    """校验服务存在并返回 spec；未知服务抛 ServiceError(404)。"""
     spec = _SPECS.get(name)
     if spec is None:
-        raise HTTPException(status_code=404, detail=f"未知服务：{name}")
+        raise ServiceError(f"未知服务：{name}", status_code=404)
     return spec
 
 
-def _conflict(message: str):
-    raise HTTPException(status_code=409, detail=message)
+def get_specs() -> dict[str, ServiceSpec]:
+    """服务注册表快照（log_viewer 白名单等只读使用）。"""
+    return dict(_SPECS)
+
+
+# --- 进程托管 ---
 
 
 def _start(spec: ServiceSpec) -> dict:
     now = time.monotonic()
     op = _OPS.get(spec.name)
     if op and op[0] in ("start", "restart") and now - op[1] < TRANSITION_WINDOW:
-        _conflict("服务正在启动（过渡窗口内），请稍后再试")
+        raise ServiceError("服务正在启动（过渡窗口内），请稍后再试")
     if _probe_http(spec.port):
-        _conflict(f"服务已在线（端口 {spec.port} 探测通过），不可重复启动")
+        raise ServiceError(f"服务已在线（端口 {spec.port} 探测通过），不可重复启动")
     _LOCKED.add(spec.name)
     try:
         procs = []
@@ -266,10 +308,10 @@ def _stop(spec: ServiceSpec) -> dict:
     now = time.monotonic()
     op = _OPS.get(spec.name)
     if op and op[0] in ("stop", "restart") and now - op[1] < TRANSITION_WINDOW:
-        _conflict("服务正在停止（过渡窗口内），请稍后再试")
+        raise ServiceError("服务正在停止（过渡窗口内），请稍后再试")
     managed = _MANAGED.get(spec.name)
     if managed is None:
-        _conflict("服务未由控制中心托管（无 PID 记录），无法托管停止")
+        raise ServiceError("服务未由控制中心托管（无 PID 记录），无法托管停止")
     assert managed is not None
     _LOCKED.add(spec.name)
     try:
@@ -286,44 +328,58 @@ def _stop(spec: ServiceSpec) -> dict:
     return {"name": spec.name, "status": "stopping", "pid": None}
 
 
-# --- 端点 ---
+# --- 8900 自身重启（self-restart） ---
 
 
-class ActionResponse(BaseModel):
-    name: str
-    status: str
-    pid: int | None = None
+def restart_self() -> dict:
+    """8900 自身重启：延迟启动新进程（同命令同端口）→ 返回 restarting → 后台旧进程退出。
 
+    Windows 时序：新进程以 `cmd /c ping -n <delay+1> 127.0.0.1 >nul && <启动命令>` 延迟绑定
+    端口（ping 延迟与 stdin 无关；timeout 在重定向 stdin 下不可用），旧进程 1s 后
+    os._exit(0) 释放端口。同端口下无法在旧进程存活时先健康确认（新进程绑定必然失败），
+    失败路径由 config.log 暴露（新进程 uvicorn 报错）并人工重启兜底；spawn 失败同步抛
+    ServiceError(500)（响应前可知）。并发防抖：上一轮重启未退出期间重复请求 409。
+    不动既有 /services 语义（config 单元仍不可经 /services 启停）。
+    """
+    global _RESTARTING  # 模块级防抖标志（定义见模块级状态区）
+    spec = _SPECS.get("config")
+    if spec is None or not spec.commands:
+        raise ServiceError("8900 重启失败：config 注册表未初始化，请人工重启", status_code=500)
+    if _RESTARTING:
+        raise ServiceError("8900 正在重启（过渡窗口内），请稍后再试")
+    base_cmd = list(spec.commands[0])
+    base_cmd[0] = sys.executable  # PATH 的 python 可能是无 uvicorn 的 base 环境（C1）
+    ping_wait = int(RESTART_DELAY_SECONDS) + 1
+    delayed_cmd = [
+        "cmd",
+        "/c",
+        f"ping -n {ping_wait} 127.0.0.1 >nul && " + " ".join(base_cmd),
+    ]
+    log_file = None
+    try:
+        log_file = open(LOG_DIR / "config.log", "ab")  # noqa: SIM115 - 随进程生命周期
+        subprocess.Popen(
+            delayed_cmd,
+            cwd=spec.workdir,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=NEW_PROCESS_GROUP,
+            env=os.environ.copy(),
+        )
+    except Exception:
+        if log_file is not None:
+            log_file.close()  # Popen 失败不泄漏日志句柄
+        raise ServiceError("8900 重启失败：新进程启动异常，请人工重启", status_code=500) from None
 
-@router.get("/services")
-def list_services() -> dict:
-    """三服务状态快照，同步返回。"""
-    return {"services": [service_status(spec) for spec in _SPECS.values()]}
+    _RESTARTING = True  # 模块级防抖标志（定义见模块级状态区）
 
+    def _exit_old() -> None:
+        global _RESTARTING  # 函数内赋值模块级标志需 global
+        try:
+            time.sleep(RESTART_EXIT_DELAY_SECONDS)
+            os._exit(0)
+        finally:
+            _RESTARTING = False  # 仅在测试 mock 下可达（真实环境 os._exit 终止进程）
 
-@router.post("/services/{name}/start", response_model=ActionResponse)
-def start_service(name: str) -> ActionResponse:
-    spec = _require(name)
-    if spec.name == "config":
-        _conflict("config（8900 自身）不可经控制中心启停")
-    return ActionResponse(**_start(spec))
-
-
-@router.post("/services/{name}/stop", response_model=ActionResponse)
-def stop_service(name: str) -> ActionResponse:
-    spec = _require(name)
-    if spec.name == "config":
-        _conflict("config（8900 自身）不可经控制中心启停")
-    return ActionResponse(**_stop(spec))
-
-
-@router.post("/services/{name}/restart", response_model=ActionResponse)
-def restart_service(name: str) -> ActionResponse:
-    """先停后启（复用 stop → start 语义）；未托管时直接启动。"""
-    spec = _require(name)
-    if spec.name == "config":
-        _conflict("config（8900 自身）不可经控制中心启停")
-    managed = _MANAGED.get(spec.name)
-    if managed is not None:
-        _stop(spec)
-    return ActionResponse(**_start(spec))
+    threading.Thread(target=_exit_old, daemon=True).start()
+    return {"status": "restarting"}

@@ -2,13 +2,13 @@
 模块职责：统一 CLI qed 契约测试：config 子命令、tracker 客户端子命令、服务发现地址与尾注提醒。
 设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/design/service-contracts.md
 实现状态：Current
-被测代码：src/qed_engine/cli.py、src/qed_engine/tracker_client.py
+被测代码：backend/qed_engine/cli.py、backend/qed_engine/clients/tracker_client.py
 """
 
 import httpx
 import pytest
 from qed_engine.cli import main
-from qed_engine.tracker_client import TrackerClient
+from qed_engine.clients.tracker_client import TrackerClient
 
 
 def _clear_env(monkeypatch):

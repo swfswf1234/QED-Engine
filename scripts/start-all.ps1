@@ -13,6 +13,17 @@ $LogDir = Join-Path $Root "logs"
 $TmpDir = Join-Path $Root "tmp"
 New-Item -ItemType Directory -Force -Path $LogDir, $TmpDir | Out-Null
 
+# conda 环境 python（QED_env）：PATH 中的 python 可能是基础环境（无 uvicorn），
+# 启动后端/前端必须用 QED_env（服务端依赖 uvicorn；serve_web.py 亦统一走该解释器）。
+$Py = "python"
+foreach ($cand in @(
+    "$env:USERPROFILE\anaconda3\envs\QED_env\python.exe",
+    "D:\software\anaconda3\envs\QED_env\python.exe",
+    "C:\ProgramData\anaconda3\envs\QED_env\python.exe"
+)) {
+    if (Test-Path $cand) { $Py = $cand; break }
+}
+
 function Get-Running([string]$PidFile) {
     if (-not (Test-Path -LiteralPath $PidFile)) { return $null }
     $pidVal = Get-Content -LiteralPath $PidFile -ErrorAction SilentlyContinue
@@ -29,9 +40,7 @@ if (Get-Running $BackendPid) {
 } else {
     Write-Host "starting backend (8900) ..."
     $log = Join-Path $LogDir "qed-engine-backend.log"
-    $p = Start-Process -FilePath "python" `
-        -ArgumentList "-m", "uvicorn", "qed_engine.api.main:app", "--host", "127.0.0.1", "--port", "8900" `
-        -WorkingDirectory $Root -RedirectStandardOutput $log -RedirectStandardError $log -PassThru -WindowStyle Hidden
+    $p = Start-Process -FilePath $Py -ArgumentList "-m", "uvicorn", "qed_engine.api.main:app", "--host", "127.0.0.1", "--port", "8900" -WorkingDirectory $Root -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -WindowStyle Hidden
     Set-Content -Path $BackendPid -Value $p.Id
     Write-Host "backend pid: $($p.Id), log: $log"
 }
@@ -43,9 +52,9 @@ if (-not $NoFrontend) {
     } else {
         Write-Host "starting frontend (8903) ..."
         $log = Join-Path $LogDir "qed-engine-frontend.log"
-        $p = Start-Process -FilePath "python" `
-            -ArgumentList "-m", "http.server", "8903", "--directory", "web" `
-            -WorkingDirectory $Root -RedirectStandardOutput $log -RedirectStandardError $log -PassThru -WindowStyle Hidden
+        # 21 期：http.server 无缓存头导致浏览器启发式缓存旧 app.js/style.css（改版不可见），
+        # 改用 scripts/serve_web.py（响应统一 Cache-Control: no-store）。
+        $p = Start-Process -FilePath $Py -ArgumentList "scripts/serve_web.py" -WorkingDirectory $Root -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -WindowStyle Hidden
         Set-Content -Path $FrontendPid -Value $p.Id
         Write-Host "frontend pid: $($p.Id), log: $log"
     }

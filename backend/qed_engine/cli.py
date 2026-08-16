@@ -16,8 +16,8 @@ import argparse
 import json
 import sys
 
+from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 from qed_engine.config import Settings
-from qed_engine.tracker_client import TrackerClient, TrackerError
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")

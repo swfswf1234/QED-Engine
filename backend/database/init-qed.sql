@@ -1,8 +1,8 @@
 -- ============================================================
 -- QED 统一数据库初始化脚本（qed 库）
--- 归属：QED-Engine 根仓库 database/（建库与授权）
+-- 归属：QED-Engine 根仓库 backend/database/（建库与授权）
 -- 环境：MySQL 8.0+，字符集 utf8mb4
--- 用法：mysql -u root -p < database/init-qed.sql
+-- 用法：mysql -u root -p < backend/database/init-qed.sql
 -- 说明：表结构不在此创建——QED-Tracker（qt_* 表）与 Axiom-Flow（af_* 表）
 --       各自通过 Alembic 迁移管理；本脚本只负责建库与授权。
 -- ============================================================

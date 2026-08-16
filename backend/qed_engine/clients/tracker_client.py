@@ -1,4 +1,4 @@
-"""QED-Tracker 服务客户端：qed CLI 与前端工作台经 HTTP 调用 8901。
+"""QED-Tracker 服务客户端（数据域·QED-Tracker 适配层）：qed CLI 与前端工作台经 HTTP 调用 8901。
 
 契约见 docs/design/service-contracts.md（资源状态机、任务轮询、confirm/reject/approve）。
 transport 可注入（测试用 MockTransport）；非 2xx 与连接失败统一抛 TrackerError。

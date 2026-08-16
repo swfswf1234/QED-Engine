@@ -43,15 +43,30 @@ class DatabaseResponse(BaseModel):
     reason: str = ""
 
 
-class LlmStatus(BaseModel):
-    """单个供应商的 LLM 可达性（需真实探测，非配置布尔）。"""
+class LogsResponse(BaseModel):
+    service: str
+    log_path: str
+    lines: list[str]
 
-    reachable: bool
+
+class GpuStatus(BaseModel):
+    available: bool
+    name: str = ""
+    memory_total_mb: int = 0
+    memory_used_mb: int = 0
+    utilization_percent: int = 0
+    processes: list[dict] = []
     reason: str = ""
-    checked_at: str
 
 
-class LlmStatusResponse(BaseModel):
-    qwen: LlmStatus
-    glm: LlmStatus
-    deepseek: LlmStatus
+class LmStudioStatus(BaseModel):
+    reachable: bool
+    base_url: str = ""
+    models: list[str] = []
+    reason: str = ""
+
+
+class MineruStatus(BaseModel):
+    reachable: bool
+    port: int = 8002
+    reason: str = ""

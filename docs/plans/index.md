@@ -15,8 +15,7 @@
 ## 活跃计划
 
 - [2026-08 教材下载轮计划（textbook-download-round）](../trackers/todo.md)（ARCH-002，状态见任务台账）
-- [2026-08 管理后台信息架构重设计（admin-redesign-v4）](../trackers/todo.md)（ARCH-004，状态见任务台账）
-- [2026-08 人工评审优化轮（review-round-v6）](../trackers/todo.md)（ARCH-006，状态见任务台账）
-- [2026-08 文档下载管理课程分页计划（downloads-course-view）](../trackers/todo.md)（ARCH-007，状态见任务台账）
-- [2026-08 文档下载管理三表统一轮（downloads-three-table）](../trackers/todo.md)（ARCH-010，状态见任务台账）
 - [2026-08 前端重构主轮（frontend-react-refactor）](../trackers/todo.md)（ARCH-011，状态见任务台账）
+- [2026-08 后端三域拆分轮（backend-domain-refactor）](../trackers/todo.md)（ARCH-012，状态见任务台账）
+- [2026-08 文档与数据边界整理轮（docs-data-boundary-round）](../trackers/todo.md)（ARCH-013，状态见任务台账）
+- [2026-08 LLM 状态收敛与 DB 启动快照轮（llm-status-convergence）](../trackers/todo.md)（ARCH-014，状态见任务台账）

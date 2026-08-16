@@ -40,6 +40,9 @@ def test_root_test_files_are_the_config_center_suite():
         "test_api.py",
         "test_config.py",
         "test_cli.py",
+        "test_log_viewer.py",
+        "test_monitor.py",
+        "test_self_restart.py",
         "test_tracker_client.py",
         "test_web.py",
     }

@@ -1,8 +1,13 @@
 # 文档下载管理三表模型设计（downloads-three-table-model）
 
-设计状态：Accepted
+设计状态：Superseded
 实现状态：Implemented
-最后更新：2026-08-14
+最后更新：2026-08-16
+取代说明：本设计（qt_selections/qt_downloads/qt_sources 三表模型）已随 **QED-031 知识层次
+重构**被取代（2026-08-16）：新模型为 qed_domain/qed_course（共享）+ qt_knowledge/qt_books/
+qt_sources（私有）五层结构，唯一事实源为 QED-Tracker `docs/design/database-schema.md`。
+本文件保留只读作历史契约留档（8900/8901 三表端点在新契约冻结前仍按本表语义运行）；
+不新建设计决策于本文件。
 实现说明：根仓库侧 8900 数据域三表适配 + 8903 前端三表切换已落地（2026-08-14）；QED-Tracker
 侧 QED-028/029 已回执（三表 DDL/状态机/迁移/8901 端点实测完成），详情见 §8 维护规则。
 关联代码：`web/app.js`、`web/index.html`、`web/style.css`（根仓库侧前端契约；8900 数据域适配

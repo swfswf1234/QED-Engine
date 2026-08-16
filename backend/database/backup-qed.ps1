@@ -1,4 +1,4 @@
-# Backup the qed database to database/backups/ via mysqldump.
+# Backup the qed database to backend/database/backups/ via mysqldump.
 # Password is read from -Password or $env:QED_DB_PASSWORD (root .env may set it).
 param(
     [string]$Host = "127.0.0.1",
@@ -9,8 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $PSScriptRoot
-$BackupDir = Join-Path $Root "database\backups"
+$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$BackupDir = Join-Path $Root "backend\database\backups"
 New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
 
 if (-not $Password) { $Password = $env:QED_DB_PASSWORD }

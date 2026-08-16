@@ -1,9 +1,9 @@
-"""QED-Engine 数据域语义 API：catalogs / tasks / selections / downloads 归 8900 所有。
+"""数据域·QED-Tracker 适配路由：catalogs / tasks / selections / downloads 归 8900 所有。
 
 前端（8903）只连 8900（ADR 0007）：目录、任务四端点、三表语义（表1 选课表 / 表2 册级明细 /
-表3 渠道来源）统一由本模块暴露，内部经 TrackerClient 适配 8901。路径与前端既有 token 一致，
-响应形状对齐 8901 当前结构（契约在 config-center-api.md 数据域章节登记；三表契约见
-downloads-three-table-model.md §3.2）。qt_resources 旧 /resources 端点已随 QED-030 退役。
+表3 渠道来源）统一由本模块暴露，内部经 clients/tracker_client.py 适配 8901。路径与前端既有
+token 一致，响应形状对齐 8901 当前结构（契约在 config-center-api.md 数据域章节登记；三表契约
+见 downloads-three-table-model.md §3.2）。qt_resources 旧 /resources 端点已随 QED-030 退役。
 
 错误映射：8901 返回 4xx（如 409 状态机冲突）→ 同码透传 detail；连接失败/5xx → 503
 + 明确提示（前端据此降级显示，独立性铁律）。
@@ -15,7 +15,7 @@ downloads-three-table-model.md §3.2）。qt_resources 旧 /resources 端点已�
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from qed_engine.tracker_client import TrackerClient, TrackerError
+from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 
 router = APIRouter(prefix="/api/v1", tags=["data"])
 

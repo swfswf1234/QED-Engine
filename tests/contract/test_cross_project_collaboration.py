@@ -61,3 +61,29 @@ def test_collaboration_standard_declares_template_fields():
         assert f"{step}" in content
     for field in TEMPLATE_FIELDS:
         assert field in content, f"设计文档模板缺少字段：{field}"
+
+
+def test_collaboration_standard_declares_execution_boundary():
+    """执行边界条款守护：需求方 agent 在子项目工作区只能读文档与登记任务，不得写代码。
+
+    2026-08-16 亡羊补牢（V2-003 越界事件）：该条款是根仓库侧 agent 执行纪律的事实源，
+    缺失会导致跨项目代码越权。
+    """
+    content = STANDARD.read_text(encoding="utf-8")
+    assert "执行边界" in content, "跨项目协作标准必须声明「执行边界」小节"
+    assert "合法动作仅限" in content
+    for marker in ("用户口头指令不豁免", "subagent 派发合规", "误产生的代码改动"):
+        assert marker in content, f"执行边界小节缺少条款：{marker}"
+
+
+def test_todo_request_rows_track_receipt_progress():
+    """请求行的证据/下一条件列必须体现对方承接或回执（推动回执闭环，防请求悬空）。"""
+    rows = _todo_rows()
+    requests = [row for row in rows if row["类型"] == "请求"]
+    assert requests
+    for row in requests:
+        evidence = row["证据/下一条件"]
+        assert TARGET_RE.search(row["任务"]), f"{row['ID']} 任务列缺少「请求：<目标仓库>」标注"
+        assert any(marker in evidence for marker in ("承接", "回执", "对方执行", "待开始")), (
+            f"{row['ID']} 证据列未体现对方承接/回执状态"
+        )

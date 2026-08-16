@@ -114,3 +114,13 @@ def test_db_password_not_leaked_in_repr():
     settings = Settings(_env_file=None, qed_db_password="sk-db-secret")
     assert "sk-db-secret" not in repr(settings.qed_db_password)
     assert "sk-db-secret" not in str(settings.qed_db_password)
+
+
+def test_lmstudio_url_default_and_override(monkeypatch):
+    """LM Studio 监控探测地址：默认 1234/v1，QED_LMSTUDIO_URL 可覆盖。"""
+    monkeypatch.delenv("QED_LMSTUDIO_URL", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.qed_lmstudio_url == "http://127.0.0.1:1234/v1"
+    monkeypatch.setenv("QED_LMSTUDIO_URL", "http://127.0.0.1:9999/v1")
+    settings = Settings(_env_file=None)
+    assert settings.qed_lmstudio_url == "http://127.0.0.1:9999/v1"

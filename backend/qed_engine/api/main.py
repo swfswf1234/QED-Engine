@@ -1,112 +1,69 @@
-"""QED-Engine 后端 API 入口：配置域（health/models/keys/database/llm-status）+ 数据域
-（catalogs/resources/tasks 语义 API）+ 服务域（/services，见 service-control.md）。
+"""QED-Engine 后端 API 入口：三域组装（控制域 control / 数据域·Tracker tracker）。
+
+对外契约见 docs/design/config-center-api.md（配置/数据域/服务域/监控诊断）与
+docs/design/service-control.md（/services）；三域组织见 docs/design/backend-domain-split.md。
+LLM 供应商可达性与 MySQL 连接为启动自检（ARCH-014：/config/llm-status 端点已删除，
+database 端点只读启动快照）。
 
 设计关联（DesignRef）：docs/design/config-center-api.md
 实现状态：Current
 关联测试：tests/test_api.py
 """
 
-from datetime import UTC, datetime
+import logging
 
-import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from qed_engine import __version__
-from qed_engine.api.data import router as data_router
-from qed_engine.api.schemas import (
-    DatabaseResponse,
-    HealthResponse,
-    KeysResponse,
-    LlmStatus,
-    LlmStatusResponse,
-    ModelRoute,
-    ModelsResponse,
-)
-from qed_engine.api.service_manager import configure as configure_services
-from qed_engine.api.service_manager import router as services_router
+from qed_engine.api import control as api_control
+from qed_engine.api.axiom import router as axiom_router
+from qed_engine.api.control import router as control_router
+from qed_engine.api.tracker import router as tracker_router
+from qed_engine.clients.axiom_client import AxiomClient
+from qed_engine.clients.tracker_client import TrackerClient
 from qed_engine.config import Settings
-from qed_engine.tracker_client import TrackerClient
+from qed_engine.services.service_manager import configure as configure_services
 
-# LLM 可达性探测：调各供应商 models 列表接口（免费、无 token 消耗），5s 超时，结果缓存 60s。
-PROBE_URLS = {
-    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
-    "glm": "https://open.bigmodel.cn/api/paas/v4/models",
-    "deepseek": "https://api.deepseek.com/models",
-}
-PROBE_TIMEOUT_SECONDS = 5.0
-LLM_STATUS_TTL_SECONDS = 60.0
-
-# MySQL 连接探测：真实认证（pymysql），3s 超时，结果缓存 60s；密码绝不下发。
-DB_PROBE_TIMEOUT_SECONDS = 3.0
-DB_STATUS_TTL_SECONDS = 60.0
+logger = logging.getLogger("qed_engine")
 
 
-def _probe_mysql(settings: Settings) -> tuple[bool, str]:
-    """真实连接 qed 数据库：认证成功为可达；异常映射为简短原因（不含密码与主机细节）。"""
-    import pymysql
-    from pymysql import err
+def _startup_db_check(settings: Settings) -> dict:
+    """启动自检：真实连接 qed 库一次（3s 超时），结果为 /config/database 的启动快照。
 
-    password = settings.qed_db_password.get_secret_value()
-    if not password:
-        return False, "未配置"
-    try:
-        connection = pymysql.connect(
-            host=settings.qed_db_host,
-            port=settings.qed_db_port,
-            user=settings.qed_db_user,
-            password=password,
-            database=settings.qed_db_name,
-            connect_timeout=DB_PROBE_TIMEOUT_SECONDS,
-        )
-    except err.OperationalError as exc:
-        code = exc.args[0] if exc.args else None
-        if code == 1045:
-            return False, "认证失败"
-        if code == 2003:
-            return False, "连接失败"
-        if code == 2013:
-            return False, "超时"
-        return False, "连接失败"
-    except Exception:
-        return False, "连接失败"
-    connection.close()
-    return True, ""
-
-
-def _probe_llm(provider: str, api_key: str, url: str) -> tuple[bool, str]:
-    """真实探测供应商 models 接口：200 为可达；网络/HTTP 异常一律不可达（附原因）。
-
-    密钥只出现在请求头，绝不进入返回值与任何响应体。
+    未配置密码不探测（reachable=false, reason=未配置）；密码绝不下发。
     """
-    try:
-        with httpx.Client() as client:
-            response = client.get(
-                url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=PROBE_TIMEOUT_SECONDS,
-                follow_redirects=True,
-            )
-        if response.status_code == 200:
-            return True, ""
-        return False, f"HTTP {response.status_code}"
-    except httpx.TimeoutException:
-        return False, "超时"
-    except httpx.HTTPError as exc:
-        return False, type(exc).__name__
+    configured = settings.qed_db_password.get_secret_value() != ""
+    reachable, reason = (False, "未配置") if not configured else api_control._probe_mysql(settings)
+    return {"configured": configured, "reachable": reachable, "reason": reason}
+
+
+def _startup_llm_check(settings: Settings) -> None:
+    """启动自检：对已配置供应商探测一次（免费 models 接口，5s 超时），结果写日志。
+
+    密钥只出现在探测请求头，绝不进入日志（ARCH-014：按需探测端点已删除）。
+    """
+    for provider in ("qwen", "glm", "deepseek"):
+        api_key = getattr(settings, f"{provider}_api_key").get_secret_value()
+        if not api_key:
+            continue
+        reachable, reason = api_control._probe_llm(provider, api_key, api_control.PROBE_URLS[provider])
+        logger.info("启动自检：%s LLM 可达=%s（%s）", provider, reachable, reason)
 
 
 def create_app(
     settings: Settings | None = None,
     tracker_client: TrackerClient | None = None,
+    axiom_client: AxiomClient | None = None,
 ) -> FastAPI:
-    """组装 API；测试可注入确定性 Settings 与 8901 客户端（MockTransport）。"""
+    """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。"""
     resolved = settings or Settings()
 
     app = FastAPI(title="QED-Engine Backend", version=__version__)
     app.state.settings = resolved
-    app.state.llm_status_cache: dict = {}
-    app.state.db_status_cache: dict = {}
+    app.state.db_status = _startup_db_check(resolved)
+    _startup_llm_check(resolved)
     app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url)
+    app.state.axiom_client = axiom_client or AxiomClient(base_url=resolved.qed_axiom_url)
     configure_services(resolved)
     app.add_middleware(
         CORSMiddleware,
@@ -129,100 +86,9 @@ def create_app(
         allow_headers=["*"],
     )
 
-    app.include_router(data_router)
-    app.include_router(services_router)
-
-    @app.get("/api/v1/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
-        return HealthResponse(status="ok", service="qed-engine-config", version=__version__)
-
-    @app.get("/api/v1/config/models", response_model=ModelsResponse)
-    def models() -> ModelsResponse:
-        """模型路由表：模型选择单线路（qwen 三用途），子项目不感知密钥。"""
-        return ModelsResponse(
-            default=ModelRoute(
-                model=resolved.qed_model,
-                provider="qwen",
-                configured=resolved.has_configured("qwen"),
-            ),
-            ocr=ModelRoute(
-                model=resolved.qed_ocr_model,
-                provider="qwen",
-                configured=resolved.has_configured("qwen"),
-            ),
-            embedding=ModelRoute(
-                model=resolved.qed_embedding_model,
-                provider="qwen",
-                configured=resolved.has_configured("qwen"),
-            ),
-        )
-
-    @app.get("/api/v1/config/keys", response_model=KeysResponse)
-    def keys() -> KeysResponse:
-        """供应商配置状态（管理界面用），不含密钥值。"""
-        return KeysResponse(
-            deepseek=resolved.has_configured("deepseek"),
-            qwen=resolved.has_configured("qwen"),
-            glm=resolved.has_configured("glm"),
-        )
-
-    @app.get("/api/v1/config/database", response_model=DatabaseResponse)
-    def database() -> DatabaseResponse:
-        """统一数据库配置与连接状态（qed 库）：只含非敏感信息；密码绝不下发。
-
-        reachable 必须经真实连接验证（_probe_mysql），不能用配置布尔冒充；
-        未配置密码不探测（reason=未配置）。
-        """
-        import time
-
-        cache = app.state.db_status_cache
-        now = time.monotonic()
-        if cache.get("checked_at") is not None and now - cache["checked_at"] < DB_STATUS_TTL_SECONDS:
-            return cache["payload"]
-
-        configured = resolved.qed_db_password.get_secret_value() != ""
-        reachable, reason = (False, "未配置") if not configured else _probe_mysql(resolved)
-        payload = DatabaseResponse(
-            host=resolved.qed_db_host,
-            port=resolved.qed_db_port,
-            name=resolved.qed_db_name,
-            user=resolved.qed_db_user,
-            configured=configured,
-            reachable=reachable,
-            reason=reason,
-        )
-        cache["checked_at"] = now
-        cache["payload"] = payload
-        return payload
-
-    @app.get("/api/v1/config/llm-status", response_model=LlmStatusResponse)
-    def llm_status() -> LlmStatusResponse:
-        """各供应商 LLM 可达性（真实探测 models 接口；未配置不探测）。
-
-        「可达」必须经过探测验证，不能用 key 配置布尔冒充；密钥不出现在任何响应。
-        """
-        import time
-
-        cache = app.state.llm_status_cache
-        now = time.monotonic()
-        if cache.get("checked_at") is not None and now - cache["checked_at"] < LLM_STATUS_TTL_SECONDS:
-            return cache["payload"]
-
-        now_iso = datetime.now(UTC).isoformat()
-        statuses: dict[str, LlmStatus] = {}
-        for provider in ("qwen", "glm", "deepseek"):
-            api_key = getattr(resolved, f"{provider}_api_key").get_secret_value()
-            if not api_key:
-                statuses[provider] = LlmStatus(reachable=False, reason="未配置", checked_at=now_iso)
-                continue
-            reachable, reason = _probe_llm(provider, api_key, PROBE_URLS[provider])
-            statuses[provider] = LlmStatus(reachable=reachable, reason=reason, checked_at=now_iso)
-
-        payload = LlmStatusResponse(**statuses)
-        cache["checked_at"] = now
-        cache["payload"] = payload
-        return payload
-
+    app.include_router(control_router)
+    app.include_router(tracker_router)
+    app.include_router(axiom_router)
     return app
 
 

@@ -2,7 +2,7 @@
 模块职责：QED-Tracker 服务客户端（8901）契约测试：方法/路径/请求体、错误响应与任务轮询。
 设计关联（DesignRef）：docs/design/service-contracts.md
 实现状态：Current
-被测代码：src/qed_engine/tracker_client.py
+被测代码：backend/qed_engine/clients/tracker_client.py
 """
 
 import json
@@ -10,7 +10,7 @@ import time
 
 import httpx
 import pytest
-from qed_engine.tracker_client import TrackerClient, TrackerError
+from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 
 
 def _client(handler) -> TrackerClient:

@@ -3,9 +3,9 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-11
-关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`scripts/load-env.ps1`、`backend/qed_engine/tracker_client.py`（8901 客户端实现）
+关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`scripts/load-env.ps1`、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0003](../adr/0003-shared-qed-database-independence.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0003](../adr/0003-shared-qed-database-independence.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0009](../adr/0009-shared-qed-tables.md)
 
 ## 目的与边界
 
@@ -28,13 +28,16 @@
 | QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 密钥直读根 `.env`（经 `load-env.ps1` 映射） | 子项目直读 `QED_*` 变量，映射层退役 |
-| 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`，`QED_DB_*` 唯一事实源 |
-| QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 三表 `qt_selections`/`qt_downloads`/`qt_sources`（QED-028/029 落地；qt_resources 已退役 QED-030） | JSON 保留文件状态事实 + MySQL 册级明细登记（三表契约见[三表模型](downloads-three-table-model.md)） |
+| 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源 |
+| QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031，取代三表 qt_selections/qt_downloads；表结构见 QED-Tracker `docs/design/database-schema.md`） | **元数据默认存数据库**（2026-08-16 用户裁决）：meta/ JSON 退役（DB 为唯一事实源，存量迁移归档见 REQ-032）；dataset/ 只管理数据资料文件 |
 
 ## 统一数据库（MySQL 8，qed 库）
 
 2026-08-04 用户裁决、[ADR 0003](../adr/0003-shared-qed-database-independence.md) 登记：新建
 MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离，属独立性铁律的明确例外）。
+2026-08-16 [ADR 0009](../adr/0009-shared-qed-tables.md) 补充：新增 `qed_*` 共享前缀表族
+（`qed_domain`/`qed_course` 课程体系元数据），所有权 QED-Tracker（建表维护），其他项目
+**只读不写**；共享表不复制 JSON，QED-Tracker 侧 `courses/math.json` 退役。
 表命名空间、表清单、关键字段、迁移与敏感字段规则见[数据库设计](database-design.md)；
 凭据与库名唯一事实源为根 `.env` 的 `QED_DB_*`（见
 [configuration-and-secrets.md](configuration-and-secrets.md)），密码绝不下发到任何接口响应。
@@ -44,13 +47,11 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 - 前缀 `/api/v1`；`GET /api/v1/health` 存活检查。
 - 只读查询（搜索、资源列表、选择报告、目录）同步返回；8903 浏览器已不直连本服务
   （ADR 0007，经 8900 数据域语义 API 访问）；8900 后端服务端到服务端调用不受 CORS 限制。
-- 三表语义契约（QED-028/029；qt_resources 时代的人机协同闭环已随 QED-030 退役）：
-  - 表1 选课 `GET /selections?course_id=&status=`（详情 `GET /selections/{id}`，rejected/superseded
-    彻底隐藏）、状态机 `candidate → confirmed / backup / rejected / superseded`；
-  - 表2 册级明细 `GET /resources/{id}/downloads`、`POST /downloads`（新建候选册）、
-    `POST /downloads/{id}/approve|reject|register`（`{relative_path}` 人工下载登记）；
-  - 表3 渠道尝试 `GET /downloads/{id}/sources`（失败留痕不展示）；
-  - 完整契约与状态机见[三表模型](downloads-three-table-model.md) §3；`InvalidTransition` 返回 409 透传。
+- 三表语义契约（QED-028/029；qt_resources 时代的人机协同闭环已随 QED-030 退役）：**已被
+  QED-031 知识层次五表模型取代（2026-08-16）**——`/selections`、`/downloads` 等三表端点的
+  8901 新契约（qt_knowledge/qt_books 语义）随 QED-Tracker 实现轮（迁移 0006）冻结后在本文件
+  更新；表结构事实源为 QED-Tracker `docs/design/database-schema.md`。三表模型历史契约见
+  [三表模型](downloads-three-table-model.md)（Superseded）。
 - 写操作（下载、论文推荐、扫描、Axiom 推送）一律创建**后台任务**：
   - `POST /tasks/...` 立即返回 `task_id`；`GET /tasks/{id}` 轮询状态与结果；
   - 状态机 `queued → running → succeeded / failed`；进度字段 0–100；

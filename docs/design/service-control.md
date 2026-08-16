@@ -1,9 +1,9 @@
 # 控制中心：服务托管与启停契约
 
 设计状态：Accepted
-实现状态：In Progress
+实现状态：Implemented
 最后更新：2026-08-16
-关联代码：`backend/qed_engine/api/service_manager.py`
+关联代码：`backend/qed_engine/services/service_manager.py`
 关联测试：`tests/test_api.py`、`tests/test_web.py`
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
 
@@ -69,7 +69,10 @@
 - `pid`：8900 托管记录的主 PID（`axiom` 为 API 进程 PID；8900 重启后 PID 记录丢失，以端口
   探测为准，pid 可为 null）。
 - `reason`：offline 的补充原因（未启动 / 连接失败 / 停止超时强杀）。
-- 状态判定**优先 HTTP 端口探测**（3s 超时），不依赖 PID 文件；8900 自身被探测时永远 online。
+- 状态判定**优先端口探测**（socket 预检 0.5s + HTTP 确认 1s，双重探测：未监听端口快速
+  判定 offline，已监听端口再 HTTP 健康确认），不依赖 PID 文件；8900 自身被探测时永远
+  online。注：Windows 上未监听 loopback 端口可能被防火墙静默丢弃（非 RST），曾致 httpx
+  直连等待 3s×2；socket 预检使未启动服务 0.5s/单元内返回（2026-08-16 修复）。
 
 ### POST /api/v1/services/{name}/start
 
@@ -105,8 +108,8 @@
    env=根 .env 注入环境, stdout/stderr=日志文件)`；模块级托管表（进程对象 + PID + 启动时间）。
 2. **优雅停止**：`os.kill(pid, signal.CTRL_BREAK_EVENT)` 发送到进程组；uvicorn 捕获
    KeyboardInterrupt 触发优雅关闭；5s 宽限后 `taskkill /PID <pid> /T /F` 强杀兜底。
-3. **状态探测**：`httpx.get(探测 URL, timeout=3)` 200 即 online；`starting`/`stopping` 为
-   过渡态（操作后 15s 内探测仍失败则回落 offline 并附 reason）。
+3. **状态探测**：socket 预检（0.5s 超时）→ HTTP 健康确认（1s 超时，200 即 online）；
+   `starting`/`stopping` 为过渡态（操作后 15s 内探测仍失败则回落 offline 并附 reason）。
 4. **8900 重启恢复**：8900 重启后子进程可能仍在运行——状态以端口探测为准（探测到 online
    即视为在管，重启按钮直接生效）；不持久化 PID 文件。
 5. **并发安全**：同一服务同时启停返回 409；操作幂等（重复 stop 未运行返回 409 而非崩溃）。
@@ -126,7 +129,9 @@
 
 - **四服务卡**：8900（状态恒在线，操作后置）、8901/8902（启停/重启，既有 /services
   语义不变）、8903（状态 + 重新加载提示）。
-- **依赖组件卡**：本地 MySQL（`/config/database`）、LLM 联通（`/config/llm-status`）。
+- **依赖组件卡**：mineru（8002 探测）、LM Studio（探测 + 已加载模型）；MySQL 与 LLM 联通
+  **不单独列卡**（ARCH-014：MySQL 为 8900 启动快照并入 8900 卡状态；LLM 供应商可达性为
+  8900 启动自检写日志，不展示）。
 - 顶部**刷新按钮**：服务状态变更时人工刷新确认；破坏性操作确认框 + 轮询收敛。
 - **本轮只用既有端点**：GPU 监控 / LM Studio / mineru / 日志查看 / 8900 重启均为
   监控与诊断域（[config-center-api.md](config-center-api.md)）后置内容，控制台界面
@@ -147,12 +152,16 @@
 - 端点族实现于 `backend/qed_engine/api/service_manager.py`，接入 `backend/qed_engine/api/main.py`；
   服务注册表自 `Settings`（QED_*_URL）解析端口（config 8900 / tracker 8901 / axiom 8902，均可
   被 `.env` 覆盖），日志落根 `logs/<unit>.log`（启动时确保目录存在）。
-- 状态判定：config 恒 online；其余优先 15s 过渡窗口（starting/stopping），其次 HTTP 端口探测
-  （3s 超时）；8900 重启后 PID 记录丢失，以探测为准（pid 可为 null）。
+- 状态判定：config 恒 online；其余优先 15s 过渡窗口（starting/stopping），其次双重端口
+  探测（socket 0.5s + HTTP 1s）；8900 重启后 PID 记录丢失，以探测为准（pid 可为 null）。
 - 启停：Popen（CREATE_NEW_PROCESS_GROUP）+ 根 `.env` 环境继承；优雅停止 CTRL_BREAK 5s 宽限后
   taskkill 强杀（`停止超时强杀` reason）；同一服务 15s 窗口内重复同向操作 409；restart 先停后启
   （未托管时直接启动）；worker 目录为各子项目目录（`QED-Tracker/`、`Axiom-Flow/`）。
 - 子进程环境注入细节（conda 环境解析、子项目直读 `.env`）在真实冒烟轮校准。
+- 2026-08-16（ARCH-012）：service_manager 迁至 services/（能力层，抛 ServiceError 无路由），
+  路由挂 api/control.py；config 单元启动命令补充（仅供 /self-restart 延迟 spawn 使用，
+  不可经 /services 启停的限制不变）；/self-restart 落地（延迟 2s 绑定端口 + 后台 1s 后
+  os._exit，Windows 端口占用规避，失败 500 提示人工重启）。
 
 ## 验证
 

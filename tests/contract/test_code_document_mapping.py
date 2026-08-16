@@ -76,7 +76,8 @@ def test_mapped_paths_and_design_references_exist():
         assert (ROOT / entry["path"]).is_file()
         assert (ROOT / entry["design"]).is_file()
         if entry["tests"] != "—":
-            assert (ROOT / entry["tests"]).is_file()
+            for test_path in entry["tests"].split("、"):
+                assert (ROOT / test_path.strip("`")).is_file()
 
 
 def test_module_headers_match_mapping_status_and_design_reference():

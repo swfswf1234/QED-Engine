@@ -15,11 +15,19 @@
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/config.py` | 统一配置读取 | Current | `docs/design/configuration-and-secrets.md` | `tests/test_config.py` | 根 `.env` 唯一事实源，空 key 降级。 |
 | `backend/qed_engine/cli.py` | 统一 CLI `qed` | Current | `docs/design/configuration-and-secrets.md` | `tests/test_cli.py` | config 子命令、tracker 客户端子命令、服务发现与最小配置尾注。 |
-| `backend/qed_engine/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/service-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/确认-拒绝-验收，transport 可注入。 |
-| `backend/qed_engine/api/main.py` | QED-Engine 后端 API 入口 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 配置域五接口（health/模型/密钥/数据库/llm-status），密钥不下发，CORS 允许 8900-8903；llm-status 真实探测 LLM 可达性（5s 超时、60s 缓存）；database 真实连接探测（pymysql 3s 超时、60s 缓存）；数据域路由（data.py）与服务域路由（service_manager.py）接入（ADR 0007）。 |
+| `backend/qed_engine/clients/tracker_client.py` | QED-Tracker 服务客户端（数据域适配） | Current | `docs/design/service-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/三表，transport 可注入。 |
+| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端（数据域适配） | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/pages/manifest/parse-jobs 五端点，transport 可注入；错误映射 4xx 透传、连接失败 AxiomError。8902 契约草案事实源在 Axiom-Flow 子仓库 `docs/design/8902-integration-contract.md`。 |
+| `backend/qed_engine/api/main.py` | QED-Engine 后端 API 入口（三域组装） | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 组装控制域（control.py）与数据域（tracker.py / axiom.py）路由，CORS 允许 8900-8903，state 注入 settings/tracker_client/axiom_client/缓存；配置五端点已拆至 control.py（ARCH-012 轮）。 |
+| `backend/qed_engine/api/control.py` | 控制域路由 | Current | `docs/design/config-center-api.md` | `tests/test_api.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py` | /services 端点族 + 配置五端点 + 监控诊断路由；ServiceError → HTTP 映射，缓存走 app.state。 |
 | `backend/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | 健康、模型路由、密钥布尔状态、数据库状态（含可达性）与 LLM 可达性。 |
-| `backend/qed_engine/api/data.py` | 数据域语义 API | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | catalogs/resources/tasks 契约归 8900（ADR 0007），内部适配 8901；4xx 透传、其余 503；PDF 预览流转发。 |
-| `backend/qed_engine/api/service_manager.py` | 服务控制（控制中心） | Current | `docs/design/service-control.md` | `tests/test_api.py` | /services 启停托管：注册表/HTTP 探测（3s）/Popen 启动/CTRL_BREAK 优雅停止+taskkill 强杀/15s 过渡窗口；config 单元不可自停。 |
+| `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | catalogs/tasks/三表语义契约归 8900（ADR 0007），内部经 clients/tracker_client.py 适配 8901；4xx 透传、其余 503。 |
+| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/design/config-center-api.md` | `tests/test_api.py` | books/pages/manifest/parse-jobs 契约归 8900（ADR 0007），内部经 clients/axiom_client.py 适配 8902；4xx 透传、连接失败 503（独立性铁律）。8902 契约草案事实源在 Axiom-Flow 子仓库 `docs/design/8902-integration-contract.md`。 |
+| `backend/qed_engine/services/service_manager.py` | 服务控制能力层（控制域） | Current | `docs/design/service-control.md` | `tests/test_api.py`、`tests/test_self_restart.py` | 注册表/HTTP 探测（3s）/Popen 启动/CTRL_BREAK 优雅停止+taskkill 强杀/15s 过渡窗口/自身重启（延迟 spawn）；无路由，抛 ServiceError。 |
+| `backend/qed_engine/services/log_viewer.py` | 服务日志查看能力（控制域） | Current | `docs/design/config-center-api.md` | `tests/test_log_viewer.py` | 白名单（注册表 log_name）tail/keyword；未知服务 LogError→404；UTF-8 容错。 |
+| `backend/qed_engine/services/monitor.py` | 组件监控探测（控制域） | Current | `docs/design/config-center-api.md` | `tests/test_monitor.py` | GPU（nvidia-smi 解析）/LM Studio（/v1/models）/mineru（8002 健康）；尽力报告不抛 5xx。 |
+| `tests/test_log_viewer.py` | 日志查看契约测试 | Current | `docs/design/config-center-api.md` | — | 白名单/tail 上限/keyword/越权/编码容错 + /logs 路由。 |
+| `tests/test_monitor.py` | 组件监控契约测试 | Current | `docs/design/config-center-api.md` | — | GPU/LM Studio/mineru 各分支与路由。 |
+| `tests/test_self_restart.py` | 自身重启契约测试 | Current | `docs/design/config-center-api.md` | — | 延迟 spawn/失败语义//services 语义不变。 |
 | `tests/test_config.py` | 配置读取单元测试 | Current | `docs/design/configuration-and-secrets.md` | — | 默认值与空值降级。 |
 | `tests/test_cli.py` | 统一 CLI 契约测试 | Current | `docs/design/configuration-and-secrets.md` | — | 子命令、服务地址与尾注提醒。 |
 | `tests/test_tracker_client.py` | QED-Tracker 客户端契约测试 | Current | `docs/design/service-contracts.md` | — | 方法/路径/请求体、错误响应与任务轮询。 |

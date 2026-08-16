@@ -11,20 +11,32 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from qed_engine.api.main import create_app
-from qed_engine.tracker_client import TrackerClient
+from qed_engine.clients.axiom_client import AxiomClient
+from qed_engine.clients.tracker_client import TrackerClient
 
 
 @pytest.fixture(autouse=True)
 def _reset_service_manager(monkeypatch):
     """每个测试前重置服务托管全局状态（_OPS/_MANAGED/_LOCKED），避免跨测试污染。"""
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     sm._OPS.clear()
     sm._MANAGED.clear()
     sm._LOCKED.clear()
 
 
-def _client(monkeypatch, *, qwen="", deepseek="", glm="", db_password="", tracker=None):
+@pytest.fixture(autouse=True)
+def _mock_startup_llm_probe(monkeypatch):
+    """8900 启动时对已配置供应商探测一次（写日志）；测试默认 mock 防真实网络请求。
+
+    需要验证启动探测行为的测试自行覆盖 api_control._probe_llm。
+    """
+    from qed_engine.api import control as api_control
+
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+
+
+def _client(monkeypatch, *, qwen="", deepseek="", glm="", db_password="", tracker=None, axiom=None):
     monkeypatch.setenv("QWEN_API_KEY", qwen)
     monkeypatch.setenv("DEEPSEEK_API_KEY", deepseek)
     monkeypatch.setenv("GLM_API_KEY", glm)
@@ -37,7 +49,7 @@ def _client(monkeypatch, *, qwen="", deepseek="", glm="", db_password="", tracke
     monkeypatch.setenv("QED_DB_NAME", "qed")
     monkeypatch.setenv("QED_DB_USER", "root")
     monkeypatch.setenv("QED_DB_PASSWORD", db_password)
-    return TestClient(create_app(tracker_client=tracker))
+    return TestClient(create_app(tracker_client=tracker, axiom_client=axiom))
 
 
 def test_health_ok(monkeypatch):
@@ -161,93 +173,52 @@ def test_database_password_never_in_any_response(monkeypatch):
         assert "sk-super-db-secret" not in response.text, path
 
 
-def _probe_calls(monkeypatch, probe):
-    """替换 _probe_llm 并记录调用，返回 (client, calls)。"""
-    from qed_engine.api import main as api_main
-
-    calls: list[tuple] = []
-    monkeypatch.setattr(
-        api_main,
-        "_probe_llm",
-        lambda provider, key, url: calls.append((provider, url)) or probe(provider, key, url),
-    )
-    return calls
+# ---------- 启动自检（ARCH-014：/config/llm-status 端点已删除，改为 8900 启动时检查一次） ----------
 
 
-def test_llm_status_unconfigured_skips_probing(monkeypatch):
-    """无任何 key：全部 reachable=False reason=未配置，不发起真实探测。"""
-    calls = _probe_calls(monkeypatch, lambda p, k, u: (True, ""))
+def test_llm_status_endpoint_removed(monkeypatch):
+    """GET /api/v1/config/llm-status 已删除 → 404（启动检查替代按需探测）。"""
     client = _client(monkeypatch)
     response = client.get("/api/v1/config/llm-status")
-    assert response.status_code == 200
-    body = response.json()
+    assert response.status_code == 404
+
+
+def test_startup_llm_check_unconfigured_skips_probing(monkeypatch):
+    """启动自检：无任何 key 时不发起探测（仅日志）。"""
+    from qed_engine.api import control as api_control
+
+    calls: list = []
+    monkeypatch.setattr(
+        api_control,
+        "_probe_llm",
+        lambda provider, key, url: calls.append((provider, url)) or (True, ""),
+    )
+    client = _client(monkeypatch)
+    assert client.get("/api/v1/health").status_code == 200
     assert calls == []
-    for provider in ("qwen", "glm", "deepseek"):
-        assert body[provider]["reachable"] is False, provider
-        assert body[provider]["reason"] == "未配置", provider
-        assert body[provider]["checked_at"]
 
 
-def test_llm_status_probes_only_configured(monkeypatch):
-    """已配置 key 的供应商才探测（qwen/glm），未配置（deepseek）跳过。"""
-    calls = _probe_calls(monkeypatch, lambda p, k, u: (True, ""))
-    client = _client(monkeypatch, qwen="sk-qwen", glm="sk-glm")
-    response = client.get("/api/v1/config/llm-status")
-    assert response.status_code == 200
-    body = response.json()
-    assert [c[0] for c in calls] == ["qwen", "glm"]
-    assert body["qwen"]["reachable"] is True
-    assert body["glm"]["reachable"] is True
-    assert body["deepseek"] == {"reachable": False, "reason": "未配置", "checked_at": body["deepseek"]["checked_at"]}
+def test_startup_llm_check_probes_only_configured(monkeypatch):
+    """启动自检：已配置 key 的供应商才探测（qwen/glm），未配置（deepseek）跳过。"""
+    from qed_engine.api import control as api_control
 
-
-def test_llm_status_probe_failure_reports_reason(monkeypatch):
-    """探测失败（如超时）时 reachable=False 且 reason 非空，不中断其他供应商。"""
-    calls = _probe_calls(
-        monkeypatch,
-        lambda p, k, u: (True, "") if p == "qwen" else (False, "超时"),
+    calls: list = []
+    monkeypatch.setattr(
+        api_control,
+        "_probe_llm",
+        lambda provider, key, url: calls.append((provider, url)) or (True, ""),
     )
     client = _client(monkeypatch, qwen="sk-qwen", glm="sk-glm")
-    response = client.get("/api/v1/config/llm-status")
-    body = response.json()
-    assert body["qwen"]["reachable"] is True
-    assert body["glm"]["reachable"] is False
-    assert body["glm"]["reason"] == "超时"
-    assert calls
-
-
-def test_llm_status_cached_within_ttl(monkeypatch):
-    """缓存生效：TTL 内重复请求不再触发探测；TTL 过期后重新探测。"""
-    from qed_engine.api import main as api_main
-
-    monkeypatch.setattr(api_main, "LLM_STATUS_TTL_SECONDS", 60.0)
-    client = _client(monkeypatch, qwen="sk-qwen")
-    calls = _probe_calls(monkeypatch, lambda p, k, u: (True, ""))
-    client.get("/api/v1/config/llm-status")
-    first = len(calls)
-    assert first == 1
-    client.get("/api/v1/config/llm-status")
-    assert len(calls) == first, "TTL 内不应重新探测"
-    monkeypatch.setattr(api_main, "LLM_STATUS_TTL_SECONDS", -1.0)
-    client.get("/api/v1/config/llm-status")
-    assert len(calls) == first + 1, "TTL 过期后应重新探测"
-
-
-def test_llm_status_never_leaks_key_values(monkeypatch):
-    """llm-status 响应体绝不包含任何密钥值。"""
-    _probe_calls(monkeypatch, lambda p, k, u: (True, ""))
-    client = _client(monkeypatch, qwen="sk-qwen-secret", glm="sk-glm-secret")
-    response = client.get("/api/v1/config/llm-status")
-    assert "sk-qwen-secret" not in response.text
-    assert "sk-glm-secret" not in response.text
+    assert client.get("/api/v1/health").status_code == 200
+    assert [c[0] for c in calls] == ["qwen", "glm"]
 
 
 def _probe_mysql_calls(monkeypatch, probe):
     """替换 _probe_mysql 并记录调用，返回调用列表。"""
-    from qed_engine.api import main as api_main
+    from qed_engine.api import control as api_control
 
     calls: list = []
-    monkeypatch.setattr(api_main, "_probe_mysql", lambda settings: calls.append(settings) or probe(settings))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: calls.append(settings) or probe(settings))
     return calls
 
 
@@ -284,21 +255,17 @@ def test_database_probe_failure_reason_preserved(monkeypatch):
     assert body["reason"] == "认证失败"
 
 
-def test_database_cached_within_ttl(monkeypatch):
-    """缓存生效：TTL 内重复请求不再探测；TTL 过期后重新探测。"""
-    from qed_engine.api import main as api_main
+def test_database_snapshot_probed_once_at_startup(monkeypatch):
+    """启动快照：create_app 时探测一次，端点重复请求不再触发探测（ARCH-014）。"""
+    from qed_engine.api import control as api_control
 
-    monkeypatch.setattr(api_main, "DB_STATUS_TTL_SECONDS", 60.0)
+    calls: list = []
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: calls.append(settings) or (True, ""))
     client = _client(monkeypatch, db_password="sk-db")
-    calls = _probe_mysql_calls(monkeypatch, lambda s: (True, ""))
+    assert len(calls) == 1, "启动时应探测一次"
     client.get("/api/v1/config/database")
-    first = len(calls)
-    assert first == 1
     client.get("/api/v1/config/database")
-    assert len(calls) == first, "TTL 内不应重复探测"
-    monkeypatch.setattr(api_main, "DB_STATUS_TTL_SECONDS", -1.0)
-    client.get("/api/v1/config/database")
-    assert len(calls) == first + 1, "TTL 过期后应重新探测"
+    assert len(calls) == 1, "端点只读快照，不应重复探测"
 
 
 # ---------- 语义 API（数据域：catalogs / tasks / selections，8900 自有契约） ----------
@@ -538,8 +505,8 @@ def test_services_spec_workdirs_and_log_dir_point_to_repo_root():
     曾错位导致 workdir 指向 backend/QED-Tracker，真实启动 WinError 267）。"""
     from pathlib import Path
 
-    from qed_engine.api import service_manager as sm
     from qed_engine.config import Settings
+    from qed_engine.services import service_manager as sm
 
     repo_root = Path(__file__).resolve().parents[1]
     sm.configure(Settings())
@@ -556,12 +523,12 @@ def test_services_start_popen_failure_closes_log_handle(monkeypatch):
     import builtins
     import subprocess
 
-    from qed_engine.api import service_manager as sm
     from qed_engine.config import Settings
+    from qed_engine.services import service_manager as sm
 
     sm.configure(Settings())
     spec = sm._SPECS["tracker"]
-    sm._probe_http = lambda port: False  # noqa: SLF001 - 测试注入
+    monkeypatch.setattr(sm, "_probe_http", lambda port: False)  # noqa: SLF001 - 测试注入
 
     closed: list = []
 
@@ -582,7 +549,7 @@ def test_services_start_popen_failure_closes_log_handle(monkeypatch):
 
 def _patch_probe(monkeypatch, result):
     """注入状态探测：全部单元返回同一结果（config 固定 online 不受影响）。"""
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     monkeypatch.setattr(sm, "_probe_http", lambda port: result)
 
@@ -594,7 +561,7 @@ def _patch_popen(monkeypatch, record=None, exit_on_signal=False):
     """
     import subprocess
 
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     class FakeProcess:
         def __init__(self, pid):
@@ -636,8 +603,59 @@ def _patch_popen(monkeypatch, record=None, exit_on_signal=False):
     return created, kill_calls
 
 
+def test_probe_http_unlistened_port_fast_false():
+    """未监听端口快速判定 offline：socket 预检兜底（不等 HTTP 超时）。
+
+    本机 Windows 上未监听 loopback 端口可能被防火墙静默丢弃（非 RST），
+    修复前 httpx 直连最坏 3s×2；修复后 socket 预检 0.5s 内返回。
+    """
+    import time
+
+    from qed_engine.services import service_manager as sm
+
+    start = time.monotonic()
+    assert sm._probe_http(1) is False  # 端口 1 几乎必然未监听
+    assert time.monotonic() - start < 2.0
+
+
+class _FakeHttpx:
+    def __init__(self, status_code: int):
+        self._status_code = status_code
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def get(self, url: str):
+        class _Resp:
+            status_code = self._status_code
+
+        return _Resp()
+
+
+def test_probe_http_socket_ok_then_http_decides(monkeypatch):
+    """socket 预检通过后由 HTTP 健康确认：200 → online；非 200/异常 → offline。"""
+    from qed_engine.services import service_manager as sm
+
+    class FakeSock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(sm.socket, "create_connection", lambda *a, **k: FakeSock())
+    monkeypatch.setattr(sm.httpx, "Client", lambda **k: _FakeHttpx(200))
+    assert sm._probe_http(8901) is True
+    monkeypatch.setattr(sm.httpx, "Client", lambda **k: _FakeHttpx(503))
+    assert sm._probe_http(8901) is False
+    monkeypatch.setattr(sm.httpx, "Client", lambda **k: (_ for _ in ()).throw(httpx.ConnectError("down")))
+    assert sm._probe_http(8901) is False
+
+
 def test_services_snapshot_three_units_offline(monkeypatch):
-    """三单元快照：字段齐全；8900 自身永远 online；探测失败 → offline + reason。"""
     _patch_probe(monkeypatch, False)
     client = _client(monkeypatch)
     response = client.get("/api/v1/services")
@@ -659,7 +677,7 @@ def test_services_snapshot_three_units_offline(monkeypatch):
 
 def test_services_snapshot_online_when_probe_ok(monkeypatch):
     """探测通过 → online（按端口区分单元）。"""
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     monkeypatch.setattr(sm, "_probe_http", lambda port: port == 8901)
     client = _client(monkeypatch)
@@ -758,7 +776,7 @@ def test_services_stop_force_kills_on_timeout(monkeypatch):
 
     _patch_probe(monkeypatch, False)
     created, _ = _patch_popen(monkeypatch, exit_on_signal=False)
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     monkeypatch.setattr(sm.time, "sleep", lambda seconds: None)
     taskkill_calls: list = []
@@ -777,7 +795,7 @@ def test_services_stop_force_kills_on_timeout(monkeypatch):
 
 def test_services_transition_window_expires_to_probe_result(monkeypatch):
     """启动后 15s 窗口内显示 starting；窗口过后回落为探测结果。"""
-    from qed_engine.api import service_manager as sm
+    from qed_engine.services import service_manager as sm
 
     _patch_probe(monkeypatch, False)
     _patch_popen(monkeypatch)
@@ -805,3 +823,117 @@ def test_services_restart_stops_then_starts(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "starting"
     assert kill_calls == [created[0].pid]  # 优雅停止信号已发送
+
+# ---------- 数据域·Axiom（8902 适配，契约草案 Axiom-Flow 8902-integration-contract.md） ----------
+
+
+def _axiom_client(handler) -> AxiomClient:
+    return AxiomClient(base_url="http://axiom.test", transport=httpx.MockTransport(handler))
+
+
+def test_axiom_books_via_gateway(monkeypatch):
+    """GET /api/v1/books：书目列表（含解析进度）经 8900 透传 8902。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books"
+        return httpx.Response(200, json=[{"book_id": "01-rudin", "title": "Rudin", "pages_total": 20, "pages_done": 20}])
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books")
+    assert response.status_code == 200
+    assert response.json()[0]["book_id"] == "01-rudin"
+
+
+def test_axiom_book_page_via_gateway(monkeypatch):
+    """GET /api/v1/books/{id}/pages/{no}：单页数据（原页图 URL + markdown + blocks）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/01-rudin/pages/3"
+        return httpx.Response(200, json={"page_no": 3, "image_url": "/static/01-rudin/p0003.png", "markdown": "## 标题\n$$x^2$$", "blocks": []})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/pages/3")
+    assert response.status_code == 200
+    assert response.json()["markdown"].startswith("## 标题")
+
+
+def test_axiom_manifest_via_gateway(monkeypatch):
+    """GET /api/v1/books/{id}/manifest：产物清单透传。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/01-rudin/manifest"
+        return httpx.Response(200, json=[{"path": "p0001.md", "size": 1024, "sha256": "abc"}])
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    assert client.get("/api/v1/books/01-rudin/manifest").json()[0]["path"] == "p0001.md"
+
+
+def test_axiom_page_image_proxy(monkeypatch):
+    """GET /books/{id}/pages/{no}/image：8900 代理 8902 页图字节流（浏览器只连 8900）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/01-rudin/pages/3/image"
+        return httpx.Response(200, content=b"\x89PNG-fake", headers={"content-type": "image/png"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/pages/3/image")
+    assert response.status_code == 200
+    assert response.content == b"\x89PNG-fake"
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_axiom_page_image_offline_maps_503(monkeypatch):
+    """页图代理：8902 离线 → 503 降级（与页数据一致）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/pages/3/image")
+    assert response.status_code == 503
+    assert "Axiom-Flow 服务不可达" in response.json()["detail"]
+
+
+def test_axiom_parse_job_create_and_query(monkeypatch):
+    """POST /parse-jobs（202）+ GET /parse-jobs/{id}：任务提交与状态查询。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/parse-jobs" and request.method == "POST":
+            body = json.loads(request.content)
+            assert body["book_id"] == "01-rudin"
+            assert body["strategy"] == "qwen-vl-plus"
+            return httpx.Response(202, json={"job_id": "j-1", "status": "queued", "progress": 0})
+        if request.url.path == "/api/v1/parse-jobs/j-1":
+            return httpx.Response(200, json={"job_id": "j-1", "status": "running", "progress": 5})
+        return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    created = client.post("/api/v1/parse-jobs", json={"book_id": "01-rudin", "pages": [1, 2], "strategy": "qwen-vl-plus"})
+    assert created.status_code == 202
+    assert created.json()["status"] == "queued"
+    queried = client.get("/api/v1/parse-jobs/j-1")
+    assert queried.json()["status"] == "running"
+
+
+def test_axiom_upstream_404_passthrough(monkeypatch):
+    """8902 返回 404（book/page 不存在）：8900 同码透传 detail。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "书目不存在：01-unknown"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-unknown/pages/1")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "书目不存在：01-unknown"
+
+
+def test_axiom_offline_maps_503(monkeypatch):
+    """8902 离线（连接失败）：8900 统一 503，前端据此降级（独立性铁律）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books")
+    assert response.status_code == 503
+    assert "Axiom-Flow 服务不可达" in response.json()["detail"]

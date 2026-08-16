@@ -46,6 +46,7 @@
 | `QED_TRACKER_URL` | QED-Tracker 服务地址 | `http://127.0.0.1:8901` | 统一 CLI/前端使用；服务启动端口见 `QED_TRACKER_PORT` |
 | `QED_TRACKER_PORT` | QED-Tracker 服务监听端口 | `8901` | 服务化轮启用 |
 | `QED_AXIOM_URL` | Axiom-Flow 服务地址 | `http://127.0.0.1:8902` | 取代 QED-Tracker 现状的 `axiom_url` 默认 8000 |
+| `QED_LMSTUDIO_URL` | LM Studio 本地 LLM 地址 | `http://127.0.0.1:1234/v1` | 控制台 /monitor/lmstudio 探测目标 |
 
 ### 统一数据库（MySQL 8，qed 库；2026-08-04 用户裁决）
 

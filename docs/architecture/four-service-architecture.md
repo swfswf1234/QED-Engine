@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-11
+最后更新：2026-08-16
 关联代码：根 `scripts/check_api_keys.py`、`scripts/load-env.ps1`（配置中心代码见[配置中心 API 契约](../design/config-center-api.md)）
 关联测试：`tests/contract/test_architecture_documents.py`
 关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0003-shared-qed-database-independence.md`、`docs/adr/0004-personal-library-positioning.md`、`docs/adr/0005-control-center-service-hosting.md`、`docs/adr/0007-qed-engine-backend-gateway.md`
@@ -15,7 +15,7 @@ QED-Engine 由四个独立服务组成，分别位于三个独立 git 仓库：
 flowchart LR
     subgraph Root[QED-Engine 仓库]
         FE[QED-Engine 前端<br/>学习中心 + 管理后台 8903]
-        CC[QED-Engine 后端 8900<br/>配置域 + 数据域网关 + 控制中心]
+        CC[QED-Engine 后端 8900<br/>控制域 + 数据域·Tracker + 数据域·Axiom（预留）]
     end
     subgraph AF[QED-Engine 仓库/Axiom-Flow 子仓库]
         A[API + Worker 8902]
@@ -38,8 +38,8 @@ flowchart LR
 | 服务 | 仓库 | 端口 | 职责 |
 | --- | --- | --- | --- |
 | QED-Engine 前端 | 根仓库 `web/` | 8903（已运行） | 学习中心（建设中）+ 管理后台四项（仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照）；**只连 8900**（ADR 0007） |
-| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900（已运行） | 配置域（健康/模型/密钥/数据库/LLM 状态，密钥不下发）+ 数据域网关（catalogs/resources/tasks 适配 8901）+ 服务域（/services 启停托管，控制中心已实装，ADR 0005/0007） |
-| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（迁移中，当前 8000） | PDF 解析、OCR、质量审阅与知识发布；前端工作台迁入根仓库后只保留 API + Worker |
+| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900（已运行） | **三域组织（ARCH-012）**：控制域（配置五端点 + /services 启停托管 + /logs 日志 + /monitor/gpu、lmstudio、mineru 监控 + /self-restart，路由 `api/control.py`，能力 `services/`）+ 数据域·QED-Tracker（catalogs/三表/tasks 语义 API 适配 8901，`api/tracker.py` + `clients/tracker_client.py`）+ 数据域·Axiom-Flow（预留）。密钥不下发 |
+| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已迁移，2026-08-11 ALN-002/REQ-001；8000 兼容保留，ADR 0002） | PDF 解析、OCR、质量审阅与知识发布；前端工作台迁入根仓库后只保留 API + Worker |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901（已服务化） | 教材/习题集/论文的发现、下载、校验、登记；写操作后台任务 + 轮询 |
 
 端口规划（8900 配置中心 / 8901 QED-Tracker / 8902 Axiom-Flow / 8903 前端）见
@@ -87,12 +87,13 @@ flowchart LR
 
 | Accepted 约束 | 当前状态 | 证据与跟踪 |
 | --- | --- | --- |
-| 配置中心五接口任何时刻可用 | 符合 | `backend/qed_engine/api/main.py`，`tests/test_api.py`（health/models/keys/database/llm-status） |
+| 配置中心四接口任何时刻可用 | 符合 | `backend/qed_engine/api/control.py`，`tests/test_api.py`（health/models/keys/database 启动快照；/config/llm-status 已删除，ARCH-014） |
 | 密钥绝不下发 | 符合 | `tests/test_api.py` 验证响应无密钥值 |
 | 前端唯一入口 8900（ADR 0007） | 符合 | `web/app.js` API_BASE + `/services`；`tests/test_web.py` 守护无 8901/8902 直连 |
-| 数据域语义 API（8900 自有契约） | 符合 | `backend/qed_engine/api/data.py`，`tests/test_api.py`（透传/503/409/PDF 流） |
-| 服务控制端实装（ADR 0005/0007） | 符合 | `backend/qed_engine/api/service_manager.py`，`tests/test_api.py`（启停/窗口/409/404） |
-| Axiom-Flow 端口 8902 | 未迁移 | 当前仍为 8000，见 [任务台账](../trackers/todo.md) REQ-001 |
+| 数据域语义 API（8900 自有契约） | 符合 | `backend/qed_engine/api/tracker.py` + `clients/tracker_client.py`，`tests/test_api.py`（透传/503/409）；三表契约待 QED-031 新端点冻结后更新 |
+| 服务控制端实装（ADR 0005/0007） | 符合 | `backend/qed_engine/services/service_manager.py`（能力层）+ `api/control.py`（路由），`tests/test_api.py`（启停/窗口/409/404） |
+| 监控诊断域（/logs、/monitor/*、/self-restart） | 符合（ARCH-012） | `backend/qed_engine/services/log_viewer.py`、`services/monitor.py`，`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py` |
+| Axiom-Flow 端口 8902 | 符合 | 已迁移（2026-08-11 ALN-002，REQ-001 关闭）；8000 兼容保留（ADR 0002），CORS 白名单含 8000 |
 | QED-Tracker 服务化 8901 | 已服务化 | 2026-08 完成（子仓库 QED-008~010 服务化轮），写操作后台任务 + 轮询 |
 | 前端统一于根仓库（8903） | 已运行 | REQ-006 十五期完成；Axiom web/ 迁移待 REQ-005 |
 | 数据子域布局（dataset/qed-tracker、dataset/axiom-flow） | 骨架已建 | 见 [dataset 目录约定](../design/dataset-conventions.md) 与 REQ-003/REQ-004 |

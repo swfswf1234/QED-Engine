@@ -17,8 +17,8 @@
 
 | 服务 | 仓库 | 端口 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web/` | 8903 | 已运行 | 学习界面（建设中占位卡）+ 管理后台四项（仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照）；前端已完成 15 期迭代；**只连 8900**（ADR 0007） |
-| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | 配置域五端点（health/models/keys/database/llm-status，密钥不下发）+ **数据域网关**（catalogs/resources/tasks 适配 8901）+ **服务域**（/services 启停托管，控制中心已实装，2026-08-11） |
+| QED-Engine 前端 | 根仓库 `web/` | 8903 | 已运行 | 学习界面（建设中占位卡）+ 管理后台（仪表大盘 / 文档下载管理 / 文档解析管理——含解析进度、原始文档对照两个子视图）；前端已完成 15 期迭代；**只连 8900**（ADR 0007） |
+| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发 |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901 | 已服务化 | 发现/下载/校验/登记 + 资源状态机 + 后台任务轮询；全链路联调冒烟（QED-014）待开始 |
 | Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902 | 已实现 | PDF 解析 / OCR / 质量审阅 / 知识发布；端口迁移已完成（2026-08-11，ALN-002），数据目录迁移未完成（ALN-003） |
 
@@ -45,12 +45,30 @@
   前端唯一入口切换（app.js），P0-P5 完成，**真实冒烟闭环（8900/8901 联调：数据域真实数据 + /services 启停托管 start/stop/restart + 409 窗口 + 优雅停止），181 passed + ruff clean**，修复 ROOT 路径错位（parents 层级）与 Popen 失败句柄泄漏，归档待用户验收。
 - 进行中：**前端重构主轮（ARCH-011，ADR 0008，2026-08-16 立档）**——用户裁决前端重构为
   当前最高优先级且**本轮只做前端**：React 19 + AntD 全家桶重建 8903（web-ui/），核心四界面
-  （主界面/控制台/仪表盘/下载管理），控制台只用既有端点（/services、/config/database、
-  /config/llm-status）；**每阶段用户验证门禁**；后端三域拆分与监控诊断端点（/logs、
-  /monitor/*、/self-restart）后置，设计文档保留为后续轮参考（backend-domain-split.md、
-  config-center-api 监控域）。设计文档与计划已落盘并通过用户验收，Phase 0（web-ui 地基）
-  开工前提交文档基线；8903 过渡期保持旧前端，切换后旧 web/ 退役。LLM 网关与本地 LLM
-  （LM Studio）接入为第二轮。
+  （主界面/控制台/仪表盘/下载管理），控制台只用既有端点（/services、/config/database 启动
+  快照）；**每阶段用户验证门禁**；后端三域拆分与监控诊断端点由 ARCH-012
+  并行承接。设计文档与计划已落盘并通过用户验收，Phase 0（web-ui 地基）开工前提交文档
+  基线；8903 过渡期保持旧前端，切换后旧 web/ 退役。LLM 网关与本地 LLM（LM Studio）
+  接入为第二轮。
+- 进行中：**后端三域拆分轮（ARCH-012，2026-08-16 立档，与 ARCH-011 并行）**——三域迁移完成
+  （clients/、services/ 能力层、api/control.py 控制域路由、api/tracker.py 数据域），控制域
+  新能力落地（/logs、/monitor/gpu、/monitor/lmstudio、/monitor/mineru、/self-restart）；
+  **门禁全绿（261 passed + ruff clean + 契约测试）**；**Task 18 真实环境实测与 8903 前端
+  回归验收延后至前端完成后统一验收**（2026-08-16 用户裁决）。
+- 进行中：**文档与数据边界整理轮（ARCH-013，2026-08-16 立档）**——后端文档按三域新模式
+  梳理、todo 清理合并（旧前端/三表轮次关闭归档）、database/dataset 边界按「dataset=数据
+  资料、元数据默认入 DB」重梳（meta/ 退役 REQ-032、QED-031 根仓库同步登记、学习表族规划）。
+- 进行中：**LLM 状态收敛与 DB 启动快照轮（ARCH-014，2026-08-16 立档）**——/config/llm-status
+  端点已删除（8900 启动时 LLM 供应商探测一次写日志）；/config/database 改启动快照（启动时
+  MySQL 探测一次，端点只读）；旧前端横幅移除 LLM 项；Axiom-Flow 端口 8902 已迁移表述更新；
+  「文档解析管理」包含关系登记前端轮。**实施完成（261 passed + ruff clean + 冒烟）**，
+  与 ARCH-012/011 一并待前端完成后统一验收。
+- 进行中：**联调矩阵与契约冻结编排（2026-08-16 立档，[integration-matrix.md](../design/integration-matrix.md)）**——
+  三组并行联调：A 前端↔8900（并行推进中）/ B 8900↔8901（待 QED-031 迁移 0006 冻结，
+  REQ-035 承接适配）/ C 8900↔8902（根仓库侧托管/监控已具备；**执行方 = Axiom-Flow v2
+  （V2-003~007，V2-003 误建产物已登记移交 REQ-036，2026-08-16 亡羊补牢——根仓库侧不再
+  写子项目代码）**，服务建立后即可 C 组第一阶段联调，第二阶段待 v2 契约冻结 REQ-034 承接）；
+  各服务独立开发阶段，验收窗口见矩阵文档。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
   文档基线之上的主线推进为**课程收集主线（ARCH-002）**——QED-Tracker QED-019（01 数学分析
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与

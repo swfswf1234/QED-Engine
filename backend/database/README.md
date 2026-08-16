@@ -1,9 +1,9 @@
-# database/ 目录说明
+# backend/database/ 目录说明
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-10
-维护位置：`database/README.md`
+最后更新：2026-08-16
+维护位置：`backend/database/README.md`
 关联代码：根 `.env`（QED_DB_*）、`scripts/check_api_keys.py`
 关联测试：—
 关联 ADR：`docs/adr/0007-qed-engine-backend-gateway.md`
@@ -15,6 +15,9 @@
 | `init-qed.sql` | 建库与授权 | 创建 `qed` 库（utf8mb4）；表结构由各子项目 Alembic 迁移管理 |
 | `backup-qed.ps1` | 备份 | mysqldump 导出到 `backups/`（git 忽略） |
 | `backups/` | 备份产物 | 不入版本控制（见根 .gitignore） |
+
+> 2026-08-16：目录由根 `database/` 迁入 `backend/database/`（归属 QED-Engine 后端，
+> ARCH-013/014 收尾）；qed 库仍为三项目共享基础设施（QED-Tracker/Axiom-Flow 同用）。
 
 ## 上下文
 
@@ -29,14 +32,14 @@
 初始化：
 
 ```powershell
-mysql -u root -p < database/init-qed.sql
+mysql -u root -p < backend/database/init-qed.sql
 ```
 
 备份：
 
 ```powershell
 # 密码从 -Password 或环境变量 QED_DB_PASSWORD 读取
-.\database\backup-qed.ps1
+.\backend\database\backup-qed.ps1
 # 指定参数
-.\database\backup-qed.ps1 -Host 127.0.0.1 -Port 3306 -User root -Password "***"
+.\backend\database\backup-qed.ps1 -Host 127.0.0.1 -Port 3306 -User root -Password "***"
 ```
