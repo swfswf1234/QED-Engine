@@ -1,11 +1,11 @@
 # 控制中心：服务托管与启停契约
 
 设计状态：Accepted
-实现状态：Implemented
-最后更新：2026-08-11
+实现状态：In Progress
+最后更新：2026-08-16
 关联代码：`backend/qed_engine/api/service_manager.py`
 关联测试：`tests/test_api.py`、`tests/test_web.py`
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
 
 ## 目的与边界
 
@@ -37,8 +37,9 @@
   前端不暴露 Worker 的独立控制。
 - 启动命令中的 Python 解释器、工作目录、环境变量注入由 8900 服务定义表配置；日志重定向到
   根仓库 `logs/<unit>.log`（Git 忽略），8900 启动时确保目录存在。
-- 8900 自身由用户手动启动（终端/脚本）；控制中心对其只探测状态并展示，不提供启停按钮
-  （避免自掘——停止 8900 即断掉整个控制中心）。
+- 8900 自身由用户手动启动（终端/脚本）；控制中心对其**不提供启停按钮**（避免自掘——
+  停止 8900 即断掉整个控制中心）；8900 自身重启（self-restart 端点）属监控与诊断域
+  后置内容，见 [config-center-api.md](config-center-api.md)。
 
 ## API 契约（8900 新增，前缀 /api/v1）
 
@@ -118,6 +119,18 @@
 - 破坏性操作（停止/重启）弹确认框（复用现有 reason modal 模式，但无需填原因）；
   操作成功后 1s 轮询 `/services` 自动刷新（复用现有任务轮询机制）。
 - LLM配置 / 数据库配置分组保持不变；8900 不可达时整个控制区离线提示（现有横幅语义）。
+
+## 前端重构控制台（2026-08-16 规划，见 [frontend-react-refactor.md](frontend-react-refactor.md)）
+
+前端重构后管理后台直达**控制台**（全局俯瞰），服务控制区演进为组件卡片：
+
+- **四服务卡**：8900（状态恒在线，操作后置）、8901/8902（启停/重启，既有 /services
+  语义不变）、8903（状态 + 重新加载提示）。
+- **依赖组件卡**：本地 MySQL（`/config/database`）、LLM 联通（`/config/llm-status`）。
+- 顶部**刷新按钮**：服务状态变更时人工刷新确认；破坏性操作确认框 + 轮询收敛。
+- **本轮只用既有端点**：GPU 监控 / LM Studio / mineru / 日志查看 / 8900 重启均为
+  监控与诊断域（[config-center-api.md](config-center-api.md)）后置内容，控制台界面
+  不为未实现数据源留占位。
 
 ## 未来规划（不实现）
 

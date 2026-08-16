@@ -1,11 +1,11 @@
 # 配置中心 API 契约
 
 设计状态：Accepted
-实现状态：Implemented
-最后更新：2026-08-11
-关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/data.py`（8901 客户端与服务控制模块分别归属[服务契约](service-contracts.md)与[服务控制设计](service-control.md)）
+实现状态：In Progress
+最后更新：2026-08-16
+关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/data.py`（8901 客户端与服务控制模块分别归属[服务契约](service-contracts.md)与[服务控制设计](service-control.md)；三域拆分与监控诊断端点见 [backend-domain-split.md](backend-domain-split.md)，实现状态 Not Started）
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
+关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
 
 ## 目的与边界
 
@@ -13,13 +13,17 @@
 健康检查与模型路由。**密钥绝不下发**——子项目不经过中心获取 key，而是直读根 `.env`（或经
 `scripts/load-env.ps1` 映射），中心只回答"用哪个模型、是否已配置"。
 
-**8900 角色（2026-08-06 架构评审 + 2026-08-11 ADR 0007 网关化扩展）**：浏览器无法直读
-`.env` 且密钥不下发，8900 是 `.env` 的唯一只读语义代理；角色收敛为四——① 配置语义代理
-（`/config/models` 模型路由表，前端与子项目「用哪个模型」的答案源）；② 状态探测中心
-（`/config/llm-status`、`/config/database` 真实可达性探测）；③ **数据域网关**（ADR 0007：
-catalogs / resources / tasks 语义 API 归 8900 所有，内部经 TrackerClient 适配 8901，
-前端唯一入口）；④ **服务域（控制中心）**（ADR 0007 / ADR 0005：/services 端点族启停托管，
-契约事实源为 [service-control.md](service-control.md)）。当前子项目零消费 8900（直读 `.env`）。
+**8900 角色（2026-08-06 架构评审 + 2026-08-11 ADR 0007 网关化扩展 + 2026-08-16 前端重构轮）**：
+浏览器无法直读 `.env` 且密钥不下发，8900 是 `.env` 的唯一只读语义代理；角色收敛为：
+① 配置语义代理（`/config/models` 模型路由表，前端与子项目「用哪个模型」的答案源）；
+② 状态探测中心（`/config/llm-status`、`/config/database` 真实可达性探测）；
+③ **数据域网关**（ADR 0007：catalogs / resources / tasks 语义 API 归 8900 所有，内部经
+TrackerClient 适配 8901，前端唯一入口）；
+④ **服务域（控制中心）**（ADR 0007 / ADR 0005：/services 端点族启停托管，契约事实源为
+[service-control.md](service-control.md)）；
+⑤ **监控与诊断域**（2026-08-16 规划：/logs 日志查看、/monitor/gpu、/monitor/lmstudio、
+/monitor/mineru 组件监控、/self-restart 自身重启——支撑前端控制台，见
+[backend-domain-split.md](backend-domain-split.md)）。当前子项目零消费 8900（直读 `.env`）。
 
 ## 服务信息
 
@@ -151,6 +155,75 @@ catalogs / resources / tasks 语义 API 归 8900 所有，内部经 TrackerClien
 [service-control.md](service-control.md) 契约事实源定义（服务注册表/过渡窗口/错误语义），
 实现于 `backend/qed_engine/api/service_manager.py`；8903 服务健康面板改经 `GET /services`
 获取三服务状态（不再直连 8901/8902 健康端点）。
+
+## 监控与诊断域（2026-08-16 登记，实施后续轮）
+
+支撑前端控制台的组件监控（GPU / LM Studio / mineru / 日志 / 8900 自身重启）。
+**本域不在前端重构轮实施**（2026-08-16 用户裁决：本轮只做前端部分，控制台只用既有
+端点）；契约先行登记，实施随后端三域拆分轮（[backend-domain-split.md](backend-domain-split.md)）
+落地，实现于 `services/log_viewer.py` 与 `services/monitor.py`，路由挂 `api/control.py`。
+
+### GET /api/v1/logs/{service}
+
+服务日志查看（错误诊断）：读取 `/services` 注册表声明日志文件（logs/<log_name>.log，
+**白名单**，越权 404）。
+
+```json
+{"service": "tracker", "log_path": "D:/coding/QED-Engine/logs/tracker.log",
+ "lines": ["...", "..."]}
+```
+
+- 查询参数：`tail`（返回行数，默认 200，上限 1000）、`keyword`（子串过滤，可选）。
+- 白名单 = 服务注册表（service-control.md）内各单元 log_name；未知服务 404。
+
+### GET /api/v1/monitor/gpu
+
+GPU 状态（nvidia-smi 解析，本地 4080）：型号、显存总量/已用、利用率、占用进程列表。
+
+```json
+{"available": true, "name": "NVIDIA GeForce RTX 4080", "memory_total_mb": 16376,
+ "memory_used_mb": 4096, "utilization_percent": 65,
+ "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096}]}
+```
+
+- `available=false` 附 `reason`（nvidia-smi 不存在/无 GPU/解析失败）。
+- 该数据用于控制台「本地 LLM 与 mineru 不能同时进 GPU」的显存提示。
+
+### GET /api/v1/monitor/lmstudio
+
+本地 LLM（LM Studio，OpenAI 兼容）探测：服务可达性 + 已加载模型。
+
+```json
+{"reachable": true, "base_url": "http://127.0.0.1:1234/v1", "models": ["qwen3-8b"],
+ "reason": ""}
+```
+
+- 探测目标与超时沿 `/config/llm-status` 模式（未配置不探测）；默认
+  `http://127.0.0.1:1234/v1`（`QED_LMSTUDIO_URL` 可覆盖，变量表见
+  [configuration-and-secrets.md](configuration-and-secrets.md)，待登记）。
+
+### GET /api/v1/monitor/mineru
+
+mineru 解析服务（8002，WSL 容器）健康探测。
+
+```json
+{"reachable": true, "port": 8002, "reason": ""}
+```
+
+- 容器未启动/WSL 不可达 → `reachable=false` + 中文原因（提示运行容器编排脚本），
+  不泄漏堆栈。
+
+### POST /api/v1/self-restart
+
+8900 自身重启（控制台「重启」按钮）：spawn 新进程（同启动命令+端口）→ 新进程健康
+探测通过 → 旧进程退出。`config` 单元不可经 /services 启停的既有限制保持（本端点只
+用于 8900 自身重启，不开放启停）。
+
+```json
+{"status": "restarting"}
+```
+
+- Windows 下 spawn/退出的技术风险实施期验证；失败时返回明确错误并提示人工重启。
 
 ## 强制规则
 

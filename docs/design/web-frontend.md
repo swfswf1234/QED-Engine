@@ -14,6 +14,11 @@
 见[learning-center.md](learning-center.md)（Draft）——本文件描述**当前实现**，学习中心描述
 **目标形态**，冲突时以各自状态标注为准。
 
+> 2026-08-16（ARCH-011）：**前端重构主轮启动**——8903 将整体切换为 React 全家桶实现
+> （web-ui/，[ADR 0008](../adr/0008-frontend-react-refactor.md)）。本文件描述的「当前实现」
+> （原生三文件版）在过渡期仍为事实源，重构目标态契约见
+> [frontend-react-refactor.md](frontend-react-refactor.md)；8903 切换完成后本文件重写为 v2。
+
 > 十七期（2026-08-14，ARCH-010）：**文档下载管理数据层切换三表**（表1 选课条目 / 表2 册级
 > 明细 / 表3 渠道来源），前端对齐契约以
 > [downloads-three-table-model.md](downloads-three-table-model.md) §4 为事实源——树第三层为

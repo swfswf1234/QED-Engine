@@ -24,6 +24,8 @@ CURRENT_DOCUMENTS = {
     "database-design.md",
     "web-frontend.md",
     "downloads-three-table-model.md",
+    "frontend-react-refactor.md",
+    "backend-domain-split.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {
