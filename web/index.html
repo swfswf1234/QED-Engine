@@ -25,7 +25,7 @@
 
     <div class="home-section">
       <div class="feature-grid">
-        <div class="feature-card">
+        <div class="feature-card" data-nav="/knowledge">
           <div class="icon">📘</div>
           <span class="badge coming">建设中</span>
           <h3>知识点梳理</h3>
@@ -42,6 +42,37 @@
           <span class="badge coming">建设中</span>
           <h3>刷题模式</h3>
           <p>基于习题集与教材练习的刷题空间：按课程、按知识点定位，针对薄弱环节反复训练。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 知识点独立界面（二十二期续：领域→课程→章节/知识点结构，数据等解析产物管线）═══ -->
+  <section id="page-knowledge" class="page">
+    <header class="topbar">
+      <a class="brand" href="#/"><span class="dot"></span>QED-Engine <span class="sub">知识点</span></a>
+      <div class="topbar-actions">
+        <a class="btn ghost" href="#/">← 返回主界面</a>
+      </div>
+    </header>
+    <div class="learn-layout" id="learn-layout">
+      <aside class="learn-side">
+        <div class="learn-side-head">
+          <span>领域 · 课程</span>
+          <button id="btn-refresh-learn" class="btn ghost" title="刷新课程列表">⟳</button>
+        </div>
+        <div id="learn-course-list" class="learn-course-list">加载中…</div>
+      </aside>
+      <div class="learn-main" id="learn-main">
+        <div class="learn-main-head">
+          <h3 id="learn-course-title">选择左侧课程开始学习</h3>
+          <span id="learn-course-badge" class="learn-course-badge"></span>
+        </div>
+        <div id="learn-chapters" class="learn-chapters">
+          <div class="empty-state">
+            <div>📚 章节数据待解析产物管线就绪后填充</div>
+            <div class="section-note">知识结构梳理（定义/定理/证明/例题）与前置依赖关系将随 Axiom-Flow 解析产物接入</div>
+          </div>
         </div>
       </div>
     </div>
@@ -109,9 +140,10 @@
           <div class="download-layout" id="download-layout">
             <aside class="download-side" id="download-side">
               <div class="side-head">
-                <span>知识点</span>
+                <span>知识点 <span class="ver-tag">v23-文件列表</span></span>
                 <button id="btn-refresh-tree" class="btn ghost" title="刷新目录树">🔄</button>
               </div>
+              <!-- 二十二期续：文件列表式知识树（领域/课程/套 文件夹 + 书叶子，层级缩进表达） -->
               <div id="domain-tree" class="tree">加载中…</div>
             </aside>
             <div class="tree-resizer" id="tree-resizer" title="拖动调整目录树宽度"></div>

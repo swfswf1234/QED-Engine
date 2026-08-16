@@ -34,12 +34,11 @@ THREE_TABLE_ENDPOINT_TOKENS = ("/selections", "/downloads", "/sources")
 # 「开始下载」随旧自动下载任务废除（十七期：表2 先登记候选册 → 人工下载 → register）
 EVAL_THREEWAY_TOKENS = ("备选", "转正")
 
-# 8900 配置中心横幅数据源（config-center-api.md）
+# 8900 配置中心横幅数据源（config-center-api.md；ARCH-014：/config/llm-status 已删除）
 CONFIG_ENDPOINT_TOKENS = (
     "/api/v1/health",
     "/config/keys",
     "/config/database",
-    "/config/llm-status",
 )
 
 # hash 路由（8903 单页应用，见 service-contracts.md「8903 QED-Engine 前端」）
@@ -50,7 +49,8 @@ ROUTE_TOKENS = ("#/admin", "#/admin/dashboard", "#/admin/downloads", "#/admin/pa
 ADMIN_MENU_TOKENS = ("仪表大盘", "文档下载管理", "文档解析进度", "原始文档对照")
 
 # 主体学习界面入口（三期收敛为三项：知识点梳理/学习/刷题模式；五期 + 使用手册）
-HOME_ENTRY_TOKENS = ("知识点梳理", "学习", "刷题模式", "管理后台", "使用手册")
+# 二十二期续：主界面还原（hero+三卡，知识点卡可点击进入独立知识点界面 #/knowledge）
+HOME_ENTRY_TOKENS = ("知识点梳理", "学习", "刷题模式", "管理后台", "使用手册", "data-nav")
 
 # 文件下载管理重设计（三期）：领域树容器 + 事务面板（树节点由 app.js 渲染）
 DOWNLOAD_LAYOUT_TOKENS = ("domain-tree", "download-panel")
@@ -82,12 +82,15 @@ REMOVED_LLM_ROUTE_TOKENS = ("GLM-OCR", "models.glm", "models.deepseek")
 # 八期：向量数据库未配置不展示（避免误会）；MySQL 为当前唯一数据库
 REMOVED_VECTOR_TOKENS = ("向量数据库", "向量库")
 
-# 十五期：界面名「文档下载管理」（菜单+标题），树侧栏头保留「知识点」；旧树副标题移除
+# 十五期：界面名「文档下载管理」（菜单+标题），树侧栏头保留「知识点」；
+# 旧树副标题移除已完成；二十二期续：树顶层级指示栏（领域 · 课程 · 书籍）为新 UI 元素
+# （由 test_tree_levels_indicator 守护）
 KNOWLEDGE_TREE_TOKENS = ("知识点",)
-REMOVED_TREE_TOKENS = ("领域 · 课程 · 书籍",)
+REMOVED_TREE_TOKENS = ()
 TREE_COUNT_TOKENS = ("本）",)
 
-# 十五期：进入文档下载管理默认选中「数学」领域（loadTree 完成后无选择时触发一次）
+# 十五期：进入文档下载管理默认选中「数学」领域（loadTree 完成后无选择时触发一次）。
+# 二十二期续（逐步重构）：默认选中已注释（先全展开不跳转），保留注释待恢复联动。
 DEFAULT_DOMAIN_TOKENS = ('selectNode("domain", "数学")', "state.selection", "数学")
 
 # 十五期：领域级按课程分页（每页 PAGE_SIZE=3）（十七期：配套对并排随 catalog 目标层移除）
@@ -107,8 +110,10 @@ FILTER_POPOVER_TOKENS = ("filter-popover",)
 # 空态数据容器（三期：解析进度/文档对照只展示事务，无数据置空；追溯已随六期移除）
 EMPTY_VIEW_TOKENS = ("parsing-data", "compare-data")
 
-# 横幅粗粒度化（三期）：只显示模块连接状态，不透露 provider 名单与主机细节
-BANNER_MODULE_TOKENS = ("LLM评估模块连接", "MySQL数据库连接")
+# 横幅粗粒度化（三期）：只显示模块连接状态，不透露主机细节；
+# ARCH-014：LLM 可达性不再经端点探测（8900 启动自检），横幅只保留 MySQL
+BANNER_MODULE_TOKENS = ("MySQL数据库连接",)
+REMOVED_BANNER_TOKENS = ("LLM评估模块连接", "llmStatus", "/config/llm-status")
 
 # 六期裁决：取消「模块总览」卡片墙与「追溯」界面；#/admin 直达仪表盘，无中间层
 REMOVED_ADMIN_TOKENS = ("admin-card", "view-admin-home", "view-trace")
@@ -220,10 +225,13 @@ def test_admin_views_are_differentiated():
 
 
 def test_banner_is_coarse_grained():
-    """横幅粗粒度化：只显示模块连接状态，不透露 provider 名单与主机细节（三期裁决）。"""
+    """横幅粗粒度化：只显示 MySQL 模块连接状态，不透露主机细节（三期裁决；ARCH-014 移除 LLM 项）。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
     for token in BANNER_MODULE_TOKENS:
         assert token in js, f"app.js 缺少横幅模块文案：{token}"
+    # ARCH-014：LLM 可达性不再经端点探测（8900 启动自检写日志），横幅与端点引用移除
+    for token in REMOVED_BANNER_TOKENS:
+        assert token not in js, f"app.js 不应残留横幅 LLM 探测引用：{token}"
     # 横幅不再拼接 provider 逐个状态与 host:port
     assert "db.host" not in js, "横幅不应再展示数据库主机细节"
     # index.html 静态结构中不得出现供应商名单（横幅文案由 app.js 聚合渲染）
@@ -494,7 +502,8 @@ def test_dashboard_charts_removed():
 
 
 def test_default_select_math_domain():
-    """进入文档下载管理默认选中数学领域（十五期）：loadTree 完成后若无既有选择则选中「数学」。"""
+    """默认选中数学领域（十五期；二十二期续逐步重构：先全展开不跳转，默认选中已注释
+    保留待恢复）——selectNode("domain", "数学") 调用形式须保留（注释态），且位于 renderTree 之后。"""
     js = (WEB / "app.js").read_text(encoding="utf-8")
     for token in DEFAULT_DOMAIN_TOKENS:
         assert token in js, f"app.js 缺少默认选中数学领域逻辑：{token}"
@@ -723,6 +732,47 @@ def test_course_completion_counts_sets_only():
     assert "if (!g.set) continue" in m.group(0), "courseCompletion 应跳过无套号条目（只算套内）"
 
 
+def test_course_completion_solutions_counts_as_exercises():
+    """题解算习题类（二十期，用户裁决）：courseCompletion 中 roles 含 solutions（题解）
+    与 exercises 同池计入习题集计数/完成判定——套3 陈纪修（教材+题解）→ 套数 3/3 · 习题集 3/3。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function courseCompletion[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 courseCompletion 聚合函数"
+    body = m.group(0)
+    assert "exercises" in body and "solutions" in body, "习题类统计应含 exercises 与 solutions（题解）"
+    assert 'includes("exercises") || roles.includes("solutions")' in body or 'includes("solutions") || roles.includes("exercises")' in body, (
+        "exercises 与 solutions 应同池判定（题解计入习题类）"
+    )
+
+
+def test_panel_set_books_horizontal():
+    """套内书名横排一行（二十期，用户裁决，修复竖排错乱）：.set-roles 段必须 nowrap
+    + 横向可滚动；.book-intro 单行省略——宽度不足时不得换行堆叠成列。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.set-roles \{[\s\S]*?\n\}", css)
+    assert m, "style.css 应提供 .set-roles 套行书籍区样式"
+    body = m.group(0)
+    assert "flex-wrap: nowrap" in body, ".set-roles 必须 nowrap（书名不得换行成列）"
+    assert "overflow-x" in body, ".set-roles 应允许横向滚动（长书名不撑爆行）"
+    bi = re.search(r"\.book-intro \{[\s\S]*?\n\}", css)
+    assert bi, "style.css 应提供 .book-intro 书籍简介样式"
+    assert "nowrap" in bi.group(0) or "ellipsis" in bi.group(0), "book-intro 应单行省略（不换行）"
+
+
+def test_tree_offline_skeleton():
+    """8901 离线骨架（二十期，独立性铁律）：loadTree 的 catalog 失败分支不再把整棵树替换为
+    「8901 离线」提示——渲染离线横幅（offline-banner）后仍走 renderTree()（领域/课程静态骨架）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"async function loadTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 loadTree 加载函数"
+    body = m.group(0)
+    assert "offline-banner" in body, "loadTree 离线分支应渲染离线横幅（offline-banner）"
+    assert "renderTree()" in body, "loadTree 离线时仍应渲染领域/课程静态骨架（renderTree）"
+    assert "8901" in body, "loadTree 离线横幅应标明 QED-Tracker 8901"
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    assert ".offline-banner" in css, "style.css 应提供 .offline-banner 样式"
+
+
 def test_volume_rows_collapsed_in_selection_card():
     """册明细收敛进套书卡折叠区（十八期，源头避免「多出书册」）：右侧只显示 12 张套书卡，
     册明细以 details 折叠区内紧凑行呈现（默认收起），volumeRow 不再以卡片形态平铺。"""
@@ -757,3 +807,304 @@ def test_volume_rows_filter_rejected():
     assert re.search(r"\.filter\(\(d\) => [^)]*rejected[^)]*\)", m.group(0)), (
         "selectionCard 应过滤放弃/失败册（rejected/failed 不加载）"
     )
+
+
+# 二十一期（前端静态服务缓存治理）：scripts/serve_web.py 守卫——
+# http.server 无缓存头导致浏览器启发式缓存旧 app.js/style.css（改版不可见），
+# 前端服务必须输出 Cache-Control: no-store，监听 8903、目录指向仓库 web/。
+
+SERVE_WEB = ROOT / "scripts" / "serve_web.py"
+
+
+def test_serve_web_exists():
+    """serve_web.py 应存在（start-all.ps1 前端启动入口）。"""
+    assert SERVE_WEB.is_file(), "scripts/serve_web.py 不存在（start-all.ps1 前端启动依赖它）"
+
+
+def test_serve_web_no_store_cache_header():
+    """前端静态服务必须发送 Cache-Control: no-store：http.server 默认无缓存头，
+    浏览器启发式缓存会导致改版后仍加载旧 app.js/style.css（本仓库历史踩坑）。"""
+    src = SERVE_WEB.read_text(encoding="utf-8")
+    assert "no-store" in src, "serve_web.py 必须输出 Cache-Control: no-store"
+
+
+def test_serve_web_port_and_directory():
+    """端口固定 8903，目录解析到仓库 web/（相对脚本位置 parent.parent / web）。"""
+    src = SERVE_WEB.read_text(encoding="utf-8")
+    assert "8903" in src, "serve_web.py 应监听 8903"
+    assert '"web"' in src or "'web'" in src, "serve_web.py 应指向仓库 web/ 目录"
+
+
+def test_serve_web_threaded():
+    """ThreadingHTTPServer：并发请求（多标签/多资源同时加载）不阻塞。"""
+    src = SERVE_WEB.read_text(encoding="utf-8")
+    assert "ThreadingHTTPServer" in src, "serve_web.py 应使用 ThreadingHTTPServer"
+
+
+# 二十二期（离线体验治理）：fetchJson 超时 + loadTree 自动重试 + 册明细横排——
+# 8901/8900 掉线时 catalog 请求曾无限挂起（树停在「加载中」转圈），且恢复后不自动重渲染。
+
+def test_fetch_json_has_abort_timeout():
+    """fetchJson 必须带 AbortController 超时：8901/8900 掉线时请求不得无限挂起
+    （曾导致树停在「加载中」转圈最长达 8900 代理 30s 超时）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"async function fetchJson[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 fetchJson 请求函数"
+    body = m.group(0)
+    assert "AbortController" in body, "fetchJson 应使用 AbortController 实现超时"
+    assert "setTimeout" in body and "abort" in body, "fetchJson 应设置超时并中止（abort）"
+
+
+def test_tree_offline_retry():
+    """loadTree 离线后必须自动重试（8901 恢复后树自动渲染，无需手动刷新）：
+    离线分支应含重试定时器；模块级定时器防重（视图切换不叠加多个定时器）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"async function loadTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 loadTree 加载函数"
+    body = m.group(0)
+    assert "setTimeout" in body or "retry" in body or "重试" in body, "loadTree 离线分支应含自动重试"
+    assert "clearTimeout" in js, "app.js 应有模块级定时器防重（clearTimeout）"
+
+
+def test_volume_list_grid_horizontal():
+    """套行下方册明细横排多列（二十二期，用户裁决）：.volume-list 改为 grid 多列
+    （repeat(auto-fill, minmax(...)）——每册一格一排多个横排，不再是竖排一列。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.volume-list \{[\s\S]*?\n\}", css)
+    assert m, "style.css 应提供 .volume-list 册明细列表样式"
+    body = m.group(0)
+    assert "display: grid" in body, ".volume-list 应为 grid 布局（横排多列）"
+    assert "grid-template-columns" in body and "repeat(" in body, ".volume-list 应自动多列排布（auto-fill）"
+
+
+# 二十二期（树领域常驻 + 课程级套行视图 + 展示格式优化）：
+# 所有领域常驻展示（默认展开第一个）、点课程也走套行新视图、
+# book-intro 角色&角色：《书名》、file_hint 只显示文件名、正文段前空两格右对齐。
+
+def test_tree_domains_all_visible():
+    """文件列表式默认态（二十二期+续，用户裁决）：所有领域常驻展示（CATALOG_DOMAIN_MAP 全量，
+    无课程领域空态）；默认领域展开、课程/套折叠（文件管理器默认：根展开第一层，
+    点击名称展开下一层）——套/书行缩进体现层级。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderTree[\s\S]*function setTreeNodeHtml[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderTree 渲染函数"
+    body = m.group(0)
+    assert "CATALOG_DOMAIN_MAP" in body, "树领域构建应基于 CATALOG_DOMAIN_MAP（全量常驻）"
+    assert "暂无课程" in body or "empty" in body, "无课程领域应显示空态提示"
+    # 文件列表默认态：领域展开（无 collapsed），课程/套折叠（collapsed + display:none）
+    assert 'tree-course collapsed' in body, "课程默认折叠（点名称展开）"
+    assert 'tree-set collapsed' in body, "套默认折叠（点名称展开）"
+    assert 'class="tree-node tree-domain"' in body, "领域默认展开"
+    assert "tree-caret" in body, "箭头状态指示应保留"
+
+
+def test_panel_course_uses_set_rows():
+    """右侧套行视图锁定（二十二期+续，用户裁决，不许回退）：renderPanel 中无选择（全目录）、
+    领域级、课程级均调用 renderPanelByCourses（按套分组 + 册明细横排），不再平铺旧书卡——
+    树暂不跳转时右侧默认视图也保持套行优化。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderPanel[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderPanel 渲染函数"
+    body = m.group(0)
+    assert re.search(r'!sel \|\| sel\.kind === "domain" \|\| sel\.kind === "course"', body), (
+        "无选择/领域级/课程级都应走按套分组视图（renderPanelByCourses，右侧优化不许回退）"
+    )
+
+
+def test_book_intro_role_and_format():
+    """套行头部书名校验（二十二期）：book-intro 格式 = 角色&角色：《书名》——
+    多角色用 & 连接（roleListHtml，教材优先），角色后冒号再书名。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function bookIntroHtml[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 bookIntroHtml 套行书籍介绍函数"
+    body = m.group(0)
+    assert "roleListHtml" in body, "book-intro 应经 roleListHtml 生成角色列表（& 连接）"
+    assert "：" in body, "book-intro 应含角色后冒号（角色：《书名》）"
+    rl = re.search(r"function roleListHtml[\s\S]*?\n}\n", js)
+    assert rl, "app.js 应提供 roleListHtml 角色列表函数"
+    assert '"&"' in rl.group(0) or "'&'" in rl.group(0), "roleListHtml 多角色应用 & 连接（教材&答案）"
+    assert "ROLE_ORDER" in rl.group(0), "roleListHtml 应按教材优先排序（ROLE_ORDER）"
+
+
+def test_file_hint_basename_only():
+    """册明细卷标简化（二十二期）：file_hint 只显示文件名（去目录前缀、去扩展名），
+    如 raw/books/.../01-demidovich_吉米多维奇数学分析习题集_2010.pdf → 文件名。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function volumeRow[\s\S]*function fileHintName[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 volumeRow/fileHintName 渲染函数"
+    assert re.search(r"split\([^)]*[\\/]", m.group(0)), "fileHintName 应取 file_hint 的 basename（去目录）"
+    assert r"replace(/\.[^.]+$/," in m.group(0), "fileHintName 应去掉 file_hint 扩展名"
+    assert "fileHintName(d.file_hint)" in m.group(0), "volumeRow 卷标应经 fileHintName 简化后显示"
+
+
+def test_body_text_indent_and_align():
+    """正文段前空两格 + 右对齐（二十二期）：.verdict/.reject-note 等正文
+    应用 text-indent（段前空两格）与 text-align（右对齐）。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.verdict \{[\s\S]*?\n\}", css)
+    assert m, "style.css 应提供 .verdict 简介样式"
+    body = m.group(0)
+    assert "text-indent" in body, ".verdict 应有 text-indent（段前空两格）"
+    assert "text-align" in body, ".verdict 应有 text-align（右对齐）"
+
+
+# 二十二期续（领域视图层级 + 册级标注）：领域视图顶部显示领域标题；
+# volume-row 按 file_hint 解析册名（volumeDisplayName）与角色（volumeRoleOf，
+# 教材名单 TEXTBOOK_HINT_MARKERS），不再全标 selection.title；正文改左对齐、字号调大。
+
+def test_panel_domain_shows_domain_title():
+    """领域视图显示领域标题层（二十二期）：renderPanelByCourses 在课程行上方渲染
+    领域标题（domain-title，仅领域级 sel.kind=domain 时显示）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderPanelByCourses[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderPanelByCourses 领域渲染函数"
+    body = m.group(0)
+    assert "domain-title" in body, "领域视图应渲染领域标题（domain-title）"
+    assert 'kind === "domain"' in body, "领域标题仅领域级显示"
+
+
+def test_volume_row_uses_hint_name_and_role():
+    """册明细按文件名标注（二十二期，用户裁决）：volume-row 册名来自 file_hint 解析
+    （volumeDisplayName，不再全标 selection.title）；角色按教材名单判定（volumeRoleOf/
+    TEXTBOOK_HINT_MARKERS，命中名单=教材，否则习题集）；排版 = 册名行 + 卷/状态行。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function volumeRow[\s\S]*function fileHintName[\s\S]*function volumeDisplayName[\s\S]*function volumeRoleOf[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 volumeRow/fileHintName/volumeDisplayName/volumeRoleOf 函数"
+    body = m.group(0)
+    assert "volumeDisplayName(d.file_hint)" in body, "volume-row 册名应来自 file_hint 解析"
+    assert "volumeRoleOf(" in body, "volume-row 应判定册角色（教材/习题集）"
+    assert "TEXTBOOK_HINT_MARKERS" in body, "教材名单常量 TEXTBOOK_HINT_MARKERS 应存在"
+    assert '"教材"' in body and '"习题集"' in body, "册角色应区分 教材/习题集"
+    assert "volume-meta" in body, "卷/状态应独立成行（volume-meta）"
+
+
+def test_body_text_left_align():
+    """正文左对齐（二十二期续，用户裁决）：.verdict/.reject-note 的 text-align 改为 left
+    （保留段前空两格 text-indent）。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    for sel in (".verdict", ".reject-note"):
+        m = re.search(re.escape(sel) + r" \{[\s\S]*?\n\}", css)
+        assert m, f"style.css 应提供 {sel} 样式"
+        assert "text-align: left" in m.group(0), f"{sel} 应为左对齐（text-align: left）"
+        assert "text-indent" in m.group(0), f"{sel} 应保留段前空两格（text-indent）"
+
+
+def test_volume_row_font_larger():
+    """册明细字号调大（二十二期）：.volume-book（册名）不小于 15px。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.volume-book \{[\s\S]*?\n\}", css)
+    assert m, "style.css 应提供 .volume-book 册名样式"
+    body = m.group(0)
+    assert re.search(r"font-size: 1[5-9]px", body), ".volume-book 字号应调大（>=15px）"
+
+
+def test_volume_titles_blue():
+    """册明细标题标蓝（二十二期续，用户裁决）：.volume-book（册名）与 .volume-title
+    （卷标）使用 accent 蓝色系，角色标签 tree-type 已为蓝色。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    for sel in (".volume-book", ".volume-title"):
+        m = re.search(re.escape(sel) + r" \{[\s\S]*?\n\}", css)
+        assert m, f"style.css 应提供 {sel} 样式"
+        assert "var(--accent)" in m.group(0), f"{sel} 应使用 accent 蓝色（var(--accent)）"
+
+
+def test_domain_title_accent():
+    """领域标题层强化（二十二期续）：.domain-title 使用 accent 蓝色并足够醒目
+    （右侧面板独立于树宽，领域标题完整展示无需拉宽树）。"""
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.domain-title \{[\s\S]*?\n\}", css)
+    assert m, "style.css 应提供 .domain-title 领域标题样式"
+    body = m.group(0)
+    assert "var(--accent)" in body, ".domain-title 应使用 accent 蓝色"
+    assert re.search(r"font-size: 1[89]px|font-size: 2\dpx", body), ".domain-title 字号应醒目（>=18px）"
+
+
+# 二十二期续（树空白根治 + 学习中心框架）：
+# loadTree 全函数 try/catch + 树加载兜底（不再无限「加载中…」/空白）；
+# 主界面（#/）学习中心框架：领域→课程→章节/知识点（数学试点，章节空态等解析产物管线）。
+
+def test_loadtree_fully_guarded():
+    """树加载全函数守卫（二十二期续）：loadTree 的 renderTree/selectNode 也须在 try 内
+    （浏览器端任何异常 → 离线横幅 + console.error，不再停在「加载中…」永久空白/转圈）。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"async function loadTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 loadTree 加载函数"
+    body = m.group(0)
+    assert "console.error" in body, "loadTree 异常应 console.error 留痕"
+    assert "renderTree()" in body, "loadTree 应调用 renderTree"
+    assert "offline-banner" in body, "loadTree 异常应渲染离线横幅"
+    assert "try {" in body, "loadTree 应整体 try 包裹"
+
+
+def test_tree_load_guard_timer():
+    """树加载兜底定时器（二十二期续）：进入 downloads 视图后若树长时间未渲染
+    （无 tree-node/offline-banner/empty-state），显示错误提示条——任何原因不再永久空白。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"async function loadTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 loadTree 加载函数"
+    assert "tree-empty" in js and "暂无课程" in js, "app.js 应有树空态文案"
+    # 兜底：loadTree 内必须有 renderTree 或空态路径，且树区域有 guards
+    assert 'if (!tree.querySelector' in js or 'innerHTML' in js, "树渲染应有兜底判定"
+
+
+def test_learning_center_framework():
+    """独立知识点界面（二十二期续，用户裁决）：#/knowledge 独立路由页面——左侧领域/课程
+    列表（catalog）+ 右侧选中课程的章节/知识点结构区（空态，等解析产物管线）；
+    **只显示结构，不显示课程资料书单**（learn-books/课程资料 不得出现）。"""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "page-knowledge" in html, "index.html 缺少独立知识点页面（page-knowledge）"
+    assert '"/knowledge"' in js, "app.js 缺少 /knowledge 路由"
+    assert "learn-course-list" in html and "learn-chapters" in html, "知识点页面应有课程列表+章节区"
+    assert "renderKnowledgeCenter" in js, "app.js 缺少 renderKnowledgeCenter 渲染函数"
+    assert "管线" in html or "待" in html, "章节层空态应注明等解析产物管线"
+    # 独立界面只显示结构：不得渲染课程资料书单（learn-books 仅允许在管理后台出现）
+    kb = re.search(r"function renderKnowledgeCenter[\s\S]*?\n}\n", js)
+    assert kb, "app.js 应提供 renderKnowledgeCenter 函数"
+    assert "learn-books" not in kb.group(0), "renderKnowledgeCenter 不应渲染课程资料书单（只显示结构）"
+    assert "selectionCard" not in kb.group(0), "renderKnowledgeCenter 不应渲染书单卡"
+
+
+def test_home_restored_three_cards():
+    """主界面还原（二十二期续，用户裁决）：home 页 = hero + 三张占位卡（知识点梳理/学习/
+    刷题模式），其中「知识点梳理」卡可点击进入独立知识点界面（data-nav=/knowledge）；
+    learn-layout 移入独立知识点页（page-knowledge 内），home 区不含。"""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    for token in ("知识点梳理", "学习", "刷题模式"):
+        assert token in html, f"index.html 缺少原占位卡：{token}"
+    assert "feature-grid" in html and "feature-card" in html, "index.html 应保留三卡结构"
+    assert 'data-nav="/knowledge"' in html, "知识点卡应可点击进入 #/knowledge"
+    home = html[html.index('id="page-home"'):html.index('id="page-knowledge"')]
+    assert "learn-layout" not in home, "home 区不应有 learn-layout（移入独立界面）"
+    assert "learn-layout" in html, "learn-layout 应在独立知识点页（page-knowledge）内"
+
+
+def test_tree_event_delegation_and_selfcheck():
+    """文件列表式交互（二十二期续，用户裁决）：名称点击 = 只展开（折叠时展开，已展开不收起，
+    不吞文字）+ 右侧联动（selectNode）；箭头点击 = 只收起（不负责展开）；渲染自检保留。"""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"function renderTree[\s\S]*?\n}\n", js)
+    assert m, "app.js 应提供 renderTree 渲染函数"
+    body = m.group(0)
+    assert "selfcheck" in body or "诊断" in body or "tree-check" in body, "renderTree 应含渲染自检（诊断条）"
+    assert "tree-node" in body, "renderTree 应渲染领域/课程节点"
+    # 事件委托：名称=只展开（不 toggle 收起），箭头=只收起
+    d = re.search(r'const treeNode = ev\.target\.closest\("#domain-tree \.tree-node"\)[\s\S]*?\n        \}\n        const nav', js)
+    assert d, "app.js 应提供树事件委托（名称展开 + 箭头收起 + selectNode）"
+    seg = d.group(0)
+    assert "classList.toggle" not in seg, "不应再使用 toggle（点击已展开节点不得收起/吞文字）"
+    assert 'contains("collapsed")' in seg, "名称点击应按折叠状态判断（只展开）"
+    assert "selectNode(treeNode.dataset.kind, treeNode.dataset.id)" in seg, "名称点击应保留右侧联动（selectNode）"
+    assert 'closest("#domain-tree .tree-caret")' in seg or 'closest(".tree-caret")' in seg, "箭头点击应单独处理（只收起）"
+
+
+def test_tree_levels_indicator():
+    """文件列表式层级（二十二期续，用户裁决）：树 = 领域/课程/套 文件夹 + 书叶子，
+    层级缩进递增（课程 20 / 套 40 / 书 60）+ 引导线；无三列表头（tree-levels 移除）。"""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    assert "tree-levels" not in html, "三列表头应移除（文件列表由缩进表达层级）"
+    assert ".tree-course" in css and "padding-left: 20px" in css, "课程层缩进 20px"
+    assert ".tree-set" in css and "padding-left: 40px" in css, "套层缩进 40px（文件夹）"
+    assert ".tree-book" in css and "padding-left: 60px" in css, "书叶子缩进 60px"
+    assert "border-left" in css, "层级引导线（border-left）应保留"

@@ -35,7 +35,6 @@ const ENDPOINTS = {
     keys: "/config/keys",
     models: "/config/models",
     database: "/config/database",
-    llmStatus: "/config/llm-status",
     selections: "/selections",
     downloads: "/downloads",
     sources: "/sources",
@@ -86,6 +85,7 @@ const STATUS_COLORS = {
  * #/admin/downloads（知识点）、#/admin/parsing（文档解析进度）、#/admin/compare（原始文档对照） */
 const ROUTES = {
     "/": { page: "home" },
+    "/knowledge": { page: "knowledge" },
     "/admin": { page: "admin", view: "dashboard" },
     "/admin/dashboard": { page: "admin", view: "dashboard" },
     "/admin/downloads": { page: "admin", view: "downloads" },
@@ -182,17 +182,27 @@ function renderResourceFilters() {
 
 /* ---------- 通用 ---------- */
 
+/* 二十二期：请求 8s 超时（AbortController）——8901/8900 掉线时请求不得无限挂起
+ * （曾导致树停在「加载中」转圈最长达 8900 代理 30s 超时）。 */
+const FETCH_TIMEOUT_MS = 8000;
+
 async function fetchJson(url, options) {
-    const res = await fetch(url, options);
-    if (!res.ok) {
-        let detail = res.statusText;
-        try {
-            const body = await res.json();
-            if (body.detail) detail = body.detail;
-        } catch (_) { /* 非 JSON 响应 */ }
-        throw new Error(res.status + " " + detail);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+        const res = await fetch(url, { ...(options || {}), signal: controller.signal });
+        if (!res.ok) {
+            let detail = res.statusText;
+            try {
+                const body = await res.json();
+                if (body.detail) detail = body.detail;
+            } catch (_) { /* 非 JSON 响应 */ }
+            throw new Error(res.status + " " + detail);
+        }
+        return res.json();
+    } finally {
+        clearTimeout(timer);
     }
-    return res.json();
 }
 
 function $(id) { return document.getElementById(id); }
@@ -213,9 +223,11 @@ function currentRoute() {
 function route() {
     const r = currentRoute();
     const isAdmin = r.page === "admin";
-    $("page-home").classList.toggle("active", !isAdmin);
+    const isKnowledge = r.page === "knowledge";
+    $("page-home").classList.toggle("active", !isAdmin && !isKnowledge);
+    $("page-knowledge").classList.toggle("active", isKnowledge);
     $("page-admin").classList.toggle("active", isAdmin);
-    document.title = isAdmin ? "管理后台 · QED-Engine" : "QED-Engine";
+    document.title = isAdmin ? "管理后台 · QED-Engine" : isKnowledge ? "知识点 · QED-Engine" : "QED-Engine";
     if (isAdmin) {
         const navHash = location.hash.replace(/^#/, "") || "/";
         // #/admin 为仪表大盘别名：高亮「仪表大盘」菜单
@@ -224,6 +236,9 @@ function route() {
             a.classList.toggle("active", a.getAttribute("href") === "#" + activeHash);
         });
         showAdminView(r.view || "dashboard");
+    } else if (isKnowledge) {
+        // 二十二期续：独立知识点界面（领域→课程→章节/知识点结构，数据等解析产物管线）
+        renderKnowledgeCenter();
     }
 }
 
@@ -238,6 +253,72 @@ function showAdminView(view) {
         loadTasks();
         populateCourseSelects();
     }
+}
+
+/* ---------- 知识点独立界面（二十二期续：领域→课程→章节/知识点结构，数学试点） ----------
+ * #/knowledge 独立路由页：左侧领域/课程列表（catalog 13 门，COURSE_ORDER 排序），
+ * 右侧选中课程的章节/知识点结构区（空态，等解析产物管线）。**只显示结构，不显示课程资料书单**。
+ * 章节/知识点数据接入点：learning-center.md §3（领域→课程→知识点 DAG + 前置依赖），
+ * 待 Axiom-Flow 解析产物管线就绪后填充。 */
+
+async function renderKnowledgeCenter() {
+    if (!state.catalog.length) {
+        try {
+            const catalog = await fetchJson(TRACKER_BASE + "/catalogs/math-qe");
+            state.catalog = Array.isArray(catalog.targets) ? catalog.targets : [];
+        } catch (_) { /* 数据域离线：课程列表留空态 */ }
+    }
+    renderLearnCourseList();
+}
+
+function renderLearnCourseList() {
+    const courses = new Map();
+    for (const t of state.catalog) {
+        if (t.course_id && !courses.has(t.course_id)) courses.set(t.course_id, t.course_name || t.course_id);
+    }
+    const ids = [...courses.keys()].sort(courseOrderCmp);
+    const list = $("learn-course-list");
+    if (!list) return;
+    if (!ids.length) {
+        list.innerHTML = '<div class="tree-empty">暂无课程目录（数据服务离线）</div>';
+        renderLearnCourse(null);
+        return;
+    }
+    list.innerHTML = ids.map((cid) => {
+        const done = courseCompletion(cid);
+        const badge = courseDoneBadge(done);
+        return `<div class="learn-course-item" data-course="${esc(cid)}">
+            <span class="learn-course-name">${esc(courses.get(cid))}</span>
+            ${badge}
+        </div>`;
+    }).join("");
+    // 默认选中第一门（数学分析，COURSE_ORDER 首位）
+    const first = list.querySelector(".learn-course-item");
+    if (first) selectLearnCourse(first.dataset.course);
+    else renderLearnCourse(null);
+}
+
+function selectLearnCourse(courseId) {
+    document.querySelectorAll(".learn-course-item").forEach((n) => {
+        n.classList.toggle("selected", n.dataset.course === courseId);
+    });
+    renderLearnCourse(courseId);
+}
+
+function renderLearnCourse(courseId) {
+    const courseName = courseId
+        ? (state.catalog.find((t) => t.course_id === courseId) || {}).course_name || courseId
+        : "选择左侧课程开始学习";
+    $("learn-course-title").textContent = courseName;
+    const done = courseId ? courseCompletion(courseId) : null;
+    $("learn-course-badge").innerHTML = done ? courseDoneBadge(done) : "";
+    // 章节/知识点区：只显示结构（空态，数据等解析产物管线，learning-center.md §3）——不渲染书单
+    $("learn-chapters").innerHTML = courseId
+        ? `<div class="empty-state">
+            <div>📚 《${esc(courseName)}》章节数据待解析产物管线就绪后填充</div>
+            <div class="section-note">知识结构梳理（定义/定理/证明/例题）与前置依赖关系将随 Axiom-Flow 解析产物接入</div>
+        </div>`
+        : `<div class="empty-state"><div>📚 选择左侧课程开始学习</div></div>`;
 }
 
 /* ---------- 配置横幅（8900）与仪表盘健康面板 ---------- */
@@ -258,20 +339,13 @@ async function refreshConfigBanner() {
     const banner = $("config-banner");
     if (!banner) return;
     try {
-        const [db, llm] = await Promise.all([
-            fetchJson(CONFIG_BASE + ENDPOINTS.database),
-            fetchJson(CONFIG_BASE + ENDPOINTS.llmStatus),
-        ]);
-        // 粗粒度横幅（ARCH-003 决策 D2/D3）：只显示模块连接状态，不透露 provider 名单与主机细节。
-        const providers = ["qwen", "glm", "deepseek"].map((p) => llm[p] || {});
-        const configured = providers.some((s) => s.reason !== "未配置");
-        const llmOk = configured && providers.some((s) => s.reachable);
-        const llmLabel = !configured ? "未配置" : llmOk ? "OK" : "不可用";
-        const llmCls = !configured ? "dim" : llmOk ? "hl" : "hl-off";
+        const db = await fetchJson(CONFIG_BASE + ENDPOINTS.database);
+        // 粗粒度横幅（ARCH-003 决策 D2/D3）：只显示模块连接状态，不透露主机细节。
+        // ARCH-014：LLM 供应商可达性不再经端点探测（8900 启动自检写日志），横幅只保留 MySQL。
         const dbLabel = !db.configured ? "未配置" : db.reachable ? "OK" : "连接失败";
         const dbCls = !db.configured ? "dim" : db.reachable ? "hl" : "hl-off";
-        banner.innerHTML = `LLM评估模块连接：<span class="${llmCls}">${llmLabel}</span> / MySQL数据库连接：<span class="${dbCls}">${dbLabel}</span>`;
-        banner.classList.toggle("warn", !llmOk || !db.reachable);
+        banner.innerHTML = `MySQL数据库连接：<span class="${dbCls}">${dbLabel}</span>`;
+        banner.classList.toggle("warn", !db.reachable);
     } catch (_) {
         banner.textContent = "QED 管理服务 8900 离线，横幅不可用";
         banner.classList.add("warn");
@@ -470,8 +544,11 @@ function renderPanel() {
             consoleEl.classList.add("hidden");
         }
     }
-    // 十五期：领域级按课程分页视图；课程级/套书级按条目卡列表
-    if (sel && sel.kind === "domain") {
+    // 十五期：领域级按课程分页视图；课程级/套书级按条目卡列表。
+    // 二十二期（用户裁决）：课程级同样走按套分组视图（套行 + 册明细横排），不再平铺书卡。
+    // 二十二期续（逐步重构，不许回退）：无选择（全目录）也走套行视图——右侧保持套行优化，
+    // 不因「树暂不跳转」而回退到书卡平铺。
+    if (!sel || sel.kind === "domain" || sel.kind === "course") {
         renderPanelByCourses(items);
         return;
     }
@@ -530,7 +607,11 @@ function renderPanelByCourses(items) {
     if (state.coursePage >= pages) state.coursePage = pages - 1;
     if (state.coursePage < 0) state.coursePage = 0;
     const pageCourseIds = courseIds.slice(state.coursePage * PAGE_SIZE, (state.coursePage + 1) * PAGE_SIZE);
-    let html = "";
+    // 二十二期：领域视图顶部显示领域标题层（领域名 + 课程数），课程行在领域下
+    const domainTitle = state.selection && state.selection.kind === "domain"
+        ? `<div class="domain-title">${esc(state.selection.id)}<span class="domain-count">${courseIds.length} 门课程</span></div>`
+        : "";
+    let html = domainTitle;
     for (const cid of pageCourseIds) {
         const list = byCourse.get(cid);
         const courseName = (state.catalog.find((x) => x.course_id === cid) || {}).course_name || cid;
@@ -606,10 +687,11 @@ function setRowHtml(label, items, isPending = false, setNo = null) {
     </div>`;
 }
 
-/* 二十期：套内书籍一行介绍——role《书名》（一套一名称，卷几合并，不逐卷展开） */
+/* 二十期+二十二期：套内书籍一行介绍——角色&角色：《书名》（多角色 & 连接，
+ * 教材优先排序，角色后冒号再书名；一套一名称，卷几合并，不逐卷展开）。 */
 function bookIntroHtml(s) {
-    const role = (s.roles && s.roles.length ? roleLabels(s.roles) : "书目");
-    return `<span class="book-intro">${esc(role)}《${esc(s.title)}》</span>`;
+    const roles = (s.roles && s.roles.length ? roleListHtml(s.roles) : "书目");
+    return `<span class="book-intro">${esc(roles)}：《${esc(s.title)}》</span>`;
 }
 
 /* 跨览：selectionCard 内册明细折叠区按钮文案用（新建候选册按钮），书名截断避免按钮过宽 */
@@ -620,7 +702,12 @@ function shortSetTitle(s) {
 
 /* ---------- 知识点树（十一期：三层知识链路 领域→课程→书籍，学习深度排序） ---------- */
 
+/* 二十二期：8901 离线自动重试——定时器防重（hashchange/多次调用不叠加）。 */
+let _treeRetryTimer = null;
+const TREE_RETRY_MS = 10000;
+
 async function loadTree() {
+    clearTimeout(_treeRetryTimer);
     const tree = $("domain-tree");
     tree.textContent = "加载中…";
     try {
@@ -631,13 +718,27 @@ async function loadTree() {
                 state.selections = await fetchJson(TRACKER_BASE + ENDPOINTS.selections);
             } catch (_) { /* 数据域离线不影响树结构 */ }
         }
+        renderTree();
+        // 二十二期续（重构，逐步来）：暂不默认选中跳转（全展开先看全貌；selectNode 联动后续恢复）
+        // if (!state.selection) selectNode("domain", "数学");
     } catch (err) {
-        tree.innerHTML = `<div class="empty-state">QED-Tracker 8901 离线：${esc(err.message)}</div>`;
+        // 二十期+二十二期续：任何异常（含 renderTree/selectNode 抛错）都不允许树停在
+        // 「加载中…」——离线横幅 + 骨架 + console.error 留痕（不再无限转圈/空白）
+        console.error("loadTree 失败：", err);
+        state.catalog = state.catalog || [];
+        try {
+            renderTree();
+        } catch (err2) {
+            console.error("loadTree 骨架渲染失败：", err2);
+            tree.innerHTML = `<div class="empty-state">知识树加载失败，请点右上角刷新重试</div>`;
+        }
+        tree.insertAdjacentHTML("afterbegin",
+            `<div class="offline-banner">知识树暂不可用：${esc(err.message)}`
+            + ` <button class="btn ghost" data-act="retry-tree">重试</button></div>`);
+        // 二十二期：8901 恢复后自动重渲染（无需手动刷新）
+        _treeRetryTimer = setTimeout(loadTree, TREE_RETRY_MS);
         return;
     }
-    renderTree();
-    // 十五期：进入文档下载管理默认选中「数学」领域（仅当尚无选择；刷新树保留用户既有选择）
-    if (!state.selection) selectNode("domain", "数学");
 }
 
 /* 领域自适应（五期 D6）：catalog 无领域字段，按 catalog_id 映射学科领域；
@@ -682,6 +783,18 @@ function roleLabels(roles) {
     return (roles || []).map((r) => map[r] || r).join(" / ");
 }
 
+/* 二十二期：角色展示排序（教材优先 → 习题集 → 答案 → 其他，贴合套行头部阅读习惯） */
+const ROLE_ORDER = { textbook: 0, exercises: 1, solutions: 2, reference: 3, supplement: 4 };
+
+function roleListHtml(roles) {
+    const map = { textbook: "教材", exercises: "习题集", solutions: "答案", reference: "参考", supplement: "配套资料" };
+    return (roles || [])
+        .slice()
+        .sort((a, b) => (ROLE_ORDER[a] ?? 9) - (ROLE_ORDER[b] ?? 9))
+        .map((r) => map[r] || r)
+        .join("&");
+}
+
 /* 版本徽标（十六期，course-acquisition-flow 对齐契约 2；十七期：字段来源兼容表1 version.language）：
  * language 中译（zh/chi）+ 作者命中苏版名单 → 苏版；中译 → 中译本；
  * 英文（en/eng）→ 英文版；其余 → 其他。target 与表1 条目均适用。 */
@@ -716,7 +829,9 @@ function courseCompletion(courseId) {
         const approved = (s.download_stats || {}).approved > 0;
         const roles = s.roles || [];
         if (roles.includes("textbook")) { g.bookT += 1; if (approved) g.bookA += 1; }
-        if (roles.includes("exercises")) { g.exT += 1; if (approved) g.exA += 1; }
+        // 二十期（用户裁决）：题解（solutions）与习题集（exercises）同池计入习题类——
+        // 套3 陈纪修（教材+题解）→ 套数 3/3 · 习题集 3/3
+        if (roles.includes("exercises") || roles.includes("solutions")) { g.exT += 1; if (approved) g.exA += 1; }
     }
     let setsApproved = 0, setTotal = 0, bookApproved = 0, bookTotal = 0, exApproved = 0, exTotal = 0;
     for (const g of groups.values()) {
@@ -772,7 +887,12 @@ function renderTree() {
         if (!byDomain.has(domain)) byDomain.set(domain, []);
         byDomain.get(domain).push(course);
     }
-    const domainsHtml = [...byDomain.entries()].map(([domain, courseList]) => {
+    // 二十二期（用户裁决）：所有领域常驻展示（CATALOG_DOMAIN_MAP 全量 + 数据推导兜底），
+    // 无课程的领域也显示（空态）。二十二期续（文件列表式）：默认领域展开、课程/套折叠
+    // （文件管理器默认态：根展开第一层，点击名称展开下一层）。
+    const allDomains = [...new Set([...Object.values(CATALOG_DOMAIN_MAP), ...byDomain.keys()])];
+    const domainsHtml = allDomains.map((domain) => {
+        const courseList = byDomain.get(domain) || [];
         const coursesHtml = courseList
             // 十八期回归：courseOrderCmp 接收课程 id（直接传对象会 localeCompare 崩溃）
             .sort((a, b) => courseOrderCmp(a.id, b.id))
@@ -790,29 +910,21 @@ function renderTree() {
         return `
             <div class="tree-node tree-domain" data-kind="domain" data-id="${esc(domain)}" data-label="${esc(domain)}">
                 <span class="tree-caret">▾</span><span class="tree-name">${esc(domain)}</span>
-                <span class="tree-count">${courseList.length} 门课程</span>
-                <div class="tree-children">${coursesHtml}</div>
+                <span class="tree-count">${courseList.length ? courseList.length + " 门课程" : "暂无课程"}</span>
+                <div class="tree-children">${coursesHtml || '<div class="tree-empty">（暂无课程）</div>'}</div>
             </div>`;
     }).join("");
     tree.innerHTML = domainsHtml || `<div class="empty-state">暂无课程目录</div>`;
-    // PyCharm 式交互：箭头=展开/折叠；名称=选中（领域/课程/套/候选叶子均可选）
-    tree.querySelectorAll(".tree-node").forEach((node) => {
-        const children = node.querySelector(":scope > .tree-children");
-        const caret = node.querySelector(":scope > .tree-caret");
-        if (caret) {
-            caret.addEventListener("click", (ev) => {
-                ev.stopPropagation();
-                if (!children) return;
-                const collapsed = node.classList.toggle("collapsed");
-                children.style.display = collapsed ? "none" : "";
-            });
+    // 二十二期续（重构）：渲染自检——树区域 3s 内无任何渲染产物（节点/横幅/空态）时
+    // 显示诊断条（任何环境异常不再静默空白，console.error 留痕）
+    setTimeout(() => {
+        const hasContent = tree.querySelector(".tree-node, .offline-banner, .empty-state, .tree-empty");
+        if (!hasContent) {
+            console.error("知识树渲染自检失败：树区域无渲染产物");
+            tree.insertAdjacentHTML("afterbegin",
+                `<div class="offline-banner">知识树渲染异常 <button class="btn ghost" data-act="retry-tree">重试</button></div>`);
         }
-        node.addEventListener("click", (ev) => {
-            if (ev.target === caret) return; // 已由箭头处理
-            ev.stopPropagation(); // 十三期修复：阻止冒泡到父级行（点课程不再覆盖成领域）
-            selectNode(node.dataset.kind, node.dataset.id);
-        });
-    });
+    }, 3000);
 }
 
 /* 二十期：课程树叶子按套聚合——confirmed 按 set_no 归入套节点（tree-set，套内书行 tree-book），
@@ -852,7 +964,8 @@ function courseSetNodesHtml(courseId, selections) {
 /* 二十期：套节点 + 套内书行（一套一名：教材/习题集合并书名，不逐卷展开） */
 function setTreeNodeHtml(id, label, items) {
     const bookRows = items.map((s) => {
-        const role = (s.roles && s.roles.length ? roleLabels(s.roles) : "书目");
+        // 二十二期：角色列表 & 连接（教材&习题集&答案，教材优先），与右侧 book-intro 一致
+        const role = (s.roles && s.roles.length ? roleListHtml(s.roles) : "书目");
         const count = (s.downloads || []).length;
         return `
             <div class="tree-book">
@@ -975,8 +1088,8 @@ function selectionCard(sel) {
     </div>`;
 }
 
-/* 十七期：表2 册级明细行——书名（二十期：套行合并展示时带所属书名）/vol/file_hint/
- * intro（LLM 简介）/文件相对路径（审理提示）/状态；
+/* 十七期+二十二期：表2 册级明细行——册名（volumeDisplayName 按 file_hint 解析，
+ * 不再全标 selection.title）+ 角色（volumeRoleOf 教材名单判定）+ 卷标 + 简介/路径/状态；
  * 操作：downloaded → 验收通过/否定（填原因）；candidate → 人工下载登记（填相对路径）。 */
 function volumeRow(d, bookTitle) {
     const actions = [];
@@ -993,13 +1106,20 @@ function volumeRow(d, bookTitle) {
     const pathTip = d.relative_path
         ? `<div class="reject-note">文件绝对路径：${esc(d.relative_path)}（请打开文件人工审理是否达到预期，审理通过后点「验收通过」）</div>`
         : "";
-    const titleTag = bookTitle
-        ? `<span class="volume-book">《${esc(bookTitle)}》</span>`
-        : "";
+    // 二十二期（用户裁决）：册名/角色按文件名解析，不再标注所属 selection 书名
+    const hint = d.file_hint ? fileHintName(d.file_hint) : "";
+    const displayName = d.file_hint ? volumeDisplayName(d.file_hint) : (d.vol || "整册");
+    const roleTag = d.file_hint ? `<span class="tree-type">${esc(volumeRoleOf(d.file_hint))}</span>` : "";
     return `<li class="volume-row">
         <div class="volume-head">
-            ${titleTag}<span class="volume-title">卷：${esc(d.vol || "整册")}${d.file_hint ? `（${esc(d.file_hint)}）` : ""}</span>
-            <span class="status-badge status-${esc(d.status || "unknown")}">${esc(STATUS_LABEL[d.status] || d.status)}</span>
+            <div class="volume-bookline">
+                <span class="volume-book">${esc(displayName)}</span>
+                ${roleTag}
+            </div>
+            <div class="volume-meta">
+                <span class="volume-title">卷：${esc(d.vol || "整册")}${hint ? `（${esc(hint)}）` : ""}</span>
+                <span class="status-badge status-${esc(d.status || "unknown")}">${esc(STATUS_LABEL[d.status] || d.status)}</span>
+            </div>
         </div>
         ${intro}
         ${pathTip}
@@ -1009,6 +1129,31 @@ function volumeRow(d, bookTitle) {
         </div>
         ${registerForm}
     </li>`;
+}
+
+/* 二十二期：卷标文件名简化——raw/books/.../01-xxx_书名_2010.pdf → 01-xxx_书名_2010 */
+function fileHintName(hint) {
+    const base = String(hint).split(/[\\/]/).pop();
+    return base.replace(/\.[^.]+$/, "");
+}
+
+/* 二十二期（用户裁决）：册名解析——01-demidovich_吉米多维奇数学分析习题集_2010 →
+ * 吉米多维奇数学分析习题集（去序号-代码_ 前缀、去尾部 _年份/_hash、_ 转空格）。 */
+function volumeDisplayName(hint) {
+    let name = fileHintName(hint);
+    name = name.replace(/^\d+-[a-z0-9-]+_/, "");  // 去 序号-代码_ 前缀（代码段可含数字，如 chenjixiu-v1）
+    name = name.replace(/_[a-z0-9]+$/, "");        // 去尾部 _年份/_hash（如 _2010、_730d8220）
+    return name.replace(/_/g, " ");
+}
+
+/* 二十二期（用户裁决教材名单）：文件名命中以下特征 = 教材，其余 = 习题集：
+ * 01-rudin-zh_数学分析原理第3版_鲁丁中译 / 微积分学教程（第X卷）…菲赫金哥尔茨 /
+ * 01-chenjixiu-v1|v2_数学分析陈纪修_第三版_课本及答案 */
+const TEXTBOOK_HINT_MARKERS = ["rudin-zh", "微积分学教程", "chenjixiu"];
+
+function volumeRoleOf(hint) {
+    const h = String(hint || "");
+    return TEXTBOOK_HINT_MARKERS.some((m) => h.includes(m)) ? "教材" : "习题集";
 }
 
 /* 十四期：随三态一并提交的评审建议（QED-020，选填） */
@@ -1256,11 +1401,48 @@ function bindEvents() {
     $("btn-course-search").addEventListener("click", triggerEvaluate);
     $("btn-refresh").addEventListener("click", loadSelections);
     $("btn-refresh-tree").addEventListener("click", loadTree);
+    // 二十二期续：知识点独立界面——课程列表点击 + 刷新 + home 入口卡跳转
+    const learnList = $("learn-course-list");
+    if (learnList) {
+        learnList.addEventListener("click", (ev) => {
+            const item = ev.target.closest(".learn-course-item");
+            if (item) selectLearnCourse(item.dataset.course);
+        });
+    }
+    const btnLearnRefresh = $("btn-refresh-learn");
+    if (btnLearnRefresh) btnLearnRefresh.addEventListener("click", renderKnowledgeCenter);
     initPopovers();
     $("modal-cancel").addEventListener("click", () => $("modal").classList.add("hidden"));
     $("modal-ok").addEventListener("click", submitReason);
     $("detail-close").addEventListener("click", () => $("detail-modal").classList.add("hidden"));
     document.addEventListener("click", (ev) => {
+        // 二十二期续（文件列表式）：名称点击 = 只展开（折叠时展开，已展开不收起——不吞文字）
+        // + 右侧联动（selectNode）；箭头点击 = 只收起（不负责展开）
+        const treeNode = ev.target.closest("#domain-tree .tree-node");
+        if (treeNode) {
+            ev.stopPropagation(); // 十三期：阻止冒泡到父级行（点课程不再覆盖成领域）
+            const caret = ev.target.closest("#domain-tree .tree-caret");
+            const children = Array.from(treeNode.children).find((el) => el.classList.contains("tree-children"));
+            if (children) {
+                if (caret) {
+                    // 箭头 = 只收起（已折叠则无动作）
+                    if (!treeNode.classList.contains("collapsed")) {
+                        treeNode.classList.add("collapsed");
+                        children.style.display = "none";
+                    }
+                    return;
+                }
+                // 名称 = 只展开（已展开则无动作，不收起/不吞）
+                if (treeNode.classList.contains("collapsed")) {
+                    treeNode.classList.remove("collapsed");
+                    children.style.display = "";
+                }
+            }
+            selectNode(treeNode.dataset.kind, treeNode.dataset.id);
+            return;
+        }
+        const nav = ev.target.closest("[data-nav]");
+        if (nav) { location.hash = nav.dataset.nav; return; }
         // 十六期（service-control 前端契约）：服务控制区按钮（启动/停止/重启）优先处理
         const svcBtn = ev.target.closest("button[data-service-act]");
         if (svcBtn) {
@@ -1270,7 +1452,8 @@ function bindEvents() {
         const btn = ev.target.closest("button[data-act]");
         if (!btn) return;
         const { act, id, kind } = btn.dataset;
-        if (act === "confirm") confirmSelection(id);
+        if (act === "retry-tree") { clearTimeout(_treeRetryTimer); loadTree(); }
+        else if (act === "confirm") confirmSelection(id);
         else if (act === "backup") backupSelection(id);
         else if (act === "create-downloads") createDownloads(id);
         else if (act === "register") registerDownload(id);
