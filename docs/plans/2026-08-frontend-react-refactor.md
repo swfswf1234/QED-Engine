@@ -14,8 +14,9 @@
 ## 前置条件
 
 - 2026-08-16 用户方向裁决：前端重构为当前最高优先级，**本轮只做前端部分改造**；后端
-  三域拆分（[backend-domain-split.md](../design/backend-domain-split.md)）与监控诊断端点
-  不在本轮，保留文档作为后续轮参考；框架选型 React + AntD 全家桶（ADR 0008）。
+  三域拆分与监控诊断端点独立成轮，由 [ARCH-012 后端三域拆分轮（backend-domain-refactor）](2026-08-backend-domain-refactor.md)
+  并行承接（设计文档 [backend-domain-split.md](../design/backend-domain-split.md) 深化版）；
+  框架选型 React + AntD 全家桶（ADR 0008）。
 - 设计文档已落盘并通过用户验收（2026-08-16）：frontend-react-refactor.md、
   config-center-api.md（监控域登记）、service-control.md（控制台增强）、ADR 0008、
   本计划（修订版：纯前端 + 阶段门禁）。
@@ -26,7 +27,8 @@
 
 1. 8903 前端整体切换为 React 19 + TS + AntD 5 实现（web-ui/），核心四界面
    （主界面 / 控制台 / 仪表盘 / 下载管理）可用，视觉蓝白主题、黑字高对比、自适应缩放。
-2. 控制台只用既有端点（/services、/config/database、/config/llm-status），无新增后端端点。
+2. 控制台只用既有端点（/services、/config/database 启动快照），无新增后端端点
+   （/config/llm-status 已随 ARCH-014 删除）。
 3. 8903 切换构建产物（serve_web.py 指 web-ui/dist），旧 web/ 退役；tests/test_web.py
    守护迁移至 web-ui/src/ 源码。
 4. 文档同步：web-frontend.md v2 重写、code-map、四服务架构符合度、project-status、
@@ -43,7 +45,7 @@
 - `scripts/serve_web.py` 调整（指向 dist，保持 8903 + no-store）。
 - 测试与文档同步（上节）。
 
-非目标（本轮不做，后续轮参考文档保留）：
+非目标（本轮不做，由 [ARCH-012](2026-08-backend-domain-refactor.md) 并行承接）：
 - 后端三域拆分（[backend-domain-split.md](../design/backend-domain-split.md)）。
 - 监控与诊断端点（/logs、/monitor/*、/self-restart，config-center-api.md 登记保留）。
 - 控制台 GPU/LM Studio/mineru/日志查看展示。
@@ -55,11 +57,11 @@
 
 | # | 问题 | 裁决 |
 | --- | --- | --- |
-| D1 | 后端组织 | 三域解耦为后续并行推进做准备，但**本轮只做前端**，后端拆分/配套后置 |
+| D1 | 后端组织 | 三域解耦独立成轮（ARCH-012）并行推进，**本轮只做前端** |
 | D2 | 框架 | React 19 + Vite + TS + AntD 5 + AntV G6（后续图谱）+ ECharts + Zustand + React Router |
 | D3 | 迁移 | 地基先行、分批替换；过渡期 8903 保持旧前端，新前端 Vite dev 开发，完成后切换 |
 | D4 | 本轮界面 | 核心四界面：主界面 / 控制台 / 仪表盘 / 下载管理 |
-| D5 | 控制台数据源 | 只用既有端点（/services、/config/database、/config/llm-status）；监控端点（GPU/LM Studio/mineru/日志/self-restart）后置 |
+| D5 | 控制台数据源 | 只用既有端点（/services、/config/database 启动快照）；LLM 联通不展示（端点已删，ARCH-014）；监控端点（GPU/LM Studio/mineru/日志/self-restart）后置 |
 | D6 | 执行流程 | **每个阶段经用户验证后才进入下一阶段**（阶段门禁） |
 | D7 | 基线提交 | 文档基线在 Phase 0 开工前提交 git |
 
@@ -82,9 +84,9 @@
 
 ### Phase 2：控制台（Console）
 
-- 顶部刷新按钮；四服务卡（8900 状态 / 8901·8902 启停重启 / 8903 重新加载提示；
-  离线附原因；破坏性操作确认框；操作后轮询 /services 收敛）；
-  MySQL 卡（/config/database）+ LLM 联通卡（/config/llm-status）。
+- 顶部刷新按钮；四服务卡（8900 状态 + 数据库启动快照信息 / 8901·8902 启停重启 /
+  8903 重新加载提示；离线附原因；破坏性操作确认框；操作后轮询 /services 收敛）。
+  （ARCH-014：MySQL 不单独列卡并入 8900 卡；LLM 联通卡已取消，端点已删除。）
 - 验证：组件测试 + 真实服务冒烟；**门禁**：用户验证真实启停/离线提示/刷新。
 
 ### Phase 3：仪表盘（Dashboard）

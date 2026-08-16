@@ -1,0 +1,188 @@
+/* 文档下载管理（Phase 4a：左树 + 右侧面板） */
+
+.dl-layout {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+/* ---- 左树 ---- */
+
+.dl-tree-wrap {
+  position: relative;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 8px 12px 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.dl-tree {
+  height: calc(100vh - 300px);
+  min-height: 360px;
+  overflow-y: auto;
+  padding-right: 6px;
+  font-size: 13px;
+}
+
+.dl-tree-node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.dl-tree-node.selected {
+  background: #e6f4ff;
+}
+
+.dl-tree-caret {
+  width: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  color: #8c8c8c;
+  cursor: pointer;
+  font-size: 11px;
+  user-select: none;
+}
+
+.dl-tree-caret-domain {
+  cursor: default;
+  color: #1677ff;
+}
+
+.dl-tree-name {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-tree-domain > .dl-tree-name {
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.dl-tree-count {
+  color: #999;
+  font-size: 12px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.dl-tree-children {
+  width: 100%;
+  padding-left: 14px;
+}
+
+.dl-tree-course > .dl-tree-children {
+  padding-left: 12px;
+}
+
+.dl-tree-tutorial {
+  padding-left: 14px;
+}
+
+.dl-tree-book {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.dl-tree-book-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-tree-book-count {
+  color: #999;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.dl-tree-empty {
+  padding: 16px 8px;
+  color: #999;
+  font-size: 13px;
+}
+
+/* 树宽拖拽手柄 */
+.dl-tree-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  cursor: col-resize;
+  background: #fafafa;
+  border-left: 1px solid #eee;
+  user-select: none;
+  touch-action: none;
+}
+
+.dl-tree-resizer:hover {
+  color: #1677ff;
+  background: #f0f7ff;
+}
+
+/* ---- 右侧面板 ---- */
+
+.dl-right {
+  flex: 1;
+  min-width: 0;
+  margin-left: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dl-filter-bar {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.dl-summary {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 12px;
+}
+
+.dl-content {
+  flex: 1;
+  min-height: 400px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-top: 12px;
+  overflow: auto;
+}
+
+.dl-placeholder {
+  height: 100%;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #999;
+}

@@ -1,0 +1,73 @@
+/* 学习中心·知识结构浏览（#/knowledge） */
+
+.kn-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.kn-domain-panel {
+  width: 140px;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kn-domain-title {
+  padding: 0 8px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 4px;
+}
+
+.kn-domain-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+}
+
+.kn-domain-item:hover {
+  background: #f0f7ff;
+}
+
+.kn-domain-item.active {
+  background: #e6f4ff;
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.kn-main {
+  flex: 1;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+  min-height: 560px;
+}
+
+.kn-graph {
+  overflow-x: auto;
+}
+
+.kn-structure {
+  min-height: 480px;
+}
+
+.kn-empty {
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+  padding: 24px;
+}
