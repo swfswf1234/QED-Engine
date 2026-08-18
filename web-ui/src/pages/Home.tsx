@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import {
-  Button, Card, Col, Layout, Modal, Row, Space, Typography,
+  App, Button, Card, Col, Layout, Modal, Row, Space, Typography,
 } from 'antd';
 import {
   BookOutlined, ReadOutlined, ScheduleOutlined, SolutionOutlined,
 } from '@ant-design/icons';
-import { message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import AppHeader, { AdminEntryButton } from '../components/AppHeader';
 import { heroGradient } from '../theme';
@@ -49,6 +48,7 @@ const ENTRANCE_NAMES: Record<string, string> = Object.fromEntries(
 export default function Home() {
   const [helpOpen, setHelpOpen] = useState(false);
   const navigate = useNavigate();
+  const { message } = App.useApp();
 
   const onEntranceClick = (key: string) => {
     const entrance = ENTRANCES.find((e) => e.key === key);

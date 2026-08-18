@@ -1,19 +1,26 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Button, Card, Col, Layout, Modal, Row, Space, Spin, Typography,
+  Alert, App, Button, Card, Col, Layout, Modal, Row, Space, Spin, Typography,
 } from 'antd';
 import {
   ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
 import AppHeader from '../components/AppHeader';
-import { useConsoleStore } from '../stores/console';
+import { useConsoleStore, type OperateResult } from '../stores/console';
 import { WEB_SERVICE } from '../stores/webService';
 import { statusBadge, reachableBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
-import type { ServiceOp } from '../api/services';
+import { selfRestart, type ServiceOp } from '../api/services';
 import type { ServiceStatus } from '../stores';
 
 const { Title, Text } = Typography;
+
+/** 操作中文名映射（message 提示用） */
+const OP_LABELS: Record<ServiceOp, string> = {
+  start: '启动',
+  stop: '停止',
+  restart: '重启',
+};
 
 /** 前端显示名映射：8900/8903 不带括号；8901/8902 沿用后端 label */
 const DISPLAY_NAMES: Record<string, string> = {
@@ -25,26 +32,25 @@ function displayName(svc: ServiceStatus): string {
   return DISPLAY_NAMES[svc.name] ?? svc.label;
 }
 
+/**
+ * 服务卡操作规则（2026-08-17 用户裁决）：
+ * - config：仅重启（经 /self-restart；8900 不可经 /services 启停）
+ * - web：在线→重启、离线→启动，不提供停止（避免自掘断界面）
+ * - tracker/axiom：在线→停止+重启、离线→启动
+ * 确认框为受控 <Modal>（2026-08-18：Modal.confirm 静态方法在 React 19 下不可靠，
+ * 点击无反应——根因见会话记录；改用 useState 驱动，彻底脱离静态方法）。
+ */
 function ServiceCard({
-  svc, operating, onOperate, onRestartUnavailable,
+  svc, operating, onConfirm, onRestartConfig,
 }: {
   svc: ServiceStatus;
   operating: boolean;
-  onOperate: (op: ServiceOp) => void;
-  onRestartUnavailable: () => void;
+  onConfirm: (op: ServiceOp) => void;
+  onRestartConfig: () => void;
 }) {
   const isTransition = svc.status === 'starting' || svc.status === 'stopping';
-  const canControl = (svc.name === 'tracker' || svc.name === 'axiom') && !operating && !isTransition;
-
-  const confirmOp = (op: ServiceOp, label: string) => {
-    Modal.confirm({
-      title: `确认${label}「${displayName(svc)}」？`,
-      content: op === 'stop' ? '停止后该服务将不可用，可随时重新启动。' : '重启会中断当前运行中的任务。',
-      okText: `确认${label}`,
-      cancelText: '取消',
-      onOk: () => onOperate(op),
-    });
-  };
+  const controllable = svc.name !== 'config' && !operating && !isTransition;
+  const canStop = svc.name === 'tracker' || svc.name === 'axiom';
 
   return (
     <Card size="small" title={displayName(svc)}>
@@ -52,27 +58,29 @@ function ServiceCard({
         {statusBadge(svc.status, svc.reason)}
         <Text type="secondary" style={{ display: 'block' }}>
           端口 {svc.port}
-          {svc.pid != null && ` · PID ${svc.pid}`}
-          {svc.started_at ? ` · 启动于 ${svc.started_at}` : ''}
+          {svc.status !== 'online' && svc.pid != null && ` · PID ${svc.pid}`}
+          {svc.status !== 'online' && svc.started_at ? ` · 启动于 ${svc.started_at}` : ''}
         </Text>
         <Space wrap>
-          {canControl && svc.status === 'offline' && (
-            <Button size="small" type="primary" icon={<PoweroffOutlined />} onClick={() => onOperate('start')}>
+          {controllable && svc.status === 'offline' && (
+            <Button size="small" type="primary" icon={<PoweroffOutlined />} onClick={() => onConfirm('start')}>
               启动
             </Button>
           )}
-          {canControl && svc.status === 'online' && (
+          {controllable && svc.status === 'online' && (
             <>
-              <Button size="small" icon={<PoweroffOutlined />} onClick={() => confirmOp('stop', '停止')}>
-                停止
-              </Button>
-              <Button size="small" icon={<SyncOutlined />} onClick={() => confirmOp('restart', '重启')}>
+              {canStop && (
+                <Button size="small" icon={<PoweroffOutlined />} onClick={() => onConfirm('stop')}>
+                  停止
+                </Button>
+              )}
+              <Button size="small" icon={<SyncOutlined />} onClick={() => onConfirm('restart')}>
                 重启
               </Button>
             </>
           )}
           {svc.name === 'config' && (
-            <Button size="small" icon={<SyncOutlined />} onClick={onRestartUnavailable}>
+            <Button size="small" icon={<SyncOutlined />} onClick={onRestartConfig}>
               重启
             </Button>
           )}
@@ -86,8 +94,8 @@ function ServiceCard({
 /**
  * 控制台（`#/admin`）
  * - 顶部操作区：「刷新」（重拉数据）+「重新加载页面」（整页重载，独立按钮）
- * - 四服务卡：8900 恒在线（脚本托管，仅重启→提示后置）/ 8901·8902 启停重启（确认框 + 操作后轮询收敛）/
- *   8903 前端本地判定（页面级操作已由顶部承担，卡内无按钮）
+ * - 四服务卡：8900 恒在线（重启经 /self-restart，成功后自动刷新）/ 8901·8902 启停重启（确认框 +
+ *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；后端注册表返回 web 时用真实状态）
  * - 依赖组件卡：本地 MySQL（/config/database，独立超时；失败仅本卡降级）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
  */
@@ -95,21 +103,54 @@ export default function Console() {
   const {
     services, dbStatus, loading, error, dbError, operating, fetchAll, operate,
   } = useConsoleStore();
+  const { message } = App.useApp();
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
 
-  const cards = useMemo(
-    () => [...services, WEB_SERVICE].sort((a, b) => a.port - b.port),
-    [services],
-  );
+  const cards = useMemo(() => {
+    const merged = services.some((s) => s.name === 'web') ? services : [...services, WEB_SERVICE];
+    return [...merged].sort((a, b) => a.port - b.port);
+  }, [services]);
+
+  /** 统一成功/失败提示（2026-08-17 用户裁决：只提示收敛结果；失败统一用 message） */
+  const notifyResult = (result: OperateResult) => {
+    const svc = services.find((s) => s.name === result.name);
+    const label = displayName(svc ?? { name: result.name, label: result.name } as ServiceStatus);
+    const opLabel = OP_LABELS[result.op];
+    if (result.success) {
+      message.success(`「${label}」${opLabel}成功（${result.status}）`);
+    } else {
+      message.warning(`「${label}」${opLabel}未生效：${result.reason ?? '状态未收敛'}`);
+    }
+  };
 
   const onOperate = async (name: string, op: ServiceOp) => {
+    const result = await operate(name, op);
+    notifyResult(result);
+  };
+
+  /** 8900 自重启（/self-restart，成功后 3s 自动刷新；确认由受控 Modal 负责） */
+  const doRestartConfig = async () => {
     try {
-      await operate(name, op);
+      await selfRestart({ timeoutMs: 15000 });
+      message.success('8900 重启中，约 3 秒后页面自动刷新');
+      setTimeout(() => window.location.reload(), 3000);
     } catch (err) {
-      Modal.warning({ title: '操作失败', content: describeError(err) });
+      message.warning(`8900 重启失败：${describeError(err)}`);
+    }
+  };
+
+  /** 受控确认框状态：{ 服务名, 操作, 显示名 }；null 表示未打开 */
+  const [confirmTarget, setConfirmTarget] = useState<{ name: string; op: ServiceOp; display: string } | null>(null);
+
+  const executeConfirm = (target: { name: string; op: ServiceOp }) => {
+    setConfirmTarget(null);
+    if (target.name === 'config') {
+      void doRestartConfig();
+    } else {
+      void onOperate(target.name, target.op);
     }
   };
 
@@ -156,17 +197,28 @@ export default function Console() {
               <ServiceCard
                 svc={svc}
                 operating={operating === svc.name}
-                onOperate={(op) => void onOperate(svc.name, op)}
-                onRestartUnavailable={() => {
-                  Modal.warning({
-                    title: '暂不可用',
-                    content: 'QED 管理服务重启能力后置（后端 self-restart 端点后续轮次提供），暂不可经控制台操作。',
-                  });
-                }}
+                onConfirm={(op) => setConfirmTarget({ name: svc.name, op, display: displayName(svc) })}
+                onRestartConfig={() => setConfirmTarget({ name: svc.name, op: 'restart', display: displayName(svc) })}
               />
             </Col>
           ))}
         </Row>
+
+        {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应） */}
+        <Modal
+          open={confirmTarget !== null}
+          title={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}「${confirmTarget.display}」？` : ''}
+          okText={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}` : ''}
+          cancelText="取消"
+          onOk={() => confirmTarget && executeConfirm(confirmTarget)}
+          onCancel={() => setConfirmTarget(null)}
+        >
+          {confirmTarget?.op === 'stop'
+            ? '停止后该服务将不可用，可随时重新启动。'
+            : confirmTarget?.name === 'config'
+              ? '8900 重启将短暂中断所有管理接口，约 3 秒后页面自动刷新恢复。'
+              : '重启会中断当前运行中的任务。'}
+        </Modal>
 
         <Title level={4} style={{ marginTop: 24 }}>依赖组件</Title>
         <Row gutter={[16, 16]}>

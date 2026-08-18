@@ -51,8 +51,15 @@
 }
 
 .dl-tree-caret-domain {
-  cursor: default;
+  cursor: pointer;
   color: #1677ff;
+}
+
+/* 禁用箭头位（分类头/教程叶子：占位对齐，不可点击） */
+.dl-tree-caret-disabled {
+  cursor: default;
+  color: transparent;
+  pointer-events: none;
 }
 
 .dl-tree-name {
@@ -67,6 +74,28 @@
 .dl-tree-domain > .dl-tree-name {
   font-weight: 600;
   color: #1677ff;
+}
+
+/* 分类头：仅展示分组（不可点击） */
+.dl-tree-category > .dl-tree-name {
+  font-weight: 600;
+  color: #4a5568;
+  cursor: default;
+}
+
+/* 教程叶子名：不可点击 */
+.dl-tree-tutorial-name {
+  cursor: default;
+  color: #333;
+}
+
+/* 教程验收进度（verified/total 已验收） */
+.dl-tree-progress {
+  color: #1677ff;
+  font-size: 12px;
+  margin-left: 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .dl-tree-count {
@@ -87,29 +116,6 @@
 
 .dl-tree-tutorial {
   padding-left: 14px;
-}
-
-.dl-tree-book {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  padding: 3px 6px;
-  font-size: 12px;
-  color: #555;
-}
-
-.dl-tree-book-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
-}
-
-.dl-tree-book-count {
-  color: #999;
-  margin-left: 6px;
-  flex-shrink: 0;
 }
 
 .dl-tree-empty {
@@ -185,4 +191,88 @@
   justify-content: center;
   gap: 12px;
   color: #999;
+}
+
+.dl-tree-book-status {
+  color: #1677ff;
+  font-size: 12px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+/* ---- 教程行区（4b） ---- */
+
+.dl-knowledge-section {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 14px 16px;
+}
+
+.dl-knowledge-section:last-child {
+  border-bottom: none;
+}
+
+.dl-knowledge-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.dl-knowledge-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.dl-knowledge-intro {
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dl-books-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.dl-book-card {
+  flex: 0 0 240px;
+  min-width: 200px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafbfd;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dl-book-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f1f1f;
+  line-height: 1.4;
+}
+
+.dl-book-meta {
+  font-size: 12px;
+  color: #777;
+}
+
+.dl-book-actions {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dl-books-empty {
+  color: #999;
+  font-size: 13px;
+  padding: 8px 0;
 }

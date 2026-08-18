@@ -2,12 +2,11 @@
 
 设计状态：Draft
 实现状态：In Progress
-最后更新：2026-08-14
-关联代码：web/index.html（learn-layout/learn-side/learn-main，学习中心框架）、
-web/app.js（renderLearningCenter/renderLearnCourseList/renderLearnCourse）、
-web/style.css（.learn-*）
-关联测试：tests/test_web.py（test_learning_center_framework、test_loadtree_fully_guarded、
-test_tree_load_guard_timer 等）
+最后更新：2026-08-17
+关联代码：web-ui/src/pages/Home.tsx（主界面学习中心框架）、web-ui/src/pages/Knowledge.tsx
+（课程图/知识行浏览，web-ui React 版；旧 web/ 三文件版已随 2026-08-17 切换退役）
+关联测试：web-ui/src/App.test.tsx、web-ui/src/pages/*.test.tsx（vitest）；tests/test_web.py
+（web-ui 源码契约守护）
 关联 ADR：无
 > 进度说明（2026-08-14）：主界面学习中心框架已搭——领域→课程→章节/知识点浏览（数学试点，
 > 章节空态等解析产物管线填充，见 §3 框架进度）。

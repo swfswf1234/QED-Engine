@@ -2,16 +2,16 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-09
-关联代码：`scripts/load-env.ps1`（待退役）、根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
+最后更新：2026-08-17
+关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](config-center-api.md)）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
 
 ## 目的与边界
 
 本标准规定三个项目的 API key、模型选择与服务端口如何在根仓库集中管理。根 `.env` 是密钥的
-唯一事实源；子项目直读根 `.env` 的 `QED_*` 变量。过渡期 `scripts/load-env.ps1` 承担变量映射，
-子项目改造完成后退役。
+唯一事实源；子项目直读根 `.env` 的 `QED_*` 变量（`scripts/load-env.ps1` 过渡映射层已于
+2026-08-17 退役删除）。
 
 子项目自身配置细节以其各自 `docs/design/` 为准；本文件只定义跨项目变量与映射。
 
@@ -70,10 +70,7 @@
 - `.env` 中变量为空时，子项目使用自身降级默认值（离线可用），不因缺 key 阻塞启动；无根
   `.env` 时使用内置最小默认值并输出尾注提醒。
 - 环境变量优先级：子项目自身覆盖（如 `QED_TRACKER_URL`）> 根 `.env` 导出 > 代码默认值。
-- `scripts/load-env.ps1` 是过渡映射层：读取根 `.env`，导出供应商 key 与模型变量，并映射为
-  子项目现状变量名。子项目改造为直读新变量后，映射层退役并从本表移除映射列。
-- 新增供应商 key、模型变量或服务端口时，同步更新本表、`.env.example`、配置中心路由与
-  `check_api_keys.py`（如适用）。
+- 新增供应商 key、模型变量或服务端口时，同步更新本表、`.env.example` 与配置中心路由。
 - 新增数据库变量（`QED_DB_*`）或变更库名时，同步更新本表、`.env.example`、配置中心
   `/config/database` 接口契约与子项目数据库别名映射。
 
@@ -81,11 +78,11 @@
 
 配置中心（`backend/qed_engine/`，端口 8900）读取根 `.env`，提供健康检查、模型路由表与数据库配置
 状态，**密钥绝不下发**（详见[配置中心 API 契约](config-center-api.md)）。子项目获取 key 的路径：
-现状经 `load-env.ps1` 映射，Phase 2/3 改造为直读根 `.env` 变量后映射层退役。中心接口变更不影响子项目启动。
+直读根 `.env` 变量（`load-env.ps1` 过渡映射层已于 2026-08-17 退役）。中心接口变更不影响子项目启动。
 
 ## 执行与验证
 
 - 修改 `.env.example` 或本表后，人工核对变量名一致（脚本 `check-env-consistency` 或人工对照）。
-- `load-env.ps1` 变更后，在干净 PowerShell 会话执行一次并确认导出的子项目变量名存在。
 - 配置中心变更后：`pytest tests -q` 全绿、`ruff check src tests` 无错误、8900 端口五接口 200。
-- 密钥与模型真实可用性：`python scripts/check_api_keys.py`（不打印密钥；glm 429 余额不足属账户状态）。
+- 密钥与模型真实可用性以各服务实际调用为准（`scripts/check_api_keys.py` 已于 2026-08-17 退役；
+  glm 曾返 429 余额不足属账户状态，不影响降级运行）。

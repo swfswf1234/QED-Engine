@@ -24,6 +24,15 @@ export async function operateService(name: string, op: ServiceOp): Promise<Servi
   return api.post<ServiceActionResponse>(`/services/${name}/${op}`);
 }
 
+export interface SelfRestartResponse {
+  status: 'restarting';
+}
+
+/** POST /api/v1/self-restart：8900 自身重启（延迟 2s 绑定端口 + 后台 1s 后旧进程退出） */
+export async function selfRestart(opts?: ApiRequestOptions): Promise<SelfRestartResponse> {
+  return api.post<SelfRestartResponse>('/self-restart', undefined, opts);
+}
+
 /** GET /api/v1/config/database：本地 MySQL 真实连接状态（pymysql 探测，60s 缓存） */
 export async function getDatabaseStatus(opts?: ApiRequestOptions): Promise<DatabaseStatus> {
   return api.get<DatabaseStatus>('/config/database', opts);

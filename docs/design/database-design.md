@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-16
-关联代码：`scripts/load-env.ps1`（`QED_DB_*` 映射）、`.env.example`（变量模板）
+关联代码：`.env.example`（变量模板）
 关联测试：`tests/contract/test_design_documents.py`
 关联 ADR：`docs/adr/0003-shared-qed-database-independence.md`、`docs/adr/0009-shared-qed-tables.md`（2026-08-16：新增 `qed_*` 共享表族，部分补充 0003）
 

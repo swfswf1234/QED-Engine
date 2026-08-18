@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ConfigProvider } from 'antd';
+import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
 import { theme } from './theme';
@@ -14,7 +14,9 @@ if (!root) {
 createRoot(root).render(
   <StrictMode>
     <ConfigProvider locale={zhCN} theme={theme}>
-      <App />
+      <AntApp>
+        <App />
+      </AntApp>
     </ConfigProvider>
   </StrictMode>,
 );

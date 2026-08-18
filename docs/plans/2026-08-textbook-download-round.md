@@ -150,7 +150,7 @@ annas_archive/zlib 保持退役）；`ResourceKind` 增加 `supplement`（其他
 2. 数据与配置对齐：产物默认写入 `dataset/axiom-flow/parsed/`；直读 `QED_*`
    （`QWEN_API_KEY`→`AXIOM_API_KEY`、`QED_OCR_MODEL`→`AXIOM_VISION_MODEL`、`QED_MODEL`→
    `AXIOM_KNOWLEDGE_MODEL`、`QED_DB_*`→`AXIOM_MYSQL_*`），旧变量保留别名；load-env.ps1 映射
-   依赖退役。
+   依赖退役（映射层已随 2026-08-17 scripts/ 整理删除）。
 3. qed 库初始化：`alembic upgrade head` 建立 `af_*` 表；存量 `xqfm11` 不迁移、不改名。
 
 ### 线 C：QED-Engine 根仓库（REQ-007、REQ-011、REQ-012）

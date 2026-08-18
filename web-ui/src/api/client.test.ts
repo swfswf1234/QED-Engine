@@ -61,7 +61,7 @@ describe('api client（统一 API 客户端）', () => {
       new Response(JSON.stringify({ detail: 'reason 必填' }), { status: 422, headers: { 'Content-Type': 'application/json' } }),
     );
     try {
-      await api.post<unknown>('/selections/x/reject', {});
+      await api.post<unknown>('/knowledge/k1/reject', {});
       expect.unreachable();
     } catch (err) {
       expect(describeError(err)).toBe('校验失败：reason 必填');
@@ -73,7 +73,7 @@ describe('api client（统一 API 客户端）', () => {
       new Response(JSON.stringify({ detail: 'QED-Tracker 服务不可达' }), { status: 503, headers: { 'Content-Type': 'application/json' } }),
     );
     try {
-      await api.get('/selections');
+      await api.get('/knowledge');
       expect.unreachable();
     } catch (err) {
       expect(describeError(err)).toBe('服务暂不可用：QED-Tracker 服务不可达');

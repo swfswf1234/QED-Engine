@@ -12,7 +12,8 @@
 8900 是 QED-Engine 后端（三域组织见 [backend-domain-split.md](backend-domain-split.md)）的
 **对外 API 契约总表**：读取根 `.env`，向 QED-Engine 前端与子项目提供健康检查、模型路由、
 数据域语义 API、服务托管与监控诊断。**密钥绝不下发**——子项目不经过中心获取 key，而是直读
-根 `.env`（或经 `scripts/load-env.ps1` 映射），中心只回答"用哪个模型、是否已配置"。
+根 `.env`（`scripts/load-env.ps1` 过渡映射层已于 2026-08-17 退役），中心只回答"用哪个模型、
+是否已配置"。
 
 **8900 五合一角色（2026-08-06 架构评审 + 2026-08-11 ADR 0007 网关化扩展 + 2026-08-16
 ARCH-011/012/014 轮）**：浏览器无法直读 `.env` 且密钥不下发，8900 是 `.env` 的唯一只读语义代理；
@@ -35,7 +36,6 @@ ARCH-011/012/014 轮）**：浏览器无法直读 `.env` 且密钥不下发，89
 - 端口：`8900`
 - 前缀：`/api/v1`
 - 启动（根仓库目录）：`python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900`
-  （或 `scripts/start-all.ps1` 统一启停）
 
 ## 接口契约
 
@@ -120,28 +120,39 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 > 已随 QED-030（qt_resources 退役）移除，本表不再登记。
 
 > **三表语义 API（qt_selections / qt_downloads / qt_sources）已随 QED-031 知识层次重构
-> （qed_domain/qed_course 共享 + qt_knowledge/qt_books/qt_sources）被取代（2026-08-16）**：
-> 下表端点登记为历史契约（Superseded 状态），8901 新契约随 QED-Tracker 实现轮（迁移 0006）
-> 冻结后更新；三表模型历史契约见 [downloads-three-table-model.md](downloads-three-table-model.md)。
+> （qed_domain/qed_course 共享 + qt_knowledge/qt_books/qt_sources）退役（2026-08-17 五层落地）**：
+> 下表端点登记为历史契约（Superseded 状态），8900 不再暴露；三表模型历史契约见
+> [downloads-three-table-model.md](downloads-three-table-model.md)。
+
+**五层语义 API（QED-031，2026-08-17 落地）**：知识行（qt_knowledge）draft→confirmed→completed；
+书行（qt_books）candidate→decided→downloading→downloaded→verified；渠道（qt_sources）一次尝试
+一条，ok 表达成败。路径与 8901 一致（透传）；`GET /books` 被数据域·Axiom 预留路由占用
+（axiom.py，仅 GET，与 tracker 的 POST /books 不冲突），五层 GET 端点无此路径冲突。
 
 | 端点 | 语义 | 内部适配 |
 | --- | --- | --- |
-| `GET /selections?course_id=&status=` | 表1 选课表列表（rejected/superseded 彻底隐藏由上游数据层保证） | TrackerClient.list_selections |
-| `GET /selections/{id}` | 表1 套书详情（含表2 册明细） | TrackerClient.get_selection |
-| `POST /selections/{id}/confirm` `{"note"}` | 表1 候选→确认入书单 | TrackerClient.confirm_selection |
-| `POST /selections/{id}/backup` `{"note"}` | 表1 候选→备选（可转正/放弃） | TrackerClient.backup_selection |
-| `POST /selections/{id}/reject` `{"reason","note"}` | 表1 否定（reason 必填 422；终态彻底隐藏） | TrackerClient.reject_selection |
-| `POST /selections/{id}/supersede` `{"reason"}` | 表1 confirmed→superseded（被新版本替代） | TrackerClient.supersede_selection |
-| `GET /resources/{id}/downloads` | 表2 册级明细（按 selection_id；rejected/failed 默认过滤） | TrackerClient.list_selection_downloads |
-| `POST /downloads` `{"selection_id","vol","file_hint"}` | 表2 新建候选册（下载预登记；vol 省略按表1 vols 生成） | TrackerClient.create_download_candidate |
-| `POST /downloads/{id}/approve` | 表2 册级验收通过 | TrackerClient.approve_download |
-| `POST /downloads/{id}/reject` `{"reason"}` | 表2 册级否定（reason 必填 422，硬删+留痕） | TrackerClient.reject_download |
-| `POST /downloads/{id}/register` `{"relative_path"}` | 表2 人工下载登记（candidate→downloaded） | TrackerClient.register_download |
-| `GET /downloads/{id}/sources` | 表3 渠道尝试列表（详情弹窗） | TrackerClient.list_download_sources |
+| `GET /knowledge?course_id=&status=` | 知识行列表（rejected/superseded 彻底隐藏由上游数据层保证） | TrackerClient.list_knowledge |
+| `GET /knowledge/{id}` | 知识行详情（含所辖书行列表） | TrackerClient.get_knowledge |
+| `POST /knowledge/{id}/confirm` `{"textbook_ref","exercise_ref","textbook_intro","exercise_intro"}` | 知识行 draft→confirmed（定稿：引用 {title,version} + 简介，均可空） | TrackerClient.confirm_knowledge |
+| `POST /knowledge/{id}/complete` | 知识行 confirmed→completed（所辖书行全部 verified 聚合触发） | TrackerClient.complete_knowledge |
+| `POST /knowledge/{id}/reject` `{"reason"}` | 知识行否定（reason 必填 422；终态彻底隐藏） | TrackerClient.reject_knowledge |
+| `POST /knowledge/{id}/supersede` `{"reason"}` | 知识行过时（被新版本替代，旧版本不再可见） | TrackerClient.supersede_knowledge |
+| `POST /books` `{"knowledge_id","title",...}` | 新建书行候选（先登记再下载；knowledge_id+title 必填 422） | TrackerClient.create_book |
+| `GET /books/{id}/sources` | 渠道尝试列表（详情弹窗；失败尝试留痕不展示由上游过滤） | TrackerClient.list_book_sources |
+| `POST /books/{id}/sources` `{"channel",...}` | 登记一次渠道尝试（ok 表达成败） | TrackerClient.add_book_source |
+| `POST /books/{id}/register` `{"relative_path"}` | 人工下载登记（candidate→downloaded 直转，PDF 校验在 8901 侧） | TrackerClient.register_book |
+| `POST /books/{id}/decide` | 候选→决定（人工决定下载） | TrackerClient.decide_book |
+| `POST /books/{id}/start` | 决定→下载中（任务运行） | TrackerClient.start_book |
+| `POST /books/{id}/fail` / `retry` | 下载失败标记 / 失败重试 → downloading | TrackerClient.fail_book / retry_book |
+| `POST /books/{id}/complete` `{"sha256","relative_path","page_count",...}` | 下载完成回填（sha256+relative_path 必填 422；服务端/自动下载链路调用） | TrackerClient.complete_book |
+| `POST /books/{id}/verify` | 人工验收通过（downloaded→verified 终态） | TrackerClient.verify_book |
+| `POST /books/{id}/reject` `{"reason","note"}` | 书行否定（reason 必填 422，硬删+留痕；note 可选审理备注） | TrackerClient.reject_book |
+| `POST /books/{id}/supersede` `{"reason"}` | 书行过时（版本换代留痕） | TrackerClient.supersede_book |
 
 **错误映射**：8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409
 处理生效）；8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，
-独立性铁律）。reject 缺 reason 由 8900 校验直接 422，不请求 8901。
+独立性铁律）。reject/supersede 缺 reason 与 create/register/complete 缺必填字段由 8900
+校验直接 422，不请求 8901。
 
 ### 数据域·Axiom（8902 适配，2026-08-16 登记，REQ-034）
 
@@ -257,5 +268,5 @@ mineru 解析服务（8002，WSL 容器）健康探测。
   （`reachable`/`reason` 与启动时一致，不再按需探测）。
 - 8901 在线时 `/catalogs/math-qe` 返回真实数据；8901 离线时返回 503 且配置域
   不受影响（独立性铁律）。
-- `python scripts/check_api_keys.py` 真实调用验证各供应商 key（不打印密钥；
-  glm 当前返回 429 余额不足时以智谱账户状态为准，不影响中心降级运行）。
+- 供应商 key 真实可用性以各服务实际调用为准（`scripts/check_api_keys.py` 已于 2026-08-17
+  随 scripts/ 整理退役；glm 曾返 429 余额不足以智谱账户状态为准，不影响中心降级运行）。

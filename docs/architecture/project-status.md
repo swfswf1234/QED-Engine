@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-16
+最后更新：2026-08-17
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -17,8 +17,8 @@
 
 | 服务 | 仓库 | 端口 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web/` | 8903 | 已运行 | 学习界面（建设中占位卡）+ 管理后台（仪表大盘 / 文档下载管理 / 文档解析管理——含解析进度、原始文档对照两个子视图）；前端已完成 15 期迭代；**只连 8900**（ADR 0007） |
-| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发 |
+| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——含解析进度、原始文档对照两个子视图）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007） |
+| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发。**2026-08-17：服务注册表扩为四单元（新增 web/8903）、tracker/web/axiom 三单元均走生命周期脚本（axiom 由 Popen 切换，REQ-039）、脚本单元停止/重启语义修复、serve_web.py 切 web-ui/dist** |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901 | 已服务化 | 发现/下载/校验/登记 + 资源状态机 + 后台任务轮询；全链路联调冒烟（QED-014）待开始 |
 | Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902 | 已实现 | PDF 解析 / OCR / 质量审阅 / 知识发布；端口迁移已完成（2026-08-11，ALN-002），数据目录迁移未完成（ALN-003） |
 
@@ -30,8 +30,10 @@
   习题集、论文、博客与官方文档，后续随需求扩展。
 - **管理中心**：后台内容管理——文档下载管理 / 文档解析进度 / 原始文档对照。
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
-  （[服务控制设计](../design/service-control.md)，Accepted / Implemented）；容器化依赖
-  （MySQL / 向量库 / MinerU）只进规划不展示。
+  （[服务控制设计](../design/service-control.md)，Accepted / Implemented）；注册表含 config/
+  tracker/axiom/**web** 四单元，8900 重启经 /self-restart、8903 前端启停经
+  `scripts/qed_web_service.py`（2026-08-17）；容器化依赖（MySQL / 向量库 / MinerU）
+  只进规划不展示。
 
 ## 当前主线
 
@@ -47,9 +49,10 @@
   当前最高优先级且**本轮只做前端**：React 19 + AntD 全家桶重建 8903（web-ui/），核心四界面
   （主界面/控制台/仪表盘/下载管理），控制台只用既有端点（/services、/config/database 启动
   快照）；**每阶段用户验证门禁**；后端三域拆分与监控诊断端点由 ARCH-012
-  并行承接。设计文档与计划已落盘并通过用户验收，Phase 0（web-ui 地基）开工前提交文档
-  基线；8903 过渡期保持旧前端，切换后旧 web/ 退役。LLM 网关与本地 LLM（LM Studio）
-  接入为第二轮。
+  并行承接。**四界面已实现并切换（2026-08-17）**：serve_web.py 指向 web-ui/dist、旧 web/
+  退役、`.env.production` VITE_API_BASE=8900、test_web.py 重写守护 web-ui 源码；控制台
+  启停 message 反馈 + 仪表盘课程完成度（≥2 套教程验收）已落地。LLM 网关与本地 LLM
+  （LM Studio）接入为第二轮。
 - 进行中：**后端三域拆分轮（ARCH-012，2026-08-16 立档，与 ARCH-011 并行）**——三域迁移完成
   （clients/、services/ 能力层、api/control.py 控制域路由、api/tracker.py 数据域），控制域
   新能力落地（/logs、/monitor/gpu、/monitor/lmstudio、/monitor/mineru、/self-restart）；

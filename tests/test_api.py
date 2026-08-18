@@ -268,7 +268,7 @@ def test_database_snapshot_probed_once_at_startup(monkeypatch):
     assert len(calls) == 1, "端点只读快照，不应重复探测"
 
 
-# ---------- 语义 API（数据域：catalogs / tasks / selections，8900 自有契约） ----------
+# ---------- 语义 API（数据域：catalogs / tasks / knowledge / books，8900 自有契约） ----------
 
 
 def _tracker_client(handler) -> TrackerClient:
@@ -311,190 +311,336 @@ def test_upstream_conflict_passthrough(monkeypatch):
         return httpx.Response(409, json={"detail": "状态机冲突：当前状态 downloading 不允许"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/selections/cand_abc/confirm", json={})
+    response = client.post("/api/v1/books/bk_abc/decide", json={})
     assert response.status_code == 409
     assert response.json()["detail"] == "状态机冲突：当前状态 downloading 不允许"
 
 
-# ---------- 三表语义 API（selections / downloads / sources，downloads-three-table-model §3.2） ----------
+# ---------- 五层语义 API（knowledge / books / sources，service-contracts.md 五层模型 QED-031） ----------
 
 
-def test_selections_list_via_semantic_api(monkeypatch):
-    """GET /api/v1/selections：查询参数透传 8901（默认过滤由上游数据层保证）。"""
+def test_knowledge_list_via_semantic_api(monkeypatch):
+    """GET /api/v1/knowledge：查询参数透传 8901（默认过滤由上游数据层保证）。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/selections"
+        assert request.url.path == "/api/v1/knowledge"
         assert dict(request.url.params) == {"course_id": "01_math_analysis", "status": "confirmed"}
-        return httpx.Response(200, json=[{"selection_id": "cand_abc", "status": "confirmed"}])
+        return httpx.Response(200, json=[{"knowledge_id": "kn_abc", "status": "confirmed"}])
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
     response = client.get(
-        "/api/v1/selections",
+        "/api/v1/knowledge",
         params={"course_id": "01_math_analysis", "status": "confirmed"},
     )
     assert response.status_code == 200
-    assert response.json() == [{"selection_id": "cand_abc", "status": "confirmed"}]
+    assert response.json() == [{"knowledge_id": "kn_abc", "status": "confirmed"}]
 
 
-def test_selection_detail_via_semantic_api(monkeypatch):
-    """GET /api/v1/selections/{id}：套书详情（含册明细）经 8900。"""
+def test_knowledge_detail_via_semantic_api(monkeypatch):
+    """GET /api/v1/knowledge/{id}：知识行详情（含所辖书行）经 8900。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/selections/cand_abc"
-        return httpx.Response(200, json={"selection_id": "cand_abc", "title": "微积分学教程"})
+        assert request.url.path == "/api/v1/knowledge/kn_abc"
+        return httpx.Response(200, json={"knowledge_id": "kn_abc", "name": "数学分析 套一", "books": []})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/selections/cand_abc")
+    response = client.get("/api/v1/knowledge/kn_abc")
     assert response.status_code == 200
-    assert response.json()["title"] == "微积分学教程"
+    assert response.json()["name"] == "数学分析 套一"
 
 
-def test_selection_state_actions_via_semantic_api(monkeypatch):
-    """POST /selections/{id}/confirm|backup|supersede：表1 生命周期动作经 8900。"""
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.path)
-        return httpx.Response(200, json={"selection_id": "cand_abc", "status": "changed"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    for action in ("confirm", "backup", "supersede"):
-        body = {"reason": "过时"} if action == "supersede" else {"note": "备注"}
-        response = client.post(f"/api/v1/selections/cand_abc/{action}", json=body)
-        assert response.status_code == 200, action
-    assert seen == [
-        "/api/v1/selections/cand_abc/confirm",
-        "/api/v1/selections/cand_abc/backup",
-        "/api/v1/selections/cand_abc/supersede",
-    ]
-
-
-def test_selection_reject_forwards_reason_and_note(monkeypatch):
-    """POST /selections/{id}/reject：reason 必填 + note 转发 8901。"""
+def test_knowledge_confirm_via_semantic_api(monkeypatch):
+    """POST /knowledge/{id}/confirm：引用与简介字段转发 8901。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/selections/cand_abc/reject"
-        assert json.loads(request.read()) == {"reason": "版本过旧", "note": "换新版"}
-        return httpx.Response(200, json={"selection_id": "cand_abc", "status": "rejected"})
+        assert request.url.path == "/api/v1/knowledge/kn_abc/confirm"
+        assert json.loads(request.read()) == {
+            "textbook_ref": {"title": "微积分学教程", "version": "第 8 版"},
+            "textbook_intro": "经典教材",
+        }
+        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "confirmed"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/selections/cand_abc/reject", json={"reason": "版本过旧", "note": "换新版"})
+    response = client.post(
+        "/api/v1/knowledge/kn_abc/confirm",
+        json={"textbook_ref": {"title": "微积分学教程", "version": "第 8 版"}, "textbook_intro": "经典教材"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
+
+
+def test_knowledge_complete_via_semantic_api(monkeypatch):
+    """POST /knowledge/{id}/complete：聚合完成经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/knowledge/kn_abc/complete"
+        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "completed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/knowledge/kn_abc/complete")
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+
+def test_knowledge_reject_forwards_reason(monkeypatch):
+    """POST /knowledge/{id}/reject：reason 必填 + 转发 8901。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/knowledge/kn_abc/reject"
+        assert json.loads(request.read()) == {"reason": "非目标体系"}
+        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "rejected"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/knowledge/kn_abc/reject", json={"reason": "非目标体系"})
     assert response.status_code == 200
     assert response.json()["status"] == "rejected"
 
 
-def test_selection_reject_without_reason_is_422(monkeypatch):
-    """表1 reject 缺 reason：8900 直接 422，不发 8901。"""
+def test_knowledge_reject_without_reason_is_422(monkeypatch):
+    """知识行 reject 缺 reason：8900 直接 422，不发 8901。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/selections/cand_abc/reject", json={})
+    response = client.post("/api/v1/knowledge/kn_abc/reject", json={})
     assert response.status_code == 422
 
 
-def test_selection_downloads_list_via_semantic_api(monkeypatch):
-    """GET /resources/{id}/downloads：表2 册明细（按 selection_id）经 8900。"""
+def test_knowledge_supersede_via_semantic_api(monkeypatch):
+    """POST /knowledge/{id}/supersede：过时标记经 8900（reason 转发）。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/resources/cand_abc/downloads"
-        return httpx.Response(200, json=[{"download_id": "download_1", "status": "downloaded"}])
+        assert request.url.path == "/api/v1/knowledge/kn_abc/supersede"
+        assert json.loads(request.read()) == {"reason": "被新版替代"}
+        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "superseded"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/resources/cand_abc/downloads")
+    response = client.post("/api/v1/knowledge/kn_abc/supersede", json={"reason": "被新版替代"})
     assert response.status_code == 200
-    assert response.json() == [{"download_id": "download_1", "status": "downloaded"}]
+    assert response.json()["status"] == "superseded"
 
 
-def test_download_create_candidate_via_semantic_api(monkeypatch):
-    """POST /api/v1/downloads：新建表2 候选册（vol/file_hint 可选）经 8900。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/downloads"
-        assert json.loads(request.read()) == {"selection_id": "cand_abc", "vol": "v2", "file_hint": "第二卷"}
-        return httpx.Response(200, json=[{"download_id": "download_1", "status": "candidate"}])
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/downloads", json={"selection_id": "cand_abc", "vol": "v2", "file_hint": "第二卷"})
-    assert response.status_code == 200
-    assert response.json()[0]["status"] == "candidate"
-
-
-def test_download_create_candidate_requires_selection(monkeypatch):
-    """POST /api/v1/downloads 缺 selection_id：8900 直接 422。"""
+def test_book_create_via_semantic_api(monkeypatch):
+    """POST /api/v1/books：新建书行候选（knowledge_id + title 必填）经 8900。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("不应请求 8901")
+        assert request.url.path == "/api/v1/books"
+        assert json.loads(request.read()) == {
+            "knowledge_id": "kn_abc",
+            "kind": "textbook",
+            "roles": ["textbook"],
+            "title": "微积分学教程",
+            "part": "第一册",
+            "authors": ["菲赫金哥尔茨"],
+            "display_title": "",
+            "language": "",
+            "version": None,
+            "source": None,
+            "original_url": "",
+        }
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "candidate"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/downloads", json={})
-    assert response.status_code == 422
-
-
-def test_download_actions_via_semantic_api(monkeypatch):
-    """POST /downloads/{id}/approve|reject|register：表2 册级动作经 8900。"""
-    seen = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.url.path, json.loads(request.content.decode("utf-8") or b"{}")))
-        return httpx.Response(200, json={"download_id": "download_1", "status": "changed"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    assert client.post("/api/v1/downloads/download_1/approve").status_code == 200
-    assert client.post("/api/v1/downloads/download_1/reject", json={"reason": "扫描缺页"}).status_code == 200
     response = client.post(
-        "/api/v1/downloads/download_1/register",
-        json={"relative_path": "raw/books/math-qe/01/v2.pdf"},
+        "/api/v1/books",
+        json={
+            "knowledge_id": "kn_abc",
+            "kind": "textbook",
+            "roles": ["textbook"],
+            "title": "微积分学教程",
+            "part": "第一册",
+            "authors": ["菲赫金哥尔茨"],
+        },
     )
     assert response.status_code == 200
-    assert seen == [
-        ("/api/v1/downloads/download_1/approve", {}),
-        ("/api/v1/downloads/download_1/reject", {"reason": "扫描缺页"}),
-        ("/api/v1/downloads/download_1/register", {"relative_path": "raw/books/math-qe/01/v2.pdf"}),
-    ]
+    assert response.json()["status"] == "candidate"
 
 
-def test_download_reject_without_reason_is_422(monkeypatch):
-    """表2 reject 缺 reason：8900 直接 422。"""
+def test_book_create_requires_knowledge_and_title(monkeypatch):
+    """POST /api/v1/books 缺 knowledge_id/title：8900 直接 422。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/downloads/download_1/reject", json={})
-    assert response.status_code == 422
+    assert client.post("/api/v1/books", json={"title": "无主书"}).status_code == 422
+    assert client.post("/api/v1/books", json={"knowledge_id": "kn_abc"}).status_code == 422
 
 
-def test_download_sources_via_semantic_api(monkeypatch):
-    """GET /downloads/{id}/sources：表3 来源记录经 8900（详情弹窗）。"""
+def test_book_sources_list_via_semantic_api(monkeypatch):
+    """GET /books/{id}/sources：渠道尝试列表经 8900（详情弹窗）。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/downloads/download_1/sources"
+        assert request.url.path == "/api/v1/books/bk_abc/sources"
         return httpx.Response(200, json=[{"source_id": "src_1", "channel": "libgen_li", "ok": 1}])
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.get("/api/v1/downloads/download_1/sources")
+    response = client.get("/api/v1/books/bk_abc/sources")
     assert response.status_code == 200
     assert response.json()[0]["channel"] == "libgen_li"
 
 
-def test_three_table_offline_returns_503(monkeypatch):
-    """8901 离线：三表端点同样 503 + 明确提示（前端降级显示依据）。"""
+def test_book_sources_add_via_semantic_api(monkeypatch):
+    """POST /books/{id}/sources：登记一次渠道尝试经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/sources"
+        assert json.loads(request.read()) == {
+            "channel": "manual",
+            "provider_id": "",
+            "page_url": "",
+            "download_url": "",
+            "file_keywords": "",
+            "ok": True,
+            "note": "人工下载",
+        }
+        return httpx.Response(200, json={"source_id": "src_2", "channel": "manual", "ok": True})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/sources",
+        json={"channel": "manual", "ok": True, "note": "人工下载"},
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_book_register_via_semantic_api(monkeypatch):
+    """POST /books/{id}/register：人工下载登记经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/register"
+        assert json.loads(request.read()) == {"relative_path": "raw/books/math-qe/01/v2.pdf"}
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "downloaded"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/register",
+        json={"relative_path": "raw/books/math-qe/01/v2.pdf"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "downloaded"
+
+
+def test_book_register_without_path_is_422(monkeypatch):
+    """书行 register 缺 relative_path：8900 直接 422。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/books/bk_abc/register", json={})
+    assert response.status_code == 422
+
+
+def test_book_state_actions_via_semantic_api(monkeypatch):
+    """POST /books/{id}/decide|start|fail|retry|verify：书行生命周期动作经 8900。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, json.loads(request.content.decode("utf-8") or b"{}")))
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "changed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    for action in ("decide", "start", "fail", "retry", "verify"):
+        assert client.post(f"/api/v1/books/bk_abc/{action}").status_code == 200, action
+    assert seen == [
+        ("/api/v1/books/bk_abc/decide", {}),
+        ("/api/v1/books/bk_abc/start", {}),
+        ("/api/v1/books/bk_abc/fail", {}),
+        ("/api/v1/books/bk_abc/retry", {}),
+        ("/api/v1/books/bk_abc/verify", {}),
+    ]
+
+
+def test_book_complete_via_semantic_api(monkeypatch):
+    """POST /books/{id}/complete：下载完成回填经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/complete"
+        assert json.loads(request.read()) == {
+            "sha256": "a" * 64,
+            "relative_path": "raw/books/math-qe/01/v2.pdf",
+            "page_count": 600,
+            "absolute_path": "",
+            "file_name": "",
+        }
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "downloaded"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/complete",
+        json={"sha256": "a" * 64, "relative_path": "raw/books/math-qe/01/v2.pdf", "page_count": 600},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "downloaded"
+
+
+def test_book_reject_forwards_reason_and_note(monkeypatch):
+    """POST /books/{id}/reject：reason 必填 + note 转发 8901。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/reject"
+        assert json.loads(request.read()) == {"reason": "扫描缺页", "note": "建议换源"}
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "rejected"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/reject",
+        json={"reason": "扫描缺页", "note": "建议换源"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_book_reject_without_reason_is_422(monkeypatch):
+    """书行 reject 缺 reason：8900 直接 422。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/books/bk_abc/reject", json={})
+    assert response.status_code == 422
+
+
+def test_book_supersede_via_semantic_api(monkeypatch):
+    """POST /books/{id}/supersede：版本换代留痕经 8900。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/supersede"
+        assert json.loads(request.read()) == {"reason": "被第 9 版替代"}
+        return httpx.Response(200, json={"book_id": "bk_abc", "status": "superseded"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/books/bk_abc/supersede", json={"reason": "被第 9 版替代"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "superseded"
+
+
+def test_five_layer_offline_returns_503(monkeypatch):
+    """8901 离线：五层端点同样 503 + 明确提示（前端降级显示依据）。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
     for path in (
-        "/api/v1/selections",
-        "/api/v1/selections/cand_abc",
-        "/api/v1/resources/cand_abc/downloads",
-        "/api/v1/downloads/download_1/sources",
+        "/api/v1/knowledge",
+        "/api/v1/knowledge/kn_abc",
+        "/api/v1/books/bk_abc/sources",
     ):
         response = client.get(path)
         assert response.status_code == 503, path
         assert "QED-Tracker" in response.json()["detail"]
+    # POST /books 走 tracker 数据域（注意 GET /api/v1/books 被 Axiom-Flow 预留路由占用）
+    response = client.post(
+        "/api/v1/books",
+        json={"knowledge_id": "kn_abc", "title": "测试书"},
+    )
+    assert response.status_code == 503
+    assert "QED-Tracker" in response.json()["detail"]
 
 
 # ---------- 服务域（控制中心 /services：service-control.md 契约） ----------
@@ -502,7 +648,7 @@ def test_three_table_offline_returns_503(monkeypatch):
 
 def test_services_spec_workdirs_and_log_dir_point_to_repo_root():
     """注册表几何守护：ROOT 必须解析到仓库根（P1 目录迁移 src/ → backend/ 后 parents 层级
-    曾错位导致 workdir 指向 backend/QED-Tracker，真实启动 WinError 267）。"""
+曾错位导致 workdir 指向 backend/QED-Tracker，真实启动 WinError 267）。"""
     from pathlib import Path
 
     from qed_engine.config import Settings
@@ -510,41 +656,12 @@ def test_services_spec_workdirs_and_log_dir_point_to_repo_root():
 
     repo_root = Path(__file__).resolve().parents[1]
     sm.configure(Settings())
-    for name in ("config", "tracker", "axiom"):
+    for name in ("config", "tracker", "axiom", "web"):
         spec = sm._SPECS[name]
         assert Path(spec.workdir).is_dir(), f"{name} workdir 不存在：{spec.workdir}"
         assert str(Path(spec.workdir)).startswith(str(repo_root)), f"{name} workdir 应位于仓库根内"
     assert sm.LOG_DIR == repo_root / "logs"
     assert sm.LOG_DIR.is_dir()
-
-
-def test_services_start_popen_failure_closes_log_handle(monkeypatch):
-    """Popen 启动失败（如 workdir 无效 WinError 267）时不得泄漏日志文件句柄（资源守护）。"""
-    import builtins
-    import subprocess
-
-    from qed_engine.config import Settings
-    from qed_engine.services import service_manager as sm
-
-    sm.configure(Settings())
-    spec = sm._SPECS["tracker"]
-    monkeypatch.setattr(sm, "_probe_http", lambda port: False)  # noqa: SLF001 - 测试注入
-
-    closed: list = []
-
-    class FakeLogFile:
-        def close(self):
-            closed.append(True)
-
-    monkeypatch.setattr(builtins, "open", lambda *a, **k: FakeLogFile())
-
-    def boom_popen(*args, **kwargs):
-        raise OSError(267, "目录名无效")
-
-    monkeypatch.setattr(subprocess, "Popen", boom_popen)
-    with pytest.raises(OSError):
-        sm._start(spec)
-    assert closed, "Popen 失败后日志句柄应被关闭"
 
 
 def _patch_probe(monkeypatch, result):
@@ -601,6 +718,29 @@ def _patch_popen(monkeypatch, record=None, exit_on_signal=False):
 
     monkeypatch.setattr(sm.os, "kill", fake_kill)
     return created, kill_calls
+
+
+def _patch_script(monkeypatch, record=None, exit_codes=None, stdout="pid: 8123\n"):
+    """注入子项目生命周期脚本调用（subprocess.run → FakeCompletedProcess，REQ-017①）。
+
+    exit_codes: dict{子命令: 退出码}（默认全部 0）；stdout 为 start 输出（首行 pid 行）。
+    """
+    import subprocess
+
+    class FakeCompleted:
+        def __init__(self, returncode, out, err=""):
+            self.returncode = returncode
+            self.stdout = out
+            self.stderr = err
+
+    def fake_run(cmd, **kwargs):
+        if record is not None:
+            record.append(cmd)
+        sub = cmd[-1] if cmd else ""
+        code = (exit_codes or {}).get(sub, 0)
+        return FakeCompleted(code, stdout if sub == "start" else "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
 
 def test_probe_http_unlistened_port_fast_false():
@@ -661,7 +801,7 @@ def test_services_snapshot_three_units_offline(monkeypatch):
     response = client.get("/api/v1/services")
     assert response.status_code == 200
     services = response.json()["services"]
-    assert [s["name"] for s in services] == ["config", "tracker", "axiom"]
+    assert [s["name"] for s in services] == ["config", "tracker", "axiom", "web"]
     for service in services:
         for key in ("name", "label", "port", "status", "pid", "started_at", "log_path", "reason"):
             assert key in service, key
@@ -673,53 +813,73 @@ def test_services_snapshot_three_units_offline(monkeypatch):
     assert by_name["tracker"]["reason"]
     assert by_name["axiom"]["status"] == "offline"
     assert by_name["axiom"]["port"] == 8902
+    assert by_name["web"]["status"] == "offline"
+    assert by_name["web"]["port"] == 8903
+    assert by_name["web"]["reason"]
 
 
 def test_services_snapshot_online_when_probe_ok(monkeypatch):
     """探测通过 → online（按端口区分单元）。"""
     from qed_engine.services import service_manager as sm
 
-    monkeypatch.setattr(sm, "_probe_http", lambda port: port == 8901)
+    monkeypatch.setattr(sm, "_probe_http", lambda port: port in (8901, 8903))
     client = _client(monkeypatch)
     services = client.get("/api/v1/services").json()["services"]
     by_name = {s["name"]: s for s in services}
     assert by_name["tracker"]["status"] == "online"
     assert by_name["axiom"]["status"] == "offline"
+    assert by_name["web"]["status"] == "online"
 
 
-def test_services_start_tracker_returns_starting(monkeypatch):
-    """start：后台 Popen + 返回 starting + pid；命令指向子项目模块。"""
+def test_services_start_tracker_uses_lifecycle_script(monkeypatch):
+    """tracker：经生命周期脚本 start（REQ-017① 接入契约），返回 starting + 脚本 PID。"""
     _patch_probe(monkeypatch, False)
     record = []
-    created, _ = _patch_popen(monkeypatch, record=record)
+    _patch_script(monkeypatch, record=record)
     client = _client(monkeypatch)
     response = client.post("/api/v1/services/tracker/start")
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "tracker"
     assert body["status"] == "starting"
-    assert body["pid"] == created[0].pid
-    assert record[0][0] == "python"
-    assert "qed_tracker.cli" in " ".join(record[0])
+    assert body["pid"] == 8123
+    assert record[0][-1] == "start"
+    assert any("qed_tracker_service.py" in cmd for cmd in record[0])
 
 
-def test_services_start_axiom_launches_two_processes(monkeypatch):
-    """axiom 双进程单元：一次启动拉起 API + Worker。"""
+def test_services_start_script_failure_returns_500(monkeypatch):
+    """脚本 start 非 0 退出 → 500（后端稳定：启动失败明确报错，不伪成功）。"""
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch, exit_codes={"start": 1})
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/start")
+    assert response.status_code == 500
+
+
+def test_services_start_axiom_uses_lifecycle_script(monkeypatch):
+    """axiom：经生命周期脚本 start（2026-08-17 REQ-039 脚本化接入），返回 starting + 脚本 PID。
+
+    原双进程 Popen 语义（API + Worker）已由 Axiom-Flow 生命周期脚本承接
+    （axiom_flow_service.py，v2 无独立 worker）。
+    """
     _patch_probe(monkeypatch, False)
     record = []
-    created, _ = _patch_popen(monkeypatch, record=record)
+    _patch_script(monkeypatch, record=record)
     client = _client(monkeypatch)
     response = client.post("/api/v1/services/axiom/start")
     assert response.status_code == 200
-    assert len(created) == 2
-    assert any("axiom_flow.main" in " ".join(cmd) for cmd in record)
-    assert any("axiom_flow.worker" in " ".join(cmd) for cmd in record)
+    body = response.json()
+    assert body["name"] == "axiom"
+    assert body["status"] == "starting"
+    assert body["pid"] == 8123
+    assert record[0][-1] == "start"
+    assert any("axiom_flow_service.py" in cmd for cmd in record[0])
 
 
 def test_services_start_twice_within_window_conflicts(monkeypatch):
     """15s 窗口内重复启动 → 409（starting 过渡态）。"""
     _patch_probe(monkeypatch, False)
-    _patch_popen(monkeypatch)
+    _patch_script(monkeypatch)
     client = _client(monkeypatch)
     assert client.post("/api/v1/services/tracker/start").status_code == 200
     response = client.post("/api/v1/services/tracker/start")
@@ -729,7 +889,7 @@ def test_services_start_twice_within_window_conflicts(monkeypatch):
 def test_services_start_already_online_conflicts(monkeypatch):
     """探测已 online（外部/遗留进程）→ start 409。"""
     _patch_probe(monkeypatch, True)
-    _patch_popen(monkeypatch)
+    _patch_script(monkeypatch)
     client = _client(monkeypatch)
     response = client.post("/api/v1/services/tracker/start")
     assert response.status_code == 409
@@ -758,39 +918,28 @@ def test_services_stop_not_running_conflicts(monkeypatch):
     assert response.status_code == 409
 
 
-def test_services_stop_sends_graceful_signal(monkeypatch):
-    """stop：向进程组发 CTRL_BREAK 优雅停止 → stopping。"""
+def test_services_stop_calls_lifecycle_script(monkeypatch):
+    """stop：经生命周期脚本 stop（优雅停止 + 强杀兜底由脚本自含）→ stopping。"""
     _patch_probe(monkeypatch, False)
-    created, kill_calls = _patch_popen(monkeypatch, exit_on_signal=True)
+    record = []
+    _patch_script(monkeypatch, record=record)
     client = _client(monkeypatch)
     client.post("/api/v1/services/tracker/start")
     response = client.post("/api/v1/services/tracker/stop")
     assert response.status_code == 200
     assert response.json()["status"] == "stopping"
-    assert kill_calls == [created[0].pid]
+    assert record[0][-1] == "start"
+    assert record[1][-1] == "stop"
 
 
-def test_services_stop_force_kills_on_timeout(monkeypatch):
-    """优雅停止超时（5s 内未退出）→ taskkill 强杀兜底 + 执行期 reason 记录。"""
-    import subprocess
-
+def test_services_stop_script_failure_returns_500(monkeypatch):
+    """脚本 stop 失败（退出码 1）→ 500（不静默吞掉，后端稳定）。"""
     _patch_probe(monkeypatch, False)
-    created, _ = _patch_popen(monkeypatch, exit_on_signal=False)
-    from qed_engine.services import service_manager as sm
-
-    monkeypatch.setattr(sm.time, "sleep", lambda seconds: None)
-    taskkill_calls: list = []
-    original_run = subprocess.run
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda cmd, **kwargs: taskkill_calls.append(cmd) if "taskkill" in cmd else original_run(cmd, **kwargs),
-    )
+    _patch_script(monkeypatch, exit_codes={"stop": 1})
     client = _client(monkeypatch)
     client.post("/api/v1/services/tracker/start")
     response = client.post("/api/v1/services/tracker/stop")
-    assert response.status_code == 200
-    assert any("taskkill" in cmd[0] for cmd in taskkill_calls)
+    assert response.status_code == 500
 
 
 def test_services_transition_window_expires_to_probe_result(monkeypatch):
@@ -798,7 +947,7 @@ def test_services_transition_window_expires_to_probe_result(monkeypatch):
     from qed_engine.services import service_manager as sm
 
     _patch_probe(monkeypatch, False)
-    _patch_popen(monkeypatch)
+    _patch_script(monkeypatch)
     fake_now = {"t": 1000.0}
     monkeypatch.setattr(sm.time, "monotonic", lambda: fake_now["t"])
     client = _client(monkeypatch)
@@ -814,15 +963,82 @@ def test_services_transition_window_expires_to_probe_result(monkeypatch):
 
 
 def test_services_restart_stops_then_starts(monkeypatch):
-    """restart：先停后启（复用 stop → start 语义）。"""
+    """restart：经生命周期脚本先停后启（stop → start）。"""
     _patch_probe(monkeypatch, False)
-    created, kill_calls = _patch_popen(monkeypatch, exit_on_signal=True)
+    record = []
+    _patch_script(monkeypatch, record=record)
     client = _client(monkeypatch)
     client.post("/api/v1/services/tracker/start")
     response = client.post("/api/v1/services/tracker/restart")
     assert response.status_code == 200
     assert response.json()["status"] == "starting"
-    assert kill_calls == [created[0].pid]  # 优雅停止信号已发送
+    assert record[-2][-1] == "stop"  # 先停
+    assert record[-1][-1] == "start"  # 后启
+
+
+def test_services_stop_externally_running_script_unit(monkeypatch):
+    """脚本单元外部运行中（探测在线、无托管记录，如手动经脚本启动）→ stop 200（REQ-017① 契约）。
+
+    修复：_stop 曾以 _MANAGED 为唯一放行条件，手动启动的 tracker 停止返回 409「无托管记录」。
+    """
+    _patch_probe(monkeypatch, True)
+    record = []
+    _patch_script(monkeypatch, record=record)
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/stop")
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopping"
+    assert record[0][-1] == "stop"
+
+
+def test_services_restart_externally_running_script_unit(monkeypatch):
+    """脚本单元外部运行中（探测在线、无托管记录）→ restart 200：先经脚本停再启。
+
+    修复：restart 曾跳过 stop（无托管记录）后 _start 因端口在线 409，表现为「重启无效果」。
+    模拟真实时序：脚本 stop 返回后端口释放（探测转离线），_start 方可通过。
+    """
+    import subprocess
+
+    from qed_engine.services import service_manager as sm
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "pid: 8123\n"
+        stderr = ""
+
+    state = {"online": True}
+    record: list = []
+
+    def fake_run(cmd, **kwargs):
+        record.append(cmd)
+        if cmd and cmd[-1] == "stop":
+            state["online"] = False  # 脚本 stop 后端口释放
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(sm, "_probe_http", lambda port: state["online"])
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/restart")
+    assert response.status_code == 200
+    assert response.json()["status"] == "starting"
+    assert record[0][-1] == "stop"
+    assert record[1][-1] == "start"
+
+
+def test_services_start_web_uses_lifecycle_script(monkeypatch):
+    """web（8903）：经生命周期脚本 start（scripts/qed_web_service.py，REQ-03x）。"""
+    _patch_probe(monkeypatch, False)
+    record = []
+    _patch_script(monkeypatch, record=record)
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/web/start")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "web"
+    assert body["status"] == "starting"
+    assert body["pid"] == 8123
+    assert record[0][-1] == "start"
+    assert any("qed_web_service.py" in cmd for cmd in record[0])
 
 # ---------- 数据域·Axiom（8902 适配，契约草案 Axiom-Flow 8902-integration-contract.md） ----------
 
@@ -937,3 +1153,169 @@ def test_axiom_offline_maps_503(monkeypatch):
     response = client.get("/api/v1/books")
     assert response.status_code == 503
     assert "Axiom-Flow 服务不可达" in response.json()["detail"]
+
+
+# --- 书目同步与块判定（REQ-042，af_* 契约草案 Axiom-Flow af-books-sync.md） ---
+
+
+def _sync_tracker_handler(knowledge_rows, details):
+    """8901 同步取数 handler：/knowledge 列表 + 详情 + catalog（课程名映射）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/knowledge":
+            return httpx.Response(200, json=knowledge_rows)
+        if path.startswith("/api/v1/knowledge/"):
+            kid = path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json=details.get(kid, {"books": []}))
+        if path == "/api/v1/catalogs/math-qe":
+            return httpx.Response(
+                200,
+                json={"targets": [{"course_id": "01_math_analysis", "course_name": "数学分析"}]},
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    return handler
+
+
+def test_axiom_sync_books_via_gateway(monkeypatch):
+    """POST /api/v1/books/sync：聚合 8901 verified 书行（仅 verified，课程名映射）→ 转发 8902。"""
+
+    knowledge_rows = [
+        {
+            "knowledge_id": "kn_1",
+            "domain_id": "math",
+            "course_id": "01_math_analysis",
+        },
+        {
+            "knowledge_id": "kn_2",
+            "domain_id": "math",
+            "course_id": "02_real_analysis",
+        },
+    ]
+    details = {
+        "kn_1": {
+            "books": [
+                {
+                    "book_id": "bk_verified",
+                    "title": "数学分析原理",
+                    "part": "",
+                    "display_title": "数学分析原理",
+                    "authors": ["Rudin"],
+                    "sha256": "ab" * 32,
+                    "relative_path": "raw/books/...",
+                    "page_count": 342,
+                    "status": "verified",
+                },
+                {
+                    "book_id": "bk_downloaded",
+                    "title": "未验证书",
+                    "display_title": "未验证书",
+                    "status": "downloaded",
+                },
+            ]
+        },
+        "kn_2": {"books": []},
+    }
+
+    def axiom_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/sync"
+        body = json.loads(request.content)
+        assert len(body) == 1  # 仅 verified
+        assert body[0]["book_id"] == "bk_verified"
+        assert body[0]["course_id"] == "01_math_analysis"
+        assert body[0]["course_name"] == "数学分析"
+        assert body[0]["domain_id"] == "math"
+        assert body[0]["knowledge_id"] == "kn_1"
+        assert body[0]["page_count"] == 342
+        return httpx.Response(200, json={"synced": 1, "updated": 0, "books": body})
+
+    client = _client(
+        monkeypatch,
+        tracker=_tracker_client(_sync_tracker_handler(knowledge_rows, details)),
+        axiom=_axiom_client(axiom_handler),
+    )
+    response = client.post("/api/v1/books/sync")
+    assert response.status_code == 200
+    assert response.json()["synced"] == 1
+
+
+def test_axiom_sync_books_tracker_offline_maps_503(monkeypatch):
+    """同步取数：8901 离线（list_knowledge 连接失败）→ 503「QED-Tracker 服务不可达」。"""
+
+    def tracker_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(
+        monkeypatch,
+        tracker=_tracker_client(tracker_handler),
+        axiom=_axiom_client(lambda r: httpx.Response(500)),
+    )
+    response = client.post("/api/v1/books/sync")
+    assert response.status_code == 503
+    assert "QED-Tracker 服务不可达" in response.json()["detail"]
+
+
+def test_axiom_sync_books_axiom_offline_maps_503(monkeypatch):
+    """同步写入：8901 可取数但 8902 离线 → 503「Axiom-Flow 服务不可达」。"""
+
+    knowledge_rows = [{"knowledge_id": "kn_1", "domain_id": "math", "course_id": "01_math_analysis"}]
+    details = {
+        "kn_1": {
+            "books": [
+                {
+                    "book_id": "bk_1",
+                    "title": "T",
+                    "display_title": "T",
+                    "status": "verified",
+                }
+            ]
+        }
+    }
+
+    def axiom_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(
+        monkeypatch,
+        tracker=_tracker_client(_sync_tracker_handler(knowledge_rows, details)),
+        axiom=_axiom_client(axiom_handler),
+    )
+    response = client.post("/api/v1/books/sync")
+    assert response.status_code == 503
+    assert "Axiom-Flow 服务不可达" in response.json()["detail"]
+
+
+def test_axiom_block_review_put_and_get(monkeypatch):
+    """PUT/GET /books/{id}/pages/{no}/blocks/{index}/review：块判定透传 8902（upsert 语义）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        assert path == "/api/v1/books/01-rudin/pages/3/blocks/2/review"
+        if request.method == "PUT":
+            body = json.loads(request.content)
+            assert body["verdict"] == "bad"
+            assert body["note"] == "公式渲染缺失"
+            return httpx.Response(200, json={"book_id": "01-rudin", "page_no": 3, "block_index": 2, "verdict": "bad"})
+        if request.method == "GET":
+            return httpx.Response(200, json={"book_id": "01-rudin", "page_no": 3, "block_index": 2, "verdict": "bad", "note": "公式渲染缺失"})
+        return httpx.Response(405, json={"detail": "method"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    put = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/review", json={"verdict": "bad", "note": "公式渲染缺失"})
+    assert put.status_code == 200
+    assert put.json()["verdict"] == "bad"
+    get = client.get("/api/v1/books/01-rudin/pages/3/blocks/2/review")
+    assert get.status_code == 200
+    assert get.json()["note"] == "公式渲染缺失"
+
+
+def test_axiom_block_review_verdict_validation(monkeypatch):
+    """块判定 verdict 非法（非 ok/bad）→ 8900 直接 422，不请求 8902。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("8902 不应被调用")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/review", json={"verdict": "unknown"})
+    assert response.status_code == 422

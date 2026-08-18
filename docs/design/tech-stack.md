@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-09
-关联代码：`web/index.html`、`web/app.js`、`web/style.css`、`scripts/load-env.ps1`、`scripts/check_api_keys.py`（后端三服务代码见各自契约文档）
+关联代码：`web-ui/`（React 重构版，已接管 8903；后端三服务代码见各自契约文档）
 关联测试：`tests/contract/test_design_documents.py`
 关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0003-shared-qed-database-independence.md`、`docs/adr/0005-control-center-service-hosting.md`
 
@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | 后端框架 | Python + FastAPI | 8900 配置中心、8901 QED-Tracker、8902 Axiom-Flow 三服务 | 已用 |
 | CLI | Python（标准库脚本） | `scripts/` 密钥检查、env 映射；qed 统一 CLI 规划中 | 已用（统一 CLI 规划） |
-| 前端 | 原生 HTML/CSS/JS 静态单页应用 | `web/` 学习中心 + 管理后台（8903），无构建步骤，`http.server` 托管 | 已用 |
+| 前端 | React 19 + AntD 5 + zustand + Vite | `web-ui/` 学习中心 + 管理后台（8903），构建产物 dist/ 由 serve_web.py 托管（ADR 0008） | 已用 |
 | 数据库 | MySQL 8 共享 `qed` 库 | 三项目共用实例与库，`qt_*`/`af_*` 表命名空间隔离（[ADR 0003](../adr/0003-shared-qed-database-independence.md)） | 已用 |
 | 数据库迁移 | Alembic（各项目独立） | 各项目在 `qed` 库内独立初始化自己的表 | 子项目侧落地中 |
 | LLM 模型（单线路） | 默认档 qwen（主对话/OCR/Embedding 三用途） | 一次只用一条线路，暂不用备用线路（策略与模型名见 [configuration-and-secrets.md](configuration-and-secrets.md) 模型选择表） | 已用 |

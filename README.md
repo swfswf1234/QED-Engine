@@ -72,24 +72,26 @@ Invoke-RestMethod http://127.0.0.1:8900/api/v1/config/models
 ### 统一启停（控制中心）
 
 ```powershell
-# 一键启动本仓库 8900/8903（scripts/start-all.ps1），并探测 8901/8902 提示显式启停
-.\scripts\start-all.ps1
-# 停止 8900/8903（按 tmp/ 下 PID 文件）
-.\scripts\stop-all.ps1
-# 8900 服务域接口启停子服务（详见 docs/design/service-control.md）
+# 8900 手动启动（根仓库，QED_env 环境；唯一需手动常驻的服务）
+python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900
+# 8901/8902/8903 经 8900 服务域接口启停（详见 docs/design/service-control.md）
 Invoke-RestMethod -Method Post http://127.0.0.1:8900/api/v1/services/tracker/start
+# 8903 前端独立启停脚本（生命周期脚本，PID + 优雅停止）
+python scripts/qed_web_service.py start|stop|restart
 ```
 
 ### QED-Engine 前端（8903）
 
-原生静态单页应用（无构建步骤），浏览器直连 8900 读取数据（唯一入口，不直连 8901/8902）：
+React 单页应用（web-ui/，构建产物 dist/），浏览器直连 8900 读取数据（唯一入口，不直连 8901/8902）：
 
 ```powershell
-# 在根仓库目录启动（QED_env 环境）
-python -m http.server 8903 --directory web
+# 构建前端（web-ui/，首次或改前端后）
+cd web-ui; npm run build; cd ..
+# 启动 8903（推荐经 8900 服务域 web 单元或 scripts/qed_web_service.py）
+python scripts/qed_web_service.py start
 
 # 打开 http://127.0.0.1:8903
-# 主体学习界面 → 右上角「管理后台」→ 仪表大盘 / 文档下载管理 / 文档解析进度 / 原始文档对照
+# 主体学习界面 → 右上角「管理后台」→ 控制台 / 仪表盘 / 文档下载管理 / 文档解析进度 / 原始文档对照
 ```
 
 前端信息架构与视觉规范见 [8903 前端契约](docs/design/web-frontend.md)。
@@ -106,7 +108,7 @@ qed-tracker serve
 cd Axiom-Flow
 Copy-Item .env.example .env
 python -m pip install -r requirements.txt
-python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
+python scripts/axiom_flow_service.py start
 ```
 
 ## 仓库结构
@@ -118,8 +120,8 @@ python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8000
 | `dataset/` | 共享数据目录：原始文档 + 解析产物（不入版本控制） |
 | `backend/qed_engine/` | QED-Engine 后端：控制域 + 数据域·Tracker + 数据域·Axiom（预留）（FastAPI，端口 8900） |
 | `backend/database/` | qed 库建库与运维：建库脚本（init-qed.sql）、备份脚本（backup-qed.ps1）与备份产物（表结构由子项目 Alembic 管理） |
-| `web/` | QED-Engine 前端（8903，主体学习界面 + 后台管理，原生单页应用） |
-| `scripts/` | 辅助与运维脚本（`load-env.ps1` 过渡映射层；`check_api_keys.py` 密钥真实检查；`start-all.ps1` / `stop-all.ps1` 统一启停 8900/8903） |
+| `web-ui/` | QED-Engine 前端（8903，React 重构版：学习中心 + 管理后台；构建产物 dist/ 由 serve_web.py 托管） |
+| `scripts/` | 服务生命周期脚本（`qed_web_service.py` 8903 前端启停；`serve_web.py` 8903 静态服务入口） |
 | `logs/` | 服务运行日志（控制中心托管子服务输出） |
 | `tmp/` | 运行时临时文件（PID 文件等，不入版本控制） |
 | `tests/` | 后端测试（pytest + ruff 门禁） |

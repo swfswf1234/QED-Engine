@@ -2,18 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { ConfigProvider, message } from 'antd';
+import { App as AntApp, ConfigProvider } from 'antd';
 import Home from './Home';
 import { theme } from '../theme';
 import { HELP_SECTIONS } from '../help/sections';
 
+const messageSpies = { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() };
 vi.mock('antd', async (importOriginal) => {
   const actual = await importOriginal<typeof import('antd')>();
+  // Object.assign 保留 App 组件函数本身，仅覆盖 useApp（spread 会毁掉组件）
   return {
     ...actual,
-    message: {
-      info: vi.fn(),
-    },
+    App: Object.assign(actual.App, { useApp: () => ({ message: messageSpies }) }),
   };
 });
 
@@ -21,7 +21,9 @@ function renderHome() {
   return render(
     <MemoryRouter>
       <ConfigProvider theme={theme}>
-        <Home />
+        <AntApp>
+          <Home />
+        </AntApp>
       </ConfigProvider>
     </MemoryRouter>,
   );
@@ -29,7 +31,7 @@ function renderHome() {
 
 describe('主界面 Home（Phase 1）', () => {
   beforeEach(() => {
-    vi.mocked(message.info).mockClear();
+    messageSpies.info.mockClear();
   });
 
   it('Hero 区渲染标题与简介（零后台痕迹：不出现服务状态字样）', () => {
@@ -46,7 +48,7 @@ describe('主界面 Home（Phase 1）', () => {
       expect(screen.getByRole('heading', { name })).toBeInTheDocument();
     }
     await user.click(screen.getByRole('heading', { name: '知识探索' }));
-    expect(message.info).toHaveBeenCalledWith('「知识探索」建设中，将在后续轮次开放');
+    expect(messageSpies.info).toHaveBeenCalledWith('「知识探索」建设中，将在后续轮次开放');
   });
 
   it('使用手册按钮打开弹窗，展示全部 HELP_SECTIONS 章节', async () => {

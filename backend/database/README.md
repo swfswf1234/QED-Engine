@@ -4,7 +4,7 @@
 实现状态：Implemented
 最后更新：2026-08-16
 维护位置：`backend/database/README.md`
-关联代码：根 `.env`（QED_DB_*）、`scripts/check_api_keys.py`
+关联代码：根 `.env`（QED_DB_*）
 关联测试：—
 关联 ADR：`docs/adr/0007-qed-engine-backend-gateway.md`
 

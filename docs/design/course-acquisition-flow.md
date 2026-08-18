@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：Not Started
 最后更新：2026-08-09
-关联代码：`web/app.js`、`web/index.html`
+关联代码：`web-ui/src/`（web-ui React 版；旧 web/ 三文件版已随 2026-08-17 切换退役）
 关联测试：`tests/test_web.py`
 关联 ADR：无
 关联文档：[service-contracts.md](service-contracts.md)（跨项目对接）、[web-frontend.md](web-frontend.md)（8903 前端契约现状基座）、[source-discovery.md](../../QED-Tracker/docs/design/source-discovery.md)（QED-Tracker 来源评估矩阵，子项目内）

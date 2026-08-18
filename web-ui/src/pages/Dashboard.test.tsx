@@ -7,11 +7,16 @@ import Dashboard from './Dashboard';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDashboardStore } from '../stores/dashboard';
+import type { BookRecord, KnowledgeDetail, KnowledgeRecord } from '../stores';
 
 // ECharts 依赖 canvas，jsdom 不可用；渲染层由 EChart.test 覆盖，此处以占位验证组装
 vi.mock('../components/EChart', () => ({
-  default: ({ option }: { option: { series?: { data?: unknown[] }[] } }) => (
-    <div data-testid="echart" data-series={JSON.stringify(option.series ?? [])} />
+  default: ({ option }: { option: { series?: { data?: unknown[] }[]; title?: { text?: string } } }) => (
+    <div
+      data-testid="echart"
+      data-series={JSON.stringify(option.series ?? [])}
+      data-title={option.title?.text ?? ''}
+    />
   ),
 }));
 
@@ -20,31 +25,91 @@ const servicesFixture = {
     { name: 'config', label: 'QED 管理服务（配置中心）', port: 8900, log_path: '', status: 'online', pid: null, started_at: null, reason: '' },
     { name: 'tracker', label: 'QED-Tracker 文档下载服务', port: 8901, log_path: '', status: 'offline', pid: null, started_at: null, reason: '未启动' },
     { name: 'axiom', label: 'Axiom-Flow 文档解析服务', port: 8902, log_path: '', status: 'online', pid: 9, started_at: '', reason: '' },
+    { name: 'web', label: 'QED 前端服务', port: 8903, log_path: '', status: 'online', pid: 10, started_at: '', reason: '' },
   ],
 };
 
-const selectionsFixture = [
-  {
-    book_id: 's1', knowledge_id: 'k1', course_id: 'math', kind: 'textbook', title: '数学分析', display_title: '数学分析（上）',
-    status: 'candidate', download_stats: { total: 2, downloaded: 1, approved: 0 }, downloads: [],
-  },
-  {
-    book_id: 's2', knowledge_id: 'k2', course_id: 'math', kind: 'exercise', title: '习题集', display_title: '数学分析习题集',
-    status: 'confirmed', download_stats: { total: 1, downloaded: 1, approved: 1 }, downloads: [],
-  },
-  {
-    book_id: 's3', knowledge_id: 'k3', course_id: 'analysis', kind: 'textbook', title: '实分析', display_title: '实分析',
-    status: 'confirmed', download_stats: { total: 0, downloaded: 0, approved: 0 }, downloads: [],
-  },
-];
+function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_id: string }): KnowledgeRecord {
+  return {
+    domain_id: 'math',
+    kind: 'tutorial',
+    set_no: '',
+    name: partial.name ?? '',
+    textbook_ref: null,
+    exercise_ref: null,
+    textbook_intro: '',
+    exercise_intro: '',
+    materials_intro: '',
+    status: 'draft',
+    reject_reason: '',
+    supersede_reason: '',
+    created_at: '',
+    confirmed_at: null,
+    completed_at: null,
+    ...partial,
+  };
+}
 
-function mockApi(routes: Record<string, unknown>) {
+function book(partial: Partial<BookRecord> & { book_id: string; knowledge_id: string }): BookRecord {
+  return {
+    kind: 'textbook',
+    roles: ['textbook'],
+    title: 't',
+    part: '',
+    display_title: 't',
+    file_name: '',
+    authors: [],
+    language: '',
+    version: {},
+    source: null,
+    original_url: '',
+    sha256: null,
+    relative_path: '',
+    absolute_path: '',
+    page_count: null,
+    status: 'candidate',
+    reject_reason: '',
+    supersede_reason: '',
+    review_note: '',
+    created_at: '',
+    decided_at: null,
+    downloaded_at: null,
+    verified_at: null,
+    ...partial,
+  };
+}
+
+const k1 = kn({ knowledge_id: 'k1', course_id: 'math', status: 'draft' });
+const k2 = kn({ knowledge_id: 'k2', course_id: 'math', status: 'confirmed' });
+const k3 = kn({ knowledge_id: 'k3', course_id: 'analysis', status: 'confirmed' });
+const knowledgeFixture: KnowledgeRecord[] = [k1, k2, k3];
+const detailsFixture: Record<string, KnowledgeDetail> = {
+  k1: { ...k1, books: [book({ book_id: 'b1', knowledge_id: 'k1', status: 'downloaded' })] },
+  k2: { ...k2, books: [book({ book_id: 'b2', knowledge_id: 'k2', status: 'verified' })] },
+  k3: { ...k3, books: [] },
+};
+// catalog targets：math（k1/k2）与 analysis（k3）→ 分母 2 门课程
+const catalogFixture = {
+  id: 'math-qe',
+  targets: [
+    { course_id: 'math', name: '数学分析' },
+    { course_id: 'analysis', name: '实分析' },
+  ],
+};
+
+/** 路由匹配：URL 包含路由 key；详情路由（更长 key）优先于列表路由；函数值按 URL 动态返回 */
+function mockApi(routes: Record<string, unknown | ((url: string) => unknown)>) {
+  const keys = Object.keys(routes).sort((a, b) => b.length - a.length);
   mockFetch.mockImplementation((url: string) => {
-    const hit = Object.keys(routes).find((k) => url.includes(k));
+    const hit = keys.find((k) => url.includes(k));
     if (!hit) return Promise.reject(new TypeError(`no route: ${url}`));
-    return Promise.resolve(
-      new Response(JSON.stringify(routes[hit]), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    );
+    const payload = routes[hit];
+    const value = typeof payload === 'function' ? (payload as (u: string) => unknown)(url) : payload;
+    return value instanceof Response
+      ? Promise.resolve(value)
+      : Promise.resolve(
+        new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
   });
 }
 
@@ -58,54 +123,63 @@ function renderDashboard() {
   );
 }
 
-describe('仪表盘 Dashboard（Phase 3）', () => {
+describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
   beforeEach(() => {
-    useDashboardStore.setState({ selections: [], services: [], loading: false, error: null, dataError: null });
+    useDashboardStore.setState({
+      knowledge: [], details: {}, catalogTargets: [], services: [], loading: false, error: null, dataError: null, catalogError: null,
+    });
   });
 
-  it('渲染标题/四服务摘要/下载状况图表/解析占位；上下布局', async () => {
-    mockApi({ '/services': servicesFixture, '/selections': selectionsFixture });
+  it('渲染标题/四服务摘要/课程完成度+教程饼图/解析占位；上下布局', async () => {
+    mockApi({
+      '/services': servicesFixture,
+      '/catalogs/': catalogFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
     renderDashboard();
     expect(await screen.findByText('仪表盘')).toBeInTheDocument();
-    // 服务健康摘要：只含四服务，无 MySQL
+    // 服务在线：只含四服务，无 MySQL
     await waitFor(() => {
-      expect(useDashboardStore.getState().services.length).toBe(3);
+      expect(useDashboardStore.getState().services.length).toBe(4);
     });
-    expect(screen.getByText('服务健康摘要')).toBeInTheDocument();
+    expect(screen.getByText('服务在线')).toBeInTheDocument();
     expect(screen.getByText('QED 管理服务（配置中心）')).toBeInTheDocument();
     expect(screen.getByText('QED 前端服务')).toBeInTheDocument();
     expect(screen.queryByText(/MySQL/)).not.toBeInTheDocument();
-    // 图表占位两个 + 统计数字
+    // 双饼图占位 + 统计数字
     const charts = screen.getAllByTestId('echart');
     expect(charts).toHaveLength(2);
-    // 表1 状态分布数据（mock EChart 注入 series）：s1 candidate、s2/s3 confirmed → [1, 2, 0]
-    const distSeries = JSON.parse(charts[0].getAttribute('data-series') ?? '[]');
-    expect(distSeries[0].data).toEqual([1, 2, 0]);
-    // 课程完成进度：math 2 套 1 推进，analysis 1 套 1 推进
-    const progSeries = JSON.parse(charts[1].getAttribute('data-series') ?? '[]');
-    expect(progSeries[0].data.map((d: { value: number }) => d.value)).toEqual([0.5, 1]);
-    // 统计行
-    expect(screen.getByText('套书总数')).toBeInTheDocument();
-    const totalStat = screen.getByText('套书总数').closest('.ant-statistic')!;
+    // 饼图1 课程完成度：分母 2 门（math/analysis）；math 仅 k2 全验收（k1 有 downloaded）→ 完成 0
+    // 两扇区 [已完成 0, 未完成 2]
+    const completionSeries = JSON.parse(charts[0].getAttribute('data-series') ?? '[]');
+    expect(completionSeries[0].data.map((d: { value: number }) => d.value)).toEqual([0, 2]);
+    expect(charts[0].getAttribute('data-title')).toContain('课程下载完成度 0/2');
+    // 饼图2 按教程：k1（b1 已下载）、k2（b2 已下载）→ [1, 1]
+    const knowledgeSeries = JSON.parse(charts[1].getAttribute('data-series') ?? '[]');
+    expect(knowledgeSeries[0].data.map((d: { value: number }) => d.value)).toEqual([1, 1]);
+    // 统计行：教程数 3、目标书目 2、已下载 2（downloaded+verified）、已验收 1
+    const totalStat = screen.getByText('教程数').closest('.ant-statistic')!;
     expect(within(totalStat as HTMLElement).getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('册级总数')).toBeInTheDocument();
+    expect(screen.getByText('目标书目')).toBeInTheDocument();
     expect(screen.getByText('已下载')).toBeInTheDocument();
-    // 解析状况占位
+    expect(screen.getByText('已验收')).toBeInTheDocument();
+    // 解析占位
     expect(screen.getByText('解析任务数据源后置')).toBeInTheDocument();
-    // 上下布局：下载状况卡在解析状况卡之前（DOM 顺序）
-    const downloadCard = screen.getByText('文档下载状况');
-    const parseCard = screen.getByText('文档解析状况');
+    // 上下布局：下载进度卡在解析进度卡之前（DOM 顺序）
+    const downloadCard = screen.getByText('文档下载进度');
+    const parseCard = screen.getByText('文档解析进度');
     expect(downloadCard.compareDocumentPosition(parseCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('8901 不可达（/selections 503）→ 文档下载状况降级提示，其余卡片正常', async () => {
+  it('8901 不可达（/knowledge 503）→ 文档下载状况降级提示，其余卡片正常', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/services')) {
         return Promise.resolve(
           new Response(JSON.stringify(servicesFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
         );
       }
-      if (url.includes('/selections')) {
+      if (url.includes('/knowledge')) {
         return Promise.resolve(
           new Response(JSON.stringify({ detail: 'QED-Tracker 服务不可达' }), { status: 503, headers: { 'Content-Type': 'application/json' } }),
         );
@@ -116,8 +190,8 @@ describe('仪表盘 Dashboard（Phase 3）', () => {
     expect(await screen.findByText('QED-Tracker 数据不可达')).toBeInTheDocument();
     // 无整体错误横幅（8900 正常）
     expect(screen.queryByText('仪表盘数据获取失败')).not.toBeInTheDocument();
-    // 服务健康摘要仍正常
-    expect(screen.getByText('服务健康摘要')).toBeInTheDocument();
+    // 服务在线卡仍正常
+    expect(screen.getByText('服务在线')).toBeInTheDocument();
   });
 
   it('8900 不可达 → 整体错误横幅', async () => {
@@ -127,11 +201,15 @@ describe('仪表盘 Dashboard（Phase 3）', () => {
   });
 
   it('刷新按钮触发重新拉取', async () => {
-    mockApi({ '/services': servicesFixture, '/selections': selectionsFixture });
+    mockApi({
+      '/services': servicesFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
     renderDashboard();
     await screen.findByText('仪表盘');
     await waitFor(() => {
-      expect(useDashboardStore.getState().selections.length).toBe(3);
+      expect(useDashboardStore.getState().knowledge.length).toBe(3);
     });
     const callsBefore = mockFetch.mock.calls.length;
     await userEvent.setup().click(screen.getByRole('button', { name: /刷新/ }));

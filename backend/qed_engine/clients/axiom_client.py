@@ -1,9 +1,13 @@
 """Axiom-Flow 服务客户端（数据域·Axiom 适配层）：8900 前端工作台经 HTTP 调用 8902。
 
-契约见 Axiom-Flow docs/design/8902-integration-contract.md（V2-007 冻结草案）：
+契约见 Axiom-Flow docs/design/8902-integration-contract.md（V2-007 冻结草案）与
+docs/design/af-books-sync.md（af_* 书目同步与块判定，REQ-042）：
 - GET  /api/v1/books                    书目列表（含解析进度）
 - GET  /api/v1/books/{id}/pages/{no}    单页完整数据（原页图 URL + markdown + blocks）
 - GET  /api/v1/books/{id}/manifest      产物清单（文件路径/大小/哈希）
+- POST /api/v1/books/sync               批量同步已验证书目（upsert af_books）
+- PUT  /api/v1/books/{id}/pages/{no}/blocks/{index}/review   块判定（upsert）
+- GET  /api/v1/books/{id}/pages/{no}/blocks/{index}/review   查询块判定
 - POST /api/v1/parse-jobs               提交解析任务（book_id、pages、strategy）
 - GET  /api/v1/parse-jobs/{id}          任务状态与进度（queued/running/completed/failed）
 
@@ -84,6 +88,35 @@ class AxiomClient:
     def get_book_manifest(self, book_id: str) -> list:
         """产物清单（文件路径/大小/哈希）。"""
         return self._request("GET", f"{API_PREFIX}/books/{book_id}/manifest")
+
+    def sync_books(self, books: list[dict]) -> dict:
+        """批量同步已验证书目（upsert af_books；book_id 同源 qt_books，幂等）。"""
+        return self._request("POST", f"{API_PREFIX}/books/sync", json=books)
+
+    def review_block(
+        self,
+        book_id: str,
+        page_no: int,
+        block_index: int,
+        verdict: str,
+        note: str = "",
+    ) -> dict:
+        """块判定（upsert af_block_reviews；verdict: ok/bad）。"""
+        body: dict = {"verdict": verdict}
+        if note:
+            body["note"] = note
+        return self._request(
+            "PUT",
+            f"{API_PREFIX}/books/{book_id}/pages/{page_no}/blocks/{block_index}/review",
+            json=body,
+        )
+
+    def get_block_review(self, book_id: str, page_no: int, block_index: int) -> dict:
+        """查询块判定（对照视图回显；无判定 → 8902 404 透传）。"""
+        return self._request(
+            "GET",
+            f"{API_PREFIX}/books/{book_id}/pages/{page_no}/blocks/{block_index}/review",
+        )
 
     # --- 解析任务 ---
 

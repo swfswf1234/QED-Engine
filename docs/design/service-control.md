@@ -2,20 +2,20 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-16
+最后更新：2026-08-17
 关联代码：`backend/qed_engine/services/service_manager.py`
-关联测试：`tests/test_api.py`、`tests/test_web.py`
+关联测试：`tests/test_api.py`、`tests/test_web.py`、`tests/test_qed_web_service.py`
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
 
 ## 目的与边界
 
 控制中心是 QED-Engine 后台管理（管理中心 + 控制中心）的运行侧：通过 8900 配置中心代理
-托管三个 Python 服务（8900 自身 / 8901 QED-Tracker / 8902 Axiom-Flow）的启停与状态展示。
+托管四个服务（8900 自身 / 8901 QED-Tracker / 8902 Axiom-Flow / 8903 前端）的启停与状态展示。
 前端静态页无权限直接操作系统进程，8900 是唯一常驻后端，因此由 8900 新增服务管理端点，
 前端仪表大盘提供「服务控制区」交互。
 
-- **本期实现范围**：三 Python 服务的启动 / 停止 / 重启 / 状态展示（8900 自身只显示状态，
-  不提供停止）。
+- **本期实现范围**：四服务的启动 / 停止 / 重启 / 状态展示（8900 自身只提供重启，
+  不提供停止；8903 只提供启动/重启，不提供停止）。
 - **只进规划、不实现、前端不展示**：MySQL 元数据管理、向量数据库、MinerU 服务后续容器化，
   经前端界面统一托管——仅在本文件「未来规划」登记方向，不建端点不占 UI 位。
 
@@ -24,28 +24,34 @@
 | 单元名 | 服务 | 端口 | 探测 URL | 进程构成 | 启动命令（QED_env 环境） |
 | --- | --- | --- | --- | --- | --- |
 | `config` | QED 管理服务（配置中心） | 8900 | `/api/v1/health` | 单进程 | `python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900` |
-| `tracker` | QED-Tracker 文档下载服务 | 8901 | `/api/v1/health` | 单进程 | `qed-tracker serve`（等价 `python -m qed_tracker.cli serve`） |
-| `axiom` | Axiom-Flow 文档解析服务 | 8902 | `/api/v1/health` | **双进程**（API + Worker） | `python -m uvicorn axiom_flow.main:app --host 127.0.0.1 --port 8902` + `python -m axiom_flow.worker` |
+| `tracker` | QED-Tracker 文档下载服务 | 8901 | `/api/v1/health` | 单进程 | `qed-tracker serve`（等价 `python -m qed_tracker.cli serve`）；**启停经生命周期脚本** `python scripts/qed_tracker_service.py start/stop/restart`（REQ-017①/QED-032，见「进程托管实现要点」） |
+| `axiom` | Axiom-Flow 文档解析服务 | 8902 | `/api/v1/health` | **单进程**（v2 无独立 Worker；API 进程） | **启停经生命周期脚本** `python scripts/axiom_flow_service.py start/stop/restart`（2026-08-17 REQ-039：由 Popen 直管切换为脚本化，对齐 tracker/web 模式；`--wait` 健康等待 + PID 文件 + 优雅停止/强杀兜底） |
+| `web` | QED 前端服务 | 8903 | `/api/v1/health`（`scripts/serve_web.py` 内建） | 单进程 | `python scripts/serve_web.py`；**启停经生命周期脚本** `python scripts/qed_web_service.py start/stop/restart`（2026-08-17 新增，仿 qed_tracker_service.py） |
 
 规则：
 
 - 端口与启动命令来自服务注册表配置，**以当前实际生效端口为准**：Axiom-Flow 端口迁移
   （8000 → 8902，Axiom-Flow ALN-002）已完成（2026-08-11），`axiom` 单元端口/探测 URL 为
-  8902；8000 侧 CORS 兼容保留至前端迁移完成。
+  8902；8000 侧 CORS 兼容保留至前端迁移完成。`web` 单元端口取自 `qed_web_url`
+  （默认 `http://127.0.0.1:8903`，可由 `.env` 覆盖）。
 
-- `axiom` 作为**单一启停单元**：启动时 API 与 Worker 同时拉起，停止/重启时两者一起处理，
-  前端不暴露 Worker 的独立控制。
+- `axiom` 作为**单一启停单元**（2026-08-17 起经生命周期脚本）：Axiom-Flow v2 无独立 Worker
+  进程（v1 时代 `axiom_flow.worker` 已退役），脚本管理 API 单进程；启停/重启由脚本自含。
 - 启动命令中的 Python 解释器、工作目录、环境变量注入由 8900 服务定义表配置；日志重定向到
   根仓库 `logs/<unit>.log`（Git 忽略），8900 启动时确保目录存在。
-- 8900 自身由用户手动启动（终端/脚本）；控制中心对其**不提供启停按钮**（避免自掘——
-  停止 8900 即断掉整个控制中心）；8900 自身重启（self-restart 端点）属监控与诊断域
-  后置内容，见 [config-center-api.md](config-center-api.md)。
+- 8900 自身由用户手动启动（终端/脚本）；控制中心对其**不提供启动/停止按钮**（避免自掘——
+  停止 8900 即断掉整个控制中心），仅提供**重启**（经 `/self-restart`，见
+  [config-center-api.md](config-center-api.md)）。8903 前端**不提供停止**（停止即断掉界面），
+  在线→重启、离线→启动。
+- **停止语义（2026-08-17 修复）**：生命周期脚本单元（tracker/web）不再以「8900 托管记录」
+  为停止放行前提——凡端口探测在线即视为在管，直接 `_stop_via_script`（解决手动经脚本启动的
+  服务在 8900 重启后「无法停止」问题）；探测离线且无托管记录 → 409。
 
 ## API 契约（8900 新增，前缀 /api/v1）
 
 ### GET /api/v1/services
 
-三服务状态快照，同步返回。
+四服务状态快照，同步返回。
 
 ```json
 {
@@ -59,6 +65,11 @@
       "name": "axiom", "label": "Axiom-Flow 文档解析服务", "port": 8902,
       "status": "offline", "pid": null, "started_at": null,
       "log_path": "D:/coding/QED-Engine/logs/axiom.log", "reason": "未启动"
+    },
+    {
+      "name": "web", "label": "QED 前端服务", "port": 8903,
+      "status": "online", "pid": 2341, "started_at": "2026-08-17T10:00:00+08:00",
+      "log_path": "D:/coding/QED-Engine/logs/web.log", "reason": ""
     }
   ]
 }
@@ -94,25 +105,46 @@
 ### POST /api/v1/services/{name}/restart
 
 先停后启（复用 stop → start 语义）。`config` 返回 409。
+**2026-08-17 语义修订**：生命周期脚本单元（tracker/web）「运行中即停」——无论是否
+8900 托管，凡 `_MANAGED` 有记录或端口探测在线即先 `_stop`，随后 `_start`
+（修复此前未托管时跳过 stop、`_start` 又因端口在线 409「服务已在线」导致重启无效果）。
+
+### POST /api/v1/self-restart
+
+8900 自身重启（监控与诊断域，见 [config-center-api.md](config-center-api.md)）：
+延迟 2s 绑定端口 + 后台 1s 后旧进程退出，规避 Windows 端口占用；失败 500 提示人工重启。
+控制台「QED 管理服务」卡的重启按钮即调此端点，成功后约 3s 自动刷新页面。
 
 ### 错误语义
 
-- 未知服务名 → 404；`config` 启停 → 409；重复启动（已 online/starting）→ 409；
-  停止未运行服务 → 409。
+- 未知服务名 → 404；`config` 启停 → 409（重启经 `/self-restart`，不走 /services）；
+  重复启动（已 online/starting）→ 409；停止未运行服务 → 409。
 - 启停为**同步轻量操作**：启动返回前完成 `Popen` 创建（不等待健康），停止返回前完成信号
   发送；状态收敛由前端轮询 `/services` 观察。
 
 ## 进程托管实现要点
 
-1. **创建**：`subprocess.Popen(cmd, creationflags=CREATE_NEW_PROCESS_GROUP, cwd=服务工作目录,
-   env=根 .env 注入环境, stdout/stderr=日志文件)`；模块级托管表（进程对象 + PID + 启动时间）。
-2. **优雅停止**：`os.kill(pid, signal.CTRL_BREAK_EVENT)` 发送到进程组；uvicorn 捕获
-   KeyboardInterrupt 触发优雅关闭；5s 宽限后 `taskkill /PID <pid> /T /F` 强杀兜底。
-3. **状态探测**：socket 预检（0.5s 超时）→ HTTP 健康确认（1s 超时，200 即 online）；
+1. **创建（Popen 单元）**：`subprocess.Popen(cmd, creationflags=CREATE_NEW_PROCESS_GROUP,
+   cwd=服务工作目录, env=根 .env 注入环境, stdout/stderr=日志文件)`；模块级托管表
+   （进程对象 + PID + 启动时间）。适用于 `config`（自身重启用）；2026-08-17 起其余单元
+   均已走生命周期脚本（tracker/axiom/web）。
+2. **生命周期脚本单元（tracker，REQ-017①/QED-032；axiom、web，2026-08-17）**：启停经子项目
+   自含脚本黑盒调用：
+   - tracker：`python scripts/qed_tracker_service.py start|stop|restart`（cwd=QED-Tracker 仓库根）；
+   - axiom：`python scripts/axiom_flow_service.py start|stop|restart`（cwd=Axiom-Flow 仓库根，REQ-039）；
+   - web：`python scripts/qed_web_service.py start|stop|restart`（cwd=根仓库）。
+   PID 取脚本 stdout 首行 `pid: <n>`（兜底读 `logs/qed-{name}.pid`，tracker/axiom/web 同名
+   规则），仅用于前端展示；优雅停止/强杀兜底由脚本自含，8900 不再持有 Popen 句柄；脚本非 0
+   退出 → 500。tracker 契约见 QED-Tracker `docs/design/service-lifecycle.md`，axiom 契约见
+   Axiom-Flow `docs/design/service-lifecycle.md`。
+3. **优雅停止（Popen 单元）**：`os.kill(pid, signal.CTRL_BREAK_EVENT)` 发送到进程组；
+   uvicorn 捕获 KeyboardInterrupt 触发优雅关闭；5s 宽限后 `taskkill /PID <pid> /T /F`
+   强杀兜底。
+4. **状态探测**：socket 预检（0.5s 超时）→ HTTP 健康确认（1s 超时，200 即 online）；
    `starting`/`stopping` 为过渡态（操作后 15s 内探测仍失败则回落 offline 并附 reason）。
-4. **8900 重启恢复**：8900 重启后子进程可能仍在运行——状态以端口探测为准（探测到 online
+5. **8900 重启恢复**：8900 重启后子进程可能仍在运行——状态以端口探测为准（探测到 online
    即视为在管，重启按钮直接生效）；不持久化 PID 文件。
-5. **并发安全**：同一服务同时启停返回 409；操作幂等（重复 stop 未运行返回 409 而非崩溃）。
+6. **并发安全**：同一服务同时启停返回 409；操作幂等（重复 stop 未运行返回 409 而非崩溃）。
 
 ## 前端：仪表大盘服务控制区
 
@@ -127,13 +159,18 @@
 
 前端重构后管理后台直达**控制台**（全局俯瞰），服务控制区演进为组件卡片：
 
-- **四服务卡**：8900（状态恒在线，操作后置）、8901/8902（启停/重启，既有 /services
-  语义不变）、8903（状态 + 重新加载提示）。
+- **四服务卡**（2026-08-17 用户裁决落地）：
+  - `config`（8900）：状态恒在线；仅**重启**按钮，经 `/self-restart` 端点，确认后约
+    3s 自动刷新页面。
+  - `tracker`（8901）/ `axiom`（8902）：在线→停止+重启、离线→启动，既有 /services
+    语义不变。
+  - `web`（8903）：在线→重启、离线→启动，**不提供停止**（避免自掘断界面）；后端
+    注册表已含 web 单元，前端以真实状态为准（8900 离线时本地判定兜底 + 去重）。
 - **依赖组件卡**：mineru（8002 探测）、LM Studio（探测 + 已加载模型）；MySQL 与 LLM 联通
   **不单独列卡**（ARCH-014：MySQL 为 8900 启动快照并入 8900 卡状态；LLM 供应商可达性为
   8900 启动自检写日志，不展示）。
 - 顶部**刷新按钮**：服务状态变更时人工刷新确认；破坏性操作确认框 + 轮询收敛。
-- **本轮只用既有端点**：GPU 监控 / LM Studio / mineru / 日志查看 / 8900 重启均为
+- **本轮只用既有端点**：GPU 监控 / LM Studio / mineru / 日志查看 均为
   监控与诊断域（[config-center-api.md](config-center-api.md)）后置内容，控制台界面
   不为未实现数据源留占位。
 
@@ -162,11 +199,26 @@
   路由挂 api/control.py；config 单元启动命令补充（仅供 /self-restart 延迟 spawn 使用，
   不可经 /services 启停的限制不变）；/self-restart 落地（延迟 2s 绑定端口 + 后台 1s 后
   os._exit，Windows 端口占用规避，失败 500 提示人工重启）。
+- 2026-08-17：① web 单元注册（`qed_web_url` 默认 8903，`scripts/qed_web_service.py`
+  生命周期脚本 + `serve_web.py` 内建 `/api/v1/health`，否则探测恒 404 判离线）；
+  ② `_start_via_script` PID 兜底泛化为 `logs/qed-{name}.pid`；③ **脚本单元停止放行修复**：
+  `_stop` 原以 `_MANAGED` 为唯一前提，手动脚本启动的 tracker/web 无记录 → 停止 409；
+  改为探测在线即放行 `_stop_via_script`（离线未托管仍 409）；④ **restart 修复**：
+  脚本单元「运行中即停」后 `_start`；⑤ 前端控制台 8900 卡接 `/self-restart`（成功
+  3s 自动刷新）、8903 卡在线重启/离线启动（无停止），后端离线时本地判定兜底 + 去重；
+  ⑥ **axiom 单元脚本化（REQ-039）**：由 Popen 直管（双进程 API+Worker）切换为
+  `scripts/axiom_flow_service.py` 黑盒调用（Axiom-Flow v2 无独立 Worker），8900 可经
+  /services 停止/重启脚本启动的 8902；`serve_web.py` 目录由旧 `web/` 切到 `web-ui/dist/`
+  （前端重构切换）；`scripts/` 整理（start-all/stop-all/load-env/check_api_keys 退役，仅留
+  qed_web_service.py + serve_web.py）。
 
 ## 验证
 
 - `pytest tests -q` 全绿；`ruff check backend tests` 无错误。
-- 定向测试：服务注册表完整性、状态探测（注入假 transport）、启停端点（mock Popen/信号）、
-  `config` 409、未知服务 404、并发 409。
-- 真实冒烟（人工）：8900 在线时启动/停止/重启 8901（观察 8903 服务控制区状态流转与日志
-  文件生成），再验证 8902 双进程单元一次。
+- 定向测试：服务注册表完整性（四单元含 web）、状态探测（注入假 transport）、启停端点
+  （mock Popen/信号）、`config` 409、未知服务 404、并发 409、脚本单元外部运行停止/重启
+  （`tests/test_api.py`）、web 生命周期脚本契约（`tests/test_qed_web_service.py`）、
+  serve_web health 端点（`tests/test_web.py`）。
+- 前端：`npx tsc -b` + vitest 全绿（72 passed）。
+- 真实冒烟（人工）：8900 在线时启动/停止/重启 8901（观察 8903 控制台状态流转与日志
+  文件生成），再验证 8902 双进程单元与 8903 前端单元一次。

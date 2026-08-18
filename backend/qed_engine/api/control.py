@@ -32,6 +32,7 @@ from qed_engine.services.monitor import probe_gpu, probe_lmstudio, probe_mineru
 from qed_engine.services.service_manager import (
     _MANAGED,
     ServiceError,
+    _probe_http,
     _start,
     _stop,
     get_specs,
@@ -102,15 +103,24 @@ def stop_service(name: str) -> ActionResponse:
 
 @router.post("/services/{name}/restart", response_model=ActionResponse)
 def restart_service(name: str) -> ActionResponse:
-    """先停后启（复用 stop → start 语义）；未托管时直接启动；config 单元 409。"""
+    """先停后启（复用 stop → start 语义）；config 单元 409。
+
+    生命周期脚本单元（tracker/web）：运行中（托管记录或端口探测在线，含外部/脚本手动
+    启动）即先经脚本停止——脚本幂等，未托管但在线时同样生效（REQ-017① 契约）；离线则
+    直接启动。Popen 单元维持原语义：仅托管记录存在时先停后启。
+    """
 
     def _run():
         spec = require_service(name)
         if spec.name == "config":
             raise ServiceError("config（8900 自身）不可经控制中心启停")
 
-        if _MANAGED.get(spec.name) is not None:
-            _stop(spec)
+        if spec.lifecycle_script:
+            if _MANAGED.get(spec.name) is not None or _probe_http(spec.port):
+                _stop(spec)
+        else:
+            if _MANAGED.get(spec.name) is not None:
+                _stop(spec)
         return ActionResponse(**_start(spec))
 
     return _service_call(_run)

@@ -19,8 +19,10 @@
 | [config-center-api.md](config-center-api.md) | Accepted | In Progress | 8900 后端 API 契约（五合一角色）：配置域（health/models/keys/database 启动快照）/ 数据域语义 API / 服务域 / 监控与诊断域（/logs、/monitor/*、/self-restart），启动自检（LLM/MySQL），密钥不下发 |
 | [service-control.md](service-control.md) | Accepted | Implemented | 控制中心：三 Python 服务启停托管（8900 代理）、服务注册表、监控诊断配套（ARCH-012 已实装） |
 | [course-acquisition-flow.md](course-acquisition-flow.md) | Accepted | Not Started | 课程收集流程五阶段（先验体系→一轮评估→下载→二轮评估→完成）与 8903 对齐契约 |
+| [exploration.md](exploration.md) | Draft | Not Started | 探索设计（2026-08-18 登记）：文档切分 + 对话式召回验证，替换原始文档对照；解析管理闭环后启动 |
 | [learning-center.md](learning-center.md) | Draft | In Progress | 学习中心探索：课程学习 + 知识问答、工具链选型、知识节点模型、里程碑（框架已搭，2026-08-14） |
 | [tech-stack.md](tech-stack.md) | Accepted | In Progress | 技术栈选型：三服务/前端/数据库/模型/解析/向量库选型记录 |
 | [database-design.md](database-design.md) | Accepted | In Progress | 数据库设计：共享 qed 库命名空间（qed_* 共享 / qt_* / af_*）、QED-031 五表清单、学习表族规划、迁移、敏感字段规则 |
 | [downloads-three-table-model.md](downloads-three-table-model.md) | Superseded | Implemented | 三表模型（qt_selections/qt_downloads/qt_sources）历史契约留档：被 QED-031 知识层次重构取代，唯一事实源见 QED-Tracker database-schema.md |
 | [integration-matrix.md](integration-matrix.md) | Accepted | In Progress | 联调矩阵与契约冻结编排：A（前端↔8900）/B（8900↔8901）/C（8900↔8902）三组联调边界、契约事实源、前置与验收窗口；QED-031 与 Axiom v2 契约冻结节奏（REQ-033/034） |
+| [downloads-manage-redesign.md](downloads-manage-redesign.md) | Accepted | Not Started | 下载管理界面重构：左树四层（高等数学→分类→课程→教程叶子+进度）、右侧流程筛选（搜索/确认/下载/验收）、书行排序、教程命名规范（跨项目 QED-Tracker） |

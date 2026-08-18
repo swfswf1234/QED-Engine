@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：Implemented
 最后更新：2026-08-16
-关联代码：`web/app.js`、`web/index.html`（8903 前端现状契约，唯一消费方；后端三域目标模块
+关联代码：`web-ui/src/`（8903 前端 web-ui 版，唯一消费方；后端三域目标模块
 `api/control.py`、`api/tracker.py`、`clients/tracker_client.py`、`services/service_manager.py`、
 `services/log_viewer.py`、`services/monitor.py` 在实现轮落地后登记 [code-map](../architecture/code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`（迁移后保持全绿；新增

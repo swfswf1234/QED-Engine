@@ -18,6 +18,23 @@ export const SERVICES_TIMEOUT_MS = 5000;
 /** /config/database 后端真实探测（connect_timeout 3s + 缓存 60s），放宽超时 */
 export const DATABASE_TIMEOUT_MS = 10000;
 
+/** 启停操作收敛结果（2026-08-17：操作成功/失败由收敛结果驱动，前端 message 提示） */
+export interface OperateResult {
+  name: string;
+  op: ServiceOp;
+  /** 是否成功（收敛到操作目标态） */
+  success: boolean;
+  /** 最终状态 / 失败状态（error=请求失败；timeout=收敛超时；busy=防重入被拒） */
+  status: ServiceStatus['status'] | 'error' | 'timeout' | 'busy';
+  /** 失败/超时原因（成功时为 undefined） */
+  reason?: string;
+}
+
+/** 操作目标态判定：start→online、stop→offline、restart→online */
+export function opTargetStatus(op: ServiceOp): 'online' | 'offline' {
+  return op === 'stop' ? 'offline' : 'online';
+}
+
 export interface ConsoleStore {
   services: ServiceStatus[];
   dbStatus: DatabaseStatus | null;
@@ -29,7 +46,8 @@ export interface ConsoleStore {
   /** 操作中（按钮 loading），值为服务名 */
   operating: string | null;
   fetchAll: () => Promise<void>;
-  operate: (name: string, op: ServiceOp) => Promise<void>;
+  /** 启停操作：请求 + 轮询收敛，返回收敛结果（成功/失败/超时），由前端提示 */
+  operate: (name: string, op: ServiceOp) => Promise<OperateResult>;
 }
 
 export const useConsoleStore = create<ConsoleStore>((set, get) => ({
@@ -61,41 +79,73 @@ export const useConsoleStore = create<ConsoleStore>((set, get) => ({
     if (!get().operating) set({ loading: false });
   },
 
-  operate: async (name, op) => {
+  operate: async (name, op): Promise<OperateResult> => {
     const { operating } = get();
-    if (operating) return; // 防重入
+    if (operating) {
+      // 防重入：另一操作进行中，直接返回失败结果（不阻塞现有操作）
+      return { name, op, success: false, status: 'busy', reason: '另一服务操作进行中，请稍后再试' };
+    }
     set({ operating: name, error: null });
     try {
       await operateService(name, op);
     } catch (err) {
-      set({
-        operating: null,
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
+      set({ operating: null, loading: false });
+      return {
+        name,
+        op,
+        success: false,
+        status: 'error',
+        reason: err instanceof Error ? err.message : String(err),
+      };
     }
 
-    // 过渡态轮询收敛：starting/stopping → 最终态（上限 POLL_TIMEOUT_MS）
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    const poll = async () => {
-      try {
-        const services = await listServices();
-        set({ services });
-        const inTransition = services.some((s) => s.status === 'starting' || s.status === 'stopping');
-        if (inTransition && Date.now() < deadline) {
-          setTimeout(poll, POLL_INTERVAL_MS);
-        } else {
+    // 过渡态轮询收敛：starting/stopping → 最终态（上限 POLL_TIMEOUT_MS），
+    // 收敛后按操作目标态判定成功/失败（2026-08-17 用户裁决：只提示收敛结果）
+    return new Promise<OperateResult>((resolve) => {
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      const target = opTargetStatus(op);
+      const poll = async () => {
+        try {
+          const services = await listServices();
+          set({ services });
+          const inTransition = services.some((s) => s.status === 'starting' || s.status === 'stopping');
+          const svc = services.find((s) => s.name === name);
+          if (!inTransition && svc && svc.status !== 'starting' && svc.status !== 'stopping') {
+            const success = svc.status === target;
+            set({ operating: null, loading: false });
+            resolve({
+              name,
+              op,
+              success,
+              status: svc.status,
+              reason: success ? undefined : (svc.reason || `最终状态 ${svc.status}`),
+            });
+            return;
+          }
+          if (Date.now() < deadline) {
+            setTimeout(poll, POLL_INTERVAL_MS);
+            return;
+          }
           set({ operating: null, loading: false });
+          resolve({
+            name,
+            op,
+            success: false,
+            status: 'timeout',
+            reason: `收敛超时（${POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
+          });
+        } catch (err) {
+          set({ operating: null, loading: false });
+          resolve({
+            name,
+            op,
+            success: false,
+            status: 'error',
+            reason: err instanceof Error ? err.message : String(err),
+          });
         }
-      } catch (err) {
-        set({
-          operating: null,
-          loading: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    setTimeout(poll, POLL_INTERVAL_MS);
+      };
+      setTimeout(poll, POLL_INTERVAL_MS);
+    });
   },
 }));

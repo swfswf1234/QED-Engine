@@ -38,11 +38,16 @@ CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM)
 
 RESTART_DELAY_SECONDS = 2.0  # 新进程延迟启动秒数（ping -n N 近似等待，N = delay+1）
 RESTART_EXIT_DELAY_SECONDS = 1.0  # 旧进程延迟退出：先确认新进程 spawn 成功
+SCRIPT_TIMEOUT_SECONDS = 30.0  # 子项目生命周期脚本调用超时（start 拉起即返 / stop 含 5s 宽限 + 强杀）
 
 
 @dataclass(frozen=True)
 class ServiceSpec:
-    """启停单元定义（服务注册表，service-control.md）。"""
+    """启停单元定义（服务注册表，service-control.md）。
+
+    lifecycle_script：子项目自含生命周期脚本（REQ-017①，QED-Tracker
+    `scripts/qed_tracker_service.py`）；存在时 start/stop 黑盒调用脚本，不持有 Popen。
+    """
 
     name: str
     label: str
@@ -50,15 +55,19 @@ class ServiceSpec:
     log_name: str
     commands: tuple[tuple[str, ...], ...]
     workdir: str
+    lifecycle_script: str | None = None
 
 
 @dataclass
 class ManagedProcess:
-    """8900 托管记录：进程对象 + PID + 启动时间 + 停止原因。"""
+    """8900 托管记录：进程对象 + PID + 启动时间 + 停止原因。
+
+    process 在脚本模式下为 None（脚本自含生命周期，8900 只记 PID 用于前端展示）。
+    """
 
     pid: int
     started_at: str
-    process: subprocess.Popen
+    process: subprocess.Popen | None
     extra_processes: list = field(default_factory=list)
     reason: str = ""
 
@@ -109,6 +118,8 @@ def configure(settings: Settings | None = None) -> None:
         log_name="tracker",
         commands=(("python", "-m", "qed_tracker.cli", "serve"),),
         workdir=str(ROOT / "QED-Tracker"),
+        # REQ-017①（QED-032）：启停交给子项目自含生命周期脚本（PID 文件 + 优雅停止 + 强杀兜底）
+        lifecycle_script="scripts/qed_tracker_service.py",
     )
     axiom_port = _port_of(resolved.qed_axiom_url, 8902)
     specs["axiom"] = ServiceSpec(
@@ -116,20 +127,22 @@ def configure(settings: Settings | None = None) -> None:
         label="Axiom-Flow 文档解析服务",
         port=axiom_port,
         log_name="axiom",
-        commands=(
-            (
-                "python",
-                "-m",
-                "uvicorn",
-                "axiom_flow.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(axiom_port),
-            ),
-            ("python", "-m", "axiom_flow.worker"),
-        ),
+        # 启动命令仅供展示/参照；axiom 单元启停经生命周期脚本（axiom_flow_service.py，
+        # 2026-08-17 REQ-039：对齐 tracker/web 脚本化模式，8900 不再持有 Popen 句柄）
+        commands=(("python", "scripts/axiom_flow_service.py", "start"),),
         workdir=str(ROOT / "Axiom-Flow"),
+        lifecycle_script="scripts/axiom_flow_service.py",
+    )
+    web_port = _port_of(resolved.qed_web_url, 8903)
+    specs["web"] = ServiceSpec(
+        name="web",
+        label="QED 前端服务",
+        port=web_port,
+        log_name="web",
+        # 启动命令仅供展示/参照；web 单元启停经生命周期脚本（qed_web_service.py，REQ-03x）
+        commands=(("python", "scripts/serve_web.py"),),
+        workdir=str(ROOT),
+        lifecycle_script="scripts/qed_web_service.py",
     )
     _SPECS.clear()
     _SPECS.update(specs)
@@ -242,6 +255,84 @@ def get_specs() -> dict[str, ServiceSpec]:
 # --- 进程托管 ---
 
 
+# --- 子项目生命周期脚本接入（REQ-017①，QED-032 接入契约：service-lifecycle.md） ---
+
+
+def _parse_script_pid(stdout: str) -> int | None:
+    """解析脚本 stdout 首行 `pid: <n>`；无匹配返回 None。"""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith("pid:"):
+            try:
+                return int(line.split(":", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
+def _read_pid_file(path: Path) -> int | None:
+    """读取脚本 PID 文件（纯 PID 文本）；缺失/非法返回 None。"""
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _start_via_script(spec: ServiceSpec) -> int:
+    """经子项目生命周期脚本启动：`python <script> start`（workdir=子项目仓库根）。
+
+    脚本拉起子进程后立即返回；PID 取 stdout 首行 `pid: <n>`，兜底读脚本 PID 文件
+    （`logs/qed-<name>.pid`，如 tracker→qed-tracker.pid、web→qed-web.pid），仅用于
+    前端展示。脚本失败抛 ServiceError(500)。
+    """
+    script = spec.lifecycle_script
+    assert script is not None
+    try:
+        result = subprocess.run(
+            [sys.executable, script, "start"],
+            cwd=spec.workdir,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT_SECONDS,
+            env=os.environ.copy(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ServiceError(f"{spec.label} 生命周期脚本执行失败：{exc}", status_code=500) from exc
+    if result.returncode != 0:
+        raise ServiceError(
+            f"{spec.label} 启动失败（脚本退出码 {result.returncode}）：{result.stderr.strip()}",
+            status_code=500,
+        )
+    pid = _parse_script_pid(result.stdout)
+    if pid is None:
+        pid = _read_pid_file(Path(spec.workdir) / "logs" / f"qed-{spec.name}.pid")
+    if pid is None:
+        raise ServiceError(f"{spec.label} 启动成功但未取得 PID（脚本输出异常）", status_code=500)
+    return pid
+
+
+def _stop_via_script(spec: ServiceSpec) -> None:
+    """经脚本停止：优雅停止 + 强杀兜底由脚本自含（幂等退出 0）；失败抛 ServiceError(500)。"""
+    script = spec.lifecycle_script
+    assert script is not None
+    try:
+        result = subprocess.run(
+            [sys.executable, script, "stop"],
+            cwd=spec.workdir,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT_SECONDS,
+            env=os.environ.copy(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ServiceError(f"{spec.label} 停止脚本执行失败：{exc}", status_code=500) from exc
+    if result.returncode != 0:
+        raise ServiceError(
+            f"{spec.label} 停止失败（脚本退出码 {result.returncode}）：{result.stderr.strip()}",
+            status_code=500,
+        )
+
+
 def _start(spec: ServiceSpec) -> dict:
     now = time.monotonic()
     op = _OPS.get(spec.name)
@@ -251,29 +342,33 @@ def _start(spec: ServiceSpec) -> dict:
         raise ServiceError(f"服务已在线（端口 {spec.port} 探测通过），不可重复启动")
     _LOCKED.add(spec.name)
     try:
-        procs = []
-        for cmd in spec.commands:
-            log_file = open(LOG_DIR / f"{spec.log_name}.log", "ab")  # noqa: SIM115 - 随进程生命周期
-            try:
-                proc = subprocess.Popen(
-                    list(cmd),
-                    cwd=spec.workdir,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    creationflags=NEW_PROCESS_GROUP,
-                    env=os.environ.copy(),
-                )
-            except Exception:
-                log_file.close()  # Popen 失败时不泄漏日志句柄（如 workdir 无效 WinError 267）
-                raise
-            procs.append(proc)
+        if spec.lifecycle_script:
+            pid = _start_via_script(spec)
+            managed = ManagedProcess(pid=pid, started_at=datetime.now(UTC).isoformat(), process=None)
+        else:
+            procs = []
+            for cmd in spec.commands:
+                log_file = open(LOG_DIR / f"{spec.log_name}.log", "ab")  # noqa: SIM115 - 随进程生命周期
+                try:
+                    proc = subprocess.Popen(
+                        list(cmd),
+                        cwd=spec.workdir,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                        creationflags=NEW_PROCESS_GROUP,
+                        env=os.environ.copy(),
+                    )
+                except Exception:
+                    log_file.close()  # Popen 失败时不泄漏日志句柄（如 workdir 无效 WinError 267）
+                    raise
+                procs.append(proc)
+            started_at = datetime.now(UTC).isoformat()
+            managed = ManagedProcess(pid=procs[0].pid, started_at=started_at, process=procs[0])
+            if len(procs) > 1:
+                managed.extra_processes = procs[1:]
     finally:
         _LOCKED.discard(spec.name)
 
-    started_at = datetime.now(UTC).isoformat()
-    managed = ManagedProcess(pid=procs[0].pid, started_at=started_at, process=procs[0])
-    if len(procs) > 1:
-        managed.extra_processes = procs[1:]
     _MANAGED[spec.name] = managed
     _OPS[spec.name] = ("start", time.monotonic())
     return {"name": spec.name, "status": "starting", "pid": managed.pid}
@@ -311,19 +406,26 @@ def _stop(spec: ServiceSpec) -> dict:
         raise ServiceError("服务正在停止（过渡窗口内），请稍后再试")
     managed = _MANAGED.get(spec.name)
     if managed is None:
-        raise ServiceError("服务未由控制中心托管（无 PID 记录），无法托管停止")
-    assert managed is not None
+        # 生命周期脚本单元：脚本自含 PID 文件，不依赖 8900 托管记录（REQ-017① 契约）——
+        # 探测在线（外部/脚本手动启动）即可经脚本停止；离线且未托管仍 409。
+        if spec.lifecycle_script and _probe_http(spec.port):
+            pass
+        else:
+            raise ServiceError("服务未由控制中心托管（无 PID 记录），无法托管停止")
     _LOCKED.add(spec.name)
     try:
-        procs = [managed.process, *managed.extra_processes]
-        reason = ""
-        for proc in procs:
-            if proc is not None and proc.poll() is None:
-                if _stop_process(proc):
-                    reason = "停止超时强杀"
+        if spec.lifecycle_script:
+            _stop_via_script(spec)
+        else:
+            procs = [managed.process, *managed.extra_processes]
+            reason = ""
+            for proc in procs:
+                if proc is not None and proc.poll() is None:
+                    if _stop_process(proc):
+                        reason = "停止超时强杀"
+            managed.reason = reason
     finally:
         _LOCKED.discard(spec.name)
-    managed.reason = reason
     _OPS[spec.name] = ("stop", time.monotonic())
     return {"name": spec.name, "status": "stopping", "pid": None}
 

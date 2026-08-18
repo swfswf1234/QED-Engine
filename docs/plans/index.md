@@ -19,3 +19,4 @@
 - [2026-08 后端三域拆分轮（backend-domain-refactor）](../trackers/todo.md)（ARCH-012，状态见任务台账）
 - [2026-08 文档与数据边界整理轮（docs-data-boundary-round）](../trackers/todo.md)（ARCH-013，状态见任务台账）
 - [2026-08 LLM 状态收敛与 DB 启动快照轮（llm-status-convergence）](../trackers/todo.md)（ARCH-014，状态见任务台账）
+- [2026-08 下载管理界面重构轮（downloads-manage-redesign）](../trackers/todo.md)（ARCH-015，状态见任务台账）

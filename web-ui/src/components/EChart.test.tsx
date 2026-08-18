@@ -11,7 +11,7 @@ vi.mock('echarts/core', () => ({
   use: vi.fn(),
 }));
 vi.mock('echarts/charts', () => ({ BarChart: vi.fn(), PieChart: vi.fn() }));
-vi.mock('echarts/components', () => ({ GridComponent: vi.fn(), TooltipComponent: vi.fn(), LegendComponent: vi.fn() }));
+vi.mock('echarts/components', () => ({ GridComponent: vi.fn(), TooltipComponent: vi.fn(), LegendComponent: vi.fn(), TitleComponent: vi.fn() }));
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: vi.fn() }));
 
 describe('EChart 封装（echarts/core 生命周期）', () => {

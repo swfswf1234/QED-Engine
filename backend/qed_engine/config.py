@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     qed_config_center_url: str = "http://127.0.0.1:8900"
     qed_tracker_url: str = "http://127.0.0.1:8901"
     qed_axiom_url: str = "http://127.0.0.1:8902"
+    qed_web_url: str = "http://127.0.0.1:8903"
     # 本地 LLM（LM Studio，OpenAI 兼容）默认地址（QED_LMSTUDIO_URL 可覆盖，控制台监控探测目标）
     qed_lmstudio_url: str = "http://127.0.0.1:1234/v1"
     # 模型选择（单线路策略：一次只启用一条线路，当前 qwen 三用途；备选线路启用时恢复）

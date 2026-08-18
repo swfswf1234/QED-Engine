@@ -44,6 +44,8 @@ build/
 .env
 .env.*
 !.env.example
+# web-ui 生产构建配置（非密钥，入库保证构建可复现）：VITE_API_BASE=8900
+!web-ui/.env.production
 
 # 系统
 Thumbs.db

@@ -1,10 +1,10 @@
 # 前端重构设计：React 全家桶（web-ui/）
 
 设计状态：Accepted
-实现状态：In Progress
-最后更新：2026-08-16
-关联代码：`web-ui/`（规划中，含 src/pages、src/api、src/stores、src/components）、`web/app.js`（现状契约）
-关联测试：`tests/test_web.py`（切换后迁移至 `web-ui/src/` 守护）、`web-ui/` Vitest
+实现状态：Implemented
+最后更新：2026-08-17
+关联代码：`web-ui/`（React 重构版，已接管 8903）、`scripts/serve_web.py`、`web-ui/.env.production`；旧 `web/` 三文件版已退役（git 保留）
+关联测试：`tests/test_web.py`（守护 web-ui/src 源码 + serve_web）、`web-ui/` Vitest
 关联 ADR：[ADR 0008](../adr/0008-frontend-react-refactor.md)（框架与工程化选型）、
 [ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
 [ADR 0002](../adr/0002-frontend-and-port-centralization.md)（全局端口）
@@ -12,9 +12,9 @@
 ## 目的与边界
 
 本文件是 8903 前端**重构目标态**的设计事实源：技术栈、目录架构、主题规范、核心四界面
-契约与切换策略。**当前实现**（原生三文件版）仍以 [web-frontend.md](web-frontend.md) 为
-事实源，两者冲突时以各自状态标注为准；切换完成后 web-frontend.md 重写为 v2 并以本设计
-为准。
+契约与切换策略。**切换已完成（2026-08-17）**：web-ui 接管 8903（serve_web.py → dist、
+`.env.production` VITE_API_BASE=8900、旧 web/ 退役）；[web-frontend.md](web-frontend.md)
+已重写为 v2 以本设计为准。
 
 驱动背景与框架选型理由见 [ADR 0008](../adr/0008-frontend-react-refactor.md)：原生单文件
 app.js 约 1684 行/91KB 定位困难；九大界面需要稳定组件边界；知识图谱/大图/聊天/标注等
@@ -23,8 +23,7 @@ app.js 约 1684 行/91KB 定位困难；九大界面需要稳定组件边界；�
 ## 目标架构
 
 ```
-web/                      # 旧前端（过渡期 8903 照常服务；切换后退役，git 历史保留）
-web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript）
+web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript，已接管 8903）
 ├── src/
 │   ├── main.tsx          # 入口
 │   ├── App.tsx           # 全局布局 + React Router 路由
@@ -32,9 +31,10 @@ web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript）
 │   ├── api/              # 统一 API 客户端（API_BASE=8900，AbortController 超时、离线降级）
 │   ├── stores/           # Zustand：服务状态、筛选、树选择、控制台快照
 │   ├── components/       # 通用组件（状态点、图层卡片、筛选器、日志弹窗、空态/离线态）
-│   └── pages/            # 按界面分目录：Home / Console / Dashboard / Downloads（后续轮追加）
+│   └── pages/            # 按界面分目录：Home / Console / Dashboard / Downloads
+├── .env.production       # 生产 API 基址 VITE_API_BASE=http://127.0.0.1:8900/api/v1
 ├── vite.config.ts / package.json
-└── dist/                 # 构建产物（8903 切换后 serve_web.py 指向）
+└── dist/                 # 构建产物（serve_web.py 托管 8903）
 ```
 
 - **界面解耦原则**：一界面一目录，界面间只通过路由与 store 交互；通用逻辑抽组件/工具，
@@ -72,14 +72,14 @@ web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript）
 **「刷新」**（重拉 `/services` 与 `/config/database` 数据）+ **「重新加载页面」**
 （整页重载，8903 页面级操作，不与刷新重复）。
 
-**组件卡片（本轮纯前端，只用既有端点）**：
+**组件卡片（本轮只用既有端点）**：
 
 | 组件 | 数据源 | 展示 | 操作 |
 | --- | --- | --- | --- |
-| 8900 QED 管理服务 | `/services` + `/config/database` | 状态 + 原因（恒在线）+ 数据库连接启动快照 | 重启（点击提示能力后置，不调 API） |
+| 8900 QED 管理服务 | `/services` + `/config/database` | 状态 + 原因（恒在线）+ 数据库连接启动快照 | 重启（`/self-restart`，2026-08-17 接线；确认后约 3s 自动刷新页面） |
 | 8901 QED-Tracker | `/services` | 状态 + 原因 | 启动 / 停止 / 重启 |
 | 8902 Axiom-Flow | `/services` | 状态 + 原因 | 启动 / 停止 / 重启 |
-| 8903 QED 前端服务 | 本地判定 | 在线即健康 | —（页面级操作由顶部「重新加载页面」承担） |
+| 8903 QED 前端服务 | `/services`（后端注册表含 web 单元，2026-08-17）；8900 离线时本地判定兜底 | 在线即健康 | 在线→重启、离线→启动；**不提供停止**（避免自掘断界面） |
 
 - 服务显示名：8900/8903 前端映射为「QED 管理服务」「QED 前端服务」（无括号），
   8901/8902 沿用后端 label；端口号在卡内展示（标题不带端口）。
@@ -89,83 +89,95 @@ web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript）
   database 失败 → 仅 8900 卡降级（「获取失败，点刷新重试」）。
 - LLM 联通卡**本轮取消**（用户验证裁决：供应商探测不重要，后端配置即告知）。
 - **不在本轮**（后端监控端点后置，[backend-domain-split.md](backend-domain-split.md)
-  后续轮参考）：GPU 监控、LM Studio 探测、mineru 健康、服务日志查看、8900 自身重启
+  后续轮参考）：GPU 监控、LM Studio 探测、mineru 健康、服务日志查看
   ——控制台界面不为未实现数据源留占位（延续「空态不占位」语义）。
 
 ### 3. 仪表盘（`#/admin/dashboard`，Dashboard）——过渡形态，整体优化后置（REQ-033）
 
-- **服务健康摘要卡**：四服务状态点（`/services`：8900/8901/8902 + 8903 本地判定；
-  不展示 MySQL，2026-08-16 用户裁决）；8900 不可达 → 整体错误横幅，不白屏。
-- **文档下载状况大盘**（全宽，在上；ECharts，echarts/core 按需引入，窗口 resize 自适应）：
-  数据源 `/selections` 单次拉取（表1 每项内嵌表2 `downloads` + `download_stats`，无 N+1）。
-  - 表1 状态分布（柱状）：候选 / 确认 / 备选（零值补齐；rejected/superseded 由数据层隐藏）；
-  - 课程完成进度（横向柱状）：按 course_id 分组，进度 = 非候选套数占比；
-  - 表2 汇总统计行：册级总数 / 已下载 / 已验收（download_stats 聚合）；
+- **服务在线卡**：四服务状态点（`/services`：8900/8901/8902/8903，后端注册表已含 web
+  单元；8900 离线时本地判定兜底 + 去重；不展示 MySQL，2026-08-16 用户裁决）；
+  8900 不可达 → 整体错误横幅，不白屏。
+- **文档下载进度卡**（全宽，在上；ECharts，echarts/core 按需引入，窗口 resize 自适应）：
+  数据源 `/knowledge` 一次拉取知识行列表 + **并行拉取 `/knowledge/{id}` 详情**（含所辖书行
+  books，逐行独立降级——五层模型 QED-031，2026-08-17 五层化）。
+  - **双饼图「文档下载进度（本）」（2026-08-17 用户裁决）**：饼图1 按课程（course_id）、
+    饼图2 按教程（知识行），扇区值 = 该维度已下载书行数（downloaded+verified）——看
+    各课程/各教程的下载工作量分布；
+  - 书行汇总统计行：教程数（kind=tutorial）/ 目标书目 / 已下载 / 已验收（books 聚合）；
   - 8901 不可达（503）→ 本卡离线提示降级，其余卡片正常。
-- **文档解析状况大盘**（全宽，在下）：8902 parse-jobs 端点后置（backend-domain-split
-  后续轮），当前显示「数据源后置」离线占位，不占位拉取。
+- **文档解析进度卡**（全宽，在下；卡名副标「Axiom-Flow监控」）：8902 parse-jobs 端点后置
+  （backend-domain-split 后续轮），当前显示「数据源后置」离线占位，不占位拉取。
 - 布局上下分列（用户裁决 2026-08-16）；顶部「刷新」按钮重拉全部数据源（独立降级，
   互不拖累）。整体梳理待后台服务正常后优化（REQ-033，低优先级）。
 
 ### 4. 文档下载管理（`#/admin/downloads`，Downloads）——存量重写，功能不减
 
-**进度：4a（布局与树）已完成 2026-08-16**；4b 书目卡区 / 4c 详情弹窗 / 4d 三表操作闭环待做。
+**进度：4a（布局与树）完成 2026-08-16；4b 书目卡区 / 4c 详情弹窗 / 4d 操作闭环完成
+2026-08-17（五层化，QED-031）**。
 
 **左侧知识点树**（类 Excel 合并单元格/文件列表折叠语义，延续现状语义）：
 
-- 层级：**领域 → 课程 → 教程**；叶子为教程节点——教材 + 对应习题集合并为**一个名称**
-  （书名取第一阶段探索出的套书名，非具体下载册名；单册教程取书名）。
+- 层级：**领域 → 课程 → 教程**；教程节点 = 知识行（kind=tutorial 为套节点可展开显示
+  所辖书行条目行；kind=other_material 为叶子，名称即归类名）。
 - 折叠行为：领域常驻展开，课程/教程点名称展开折叠（文件列表式）；箭头与名称交互分离
   （箭头=展开折叠、名称=选中联动右侧）。
 - 领域/课程节点点击**联动右侧筛选**（领域→领域筛选、课程→课程筛选，十二期单向联动语义）。
 - 树宽可拖拽（手柄 + 左右侧可调），有最大最小限制（如 280–640px，localStorage 记忆）。
 
-**4a 落地实现**（2026-08-16）：数据源 `/catalogs/math-qe`（课程结构）+ `/selections`
-（表1，rejected/superseded 数据层隐藏）。教程节点按表1 分组：confirmed+set_no 合并为
-「套N」（套节点可展开显示条目行：角色+书名+册数）；confirmed 无 set_no / candidate /
-backup 为单条目教程（label=书名）。领域 = DOMAIN_MAP（course_id→分析/代数/概率论与
-数理统计，未映射归「其他」），DOMAIN_ORDER 排序；课程 = catalog targets 去重
-（COURSE_ORDER 排序），表1 独有课程兜底。筛选栏（领域/课程/状态，Select，与树选择
-单向联动：树→筛选；筛选只作用于书目卡列表）。独立降级：8900 不可达 → 整体横幅 +
-树区空态；catalog/selections 各自失败互不拖累。右侧面板为骨架（当前选择 + 筛选结果
-统计 + 卡片区占位）。树宽：`qed-downloads-tree-w`（280–640px，默认 400）。
+**4a 落地实现**（2026-08-16）：数据源 `/catalogs/math-qe`（课程结构）+ `/knowledge`
+（知识行，rejected/superseded 数据层隐藏）。教程节点按知识行构建：kind=tutorial 为
+套节点（可展开显示条目行：角色+书名+状态）；other_material 为叶子。领域 = DOMAIN_MAP
+（course_id→分析/代数/概率论与数理统计，未映射归「其他」），DOMAIN_ORDER 排序；课程 =
+catalog targets 去重（COURSE_ORDER 排序），知识行独有课程兜底。筛选栏（领域/课程/状态，
+Select，与树选择单向联动：树→筛选；筛选只作用于知识行卡列表）。独立降级：8900 不可达 →
+整体横幅 + 树区空态；catalog/knowledge 各自失败互不拖累（知识行失败 → 警示 + 树仅课程骨架）。
+树宽：`qed-downloads-tree-w`（280–640px，默认 400）。
 
 **右侧面板**：
 
-- **筛选栏**（统一逻辑、同风格）：领域 / 课程 / 状态 三筛选项（按钮弹层或下拉，
-  与树选择独立叠加 AND）；"无论怎么筛选都是同一套逻辑"——筛选只作用于书目卡片列表。
-- **课程区**：课程名称 + 课程简介。
-- **教程行**：教程下属书目**横排一排**（有最小长度；超宽页面内出现横向滑动栏，
-  布局自适应）；书目为**卡片**，卡片内容：
-  - 书名（明确）、类型徽标（教材/习题集/配套资料/题解）、状态（表1/表2 状态机语义）；
-  - 简介：这是什么课程、作者、译者、第几版、学习难度、评价等；
-  - **LLM 评估意见**（表1 既有 llm 相关字段渲染）+ **人工补充说明**（review_note，
-    随三态提交，双写展示）；
-  - 详情弹窗：展示具体信息（套/册明细/来源渠道，跟随数据库表更新展示）。
-- 卡内操作沿用三表全套语义：确认/备选/否定（表1）、新建候选册/登记/验收/否定（表2）、
-  来源详情（表3），409/422 语义透传。
+- **筛选栏**（统一逻辑、同风格）：领域 / 课程 / 状态 三筛选项（Select 下拉，
+  与树选择独立叠加 AND）；"无论怎么筛选都是同一套逻辑"——筛选只作用于知识行列表。
+- **知识行区**（4b/4d 完成 2026-08-17）：每行 = 教程名（tutorialLabel）+ 类型徽标
+  （教程套系/延展资料）+ 状态标签（探索中/已定稿/已完成）+ 操作按钮；书行 **横排一排**
+  （有最小长度；超宽页面内出现横向滑动栏，布局自适应），书目为**卡片**，卡片内容：
+  - 书名（display_title）、类型徽标（教材/习题集/配套资料/题解）、书行状态（候选/已决定/
+    下载中/已下载/已验证/失败）；
+  - 简介：作者、版本（edition·year）、页数、否定原因；
+  - 详情弹窗（4c）：书行完整信息（作者/版本/语言/页数/sha256/路径/来源）+ **渠道尝试列表**
+    （sources 逐条：渠道/成败/页面/下载链接/备注）+ **添加渠道尝试**表单；
+- **卡内操作闭环**（4d，五层模型语义，409/422 透传）：
+  - 知识行：确认（draft→confirmed，决定引用+简介）/ 完成（confirmed→completed）/
+    否定 / 过时（reason 必填）；
+  - 书行：决定（candidate→decided）/ 开始下载（decided→downloading）/ 标记失败 /
+    重试（failed→downloading）/ 验收（downloaded→verified）/ 否定 / 过时 / 登记下载
+    （人工下载 candidate→downloaded，relative_path 必填）；
+  - 新建书行（POST /books，title 必填；kind/roles/authors）；操作成功后仅刷新该知识行
+    详情（refreshDetail，不整树重拉）。
 
 **布局**：左侧树显示全但有 min/max；右侧书目行固定最小宽度、超出滚动；整体自适应。
 
 ## 控制台数据源（本轮只用既有端点；监控与诊断端点后置）
 
 控制台本轮只用既有端点：`/services`（四服务状态与启停）、`/config/database`（**启动快照**，
-8900 启动时探测一次，2026-08-16 用户裁决）。**数据库连接不单独列卡**——并入 8900 服务卡
+8900 启动时探测一次，2026-08-16 用户裁决）、`/self-restart`（8900 自身重启，2026-08-17
+接线）。**数据库连接不单独列卡**——并入 8900 服务卡
 状态（附「数据库连接：启动快照 OK/失败」信息，读取 `/config/database`）；LLM 供应商可达性
 不展示（端点已删除，8900 启动时检查一次写日志，ARCH-014）。
-GPU 监控 / LM Studio 探测 / mineru 健康 / 日志查看 / self-restart 等**监控与诊断端点**
+GPU 监控 / LM Studio 探测 / mineru 健康 / 日志查看 等**监控与诊断端点**
 契约已登记于 [config-center-api.md](config-center-api.md)，实施随后续轮
 （backend-domain-split）落地，届时控制台界面扩展对应卡片。
 
 ## 迁移与切换
 
-1. **过渡期**：8903 继续服务旧 `web/`（现状不变）；新前端在 Vite dev Server 开发，
+1. **过渡期**：8903 继续服务旧 `web/`；新前端在 Vite dev Server 开发，
    dev proxy 将 `/api` 转发至 8900（避免新增跨源面，浏览器同源请求 dev 端口）。
 2. **分批替换**：按 主界面 → 控制台 → 仪表盘 → 下载管理 逐批完成；**每批完成后暂停，
    用户浏览器验证通过才进入下一批**（阶段门禁，2026-08-16 用户裁决）。
-3. **切换**：四界面完成并验收后，`serve_web.py` 指向 `web-ui/dist/`（保持 8903 + no-store），
-   旧 `web/` 退役（git 保留）；`tests/test_web.py` token 守护迁移至 `web-ui/src/` 源码
-   （守护 API_BASE=8900、零 8901/8902 直连、路由清单、关键契约 token），旧守护删除。
+3. **切换（2026-08-17 已执行）**：`serve_web.py` 目录改为 `web-ui/dist/`（保持 8903 +
+   no-store），旧 `web/` 退役（git 保留）；8903 经 `scripts/qed_web_service.py`（或 8900
+   `/services/web`）托管；新增 `web-ui/.env.production`（`VITE_API_BASE=http://127.0.0.1:8900/api/v1`，
+   生产直连 8900）；`tests/test_web.py` 重写为守护 serve_web 契约 + web-ui 源码 token
+   （API_BASE=8900 / 零直连 / 路由 / 关键契约）。
 4. **存量验收衔接**：ARCH-006/007/010 等既有支线的浏览器验收，在切换前仍以旧界面进行
    AR；切换后以重写后的新界面验收对应语义。
 

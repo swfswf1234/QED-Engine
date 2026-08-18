@@ -1,8 +1,9 @@
 """QED-Tracker 服务客户端（数据域·QED-Tracker 适配层）：qed CLI 与前端工作台经 HTTP 调用 8901。
 
-契约见 docs/design/service-contracts.md（资源状态机、任务轮询、confirm/reject/approve）。
+契约见 docs/design/service-contracts.md 与 QED-Tracker docs/design/database-schema.md
+（五层模型：qed_domain/qed_course 共享 + qt_knowledge/qt_books/qt_sources 私有，QED-031）。
 transport 可注入（测试用 MockTransport）；非 2xx 与连接失败统一抛 TrackerError。
-calalog 与 register、raw 文件下载为语义 API（8900 数据域）提供能力。
+catalogs 与 register、raw 文件下载为语义 API（8900 数据域）提供能力。
 
 设计关联（DesignRef）：docs/design/service-contracts.md
 实现状态：Current
@@ -35,7 +36,12 @@ class TrackerError(RuntimeError):
 
 
 class TrackerClient:
-    """8901 服务客户端；方法返回解析后的 JSON（dict 或 list）。"""
+    """8901 服务客户端；方法返回解析后的 JSON（dict 或 list）。
+
+    五层端点（QED-031）语义：知识行（qt_knowledge）draft→confirmed→completed；
+    书行（qt_books）candidate→decided→downloading→downloaded→verified，rejected/superseded
+    终态彻底隐藏由上游数据层保证；渠道（qt_sources）一次尝试一条，ok 表达成败。
+    """
 
     def __init__(
         self,
@@ -59,99 +65,6 @@ class TrackerClient:
     def list_tasks(self) -> list:
         return self._request("GET", f"{API_PREFIX}/tasks")
 
-    # --- 三表（qt_selections / qt_downloads / qt_sources，downloads-three-table-model §3.1） ---
-
-    def list_selections(
-        self,
-        course_id: str | None = None,
-        status: str | None = None,
-    ) -> list:
-        """表1 选课表列表（按课程/状态过滤）；rejected/superseded 彻底隐藏由上游数据层保证。"""
-        params = {}
-        for key, value in (("course_id", course_id), ("status", status)):
-            if value:
-                params[key] = value
-        return self._request("GET", f"{API_PREFIX}/selections", params=params)
-
-    def get_selection(self, selection_id: str) -> dict:
-        """表1 套书详情（含该条目表2 册明细列表）。"""
-        return self._request("GET", f"{API_PREFIX}/selections/{selection_id}")
-
-    def confirm_selection(self, selection_id: str, note: str | None = None) -> dict:
-        """表1 候选→确认入书单（可选评审建议 note）。"""
-        body = {"note": note} if note else {}
-        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/confirm", json=body)
-
-    def backup_selection(self, selection_id: str, note: str | None = None) -> dict:
-        """表1 候选→备选（可选评审建议 note）。"""
-        body = {"note": note} if note else {}
-        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/backup", json=body)
-
-    def reject_selection(self, selection_id: str, reason: str, note: str | None = None) -> dict:
-        """表1 否定（reason 必填留痕，可选 note）；rejected 为终态稍后彻底隐藏。"""
-        if not reason:
-            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
-        body = {"reason": reason}
-        if note:
-            body["note"] = note
-        return self._request("POST", f"{API_PREFIX}/selections/{selection_id}/reject", json=body)
-
-    def supersede_selection(self, selection_id: str, reason: str) -> dict:
-        """表1 confirmed→superseded（被新版本替代，reason 必填）；旧版本前端不再可见。"""
-        if not reason:
-            raise TrackerError("标记过时必须提供原因（reason）")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/selections/{selection_id}/supersede",
-            json={"reason": reason},
-        )
-
-    def list_selection_downloads(self, selection_id: str) -> list:
-        """表2 册级明细（按 selection_id）；rejected/failed 默认过滤由上游数据层保证。"""
-        return self._request("GET", f"{API_PREFIX}/resources/{selection_id}/downloads")
-
-    def create_download_candidate(
-        self,
-        selection_id: str,
-        vol: str | None = None,
-        file_hint: str | None = None,
-    ) -> list:
-        """表2 新建候选册（下载预登记）；vol 省略时上游按表1 vols 生成全部候选册。"""
-        body = {"selection_id": selection_id}
-        if vol:
-            body["vol"] = vol
-        if file_hint:
-            body["file_hint"] = file_hint
-        return self._request("POST", f"{API_PREFIX}/downloads", json=body)
-
-    def approve_download(self, download_id: str) -> dict:
-        """表2 册级验收通过：downloaded → approved。"""
-        return self._request("POST", f"{API_PREFIX}/downloads/{download_id}/approve")
-
-    def reject_download(self, download_id: str, reason: str) -> dict:
-        """表2 册级否定（reason 必填，硬删 + 留痕）。"""
-        if not reason:
-            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/downloads/{download_id}/reject",
-            json={"reason": reason},
-        )
-
-    def register_download(self, download_id: str, relative_path: str) -> dict:
-        """表2 人工下载登记：candidate → downloaded（数据根内相对路径由人工输入）。"""
-        if not relative_path:
-            raise TrackerError("人工下载登记必须提供数据根内相对路径（relative_path）")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/downloads/{download_id}/register",
-            json={"relative_path": relative_path},
-        )
-
-    def list_download_sources(self, download_id: str) -> list:
-        """表3 渠道尝试列表（详情弹窗用；失败尝试 ok=0 留痕不展示由上游过滤）。"""
-        return self._request("GET", f"{API_PREFIX}/downloads/{download_id}/sources")
-
     def get_task(self, task_id: str) -> dict:
         return self._request("GET", f"{API_PREFIX}/tasks/{task_id}")
 
@@ -165,6 +78,153 @@ class TrackerClient:
             if time.monotonic() > deadline:
                 raise TrackerError(f"任务 {task_id} 等待超时（{timeout:.0f}s），当前状态：{task.get('status')}")
             time.sleep(interval)
+
+    # --- 知识行（qt_knowledge：一套教程/一组延展资料，五层模型 QED-031） ---
+
+    def list_knowledge(
+        self,
+        course_id: str | None = None,
+        status: str | None = None,
+    ) -> list:
+        """知识行列表（按课程/状态过滤）；rejected/superseded 彻底隐藏由上游数据层保证。"""
+        params = {}
+        for key, value in (("course_id", course_id), ("status", status)):
+            if value:
+                params[key] = value
+        return self._request("GET", f"{API_PREFIX}/knowledge", params=params)
+
+    def get_knowledge(self, knowledge_id: str) -> dict:
+        """知识行详情（含所辖书行列表）。"""
+        return self._request("GET", f"{API_PREFIX}/knowledge/{knowledge_id}")
+
+    def confirm_knowledge(
+        self,
+        knowledge_id: str,
+        textbook_ref: dict | None = None,
+        exercise_ref: dict | None = None,
+        textbook_intro: str = "",
+        exercise_intro: str = "",
+    ) -> dict:
+        """知识行 draft→confirmed（定稿：决定引用 {title, version} + 简介，可空）。"""
+        body: dict = {}
+        if textbook_ref:
+            body["textbook_ref"] = textbook_ref
+        if exercise_ref:
+            body["exercise_ref"] = exercise_ref
+        if textbook_intro:
+            body["textbook_intro"] = textbook_intro
+        if exercise_intro:
+            body["exercise_intro"] = exercise_intro
+        return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/confirm", json=body)
+
+    def complete_knowledge(self, knowledge_id: str) -> dict:
+        """知识行 confirmed→completed（所辖书行全部 verified 后聚合触发）。"""
+        return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/complete")
+
+    def reject_knowledge(self, knowledge_id: str, reason: str) -> dict:
+        """知识行否定（reason 必填留痕）；rejected 终态彻底隐藏。"""
+        if not reason:
+            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/knowledge/{knowledge_id}/reject",
+            json={"reason": reason},
+        )
+
+    def supersede_knowledge(self, knowledge_id: str, reason: str) -> dict:
+        """知识行过时（被新版本替代，reason 必填）；旧版本前端不再可见。"""
+        if not reason:
+            raise TrackerError("标记过时必须提供原因（reason）")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/knowledge/{knowledge_id}/supersede",
+            json={"reason": reason},
+        )
+
+    # --- 书行（qt_books：一册/一卷/一个快照） ---
+
+    def create_book(self, knowledge_id: str, **kwargs) -> dict:
+        """新建书行候选（先登记再下载）：candidate 态；kwargs 透传 8901 /books 字段。"""
+        body = {"knowledge_id": knowledge_id, **kwargs}
+        return self._request("POST", f"{API_PREFIX}/books", json=body)
+
+    def list_book_sources(self, book_id: str) -> list:
+        """书行渠道尝试列表（详情弹窗用；失败尝试 ok=0 留痕不展示由上游过滤）。"""
+        return self._request("GET", f"{API_PREFIX}/books/{book_id}/sources")
+
+    def add_book_source(self, book_id: str, **kwargs) -> dict:
+        """登记一次渠道尝试（channel/provider_id/page_url/download_url/...）；ok 表达成败。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/sources", json=dict(kwargs))
+
+    def register_book(self, book_id: str, relative_path: str) -> dict:
+        """人工下载登记：candidate → downloaded 直转（数据根内相对路径，PDF 校验在 8901 侧）。"""
+        if not relative_path:
+            raise TrackerError("人工下载登记必须提供数据根内相对路径（relative_path）")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/books/{book_id}/register",
+            json={"relative_path": relative_path},
+        )
+
+    def decide_book(self, book_id: str) -> dict:
+        """候选→决定（人工决定下载）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/decide")
+
+    def start_book(self, book_id: str) -> dict:
+        """决定→下载中（任务运行）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/start")
+
+    def fail_book(self, book_id: str) -> dict:
+        """下载失败标记（可 retry）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/fail")
+
+    def retry_book(self, book_id: str) -> dict:
+        """失败重试 → downloading。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/retry")
+
+    def complete_book(
+        self,
+        book_id: str,
+        sha256: str,
+        relative_path: str,
+        page_count: int | None = None,
+        absolute_path: str = "",
+        file_name: str = "",
+    ) -> dict:
+        """下载完成回填：sha256 + 数据根相对路径必填（服务端/自动下载链路调用）。"""
+        if not sha256 or not relative_path:
+            raise TrackerError("下载完成必须提供 sha256 与 relative_path")
+        body = {
+            "sha256": sha256,
+            "relative_path": relative_path,
+            "page_count": page_count,
+            "absolute_path": absolute_path,
+            "file_name": file_name,
+        }
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/complete", json=body)
+
+    def verify_book(self, book_id: str) -> dict:
+        """人工验收通过：downloaded → verified（终态）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/verify")
+
+    def reject_book(self, book_id: str, reason: str, note: str | None = None) -> dict:
+        """书行否定（reason 必填，文件硬删留痕；可选审理备注 note）。"""
+        if not reason:
+            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
+        body: dict = {"reason": reason}
+        if note:
+            body["note"] = note
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/reject", json=body)
+
+    def supersede_book(self, book_id: str, reason: str) -> dict:
+        """书行过时（版本换代留痕，reason 必填）。"""
+        if not reason:
+            raise TrackerError("标记过时必须提供原因（reason）")
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/books/{book_id}/supersede",
+            json={"reason": reason},
+        )
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         try:

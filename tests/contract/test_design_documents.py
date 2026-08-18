@@ -27,6 +27,7 @@ CURRENT_DOCUMENTS = {
     "frontend-react-refactor.md",
     "backend-domain-split.md",
     "integration-matrix.md",
+    "downloads-manage-redesign.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

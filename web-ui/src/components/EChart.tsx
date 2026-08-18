@@ -7,12 +7,12 @@ import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts/core';
 import { BarChart, PieChart } from 'echarts/charts';
 import {
-  GridComponent, TooltipComponent, LegendComponent,
+  GridComponent, TooltipComponent, LegendComponent, TitleComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption } from 'echarts/core';
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, CanvasRenderer]);
 
 export default function EChart({ option, height = 320 }: { option: EChartsCoreOption; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);

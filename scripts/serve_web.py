@@ -4,19 +4,23 @@
 做启发式缓存（freshness ≈ 距 Last-Modified 的 10%），改版后硬刷新前仍加载旧文件，
 多次造成「改版不可见」。本脚本在响应上强制 Cache-Control: no-store。
 
-用法（start-all.ps1 前端启动等价命令）：
+额外提供 /api/v1/health 健康探测端点（8900 服务注册表 `web` 单元端口探测目标，
+service-control.md）：静态目录不存在的路径统一回退 GET 处理前先命中 health。
+
+用法（qed_web_service.py 生命周期脚本调用的实际服务进程）：
     python scripts/serve_web.py
 
-设计关联（DesignRef）：docs/design/web-frontend.md
+设计关联（DesignRef）：docs/design/web-frontend.md、docs/design/frontend-react-refactor.md
 实现状态：Current
 """
 
 import functools
+import json
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PORT = 8903
-WEB_DIR = str(Path(__file__).resolve().parent.parent / "web")
+WEB_DIR = str(Path(__file__).resolve().parent.parent / "web-ui" / "dist")
 
 
 class NoStoreHandler(SimpleHTTPRequestHandler):
@@ -25,6 +29,18 @@ class NoStoreHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def do_GET(self) -> None:
+        """健康探测端点：/api/v1/health 返回 200 JSON（8900 `web` 单元探测目标）。"""
+        if self.path == "/api/v1/health":
+            body = json.dumps({"status": "ok", "service": "qed-engine-web"}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 
 
 def main() -> None:
