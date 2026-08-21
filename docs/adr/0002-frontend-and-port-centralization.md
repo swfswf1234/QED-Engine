@@ -42,7 +42,7 @@ QED-Engine 下，需要明确前端归属与端口规划。
 ## 关联
 
 - 关联设计：`docs/design/service-contracts.md`、`docs/design/configuration-and-secrets.md`、
-  `docs/design/config-center-api.md`
+  `docs/architecture/api-contracts.md`
 - 关联架构：`docs/architecture/four-service-architecture.md`
 - 关联计划：`../history/plans/2026-08/2026-08-sync-alignment.md`（已归档，原登记于
   `docs/plans/2026-08-sync-alignment.md`，2026-08-10 REQ-024 清理时修正链接）

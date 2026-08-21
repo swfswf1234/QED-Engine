@@ -11,7 +11,7 @@ PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（块判定）。
 连接失败/5xx → 503 + 明确提示（前端据此降级显示，独立性铁律：8902 离线不破坏其他界面）。
 /books/sync 同时依赖 8901（取数）：8901 不可达 → 503 + 「QED-Tracker 服务不可达」提示。
 
-设计关联（DesignRef）：docs/design/config-center-api.md（8902 契约草案事实源：
+设计关联（DesignRef）：docs/architecture/api-contracts.md（8902 契约草案事实源：
 Axiom-Flow docs/design/8902-integration-contract.md）、docs/design/af-books-sync.md
 实现状态：Current（契约草案阶段；V2-007 冻结后按回执微调）
 关联测试：tests/test_api.py

@@ -1,6 +1,6 @@
 """
 模块职责：8900 自身重启（self-restart）契约测试：spawn 延迟启动/失败语义/不破坏 /services。
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/services/service_manager.py
 """
@@ -136,7 +136,15 @@ def test_restart_self_popen_failure_raises_service_error(monkeypatch):
 
 
 def _client(monkeypatch):
+    from qed_engine.api import control as api_control
+    from qed_engine.services.llm import call_log as llm_call_log
+
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
+    # 隔离 create_app() 启动自检（真实 .env 密钥/数据库不可控，同 test_api.py 模式）：
+    # 探测与建表全 mock，避免真实网络请求与真实 CREATE TABLE 副作用
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
     return TestClient(create_app())
 
 

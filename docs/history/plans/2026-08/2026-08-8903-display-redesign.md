@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-06
 关联 ADR：docs/adr/0002-frontend-and-port-centralization.md
-关联设计：docs/design/service-contracts.md、docs/design/config-center-api.md
+关联设计：docs/design/service-contracts.md、docs/architecture/api-contracts.md
 关联 Tracker：docs/trackers/todo.md（ARCH-005 登记；REQ-006 承接执行）
 归档判定：用户确认计划（转 Accepted）→ REQ-006 执行 → 门禁全绿 + 浏览器验收后 Completed，归档至 `history/plans/2026-08/`
 

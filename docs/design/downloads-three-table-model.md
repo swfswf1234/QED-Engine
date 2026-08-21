@@ -17,7 +17,7 @@ qt_sources（私有）五层结构，唯一事实源为 QED-Tracker `docs/design
 关联 ADR：无（数据库归属沿用 REQ-026/027 裁决：各子项目确认维护，根仓库只做指引与规划）
 关联文档：[course-acquisition-flow.md](course-acquisition-flow.md)（五阶段流程）、
 [web-frontend.md](web-frontend.md)（8903 前端契约现状基座）、
-[database-design.md](database-design.md)（数据库指引与规划）、
+[../architecture/database-design.md](../architecture/database-design.md)（数据库指引与规划）、
 [service-contracts.md](service-contracts.md)（跨项目对接语义）
 
 ## 1. 背景与动机

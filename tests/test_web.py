@@ -100,7 +100,10 @@ def test_api_modules_no_direct_subproject_ports():
 
 
 def test_hash_routes_declared():
-    """App.tsx 应声明 hash 路由：主界面 / 学习中心 / 管理台嵌套（控制台/仪表盘/下载/解析/对照）。"""
+    """App.tsx 应声明 hash 路由：主界面 / 学习中心 / 管理台嵌套（控制台/仪表盘/下载/文档解析管理）。
+
+    2026-08-18：原始文档对照(compare)路由删除，能力并入文档解析管理（D7 裁决）。
+    """
     src = (SRC / "App.tsx").read_text(encoding="utf-8")
     for route in (
         'path="/"',
@@ -109,10 +112,19 @@ def test_hash_routes_declared():
         'path="dashboard"',
         'path="downloads"',
         'path="parsing"',
-        'path="compare"',
     ):
         assert route in src, f"App.tsx 缺少路由：{route}"
+    assert 'path="compare"' not in src, "App.tsx 不应再声明 compare 路由（已并入文档解析管理）"
     assert "HashRouter" in src, "App.tsx 应使用 HashRouter（8903 静态服务无服务端路由）"
+
+
+def test_admin_menu_renamed_parsing():
+    """管理台左侧导航：解析进度改名「文档解析管理」，原始文档对照菜单删除。"""
+    src = (SRC / "components" / "AdminLayout.tsx").read_text(encoding="utf-8")
+    assert "label: '文档解析管理'" in src, "AdminLayout 应展示「文档解析管理」菜单"
+    assert "label: '解析进度'" not in src, "AdminLayout 不应残留旧菜单名「解析进度」"
+    assert "label: '原始文档对照'" not in src, "AdminLayout 不应残留「原始文档对照」菜单"
+    assert "/admin/compare" not in src, "AdminLayout 不应残留 compare 菜单项"
 
 
 # --- 关键契约端点 token（防契约漂移） ---
@@ -121,12 +133,12 @@ def test_hash_routes_declared():
 def test_api_endpoint_tokens_present():
     """web-ui api 封装应覆盖关键契约端点（8900 数据域/服务域/监控诊断）。
 
-    契约来源：docs/design/config-center-api.md、service-control.md。
+    契约来源：docs/architecture/api-contracts.md、service-control.md。
     """
     endpoint_tokens = {
         "services.ts": ("/services", "/self-restart", "/config/database"),
         "tracker.ts": ("/catalogs/", "/knowledge", "/books"),
-        "axiom.ts": ("/books", "/parse-jobs"),
+        "axiom.ts": ("/books", "/parse-jobs", "/books/sync", "/blocks/", "/review"),
     }
     for filename, tokens in endpoint_tokens.items():
         path = SRC / "api" / filename

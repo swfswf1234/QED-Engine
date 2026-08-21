@@ -5,21 +5,32 @@
 LLM 供应商可达性与 MySQL 连接为 8900 **启动自检**（create_app 时探测一次，见
 api/main.py），本模块保留探测函数供启动检查引用；/config/llm-status 端点已删除（ARCH-014）。
 
-设计关联（DesignRef）：docs/design/config-center-api.md
-（服务域契约见 docs/design/service-control.md；三域组织见 docs/design/backend-domain-split.md）
+设计关联（DesignRef）：docs/architecture/api-contracts.md
+（服务域契约见 docs/design/service-control.md；三域组织见 docs/design/backend-domain-split.md；
+LLM 网关端点契约见 docs/design/llm-gateway-and-model-management.md）
 实现状态：Current
-关联测试：tests/test_api.py、tests/test_log_viewer.py、tests/test_monitor.py、tests/test_self_restart.py
+关联测试：tests/test_api.py、tests/test_log_viewer.py、tests/test_monitor.py、tests/test_self_restart.py、
+tests/test_llm_endpoints.py
 """
+
+import base64
+import binascii
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from qed_engine import __version__
 from qed_engine.api.schemas import (
+    CallLogItem,
+    CallsResponse,
     DatabaseResponse,
     GpuStatus,
     HealthResponse,
     KeysResponse,
+    LlmCallResponse,
+    LlmTestResponse,
+    LlmTextRequest,
+    LlmVisionRequest,
     LmStudioStatus,
     LogsResponse,
     MineruStatus,
@@ -27,8 +38,11 @@ from qed_engine.api.schemas import (
     ModelsResponse,
 )
 from qed_engine.config import Settings
+from qed_engine.services.llm import call_log as llm_call_log
+from qed_engine.services.llm import clients as llm_clients
+from qed_engine.services.llm import gateway as llm_gateway
 from qed_engine.services.log_viewer import LogError, read_log
-from qed_engine.services.monitor import probe_gpu, probe_lmstudio, probe_mineru
+from qed_engine.services.monitor import probe_gpu, probe_lmstudio, probe_memory, probe_mineru
 from qed_engine.services.service_manager import (
     _MANAGED,
     ServiceError,
@@ -133,36 +147,35 @@ def health() -> HealthResponse:
 
 @router.get("/config/models", response_model=ModelsResponse)
 def models(request: Request) -> ModelsResponse:
-    """模型路由表：模型选择单线路（qwen 三用途），子项目不感知密钥。"""
+    """模型路由表：按 QED_API_PROVIDER 路由，返回解析后生效模型（厂商默认兜底）。"""
     resolved: Settings = request.app.state.settings
+    provider = resolved.qed_api_provider
+    text_model = llm_clients.resolve_text(provider, resolved.qed_model)[1]
+    vision = llm_clients.resolve_vision(provider, resolved.qed_ocr_model)
     return ModelsResponse(
         default=ModelRoute(
-            model=resolved.qed_model,
-            provider="qwen",
-            configured=resolved.has_configured("qwen"),
+            model=text_model,
+            provider=provider,
+            configured=resolved.api_configured,
         ),
         ocr=ModelRoute(
-            model=resolved.qed_ocr_model,
-            provider="qwen",
-            configured=resolved.has_configured("qwen"),
+            model=vision[1] if vision else "（无视觉）",
+            provider=provider,
+            configured=resolved.api_configured,
         ),
         embedding=ModelRoute(
             model=resolved.qed_embedding_model,
-            provider="qwen",
-            configured=resolved.has_configured("qwen"),
+            provider=provider,
+            configured=resolved.api_configured,
         ),
     )
 
 
 @router.get("/config/keys", response_model=KeysResponse)
 def keys(request: Request) -> KeysResponse:
-    """供应商配置状态（管理界面用），不含密钥值。"""
+    """供应商配置状态（管理界面用）：单 key 布尔 + 当前厂商，不含密钥值。"""
     resolved: Settings = request.app.state.settings
-    return KeysResponse(
-        deepseek=resolved.has_configured("deepseek"),
-        qwen=resolved.has_configured("qwen"),
-        glm=resolved.has_configured("glm"),
-    )
+    return KeysResponse(provider=resolved.qed_api_provider, configured=resolved.api_configured)
 
 
 @router.get("/config/database", response_model=DatabaseResponse)
@@ -182,6 +195,117 @@ def database(request: Request) -> DatabaseResponse:
         configured=snapshot["configured"],
         reachable=snapshot["reachable"],
         reason=snapshot["reason"],
+    )
+
+
+def gateway_call_text(settings, **kwargs):
+    return llm_gateway.call_text(settings, **kwargs)
+
+
+def gateway_call_vision(settings, **kwargs):
+    return llm_gateway.call_vision(settings, **kwargs)
+
+
+def gateway_search_calls(settings, **kwargs):
+    return llm_call_log.search_calls(settings, **kwargs)
+
+
+@router.post("/llm/text", response_model=LlmCallResponse)
+def llm_text(request: Request, payload: LlmTextRequest) -> LlmCallResponse:
+    """文字模型调用（api/local 路由由网关处理，调用记录落 qed_llm_calls）。"""
+    resolved: Settings = request.app.state.settings
+    return LlmCallResponse(**gateway_call_text(
+        resolved, prompt=payload.prompt, system=payload.system,
+        prompt_template=payload.prompt_template, max_tokens=payload.max_tokens,
+    ))
+
+
+@router.post("/llm/vision", response_model=LlmCallResponse)
+def llm_vision(request: Request, payload: LlmVisionRequest) -> LlmCallResponse:
+    """视觉模型调用：api 模式收 image_base64；local 模式收 pdf_base64（MinerU）。"""
+    if not payload.image_base64 and not payload.pdf_base64:
+        raise HTTPException(status_code=422, detail="image_base64 与 pdf_base64 至少提供一个")
+    resolved: Settings = request.app.state.settings
+    pdf_bytes = None
+    if payload.pdf_base64:
+        try:
+            pdf_bytes = base64.b64decode(payload.pdf_base64, validate=True)
+        except binascii.Error:
+            raise HTTPException(status_code=422, detail="pdf_base64 不是合法的 Base64 数据") from None
+        if not pdf_bytes:
+            raise HTTPException(status_code=422, detail="pdf_base64 不是合法的 Base64 数据")
+    return LlmCallResponse(**gateway_call_vision(
+        resolved, image_base64=payload.image_base64, pdf_bytes=pdf_bytes,
+        pdf_filename=payload.pdf_filename, prompt=payload.prompt,
+        prompt_template=payload.prompt_template,
+    ))
+
+
+@router.post("/llm/test/text", response_model=LlmTestResponse)
+def llm_test_text(request: Request) -> LlmTestResponse:
+    """文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因。"""
+    resolved: Settings = request.app.state.settings
+    result = gateway_call_text(resolved, prompt="请回复「OK」两个字。", prompt_template="test")
+    return LlmTestResponse(ok=result["success"], detail=(result["error"] or "")[:200] or result["reply"][:200],
+                           call_id=result["call_id"])
+
+
+@router.post("/llm/test/vision", response_model=LlmTestResponse)
+def llm_test_vision(request: Request) -> LlmTestResponse:
+    """图像模型测试：api 模式用小图调 qwen-vl；local 模式做 MinerU 健康探测。"""
+    resolved: Settings = request.app.state.settings
+    if resolved.qed_api_select == "local":
+        status = probe_mineru()
+        return LlmTestResponse(ok=status["reachable"], detail=status["reason"] or "MinerU 可达")
+    # api 模式：1x1 像素透明 PNG
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
+    result = gateway_call_vision(resolved, image_base64=base64.b64encode(tiny_png).decode(), prompt="识别图片")
+    return LlmTestResponse(ok=result["success"], detail=(result["error"] or "")[:200] or result["reply"][:200],
+                           call_id=result["call_id"])
+
+
+@router.get("/llm/calls", response_model=CallsResponse)
+def llm_calls(
+    request: Request,
+    service: str | None = None,
+    mode: str | None = None,
+    model: str | None = None,
+    status: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    page: int = 1,
+    size: int = 20,
+) -> CallsResponse:
+    """调用记录检索（qed_llm_calls，按 service/mode/model/status/时间过滤，倒序分页）。"""
+    resolved: Settings = request.app.state.settings
+    result = gateway_search_calls(
+        resolved, service=service, mode=mode, model=model, status=status,
+        start=start, end=end, page=page, size=size,
+    )
+    return CallsResponse(
+        items=[CallLogItem(
+            id=item["id"], service=item["service"], mode=item["mode"], provider=item["provider"],
+            model=item["model"], endpoint=item["endpoint"], prompt_template=item.get("prompt_template"),
+            prompt=item.get("prompt") or "", response=item.get("response") or "",
+            duration_ms=item.get("duration_ms"),
+            status=item["status"], error=item.get("error"),
+            created_at=str(item["created_at"]),
+        ) for item in result["items"]],
+        total=result["total"], page=result["page"], size=result["size"],
+    )
+
+
+@router.post("/database/test", response_model=DatabaseResponse)
+def database_test(request: Request) -> DatabaseResponse:
+    """MySQL 即时连接探测（控制台测试按钮；/config/database 仍为启动快照）。"""
+    resolved: Settings = request.app.state.settings
+    reachable, reason = _probe_mysql(resolved)
+    return DatabaseResponse(
+        host=resolved.qed_db_host, port=resolved.qed_db_port, name=resolved.qed_db_name,
+        user=resolved.qed_db_user, configured=resolved.qed_db_password.get_secret_value() != "",
+        reachable=reachable, reason=reason,
     )
 
 
@@ -250,8 +374,8 @@ def logs(service: str, tail: int = 200, keyword: str | None = None) -> LogsRespo
 
 @router.get("/monitor/gpu", response_model=GpuStatus)
 def monitor_gpu() -> GpuStatus:
-    """GPU 状态（nvidia-smi 解析）；不可用也 200 + reason（控制台降级显示）。"""
-    return GpuStatus(**probe_gpu())
+    """GPU 状态（nvidia-smi 解析）+ 系统内存（GlobalMemoryStatusEx）；不可用也 200 + reason。"""
+    return GpuStatus(**probe_gpu(memory_fn=probe_memory))
 
 
 @router.get("/monitor/lmstudio", response_model=LmStudioStatus)

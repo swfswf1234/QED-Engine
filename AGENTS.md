@@ -28,7 +28,7 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 ## 开发状态指针
 
-**接手任何任务前，先读[项目状态快照](docs/architecture/project-status.md)**：四服务当前实现
+**接手任何任务前，先读[项目状态快照](docs/trackers/project-status.md)**：四服务当前实现
 状态、三中心定位与当前主线一览（30 秒了解项目到哪）。未关闭任务与未来方向分别见
 [任务台账](docs/trackers/todo.md) 与[能力路线图](docs/trackers/roadmap.md)。
 
@@ -38,7 +38,7 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 | --- | --- | --- | --- | --- |
 | QED-Engine 前端 | 本仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习中心（建设中）+ 管理后台：控制台 / 仪表盘 / 文档下载管理 / 文档解析管理（含解析进度、原始文档对照两个子视图）；**只连 8900**（ADR 0007） |
 | QED-Engine 后端 | 本仓库 `backend/qed_engine/` | 8900 | 已运行 | 三域组织（ARCH-012）：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（目录/三表/任务适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发 |
-| Axiom-Flow | 子仓库 | 8000 → 8902 迁移中 | 已实现 | 下载后文档的解析、OCR、图表/公式还原、质量审阅 |
+| Axiom-Flow | 子仓库 | 8902（已迁移，8000 兼容保留） | 已实现 | 下载后文档的解析、OCR、图表/公式还原、质量审阅 |
 | QED-Tracker | 子仓库 | 8901 | 已服务化 | 教材/习题集/论文的发现、下载、校验、登记 |
 
 **独立性铁律**：Axiom-Flow 与 QED-Tracker 未启动时，QED-Engine 前端对话/展示必须正常；QED-Engine 后端离线时，前两者用本地默认配置降级运行。三个项目均可独立开发、独立部署。
@@ -49,9 +49,9 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 | 需要 | 入口 |
 | --- | --- |
-| 项目当前状态（开发状态指针） | [docs/architecture/project-status.md](docs/architecture/project-status.md) |
-| 系统结构与服务边界 | [docs/architecture/](docs/architecture/index.md)，映射与实现状态见 [code-map.md](docs/architecture/code-map.md) |
-| 服务契约、dataset 约定、统一配置接口 | [docs/design/](docs/design/index.md) |
+| 项目当前状态（开发状态指针） | [docs/trackers/project-status.md](docs/trackers/project-status.md) |
+| 系统结构与服务边界（固定架构文档） | [docs/architecture/](docs/architecture/index.md)：总体架构、服务架构、固定 API 文档（[api-contracts.md](docs/architecture/api-contracts.md)）、数据库总纲（[database-design.md](docs/architecture/database-design.md)）、映射见 [code-map.md](docs/architecture/code-map.md) |
+| 服务契约、dataset 约定、统一配置接口（相对确定设计文档） | [docs/design/](docs/design/index.md) |
 | 工程治理规则（文档规范等） | `docs/standards/` 是工程治理规则的唯一事实源，入口 [docs/standards/](docs/standards/index.md)，具体采用 [任务生命周期](docs/standards/task-lifecycle.md)、[文档规范](docs/standards/documentation.md)、[ADR 治理](docs/standards/adr-governance.md)、[代码与文档追溯](docs/standards/code-document-traceability.md)、[测试架构与门禁](docs/standards/testing.md)、[工程治理契约](docs/standards/governance-contract.md)、[跨项目协作流程](docs/standards/cross-project-collaboration.md) |
 | 开发/联调步骤 | [docs/guides/](docs/guides/index.md) |
 | 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md)，任务台账 [todo.md](docs/trackers/todo.md) |

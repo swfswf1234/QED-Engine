@@ -24,8 +24,14 @@ def _table(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
     start = lines.index(header)
     rows = []
     for line in lines[start + 2 :]:
+        stripped = line.strip()
+        # 分节标题（### 主线分组）、空行、重复表头与分隔行（每分节独立表格）不是任务行，跳过
         if not line.startswith("|"):
+            if line.startswith("### ") or not stripped:
+                continue
             break
+        if stripped == header or stripped.startswith("| ---"):
+            continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         assert len(cells) == len(columns), line
         rows.append(dict(zip(columns, cells, strict=True)))
@@ -46,12 +52,13 @@ def _todo_rows() -> list[dict[str, str]]:
 
 
 def test_tracker_directory_has_exact_governed_files_and_index_links():
-    # completed.md 为按需创建的关闭台账（见 task-lifecycle 终态规则），其余文件必须齐全
+    # completed.md 为按需创建的关闭台账（见 task-lifecycle 终态规则）；project-status.md
+    # 为实时状态快照（ADR 0010 移入，见 documentation.md），其余文件必须齐全
     names = {path.name for path in TRACKERS.glob("*.md")}
-    assert names <= {"index.md", "roadmap.md", "todo.md", "completed.md"}
+    assert names <= {"index.md", "roadmap.md", "todo.md", "completed.md", "project-status.md"}
     assert {"index.md", "roadmap.md", "todo.md"} <= names
     index = (TRACKERS / "index.md").read_text(encoding="utf-8")
-    for filename in ("roadmap.md", "todo.md"):
+    for filename in ("roadmap.md", "todo.md", "project-status.md"):
         assert f"]({filename})" in index
 
 

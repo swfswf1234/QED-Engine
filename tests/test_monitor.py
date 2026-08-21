@@ -1,6 +1,6 @@
 """
 模块职责：组件监控探测（monitor）契约测试：GPU/LM Studio/mineru 各分支与响应形状。
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/services/monitor.py
 """
@@ -122,7 +122,7 @@ def test_lmstudio_ok_returns_models():
     result = monitor.probe_lmstudio(_lmstudio_settings(), client=_mock_client(handler))
     assert result == {
         "reachable": True,
-        "base_url": "http://127.0.0.1:1234/v1",
+        "base_url": "http://127.0.0.1:5001/v1",
         "models": ["qwen3-8b", "qwen3-27b"],
         "reason": "",
     }
@@ -167,7 +167,7 @@ def test_mineru_ok():
     """mineru 8002 健康端点 200 → reachable=True。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/health"
+        assert request.url.path == "/health"
         return httpx.Response(200, json={"status": "ok"})
 
     result = monitor.probe_mineru(client=_mock_client(handler))
@@ -198,19 +198,28 @@ def test_mineru_unreachable_reports_chinese_reason():
 
 
 def _client(monkeypatch):
+    from qed_engine.api import control as api_control
+    from qed_engine.services.llm import call_log as llm_call_log
+
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
+    # 隔离 create_app() 启动自检（真实 .env 密钥/数据库不可控，同 test_api.py 模式）：
+    # 探测与建表全 mock，避免真实网络请求与真实 CREATE TABLE 副作用
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
     return TestClient(create_app())
 
 
 def test_monitor_gpu_endpoint(monkeypatch):
-    """GET /monitor/gpu：返回响应形状。"""
+    """GET /monitor/gpu：返回响应形状（含 sys_memory_* 契约字段）。"""
     from qed_engine.api import control
 
     monkeypatch.setattr(
         control,
         "probe_gpu",
-        lambda: {"available": True, "name": "RTX 4080", "memory_total_mb": 16376,
-                 "memory_used_mb": 4096, "utilization_percent": 65, "processes": []},
+        lambda **kwargs: {"available": True, "name": "RTX 4080", "memory_total_mb": 16376,
+                          "memory_used_mb": 4096, "utilization_percent": 65, "processes": [],
+                          "sys_memory_total_mb": 32768, "sys_memory_used_mb": 15360, "sys_memory_percent": 45},
     )
     client = _client(monkeypatch)
     response = client.get("/api/v1/monitor/gpu")
@@ -218,6 +227,7 @@ def test_monitor_gpu_endpoint(monkeypatch):
     body = response.json()
     assert body["name"] == "RTX 4080"
     assert body["utilization_percent"] == 65
+    assert body["sys_memory_percent"] == 45
 
 
 def test_monitor_lmstudio_endpoint(monkeypatch):
@@ -227,7 +237,7 @@ def test_monitor_lmstudio_endpoint(monkeypatch):
     monkeypatch.setattr(
         control,
         "probe_lmstudio",
-        lambda settings: {"reachable": True, "base_url": "http://127.0.0.1:1234/v1",
+        lambda settings: {"reachable": True, "base_url": "http://127.0.0.1:5001/v1",
                           "models": ["qwen3-8b"], "reason": ""},
     )
     client = _client(monkeypatch)
@@ -249,3 +259,55 @@ def test_monitor_mineru_endpoint(monkeypatch):
     response = client.get("/api/v1/monitor/mineru")
     assert response.status_code == 200
     assert response.json()["reachable"] is False
+
+
+def test_probe_memory_windows_ok(monkeypatch):
+    """系统内存探测（Windows GlobalMemoryStatusEx）：字段齐全。"""
+    import ctypes
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    class FakeStat:
+        dwLength = 64
+        dwMemoryLoad = 45
+        ullTotalPhys = 32 * 1024**3
+        ullAvailPhys = 17 * 1024**3
+        ullTotalPageFile = 0
+        ullAvailPageFile = 0
+        ullTotalVirtual = 0
+        ullAvailVirtual = 0
+        ullAvailExtendedVirtual = 0
+
+    fake = FakeStat()
+
+    def fake_global_memory_status_ex(ptr):
+        ptr.contents.dwMemoryLoad = fake.dwMemoryLoad
+        ptr.contents.ullTotalPhys = fake.ullTotalPhys
+        ptr.contents.ullAvailPhys = fake.ullAvailPhys
+        return True
+
+    monkeypatch.setattr(ctypes.windll.kernel32, "GlobalMemoryStatusEx", fake_global_memory_status_ex)
+    result = monitor.probe_memory()
+    assert result["available"] is True
+    assert result["total_mb"] == 32768
+    assert result["used_mb"] == 15360
+    assert result["percent"] == 45
+
+
+def test_probe_memory_non_windows_reports_reason(monkeypatch):
+    """非 Windows 平台：available=false + 中文原因（不抛异常）。"""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    result = monitor.probe_memory()
+    assert result["available"] is False
+
+
+def test_probe_gpu_attaches_memory_when_provided():
+    """probe_gpu(memory_fn=...) 时响应附带 sys_memory_* 字段（端点注入）。"""
+    runner = _fake_smi("NVIDIA GeForce RTX 4080, 16376, 4096, 65")
+    result = monitor.probe_gpu(runner=runner, memory_fn=lambda: {"available": True, "total_mb": 32768, "used_mb": 15360, "percent": 45})
+    assert result["sys_memory_total_mb"] == 32768
+    assert result["sys_memory_used_mb"] == 15360
+    assert result["sys_memory_percent"] == 45

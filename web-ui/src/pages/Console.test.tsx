@@ -59,7 +59,11 @@ function renderConsole() {
 
 describe('控制台 Console（Phase 2）', () => {
   beforeEach(() => {
-    useConsoleStore.setState({ services: [], dbStatus: null, loading: false, error: null, dbError: null, operating: null });
+    useConsoleStore.setState({
+      services: [], dbStatus: null, loading: false, error: null, dbError: null,
+      gpu: null, gpuError: null, lmstudio: null, lmstudioError: null, mineru: null, mineruError: null,
+      operating: null,
+    });
   });
 
   afterEach(() => {
@@ -228,8 +232,9 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.getByText('QED-Tracker 文档下载服务')).toBeInTheDocument();
     // 无整体错误横幅
     expect(screen.queryByText('控制台数据获取失败')).not.toBeInTheDocument();
-    // MySQL 卡降级文案
-    expect(await screen.findByText(/获取失败/)).toBeInTheDocument();
+    // 仅 MySQL 卡降级文案（gpu/lmstudio/mineru 各自降级，不影响该断言）
+    const mysqlCard = screen.getByText('本地 MySQL（qed 库）').closest('.ant-card')!;
+    expect(await within(mysqlCard as HTMLElement).findByText(/获取失败/)).toBeInTheDocument();
   });
 
   it('刷新按钮触发重新拉取', async () => {
@@ -300,5 +305,81 @@ describe('控制台 Console（Phase 2）', () => {
     expect(result).toMatchObject({ name: 'tracker', op: 'start', success: false, status: 'error' });
     expect(result.reason).toContain('服务已在线');
     expect(useConsoleStore.getState().operating).toBeNull();
+  });
+
+  it('GPU 总览条在四服务卡之后渲染（显卡型号/显存/利用率/系统内存）', async () => {
+    const routes = {
+      '/services': servicesFixture,
+      '/config/database': dbFixture,
+      '/monitor/gpu': {
+        available: true,
+        name: 'RTX 4080',
+        memory_total_mb: 16376,
+        memory_used_mb: 4096,
+        utilization_percent: 65,
+        processes: [{ pid: 100, name: 'python.exe', memory_mb: 2048 }],
+        sys_memory_total_mb: 32768,
+        sys_memory_used_mb: 14745,
+        sys_memory_percent: 45,
+        reason: '',
+      },
+      '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
+      '/monitor/mineru': { reachable: false, port: 8002, reason: 'mineru docker 容器未启动' },
+    };
+    mockApi(routes);
+    renderConsole();
+    // 总览条内容：显卡型号 / 显存 used/total / 利用率 / 系统内存 / 模型进程
+    expect(await screen.findByText(/RTX 4080/)).toBeInTheDocument();
+    expect(screen.getByText(/4096 \/ 16376/)).toBeInTheDocument();
+    expect(screen.getByText(/65%/)).toBeInTheDocument();
+    expect(screen.getByText(/45%/)).toBeInTheDocument();
+    expect(screen.getByText(/模型进程/)).toBeInTheDocument();
+    // 顺序：四服务卡全部在 GPU 总览条之前
+    const svcCards = ['QED 管理服务', 'QED-Tracker 文档下载服务', 'Axiom-Flow 文档解析服务', 'QED 前端服务']
+      .map((name) => screen.getByText(name).closest('.ant-card')!);
+    const gpuCard = screen.getByText(/RTX 4080/).closest('.ant-card')!;
+    svcCards.forEach((card) => {
+      expect(gpuCard.compareDocumentPosition(card)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+    });
+  });
+
+  it('依赖组件三卡含 MySQL/文字模型/图像模型，测试按钮触发对应动作并展示结果', async () => {
+    const routes = {
+      '/services': servicesFixture,
+      '/config/database': dbFixture,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/monitor/lmstudio': { reachable: false, reason: '超时' },
+      '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
+      '/database/test': { reachable: true, reason: '' },
+      '/llm/test/text': { ok: true, detail: '模型响应正常' },
+      '/llm/test/vision': { ok: true, detail: '识别成功' },
+    };
+    mockApi(routes);
+    renderConsole();
+    // 三卡齐备（默认未验证置灰）
+    expect(await screen.findByText('本地 MySQL（qed 库）')).toBeInTheDocument();
+    expect(screen.getByText('本地文字模型（LM Studio）')).toBeInTheDocument();
+    expect(screen.getByText('本地图像模型（MinerU）')).toBeInTheDocument();
+    expect(screen.getByText(/未验证（超时）/)).toBeInTheDocument();
+    expect(screen.getByText(/未验证（mineru docker 容器未启动）/)).toBeInTheDocument();
+    // MySQL 卡「测试」→ POST /database/test → 卡内点亮为在线
+    const mysqlCard = screen.getByText('本地 MySQL（qed 库）').closest('.ant-card')!;
+    const callsBefore = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(mysqlCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
+    expect(await within(mysqlCard as HTMLElement).findByText(/在线/)).toBeInTheDocument();
+    expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(String(mockFetch.mock.calls[callsBefore][0])).toContain('/database/test');
+    // 文字模型卡「测试」→ POST /llm/test/text → 点亮
+    const textCard = screen.getByText('本地文字模型（LM Studio）').closest('.ant-card')!;
+    const callsBeforeText = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
+    expect(await within(textCard as HTMLElement).findByText(/在线/)).toBeInTheDocument();
+    expect(String(mockFetch.mock.calls[callsBeforeText][0])).toContain('/llm/test/text');
+    // 图像模型卡「测试」→ POST /llm/test/vision → 点亮
+    const visionCard = screen.getByText('本地图像模型（MinerU）').closest('.ant-card')!;
+    const callsBeforeVision = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(visionCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
+    expect(await within(visionCard as HTMLElement).findByText(/在线/)).toBeInTheDocument();
+    expect(String(mockFetch.mock.calls[callsBeforeVision][0])).toContain('/llm/test/vision');
   });
 });

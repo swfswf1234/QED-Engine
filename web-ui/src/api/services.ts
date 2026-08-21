@@ -3,7 +3,7 @@
  * 契约来源：backend/qed_engine/api/service_manager.py、api/main.py
  */
 import { api, type ApiRequestOptions } from './client';
-import type { DatabaseStatus, ServiceStatus, ServicesResponse } from '../stores';
+import type { DatabaseStatus, GpuStatus, LmStudioStatus, MineruStatus, ServiceStatus, ServicesResponse } from '../stores';
 
 export interface ServiceActionResponse {
   name: string;
@@ -36,4 +36,19 @@ export async function selfRestart(opts?: ApiRequestOptions): Promise<SelfRestart
 /** GET /api/v1/config/database：本地 MySQL 真实连接状态（pymysql 探测，60s 缓存） */
 export async function getDatabaseStatus(opts?: ApiRequestOptions): Promise<DatabaseStatus> {
   return api.get<DatabaseStatus>('/config/database', opts);
+}
+
+/** GET /api/v1/monitor/gpu：GPU + 系统内存总览（控制台总览条） */
+export async function monitorGpu(opts?: ApiRequestOptions): Promise<GpuStatus> {
+  return api.get<GpuStatus>('/monitor/gpu', opts);
+}
+
+/** GET /api/v1/monitor/lmstudio：LM Studio（本地文字模型）探测 */
+export async function monitorLmstudio(opts?: ApiRequestOptions): Promise<LmStudioStatus> {
+  return api.get<LmStudioStatus>('/monitor/lmstudio', opts);
+}
+
+/** GET /api/v1/monitor/mineru：MinerU（本地图像模型）探测 */
+export async function monitorMineru(opts?: ApiRequestOptions): Promise<MineruStatus> {
+  return api.get<MineruStatus>('/monitor/mineru', opts);
 }

@@ -77,7 +77,7 @@
   前置完成的知识点；「温故知新」按遗忘曲线/依赖关系回访。
 - 进度数据入 DB（元数据默认存数据库，2026-08-16 裁决）：课程进度/练习记录/问答会话等
   学习元数据归「QED-Engine 学习表族」（规划，暂缓——归属 M2 里程碑启动时裁决，见
-  [database-design.md](database-design.md) 表清单规划）；与解析产物、向量检索数据联动。
+  [../architecture/database-design.md](../architecture/database-design.md) 表清单规划）；与解析产物、向量检索数据联动。
 
 ## 5. 知识问答（多 Agent，待细化）
 

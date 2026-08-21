@@ -23,11 +23,18 @@ TEMPLATE_FIELDS = ("需求方", "目标项目", "接口面", "评审方", "执�
 def _todo_rows() -> list[dict[str, str]]:
     columns = ("ID", "类别", "类型", "优先级", "状态", "任务", "证据/下一条件")
     lines = TODO.read_text(encoding="utf-8").splitlines()
-    start = lines.index(f"| {' | '.join(columns)} |") + 2
+    header = f"| {' | '.join(columns)} |"
+    start = lines.index(header)
     rows = []
-    for line in lines[start:]:
+    for line in lines[start + 2:]:
+        stripped = line.strip()
+        # 分节标题（### 主线分组）、空行、重复表头与分隔行（每分节独立表格）不是任务行，跳过
         if not line.startswith("|"):
+            if line.startswith("### ") or not stripped:
+                continue
             break
+        if stripped == header or stripped.startswith("| ---"):
+            continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         assert len(cells) == len(columns), line
         rows.append(dict(zip(columns, cells, strict=True)))

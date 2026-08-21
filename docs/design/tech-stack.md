@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-09
+最后更新：2026-08-20
 关联代码：`web-ui/`（React 重构版，已接管 8903；后端三服务代码见各自契约文档）
 关联测试：`tests/contract/test_design_documents.py`
 关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0003-shared-qed-database-independence.md`、`docs/adr/0005-control-center-service-hosting.md`
@@ -32,10 +32,10 @@
   无代理；框架化（Vue/React）评估延后到学习中心正式建设时（[learning-center.md](learning-center.md)）。
 - **MySQL 8 共享 qed 库**：三项目数据集中登记与查询，表命名空间隔离保证独立性；见
   [ADR 0003](../adr/0003-shared-qed-database-independence.md) 与
-  [database-design.md](database-design.md)。
-- **模型单线路**：一次只启用一条线路（当前 qwen 三用途：主对话/OCR/Embedding），备用线路
-  （GLM 切换、deepseek 占位）变量已注释，需要时按启用流程恢复；模型名唯一事实源为根 `.env`
-  （见 [configuration-and-secrets.md](configuration-and-secrets.md)）。
+  [../architecture/database-design.md](../architecture/database-design.md)。
+- **模型单线路**：一次只启用一条线路（当前 qwen 三用途：主对话/OCR/Embedding），厂商由
+  `QED_API_PROVIDER` 选择（当前 qwen；deepseek/glm 注册表已预留，启用时验证真实可用性）；
+  模型名唯一事实源为根 `.env`（见 [configuration-and-secrets.md](configuration-and-secrets.md)）。
 - **MinerU**：Axiom-Flow 解析管线主选（布局 + 公式还原），评估与实验见 Axiom-Flow 仓库与
   `learning/`；最终结论由 Axiom-Flow 侧登记。
 - **向量库/编排未定**：待学习中心 RAG 与多 Agent 需求明确后单独评估并补记本文件；候选
@@ -47,5 +47,5 @@
    [ADR 治理规范](../standards/adr-governance.md) 评估是否登记 ADR。
 2. 涉及模型名、环境变量、API 契约的变更：同步更新
    [configuration-and-secrets.md](configuration-and-secrets.md)、
-   [config-center-api.md](config-center-api.md) 与相关契约测试。
+   [../architecture/api-contracts.md](../architecture/api-contracts.md) 与相关契约测试。
 3. 运行 `pytest tests/contract/test_design_documents.py -q` 并人工复核。

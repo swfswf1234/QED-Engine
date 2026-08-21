@@ -1,6 +1,6 @@
 """
 模块职责：配置中心 API 契约测试：health、模型路由表与供应商配置状态，密钥值不泄露。
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/api/main.py、backend/qed_engine/api/schemas.py
 """
@@ -30,16 +30,18 @@ def _mock_startup_llm_probe(monkeypatch):
     """8900 启动时对已配置供应商探测一次（写日志）；测试默认 mock 防真实网络请求。
 
     需要验证启动探测行为的测试自行覆盖 api_control._probe_llm。
+    qed_llm_calls 启动建表同样 mock：测试不触碰真实 MySQL（建表逻辑由 test_llm_call_log.py 覆盖）。
     """
     from qed_engine.api import control as api_control
+    from qed_engine.services.llm import call_log as llm_call_log
 
     monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
 
 
-def _client(monkeypatch, *, qwen="", deepseek="", glm="", db_password="", tracker=None, axiom=None):
-    monkeypatch.setenv("QWEN_API_KEY", qwen)
-    monkeypatch.setenv("DEEPSEEK_API_KEY", deepseek)
-    monkeypatch.setenv("GLM_API_KEY", glm)
+def _client(monkeypatch, *, api_key="", provider="qwen", db_password="", tracker=None, axiom=None):
+    monkeypatch.setenv("API_KEY", api_key)
+    monkeypatch.setenv("QED_API_PROVIDER", provider)
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
     monkeypatch.setenv("QED_OCR_MODEL", "qwen-vl-plus")
     monkeypatch.setenv("QED_EMBEDDING_MODEL", "text-embedding-v4")
@@ -63,7 +65,7 @@ def test_health_ok(monkeypatch):
 
 
 def test_models_unconfigured(monkeypatch):
-    """无任何 key 时：返回单线路（qwen）三个用途的推荐模型，configured 均为 False。"""
+    """无 API_KEY 时：返回所选厂商（qwen）三个用途的生效模型，configured 均为 False。"""
     client = _client(monkeypatch)
     response = client.get("/api/v1/config/models")
     assert response.status_code == 200
@@ -76,8 +78,8 @@ def test_models_unconfigured(monkeypatch):
 
 
 def test_models_configured(monkeypatch):
-    """qwen 配 key 后三个用途 configured=True；备选线路不进入模型路由表。"""
-    client = _client(monkeypatch, qwen="sk-qwen")
+    """API_KEY 配置后三个用途 configured=True；provider 为当前厂商选择。"""
+    client = _client(monkeypatch, api_key="sk-qwen")
     response = client.get("/api/v1/config/models")
     assert response.status_code == 200
     body = response.json()
@@ -85,19 +87,34 @@ def test_models_configured(monkeypatch):
     assert body["ocr"]["configured"] is True
     assert body["embedding"]["configured"] is True
     assert body["default"] == {"model": "qwen-plus", "provider": "qwen", "configured": True}
-    assert "glm" not in body
-    assert "deepseek" not in body
+    assert body["ocr"]["provider"] == "qwen"
+    assert body["embedding"]["provider"] == "qwen"
 
 
 def test_keys_status(monkeypatch):
-    """config/keys 返回布尔状态，绝不包含密钥值。"""
-    client = _client(monkeypatch, qwen="sk-qwen", glm="sk-glm")
+    """config/keys 返回当前厂商与配置状态，绝不包含密钥值。"""
+    client = _client(monkeypatch, api_key="sk-qwen")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"deepseek": False, "qwen": True, "glm": True}
+    assert body == {"provider": "qwen", "configured": True}
     assert "sk-qwen" not in response.text
-    assert "sk-glm" not in response.text
+
+
+def test_keys_unconfigured(monkeypatch):
+    """无 API_KEY：keys 返回 configured=False，provider 为默认 qwen。"""
+    client = _client(monkeypatch)
+    response = client.get("/api/v1/config/keys")
+    assert response.status_code == 200
+    assert response.json() == {"provider": "qwen", "configured": False}
+
+
+def test_keys_glm_provider(monkeypatch):
+    """QED_API_PROVIDER=glm：keys 返回对应厂商（注册表预留）。"""
+    client = _client(monkeypatch, api_key="sk-glm", provider="glm")
+    response = client.get("/api/v1/config/keys")
+    assert response.status_code == 200
+    assert response.json() == {"provider": "glm", "configured": True}
 
 
 def test_cors_allowlist_covers_all_services(monkeypatch):
@@ -198,8 +215,8 @@ def test_startup_llm_check_unconfigured_skips_probing(monkeypatch):
     assert calls == []
 
 
-def test_startup_llm_check_probes_only_configured(monkeypatch):
-    """启动自检：已配置 key 的供应商才探测（qwen/glm），未配置（deepseek）跳过。"""
+def test_startup_llm_check_probes_only_selected_provider(monkeypatch):
+    """启动自检：仅探测 QED_API_PROVIDER 对应供应商（免费 models 接口，单次）。"""
     from qed_engine.api import control as api_control
 
     calls: list = []
@@ -208,9 +225,9 @@ def test_startup_llm_check_probes_only_configured(monkeypatch):
         "_probe_llm",
         lambda provider, key, url: calls.append((provider, url)) or (True, ""),
     )
-    client = _client(monkeypatch, qwen="sk-qwen", glm="sk-glm")
+    client = _client(monkeypatch, api_key="sk-qwen", provider="deepseek")
     assert client.get("/api/v1/health").status_code == 200
-    assert [c[0] for c in calls] == ["qwen", "glm"]
+    assert calls == [("deepseek", "https://api.deepseek.com/models")]
 
 
 def _probe_mysql_calls(monkeypatch, probe):

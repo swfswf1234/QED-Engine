@@ -1,7 +1,7 @@
 """QED-Engine 统一命令行（qed）。
 
 提供 config 子命令与服务发现：三服务地址来自根 .env 的 QED_*_URL（可覆盖），
-无 .env / 缺 key 时输出最小配置尾注提醒。密钥值绝不打印。
+无 .env / 缺 API_KEY 时输出最小配置尾注提醒。密钥值绝不打印。
 
 tracker 子命令为 QED-Tracker 8901 服务的 HTTP 客户端（tasks 轮询；旧 books/resources
 闭环命令已随 QED-030 qt_resources 退役，三表闭环由 8903 前端承担）：
@@ -18,6 +18,7 @@ import sys
 
 from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 from qed_engine.config import Settings
+from qed_engine.services.llm import clients
 
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,13 +29,14 @@ SERVICES = (
     ("Axiom-Flow", "qed_axiom_url"),
 )
 
+# 模型路由展示：label / 用途（text|vision|embedding）/ 配置字段
 MODEL_ROUTES = (
-    ("主对话", "qed_model", "qwen"),
-    ("OCR/视觉", "qed_ocr_model", "qwen"),
-    ("嵌入", "qed_embedding_model", "qwen"),
+    ("主对话", "text", "qed_model"),
+    ("OCR/视觉", "vision", "qed_ocr_model"),
+    ("嵌入", "embedding", "qed_embedding_model"),
 )
 
-MINIMAL_CONFIG_HINT = "最小配置：在 QED-Engine 根目录创建 .env 并填写 QWEN_API_KEY=...；或设置环境变量 QWEN_API_KEY。"
+MINIMAL_CONFIG_HINT = "最小配置：在 QED-Engine 根目录创建 .env 并填写 API_KEY=...；或设置环境变量 API_KEY。"
 
 TRACKER_USAGE = """\
 tracker 子命令（QED-Tracker 8901 服务客户端）：
@@ -43,8 +45,8 @@ tracker 子命令（QED-Tracker 8901 服务客户端）：
 
 
 def _reminder(settings: Settings) -> str | None:
-    """全部供应商 key 未配置（无 .env 或缺 key）时返回尾注提醒，否则 None。"""
-    if any(settings.has_configured(provider) for provider in ("qwen", "glm", "deepseek")):
+    """API_KEY 未配置（无 .env 或缺 key）时返回尾注提醒，否则 None。"""
+    if settings.api_configured:
         return None
     return MINIMAL_CONFIG_HINT
 
@@ -66,16 +68,25 @@ def _print_usage(settings: Settings) -> None:
 
 def _print_config(settings: Settings) -> None:
     print("模型路由（来自根 .env，可在 .env 或环境变量覆盖）：")
-    for label, field, provider in MODEL_ROUTES:
-        state = "已配置" if settings.has_configured(provider) else "未配置"
-        print(f"  {label:>16}  {getattr(settings, field):<24} {provider:<10} {state}")
+    provider = settings.qed_api_provider
+    state = "已配置" if settings.api_configured else "未配置"
+    for label, kind, field in MODEL_ROUTES:
+        value = getattr(settings, field)
+        if kind == "text":
+            model = clients.resolve_text(provider, value)[1]
+        elif kind == "vision":
+            resolved = clients.resolve_vision(provider, value)
+            model = resolved[1] if resolved else "（无视觉）"
+        else:
+            model = value
+        print(f"  {label:>16}  {model:<24} {provider:<10} {state}")
     print()
     print("服务地址（服务发现）：")
     print("\n".join(_service_lines(settings)))
     reminder = _reminder(settings)
     if reminder:
         print()
-        print(f"提示：未配置任何 API key（或根 .env 缺失），按未配置降级运行。{reminder}")
+        print(f"提示：未配置 API_KEY（或根 .env 缺失），按未配置降级运行。{reminder}")
 
 
 def _build_client(settings: Settings) -> TrackerClient:

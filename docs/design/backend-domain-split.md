@@ -1,8 +1,11 @@
 # 后端三域拆分设计（backend-domain-split）
 
-设计状态：Accepted
+设计状态：Superseded
 实现状态：Implemented
-最后更新：2026-08-16
+最后更新：2026-08-20
+
+> 勘误：2026-08-20 文档规范轮——ARCH-012 已实施完成，本设计的目标态契约并入
+> [backend-architecture](../architecture/backend-architecture.md)，本文件保留为审计留档。
 关联代码：`web-ui/src/`（8903 前端 web-ui 版，唯一消费方；后端三域目标模块
 `api/control.py`、`api/tracker.py`、`clients/tracker_client.py`、`services/service_manager.py`、
 `services/log_viewer.py`、`services/monitor.py` 在实现轮落地后登记 [code-map](../architecture/code-map.md)）
@@ -117,14 +120,14 @@ import（数据域客户端只被数据域路由与 cli.py 使用，控制域不
    - 文件不存在（服务未启动过）→ `lines=[]`（不报错）；读取 UTF-8、`errors="replace"`
      容错；实现为 `read_log(service, tail, keyword)` 纯函数，路由层做参数解析与 404 映射。
    - 响应：`{"service", "log_path", "lines"}`（契约见
-     [config-center-api.md](config-center-api.md) 监控与诊断域）。
+     [../architecture/api-contracts.md](../architecture/api-contracts.md) 监控与诊断域）。
 2. **`services/monitor.py`** + 三个探测端点：
    - `probe_gpu()` → `GET /api/v1/monitor/gpu`：`nvidia-smi --query-gpu=name,memory.total,
      memory.used,utilization.gpu --format=csv,noheader,nounits` + `--query-compute-apps=pid,
      process_name,used_memory` 解析；`available=false` 附 `reason`（nvidia-smi 不存在/无 GPU/
      解析失败，中文原因不泄漏堆栈）；命令执行可注入（测试 mock subprocess.run）。
    - `probe_lmstudio(settings)` → `GET /api/v1/monitor/lmstudio`：GET
-     `{qed_lmstudio_url}/models`（默认 `http://127.0.0.1:1234/v1`，`QED_LMSTUDIO_URL` 可
+     `{qed_lmstudio_url}/models`（默认 `http://127.0.0.1:5001/v1`，`QED_LMSTUDIO_URL` 可
      覆盖），5s 超时（沿启动自检探测模式），返回 `reachable` + 已加载模型列表；
      httpx transport 可注入。
    - `probe_mineru()` → `GET /api/v1/monitor/mineru`：探测 8002 健康端点（实施期按 mineru
@@ -161,10 +164,10 @@ import（数据域客户端只被数据域路由与 cli.py 使用，控制域不
 
 ## 契约登记
 
-新端点契约登记于 [config-center-api.md](config-center-api.md)「监控与诊断域」章节；
+新端点契约登记于 [../architecture/api-contracts.md](../architecture/api-contracts.md)「监控与诊断域」章节；
 服务域 /services 契约与注册表规则保持 [service-control.md](service-control.md) 事实源；
 `QED_LMSTUDIO_URL` 变量登记于 [configuration-and-secrets.md](configuration-and-secrets.md)
-（config.py 同步新增 `qed_lmstudio_url`，默认 `http://127.0.0.1:1234/v1`）。
+（config.py 同步新增 `qed_lmstudio_url`，默认 `http://127.0.0.1:5001/v1`）。
 
 ## 测试策略
 
@@ -187,13 +190,13 @@ import（数据域客户端只被数据域路由与 cli.py 使用，控制域不
 
 ## 文档同步清单
 
-- `configuration-and-secrets.md`：登记 `QED_LMSTUDIO_URL`（默认 1234/v1）。
-- `config-center-api.md`：监控诊断域契约核对（QED_LMSTUDIO_URL 链接变量表）。
+- `configuration-and-secrets.md`：登记 `QED_LMSTUDIO_URL`（默认 5001/v1）。
+- `../architecture/api-contracts.md`：监控诊断域契约核对（QED_LMSTUDIO_URL 链接变量表）。
 - `service-control.md`：实现注记更新（service_manager 迁移至 services/，self-restart 回执）。
 - [code-map](../architecture/code-map.md)：登记 `api/control.py`、`api/tracker.py`、
   `clients/tracker_client.py`、`services/service_manager.py`、`services/log_viewer.py`、
   `services/monitor.py`；注销 `api/data.py`、顶层 `tracker_client.py`。
-- `four-service-architecture.md` 符合度表与 [project-status](../architecture/project-status.md)
+- `four-service-architecture.md` 符合度表与 [project-status](../trackers/../trackers/project-status.md)
   当前主线同步。
 - ARCH-011 计划：Phase 3/7 移除并指向本设计 + ARCH-012（todo 已更新为「只做前端」）。
 

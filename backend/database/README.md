@@ -22,7 +22,7 @@
 ## 上下文
 
 - 三个项目共用同一 MySQL 8 实例与 `qed` 库：QED-Tracker 用 `qt_*` 表、Axiom-Flow 用
-  `af_*` 表（见 `docs/design/database-design.md`）。
+  `af_*` 表（见 `docs/architecture/../architecture/database-design.md`）。
 - 连接参数唯一事实源为根 `.env` 的 `QED_DB_HOST / QED_DB_PORT / QED_DB_NAME /
   QED_DB_USER / QED_DB_PASSWORD`（见 `.env.example`）。
 - 数据库不可达时各服务降级运行（独立性铁律），不阻塞启动。

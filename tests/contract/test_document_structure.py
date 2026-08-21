@@ -22,7 +22,7 @@ DOCUMENT_DIRECTORIES = (
     "history",
     "learning",
 )
-ACTIVE_GUIDES = {"index.md", "development.md"}
+ACTIVE_GUIDES = {"index.md", "development.md", "operations.md"}
 
 
 def test_document_directories_use_explicit_index_entrypoints():
@@ -52,6 +52,7 @@ def test_guides_are_human_handbooks_and_an_index():
 
     index = (DOCS / "guides" / "index.md").read_text(encoding="utf-8")
     assert "development.md" in index
+    assert "operations.md" in index
 
 
 def test_docs_index_only_navigates_document_areas():

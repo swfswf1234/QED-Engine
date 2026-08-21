@@ -1,8 +1,8 @@
 # 2026-08 下载管理界面重构轮计划（downloads-manage-redesign）
 
-状态：Accepted
+状态：In Progress
 任务类型：B
-最后更新：2026-08-18
+最后更新：2026-08-20
 关联 ADR：无（纯前端展示层，沿用 ADR 0007/0008）
 关联设计：[下载管理界面重构设计](../design/downloads-manage-redesign.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-015 登记；REQ-006 承接执行）
@@ -112,6 +112,18 @@
 - `web-ui`：`npx tsc --noEmit` + `npx vitest run` 全绿。
 - 根仓库：`pytest tests/contract -q` 全绿。
 - 8900/8901 真实数据浏览器验收（树结构/分类/进度/流程筛选/排序/无 kind）。
+
+## 实施记录（2026-08-20）
+
+- Phase 1~5 已按 TDD 完成：`courseMeta.ts`（DOMAIN_NAME/概率改名）、`downloads.ts`
+  （四层树 + sortBooks + bookInFlow + tutorialLabel 兜底 + filters.flow）、
+  `DownloadsTree.tsx`（领域可折叠/分类头/课程/教程叶子+进度）、`Downloads.tsx`
+  （四下拉 + 书行卡去 kind + 排序/流程过滤）、`downloads.css` 新样式。
+- 测试：`web-ui` vitest 全量 **87 passed**；`tsc --noEmit` 无错；`npm run build` 成功。
+- 契约：`pytest tests/contract -q` 当前 2 failed，均为**非本计划引入**的外部未提交改动
+  （文档解析管理轮 REQ-042：`docs/design/exploration.md` 未入 CURRENT_DOCUMENTS、
+  `docs/trackers/roadmap.md` 行 12 关联任务「文档解析管理轮」非任务 ID），待用户裁决处理。
+- 待办：浏览器验收（8900/8901 真实数据）；REQ-041（QED-Tracker 教程命名）回执后联调确认。
 
 ## 风险与回退
 

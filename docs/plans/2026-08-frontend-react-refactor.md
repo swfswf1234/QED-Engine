@@ -6,7 +6,7 @@
 关联 ADR：[ADR 0008](../adr/0008-frontend-react-refactor.md)（框架与工程化选型）、
 [ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
 关联设计：[前端重构设计](../design/frontend-react-refactor.md)、
-[配置中心 API 契约](../design/config-center-api.md)（监控与诊断域登记，实施后置）、[服务控制设计](../design/service-control.md)
+[配置中心 API 契约](../architecture/api-contracts.md)（监控与诊断域登记，实施后置）、[服务控制设计](../design/service-control.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-011 登记；REQ-021 大变动同步承接文档）
 归档判定：各 Phase 逐阶段用户验证通过 → 8903 切换完成 + 旧前端退役 + 测试迁移全绿 →
 文档同步后 Completed，归档至 `history/plans/2026-08/`
@@ -18,7 +18,7 @@
   并行承接（设计文档 [backend-domain-split.md](../design/backend-domain-split.md) 深化版）；
   框架选型 React + AntD 全家桶（ADR 0008）。
 - 设计文档已落盘并通过用户验收（2026-08-16）：frontend-react-refactor.md、
-  config-center-api.md（监控域登记）、service-control.md（控制台增强）、ADR 0008、
+  ../architecture/api-contracts.md（监控域登记）、service-control.md（控制台增强）、ADR 0008、
   本计划（修订版：纯前端 + 阶段门禁）。
 - **执行流程约定**：每个 Phase 完成后暂停，用户浏览器验证通过才进入下一 Phase
   （阶段门禁）；文档基线在 Phase 0 前提交 git（安全回退点）。
@@ -47,7 +47,7 @@
 
 非目标（本轮不做，由 [ARCH-012](2026-08-backend-domain-refactor.md) 并行承接）：
 - 后端三域拆分（[backend-domain-split.md](../design/backend-domain-split.md)）。
-- 监控与诊断端点（/logs、/monitor/*、/self-restart，config-center-api.md 登记保留）。
+- 监控与诊断端点（/logs、/monitor/*、/self-restart，../architecture/api-contracts.md 登记保留）。
 - 控制台 GPU/LM Studio/mineru/日志查看展示。
 - Axiom-Flow 适配层、本地 LLM 调用接口（LLM 网关 / prompt 调试，第二轮）。
 - 知识探索 / 课程学习 / 刷题 / 文档解析对照 / 知识点检索调试五界面（后续轮）。

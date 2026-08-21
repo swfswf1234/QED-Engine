@@ -3,7 +3,7 @@
 状态：Current
 最后更新：2026-08-04
 类型：实现
-关联设计：docs/design/config-center-api.md、docs/design/configuration-and-secrets.md
+关联设计：docs/architecture/api-contracts.md、docs/design/configuration-and-secrets.md
 关联任务：docs/trackers/todo.md（QED-Engine 后端：统一配置中心）
 
 ## 目标
@@ -26,7 +26,7 @@
 3. TDD：api 模块（三个接口，注入 Settings 测试）。
 4. 门禁：pytest 全绿 + ruff clean。
 5. 冒烟：uvicorn 启动，health 实测。
-6. 文档同步：config-center-api.md（契约）、design index、todo、README 快速开始。
+6. 文档同步：../architecture/api-contracts.md（契约）、design index、todo、README 快速开始。
 7. 链接验证 + 提交。
 
 ## 验证门禁

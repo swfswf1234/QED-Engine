@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-16
 关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
-关联设计：[config-center-api.md](../design/config-center-api.md)（五合一角色与契约）、
+关联设计：[../architecture/api-contracts.md](../architecture/api-contracts.md)（五合一角色与契约）、
 [backend-domain-split.md](../design/backend-domain-split.md)（三域）、
 [frontend-react-refactor.md](../design/frontend-react-refactor.md)（控制台/界面结构）、
 [service-control.md](../design/service-control.md)（控制台）
@@ -87,7 +87,7 @@
   守护 token 同步。
 
 ### 6. 文档同步
-- 6.1 `config-center-api.md`：删 /config/llm-status 契约章节；/config/database 改启动快照语义；
+- 6.1 `../architecture/api-contracts.md`：删 /config/llm-status 契约章节；/config/database 改启动快照语义；
   「五合一角色②状态探测中心」更新（LLM 可达性改启动检查）；「强制规则」五端点 → 四端点。
 - 6.2 `backend-domain-split.md`：控制域职责「配置五端点」→「配置四端点 + 启动自检」。
 - 6.3 `service-control.md`：控制台依赖组件行更新（MySQL 启动快照、LLM 联通取消）。

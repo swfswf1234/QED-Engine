@@ -41,7 +41,7 @@
   根仓库 `logs/<unit>.log`（Git 忽略），8900 启动时确保目录存在。
 - 8900 自身由用户手动启动（终端/脚本）；控制中心对其**不提供启动/停止按钮**（避免自掘——
   停止 8900 即断掉整个控制中心），仅提供**重启**（经 `/self-restart`，见
-  [config-center-api.md](config-center-api.md)）。8903 前端**不提供停止**（停止即断掉界面），
+  [../architecture/api-contracts.md](../architecture/api-contracts.md)）。8903 前端**不提供停止**（停止即断掉界面），
   在线→重启、离线→启动。
 - **停止语义（2026-08-17 修复）**：生命周期脚本单元（tracker/web）不再以「8900 托管记录」
   为停止放行前提——凡端口探测在线即视为在管，直接 `_stop_via_script`（解决手动经脚本启动的
@@ -111,7 +111,7 @@
 
 ### POST /api/v1/self-restart
 
-8900 自身重启（监控与诊断域，见 [config-center-api.md](config-center-api.md)）：
+8900 自身重启（监控与诊断域，见 [../architecture/api-contracts.md](../architecture/api-contracts.md)）：
 延迟 2s 绑定端口 + 后台 1s 后旧进程退出，规避 Windows 端口占用；失败 500 提示人工重启。
 控制台「QED 管理服务」卡的重启按钮即调此端点，成功后约 3s 自动刷新页面。
 
@@ -171,7 +171,7 @@
   8900 启动自检写日志，不展示）。
 - 顶部**刷新按钮**：服务状态变更时人工刷新确认；破坏性操作确认框 + 轮询收敛。
 - **本轮只用既有端点**：GPU 监控 / LM Studio / mineru / 日志查看 均为
-  监控与诊断域（[config-center-api.md](config-center-api.md)）后置内容，控制台界面
+  监控与诊断域（[../architecture/api-contracts.md](../architecture/api-contracts.md)）后置内容，控制台界面
   不为未实现数据源留占位。
 
 ## 未来规划（不实现）

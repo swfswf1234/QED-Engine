@@ -1,8 +1,11 @@
 # 前端重构设计：React 全家桶（web-ui/）
 
-设计状态：Accepted
+设计状态：Superseded
 实现状态：Implemented
-最后更新：2026-08-17
+最后更新：2026-08-20
+
+> 勘误：2026-08-20 文档规范轮——前端重构已完成使命（web-ui 已接管 8903），目标态契约并入
+> [frontend-architecture](../architecture/frontend-architecture.md)，本文件保留为审计留档。
 关联代码：`web-ui/`（React 重构版，已接管 8903）、`scripts/serve_web.py`、`web-ui/.env.production`；旧 `web/` 三文件版已退役（git 保留）
 关联测试：`tests/test_web.py`（守护 web-ui/src 源码 + serve_web）、`web-ui/` Vitest
 关联 ADR：[ADR 0008](../adr/0008-frontend-react-refactor.md)（框架与工程化选型）、
@@ -164,7 +167,7 @@ Select，与树选择单向联动：树→筛选；筛选只作用于知识行�
 状态（附「数据库连接：启动快照 OK/失败」信息，读取 `/config/database`）；LLM 供应商可达性
 不展示（端点已删除，8900 启动时检查一次写日志，ARCH-014）。
 GPU 监控 / LM Studio 探测 / mineru 健康 / 日志查看 等**监控与诊断端点**
-契约已登记于 [config-center-api.md](config-center-api.md)，实施随后续轮
+契约已登记于 [../architecture/api-contracts.md](../architecture/api-contracts.md)，实施随后续轮
 （backend-domain-split）落地，届时控制台界面扩展对应卡片。
 
 ## 迁移与切换
@@ -195,11 +198,18 @@ GPU 监控 / LM Studio 探测 / mineru 健康 / 日志查看 等**监控与诊�
 展示 + 聊天答疑，依赖解析产物管线）、刷题（参考既有项目）、知识点检索调试（RAG/Agent/
 prompt 配置 + 检索过程展示 + 人工校验）。各界面在后续轮独立设计文档细化。
 
-> **文档解析管理已提前实施（2026-08-16，REQ-034 同步开发）**：解析进度
-> （`#/admin/parsing`：书目列表 + 页进度 + 状态标签）+ 原始文档对照（`#/admin/compare`：
-> 原页图 + markdown/KaTeX 公式渲染，Select 选书选页）。数据源 8900 数据域·Axiom 适配
-> （books/pages/manifest/parse-jobs，契约草案阶段）；8902 离线 → 503 降级横幅。
-> 原规划的「左侧书目进度树 + 块级标注与语义组合切分」随契约冻结（V2-007）后深化。
+> **文档解析管理（2026-08-16 提前实施 REQ-034 同步开发，2026-08-18 重构轮）**：
+> `#/admin/parsing` 由「解析进度 + 原始文档对照」两视图合并重构为**左树右对照单视图**
+> （2026-08-18 用户裁决 D1~D7）：
+> - **左树**：领域 → 课程（折叠）→ 书目 + 解析进度（x/y 页 + 状态标签 + 策略）。数据源
+>   af_books 冗余课程字段（REQ-042）；契约冻结前无课程字段时兜底「未分课程」单组。
+> - **右侧对照**：原页图 + **块级渲染**（BlockView：段落/公式 KaTeX/表格/列表逐块显示），
+>   块可选中并判定「一致/不一致」（PUT/GET review 落库 af_block_reviews，D5：内容修改暂缓）。
+> - **书目同步**：进入界面自动触发 `POST /books/sync`（8900 聚合 8901 verified 书目 → 8902
+>   upsert）+ 手动「同步书目」按钮；同步失败不阻塞列表展示（REQ-042，D2 前端触发）。
+> - 路由与菜单：compare 路由与菜单项**删除**（D7），能力并入右侧对照；菜单改名
+>   「文档解析管理」；原 manifest 推导页进度保留为契约冻结前兼容路径。
+> - 离线降级：8902 离线（503）→ 左树空态 + 降级横幅，右侧不白屏；8900 不可达 → 整体错误横幅。
 
 ## 验证
 

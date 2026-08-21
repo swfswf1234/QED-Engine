@@ -16,18 +16,18 @@ CURRENT_DOCUMENTS = {
     "service-contracts.md",
     "dataset-conventions.md",
     "configuration-and-secrets.md",
-    "config-center-api.md",
     "service-control.md",
     "course-acquisition-flow.md",
     "learning-center.md",
     "tech-stack.md",
-    "database-design.md",
     "web-frontend.md",
     "downloads-three-table-model.md",
     "frontend-react-refactor.md",
     "backend-domain-split.md",
     "integration-matrix.md",
     "downloads-manage-redesign.md",
+    "llm-gateway-and-model-management.md",
+    "exploration.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

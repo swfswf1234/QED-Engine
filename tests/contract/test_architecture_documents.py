@@ -13,7 +13,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ARCHITECTURE = ROOT / "docs" / "architecture"
 MERMAID_BLOCK = re.compile(r"```mermaid\s*\n(?P<body>.*?)```", re.DOTALL)
-CURRENT_DOCUMENTS = {"four-service-architecture.md", "project-status.md"}
+# architecture/ 只放确定文档：总体架构 + 服务架构（前端/后端）+ 固定 API/数据库文档 + code-map
+CURRENT_DOCUMENTS = {
+    "four-service-architecture.md",
+    "frontend-architecture.md",
+    "backend-architecture.md",
+    "api-contracts.md",
+    "database-design.md",
+    "code-map.md",
+}
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {
     "Not Started",
@@ -39,13 +47,31 @@ def _field(content: str, name: str) -> str:
 def test_architecture_directory_has_one_index_and_current_documents():
     assert {path.name for path in ARCHITECTURE.glob("*.md")} == {
         "index.md",
-        "four-service-architecture.md",
-        "code-map.md",
-        "project-status.md",
+        *CURRENT_DOCUMENTS,
     }
     index = (ARCHITECTURE / "index.md").read_text(encoding="utf-8")
     for document in CURRENT_DOCUMENTS:
         assert f"]({document})" in index
+
+
+def test_service_architecture_documents_declare_metadata():
+    for document in ("frontend-architecture.md", "backend-architecture.md"):
+        content = (ARCHITECTURE / document).read_text(encoding="utf-8")
+        assert _field(content, "设计状态") in VALID_DESIGN_STATUSES
+        assert _field(content, "实现状态") in VALID_IMPLEMENTATION_STATUSES
+        for field in ("关联代码", "关联测试", "关联 ADR"):
+            _field(content, field)
+
+
+def test_fixed_api_and_database_documents_declare_metadata():
+    for document in ("api-contracts.md", "database-design.md"):
+        content = (ARCHITECTURE / document).read_text(encoding="utf-8")
+        assert _field(content, "设计状态") in VALID_DESIGN_STATUSES
+        assert _field(content, "实现状态") in VALID_IMPLEMENTATION_STATUSES
+        for field in ("关联代码", "关联测试", "关联 ADR"):
+            _field(content, field)
+    api = (ARCHITECTURE / "api-contracts.md").read_text(encoding="utf-8")
+    assert "前端无 API" in api
 
 
 def test_four_service_architecture_declares_metadata_and_diagram():

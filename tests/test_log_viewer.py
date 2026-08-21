@@ -1,6 +1,6 @@
 """
 模块职责：日志查看能力（log_viewer）契约测试：白名单/tail 上限/keyword 过滤/越权/编码容错。
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/services/log_viewer.py
 """
@@ -86,7 +86,15 @@ def test_read_log_tail_zero_returns_empty(monkeypatch):
 
 
 def _client(monkeypatch):
+    from qed_engine.api import control as api_control
+    from qed_engine.services.llm import call_log as llm_call_log
+
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
+    # 隔离 create_app() 启动自检（真实 .env 密钥/数据库不可控，同 test_api.py 模式）：
+    # 探测与建表全 mock，避免真实网络请求与真实 CREATE TABLE 副作用
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
     return TestClient(create_app())
 
 

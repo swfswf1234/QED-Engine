@@ -39,7 +39,7 @@ CORS 需对 8903 开放）、子项目接口变化直接冲击前端、前端需
 
 - 前端跨源面收缩为单一 8900 来源；浏览器不再直连 8901/8902。
 - 8901/8902 接口变化只影响 8900 适配层（TrackerClient），前端与子项目解耦。
-- 8900 公开契约扩展（数据域 + 服务域），config-center-api.md 增章节登记，服务控制契约事实源
+- 8900 公开契约扩展（数据域 + 服务域），../architecture/api-contracts.md 增章节登记，服务控制契约事实源
   为 service-control.md。
 - backend/ 迁移影响 pyproject 打包配置、code-map 与文档路径引用（机械同步 + 门禁兜底）。
 - 服务控制实现为根仓库侧行为，子项目保持可手动独立启动（独立性铁律不变）。
@@ -49,6 +49,6 @@ CORS 需对 8903 开放）、子项目接口变化直接冲击前端、前端需
 - 关联 ADR：[ADR 0002](0002-frontend-and-port-centralization.md)（全局端口规划，本决策为
   8900 角色升级，不改变端口归属）、[ADR 0005](0005-control-center-service-hosting.md)（控制
   中心服务托管，本决策为其实施）
-- 关联设计：`docs/design/service-control.md`、`docs/design/config-center-api.md`、
+- 关联设计：`docs/design/service-control.md`、`docs/architecture/api-contracts.md`、
   `docs/design/service-contracts.md`
 - 关联架构：`docs/architecture/four-service-architecture.md`

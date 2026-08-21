@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-17
+最后更新：2026-08-20
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -10,15 +10,17 @@
 ## 用途
 
 本文件是 QED-Engine 三项目开发状态的单一事实源入口：Agent 进场先读本表，
-30 秒掌握「项目现在到哪了」。具体任务状态以[任务台账](../trackers/todo.md)为准，
-未来方向以[能力路线图](../trackers/roadmap.md)为准；本表只保存「当前实现状态」快照。
+30 秒掌握「项目现在到哪了」。具体任务状态以[任务台账](todo.md)为准，
+未来方向以[能力路线图](roadmap.md)为准；本表只保存「当前实现状态」快照。
 
 ## 四服务状态
 
 | 服务 | 仓库 | 端口 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——含解析进度、原始文档对照两个子视图）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007） |
-| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发。**2026-08-17：服务注册表扩为四单元（新增 web/8903）、tracker/web/axiom 三单元均走生命周期脚本（axiom 由 Popen 切换，REQ-039）、脚本单元停止/重启语义修复、serve_web.py 切 web-ui/dist** |
+| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——**左树右对照单视图**：书目树+解析进度 → 原页图+块级渲染与判定，2026-08-18 重构轮；原「原始文档对照」并入其右侧）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007）；**控制台 LLM 改造（ARCH-016，2026-08-20）**：四服务卡后 GPU 总览条 + 依赖组件三卡（MySQL/文字模型/图像模型，置灰 + 测试按钮）+ 「模型调用记录」检索页（`#/admin/llm-calls`） |
+| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、lmstudio、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发。**2026-08-17：服务注册表扩为四单元（新增 web/8903）、tracker/web/axiom 三单元均走生命周期脚本（axiom 由 Popen 切换，REQ-039）、脚本单元停止/重启语义修复、serve_web.py 切 web-ui/dist**。**LLM 网关与模型管理（ARCH-016，2026-08-20 实施完成）**：三项目密钥约定（各 `.env` 自持 `API_KEY`，旧变量降级别名，`QED_API_SELECT` 选模式）+ 8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）+ 本地模型生命周期脚本（scripts/text-model/ + scripts/image-model/）+ 资源互斥（QED_RESOURCE_GUARD）+ qed_llm_calls 调用记录（单表三项目可写）；`--mode（api 或 local）` 启停。**密钥收敛（2026-08-20
+  用户裁决）**：逐厂商 key（QWEN/DEEPSEEK/GLM_API_KEY）已取消，单一 `API_KEY` + `QED_API_PROVIDER`
+  （qwen/deepseek/glm，默认 qwen）选厂商，`/config/keys` 改返回 `{provider, configured}` |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901 | 已服务化 | 发现/下载/校验/登记 + 资源状态机 + 后台任务轮询；全链路联调冒烟（QED-014）待开始 |
 | Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902 | 已实现 | PDF 解析 / OCR / 质量审阅 / 知识发布；端口迁移已完成（2026-08-11，ALN-002），数据目录迁移未完成（ALN-003） |
 
@@ -28,7 +30,8 @@
   （多 Agent），规划中（[学习中心设计](../design/learning-center.md)，Draft）。
   覆盖数学与计算机科学（AI 方向）双核心领域，当前以高等数学起步；资料类型含教材、
   习题集、论文、博客与官方文档，后续随需求扩展。
-- **管理中心**：后台内容管理——文档下载管理 / 文档解析进度 / 原始文档对照。
+- **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（左树右对照：书目同步、
+  块级判定；原「原始文档对照」并入，探索方向见 [exploration.md](../design/exploration.md)）。
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
   （[服务控制设计](../design/service-control.md)，Accepted / Implemented）；注册表含 config/
   tracker/axiom/**web** 四单元，8900 重启经 /self-restart、8903 前端启停经
@@ -37,6 +40,17 @@
 
 ## 当前主线
 
+- 进行中：**第一轮主线·文档规范与架构确定轮（ARCH-018，ADR 0010，2026-08-20 立档）**——
+  文档体系重构为「确定文档 / 相对确定 / 实时状态」三层：architecture/ 只放确定文档（总体架构
+  four-service-architecture + 服务架构 frontend/backend-architecture + 固定 API 文档
+  api-contracts + 数据库总纲 database-design + code-map，project-status 移入 trackers/）；
+  guides 拆分 operations（操作）+ development（开发）；trackers 归并——ARCH-011~017 归为
+  第一轮主线支线、登记长期任务 REQ-046（API 接口开发）/REQ-047（数据库设计）、roadmap 登记
+  五轮主线（ARCH-018~022）；**API 文档按五类重构**（服务管理/配置语义/数据透传·Tracker/
+  数据透传·Axiom/监控诊断与 LLM 网关，REQ-046）；**数据库总纲补登记 qed_llm_calls**（ARCH-016）
+  并加表清单总览；**todo 按五轮主线分节排序**、REQ-041/043 关闭归档 completed.md；
+  **门禁全绿（契约 50 + 全量 296 + ruff clean）**；子项目范本调整经请求由对方执行
+  （REQ-048/049 → V2-015/QED-027）；待用户验收文档体系后关闭。
 - 已完成：**v0.1 版本目标对齐——[文档与架构重构轮（ARCH-008）](../history/plans/2026-08/2026-08-docs-refactor-round.md)**
   （2026-08-10 归档，Achieved）：docs/ 九节逐节梳理完成（W1 adr/ 至 W9 ADR 清理 + REQ-024），
   **文档基线定格**——ADR 六份（领域枚举收敛为工程治理/架构与边界）、标准/设计/计划/台账
@@ -73,6 +87,30 @@
   （V2-003~007，V2-003 误建产物已登记移交 REQ-036，2026-08-16 亡羊补牢——根仓库侧不再
   写子项目代码）**，服务建立后即可 C 组第一阶段联调，第二阶段待 v2 契约冻结 REQ-034 承接）；
   各服务独立开发阶段，验收窗口见矩阵文档。
+- 进行中：**文档解析管理重构轮（2026-08-18 立档）**——解析进度 + 原始文档对照合并为
+  **左树右对照单视图**（用户裁决 D1~D7）：左树=领域→课程→书目+进度（af_books 冗余课程
+  字段，REQ-042），右侧=原页图 + 块级渲染 + 一致/不一致判定（落库 af_block_reviews），
+  书目同步（前端触发 POST /books/sync，8900 聚合 8901 verified → 8902）；compare 路由与
+  菜单删除；探索（块级切分校验 → 对话式召回）仅登记方向（[exploration.md](../design/exploration.md)，
+  后置实施）。**根仓库侧完成（2026-08-20）**：8900 sync/review 端点 + 前端重构（vitest
+  89 passed + tsc + build + 契约测试 61 passed）；**待 Axiom-Flow V2-013 执行回执后联调验收**。
+- 进行中：**LLM 网关与模型管理轮（ARCH-016，2026-08-20 立档，实施完成）**——三项目密钥约定
+  （各 `.env` 自持 `API_KEY` 统一变量，旧变量降级别名；`QED_API_SELECT` 选 api/local 模式）、
+  8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）、
+  qed_llm_calls 调用记录（单表三项目可写，DB 不可达降级）、本地模型生命周期脚本
+  （scripts/text-model/ + scripts/image-model/，MinerU 编排迁入）、资源互斥（QED_RESOURCE_GUARD）、
+  控制台 GPU 总览条 / 依赖组件三卡 / 模型调用记录检索页；REQ-043（QED-Tracker 密钥分置与
+  local 模式）与 REQ-044（Axiom-Flow 模型模式 + MinerU 移交）已文档登记待对方执行回执；
+  **Task 17 门禁收口完成（2026-08-20）**：后端 pytest 282 passed + ruff clean + 契约 48、
+  前端 vitest 100 + tsc 无错 + build 成功、api 模式真实冒烟通过（/llm/test/text ok=true、
+  qed_llm_calls 落库）；**REQ-043/044 回执后归档**（local 模式真实冒烟因本机 LM Studio 开启
+  鉴权跳过，需用户关密码或配 key 后补验）。
+- 进行中：**密钥收敛与厂商选择（2026-08-20 用户裁决，ARCH-017 登记）**——逐厂商 key
+  （QWEN/DEEPSEEK/GLM_API_KEY）正式取消，单一 `API_KEY` + `QED_API_PROVIDER`（qwen/deepseek/glm，
+  默认 qwen，仅影响 api 模式）选厂商；`/config/keys` 契约改 `{provider, configured}`，
+  `/config/models` 按 `QED_API_PROVIDER` 返回解析后生效模型（显式配置优先，否则厂商默认，deepseek
+  无视觉显示「（无视觉）」）；文档同步（configuration-and-secrets / config-center-api /
+  llm-gateway-and-model-management / tech-stack / `.env`）完成，全量门禁全绿 + qwen api 模式冒烟通过。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
   文档基线之上的主线推进为**课程收集主线（ARCH-002）**——QED-Tracker QED-019（01 数学分析
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与
@@ -83,10 +121,10 @@
 - 待开始：REQ-017 服务化三缺口；REQ-018 人工评审优化（QED-020 已实现待 8901 重启回执）；
   REQ-019 版本核对（跨项目）；REQ-020 榜单数据收集；REQ-022/023 治理契约对齐；
   REQ-026/027 数据库设计确认（设计文档已建，待子项目评审执行）。
-- 详情见[任务台账](../trackers/todo.md)。
+- 详情见[任务台账](todo.md)。
 
 ## 维护规则
 
 - 服务实现状态、端口或当前主线变化时，更新本表并刷新「最后更新」日期。
 - 本表不保存任务细节与未来规划（分别见 todo.md / roadmap.md）；与四服务架构的静态
-  描述不一致时，以本表当前状态为准并回修[四服务架构](four-service-architecture.md)。
+  描述不一致时，以本表当前状态为准并回修[四服务架构](../architecture/four-service-architecture.md)。

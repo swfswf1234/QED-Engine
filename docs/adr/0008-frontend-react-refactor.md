@@ -3,7 +3,7 @@
 状态：Accepted
 日期：2026-08-16
 领域：架构与边界
-决策阶段：v0.2
+决策阶段：v0.1
 取代：—
 被取代：—
 
@@ -40,11 +40,14 @@ app.js 已膨胀至约 1684 行、91KB，承载 17 期迭代的全部逻辑（�
 5. **纯前端改造（2026-08-16 用户裁决修订）**：本轮只做前端部分；控制台只用既有端点
    （/services、/config/database、/config/llm-status）。GPU 监控 / LM Studio 探测 /
    mineru 健康 / 服务日志查看 / 8900 自身重启等监控与诊断端点不再本轮实现，契约登记于
-   [config-center-api.md](../design/config-center-api.md) 后续轮（后端三域拆分轮）落地。
+   [../architecture/api-contracts.md](../architecture/api-contracts.md) 后续轮（后端三域拆分轮）落地。
 
 > 修订记录：2026-08-16 原文「控制台配套：8900 后端新增监控与诊断能力（GPU nvidia-smi
 > 监控、LM Studio 探测、mineru 健康探测、服务日志查看、8900 自身重启）」经用户裁决
 > 改为纯前端范围，监控端点整体后置。
+>
+> 勘误：2026-08-20 用户裁决当前项目版本为 v0.1（跑通完整服务），本 ADR 决策阶段原标记
+> v0.2 更正为 v0.1。
 
 ## 后果
 
@@ -63,5 +66,5 @@ app.js 已膨胀至约 1684 行、91KB，承载 17 期迭代的全部逻辑（�
 - 关联 ADR：[ADR 0002](0002-frontend-and-port-centralization.md)（全局端口规划）、
   [ADR 0007](0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
 - 关联设计：`docs/design/frontend-react-refactor.md`、`docs/design/backend-domain-split.md`、
-  `docs/design/config-center-api.md`、`docs/design/service-control.md`
+  `docs/architecture/api-contracts.md`、`docs/design/service-control.md`
 - 关联架构：`docs/architecture/four-service-architecture.md`

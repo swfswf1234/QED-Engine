@@ -38,6 +38,12 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     expect(container.querySelector('h2')?.textContent).toBe('文档下载管理');
   });
 
+  it('通过 hash 直达 #/admin/llm-calls 渲染模型调用记录', () => {
+    window.location.hash = '#/admin/llm-calls';
+    const { container } = renderApp();
+    expect(container.querySelector('h2')?.textContent).toBe('模型调用记录');
+  });
+
   it('#/knowledge 渲染学习中心知识结构浏览', () => {
     window.location.hash = '#/knowledge';
     const { container } = renderApp();

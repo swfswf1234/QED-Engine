@@ -5,7 +5,7 @@ logs/<log_name>.log；未知服务名抛 LogError（路由层映射 404，越权
 空日志（服务未启动过）。tail 默认 200、上限 1000（超限截断）；keyword 为子串过滤；
 读取 UTF-8 容错（errors=replace）。
 
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_log_viewer.py
 """

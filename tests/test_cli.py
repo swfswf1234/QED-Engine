@@ -9,13 +9,13 @@ import httpx
 import pytest
 from qed_engine.cli import main
 from qed_engine.clients.tracker_client import TrackerClient
+from qed_engine.config import Settings
 
 
 def _clear_env(monkeypatch):
     for name in (
-        "QWEN_API_KEY",
-        "GLM_API_KEY",
-        "DEEPSEEK_API_KEY",
+        "API_KEY",
+        "QED_API_PROVIDER",
         "QED_MODEL",
         "QED_OCR_MODEL",
         "QED_EMBEDDING_MODEL",
@@ -38,12 +38,14 @@ def test_no_args_shows_usage_and_service_urls(monkeypatch, capsys):
 
 
 def test_config_shows_model_routes_and_keys_status(monkeypatch, capsys):
-    """config 子命令：显示模型路由与密钥布尔状态，不泄露密钥值。"""
+    """config 子命令：显示模型路由与厂商/配置状态，不泄露密钥值。"""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("QWEN_API_KEY", "sk-qwen-secret")
+    monkeypatch.setenv("API_KEY", "sk-qwen-secret")
+    monkeypatch.setenv("QED_API_PROVIDER", "qwen")
     main(["config"])
     output = capsys.readouterr().out
-    assert "qwen-plus" in output
+    assert Settings().qed_api_provider in output
+    assert Settings().qed_model in output
     assert "qwen" in output
     assert "sk-qwen-secret" not in output
 
@@ -51,29 +53,29 @@ def test_config_shows_model_routes_and_keys_status(monkeypatch, capsys):
 def test_config_hides_secret_values_never_printed(monkeypatch, capsys):
     """任何场景下输出都不含密钥值。"""
     _clear_env(monkeypatch)
-    monkeypatch.setenv("QWEN_API_KEY", "sk-super-secret-value")
+    monkeypatch.setenv("API_KEY", "sk-super-secret-value")
     main(["config"])
     output = capsys.readouterr().out
     assert "sk-super-secret-value" not in output
 
 
 def test_footer_reminder_when_no_keys_configured(monkeypatch, tmp_path, capsys):
-    """全部 key 缺失（含 .env 缺失场景）：输出最小配置尾注提醒。"""
+    """API_KEY 缺失（含 .env 缺失场景）：输出最小配置尾注提醒。"""
     _clear_env(monkeypatch)
     monkeypatch.chdir(tmp_path)  # 无 .env 的干净目录，Settings 按内置默认降级
     main(["config"])
     output = capsys.readouterr().out
-    assert "QWEN_API_KEY" in output
+    assert "API_KEY" in output
 
 
 def test_no_footer_reminder_when_configured(monkeypatch, tmp_path, capsys):
-    """任一 key 已配置：不输出最小配置尾注。"""
+    """API_KEY 已配置：不输出最小配置尾注。"""
     _clear_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("QWEN_API_KEY", "sk-qwen-test")
+    monkeypatch.setenv("API_KEY", "sk-qwen-test")
     main(["config"])
     output = capsys.readouterr().out
-    assert "QWEN_API_KEY=" not in output
+    assert "API_KEY=" not in output
 
 
 def test_service_urls_env_override_in_config_output(monkeypatch, capsys):

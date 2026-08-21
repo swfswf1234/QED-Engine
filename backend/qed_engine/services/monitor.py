@@ -3,12 +3,13 @@
 探测均为「尽力报告」：任何失败返回 available/reachable=false + 中文原因，不抛 5xx；
 nvidia-smi 命令执行（runner）与 httpx transport 可注入（测试）。
 
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_monitor.py
 """
 
 import subprocess
+import sys
 from collections.abc import Callable
 
 import httpx
@@ -18,7 +19,7 @@ from qed_engine.config import Settings
 GPU_QUERY = "name,memory.total,memory.used,utilization.gpu"
 PROC_QUERY = "pid,process_name,used_memory"
 MINERU_URL = "http://127.0.0.1:8002"
-MINERU_HEALTH_PATH = "/api/v1/health"
+MINERU_HEALTH_PATH = "/health"
 PROBE_TIMEOUT = 5.0
 
 Runner = Callable[[list[str]], str]
@@ -31,7 +32,38 @@ def _run_smi(cmd: list[str]) -> str:
     return result.stdout.decode("utf-8", errors="replace")
 
 
-def probe_gpu(runner: Runner | None = None) -> dict:
+def probe_memory() -> dict:
+    """系统内存（Windows GlobalMemoryStatusEx；非 Windows 尽力报告失败原因）。"""
+    if sys.platform != "win32":
+        return {"available": False, "reason": "系统内存探测仅支持 Windows（本机部署平台）"}
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.pointer(stat)):
+            return {"available": False, "reason": "GlobalMemoryStatusEx 失败"}
+        total_mb = stat.ullTotalPhys // (1024 * 1024)
+        used_mb = (stat.ullTotalPhys - stat.ullAvailPhys) // (1024 * 1024)
+        return {"available": True, "total_mb": total_mb, "used_mb": used_mb, "percent": stat.dwMemoryLoad}
+    except Exception as exc:
+        return {"available": False, "reason": f"内存探测失败：{type(exc).__name__}"}
+
+
+def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None = None) -> dict:
     """nvidia-smi 解析：available=false 附中文原因（不存在/无 GPU/解析失败）。"""
     runner = runner or _run_smi
     try:
@@ -56,11 +88,17 @@ def probe_gpu(runner: Runner | None = None) -> dict:
         for line in proc_out.strip().splitlines():
             if not line.strip():
                 continue
-            pid, pname, mem = (cell.strip() for cell in line.split(","))
+            cells = [cell.strip() for cell in line.split(",")]
+            if len(cells) < 3:
+                continue
+            pid, pname, mem = cells[0], cells[1], cells[2]
+            # Windows WDDM 模式下 used_memory 常为 [N/A]，跳过无效行
+            if mem in ("[N/A]", "[Insufficient Permissions]", ""):
+                continue
             processes.append({"pid": int(pid), "name": pname, "memory_mb": int(float(mem))})
     except (ValueError, IndexError):
         return {"available": False, "reason": "nvidia-smi 输出解析失败"}
-    return {
+    result = {
         "available": True,
         "name": name,
         "memory_total_mb": total_mb,
@@ -68,6 +106,14 @@ def probe_gpu(runner: Runner | None = None) -> dict:
         "utilization_percent": utilization,
         "processes": processes,
     }
+    if memory_fn is not None:
+        mem = memory_fn()
+        result.update(
+            sys_memory_total_mb=mem.get("total_mb", 0),
+            sys_memory_used_mb=mem.get("used_mb", 0),
+            sys_memory_percent=mem.get("percent", 0),
+        )
+    return result
 
 
 def probe_lmstudio(settings: Settings, client: httpx.Client | None = None) -> dict:

@@ -107,6 +107,9 @@ export const api = {
   post<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
     return request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }, opts);
   },
+  put<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
+    return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }, opts);
+  },
 };
 
 /** 错误信息归一：供 UI 直接展示（含 409/422 语义提示） */

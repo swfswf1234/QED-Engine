@@ -4,7 +4,7 @@
 任务类型：A
 最后更新：2026-08-09
 关联 ADR：[ADR 0006](../../../adr/0006-engineering-governance-contract.md)（治理契约范本化，本轮治理基础）
-关联设计：[项目状态快照](../../../architecture/project-status.md)（当前主线维护）
+关联设计：[项目状态快照](../../../trackers/../trackers/project-status.md)（当前主线维护）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-008 登记；REQ-024 承接 ADR 重新治理；REQ-021 大变动同步）
 归档判定：W1-W9 全部完成、REQ-024（ADR 重新治理）完成、门禁全绿、用户确认后关闭并归档
 
@@ -30,7 +30,7 @@
    控制中心托管规划与既有 ADR/设计文档对齐。
 3. 治理 ADR 重新治理完成（REQ-024）：贵精不贵多、边界区分、合理性审查、每次优化留记录。
 4. `pytest tests -q` 全绿 + `ruff check src tests` 无错误；每节复核结论记入
-   project-status.md 当前主线与 todo 证据列。
+   ../trackers/project-status.md 当前主线与 todo 证据列。
 
 ## 范围与非目标
 
@@ -38,7 +38,7 @@
 
 - docs/ 全子目录文档、元数据与契约测试守护面的一致性审查与回修。
 - 根 README.md / AGENTS.md 定位与路由表述（大变动同步 REQ-021 的持续执行）。
-- 架构文档回修：four-service-architecture.md（落后于现状）、code-map.md、project-status.md。
+- 架构文档回修：four-service-architecture.md（落后于现状）、code-map.md、../trackers/project-status.md。
 
 非目标：
 
@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | W1 | adr/ 小节：ADR 0004/0005/0006 登记、ADR 治理规范修订（决策阶段定义/登记时机/大变动检查）、治理契约范本化（governance-contract.md + 契约头迁移 + 契约守护契约） | 已完成（2026-08-09，148 passed） |
 | W2 | standards/ 小节：task-lifecycle、code-document-traceability、cross-project-collaboration、documentation 复核与回修 | 已完成（2026-08-09：任务类型收编、占位清理、7 处 index 规则节清理、「index 只导航」守护，150 passed） |
-| W3 | architecture/ 小节：four-service-architecture.md 回修（8903 已运行/三中心/控制中心托管/8902 迁移态）、code-map.md 复核、project-status.md 持续更新 | 已完成（2026-08-09：架构文档回修到现状 + 技术栈选型 tech-stack.md + 数据库设计 database-design.md，150 passed） |
+| W3 | architecture/ 小节：four-service-architecture.md 回修（8903 已运行/三中心/控制中心托管/8902 迁移态）、code-map.md 复核、../trackers/project-status.md 持续更新 | 已完成（2026-08-09：架构文档回修到现状 + 技术栈选型 tech-stack.md + 数据库设计 ../architecture/database-design.md，150 passed） |
 | W4 | design/ 小节：service-contracts、dataset-conventions、configuration-and-secrets、config-center-api 复核与对齐 | 已完成（2026-08-09：8903 前端契约独立成 web-frontend.md、service-contracts 瘦身、dataset 差距表/配置五接口等过时修复、tech-stack 模型收敛、关联 ADR 补齐，150 passed） |
 | W5 | guides/ 小节：development.md 等指南复核（过时命令回修） | 已完成（2026-08-09：五接口冒烟替代过时三接口、子项目速览更新（QED-Tracker 已服务化）、占位行指向服务控制，150 passed） |
 | W6 | trackers/ 小节：todo 登记完整性、roadmap 与 v0.1 目标对齐、completed 台账 | 已完成（2026-08-09：completed.md 创建（ARCH-005 回填）、REQ-004 回执更新、roadmap 对齐 v0.1/技术学习目标，150 passed） |
@@ -64,7 +64,7 @@
 
 - 每个工作项完成后运行 `pytest tests -q`（重点 tests/contract/）与 `ruff check src tests`。
 - 契约测试先行：先更新守护再改正文（红→绿），失败即暴露漂移。
-- 每节复核结论更新 project-status.md「当前主线」与 todo 证据列。
+- 每节复核结论更新 ../trackers/project-status.md「当前主线」与 todo 证据列。
 - 人工验收：用户抽查各节（标准索引、架构图与现状、指南命令可执行性、ADR 合理性）。
 
 ## 回滚

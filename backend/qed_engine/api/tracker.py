@@ -3,14 +3,14 @@
 前端（8903）只连 8900（ADR 0007）：目录、任务、五层语义（知识行 qt_knowledge / 书行
 qt_books / 渠道 qt_sources，QED-031 知识层次模型，取代三表 qt_selections/qt_downloads）
 统一由本模块暴露，内部经 clients/tracker_client.py 适配 8901。路径与 8901 一致
-（config-center-api.md 数据域章节）；三表历史契约见 downloads-three-table-model.md
+（api-contracts.md 数据域章节）；三表历史契约见 downloads-three-table-model.md
 （Superseded）。
 
 错误映射：8901 返回 4xx（如 409 状态机冲突）→ 同码透传 detail；连接失败/5xx → 503
 + 明确提示（前端据此降级显示，独立性铁律）。reject 缺 reason 由 8900 校验直接 422，
 不请求 8901。
 
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_api.py
 """

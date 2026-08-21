@@ -3,7 +3,7 @@
 状态：Current
 最后更新：2026-08-04
 类型：实现
-关联设计：docs/design/config-center-api.md、docs/design/configuration-and-secrets.md
+关联设计：docs/architecture/api-contracts.md、docs/design/configuration-and-secrets.md
 关联任务：docs/trackers/todo.md（QED-Engine 后端：统一配置中心）
 
 ## 目标

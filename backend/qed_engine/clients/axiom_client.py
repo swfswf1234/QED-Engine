@@ -14,7 +14,7 @@ docs/design/af-books-sync.md（af_* 书目同步与块判定，REQ-042）：
 transport 可注入（测试用 MockTransport）；非 2xx 与连接失败统一抛 AxiomError。
 8902 离线时由 api/axiom.py 映射 503（独立性铁律）。
 
-设计关联（DesignRef）：docs/design/config-center-api.md（8902 契约草案事实源：
+设计关联（DesignRef）：docs/architecture/api-contracts.md（8902 契约草案事实源：
 Axiom-Flow docs/design/8902-integration-contract.md）
 实现状态：Current
 关联测试：tests/test_api.py（_axiom_client 用例）

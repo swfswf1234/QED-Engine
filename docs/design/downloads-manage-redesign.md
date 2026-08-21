@@ -1,8 +1,8 @@
 # 文档下载管理界面重构设计（downloads-manage-redesign）
 
 设计状态：Accepted
-实现状态：Not Started
-最后更新：2026-08-18
+实现状态：In Progress
+最后更新：2026-08-20
 关联代码：`web-ui/src/stores/courseMeta.ts`、`web-ui/src/stores/downloads.ts`、
 `web-ui/src/components/DownloadsTree.tsx`、`web-ui/src/pages/Downloads.tsx`、
 `web-ui/src/downloads.css`、`web-ui/src/pages/Downloads.test.tsx`、

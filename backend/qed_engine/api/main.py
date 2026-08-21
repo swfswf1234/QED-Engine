@@ -1,11 +1,11 @@
 """QED-Engine 后端 API 入口：三域组装（控制域 control / 数据域·Tracker tracker）。
 
-对外契约见 docs/design/config-center-api.md（配置/数据域/服务域/监控诊断）与
+对外契约见 docs/architecture/api-contracts.md（配置/数据域/服务域/监控诊断）与
 docs/design/service-control.md（/services）；三域组织见 docs/design/backend-domain-split.md。
 LLM 供应商可达性与 MySQL 连接为启动自检（ARCH-014：/config/llm-status 端点已删除，
 database 端点只读启动快照）。
 
-设计关联（DesignRef）：docs/design/config-center-api.md
+设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_api.py
 """
@@ -22,6 +22,7 @@ from qed_engine.api.tracker import router as tracker_router
 from qed_engine.clients.axiom_client import AxiomClient
 from qed_engine.clients.tracker_client import TrackerClient
 from qed_engine.config import Settings
+from qed_engine.services.llm import call_log as llm_call_log
 from qed_engine.services.service_manager import configure as configure_services
 
 logger = logging.getLogger("qed_engine")
@@ -38,16 +39,16 @@ def _startup_db_check(settings: Settings) -> dict:
 
 
 def _startup_llm_check(settings: Settings) -> None:
-    """启动自检：对已配置供应商探测一次（免费 models 接口，5s 超时），结果写日志。
+    """启动自检：对 QED_API_PROVIDER 对应供应商探测一次（免费 models 接口，5s 超时）。
 
     密钥只出现在探测请求头，绝不进入日志（ARCH-014：按需探测端点已删除）。
     """
-    for provider in ("qwen", "glm", "deepseek"):
-        api_key = getattr(settings, f"{provider}_api_key").get_secret_value()
-        if not api_key:
-            continue
-        reachable, reason = api_control._probe_llm(provider, api_key, api_control.PROBE_URLS[provider])
-        logger.info("启动自检：%s LLM 可达=%s（%s）", provider, reachable, reason)
+    provider = settings.qed_api_provider
+    api_key = settings.resolved_api_key()
+    if not api_key:
+        return
+    reachable, reason = api_control._probe_llm(provider, api_key, api_control.PROBE_URLS[provider])
+    logger.info("启动自检：%s LLM 可达=%s（%s）", provider, reachable, reason)
 
 
 def create_app(
@@ -65,6 +66,10 @@ def create_app(
     app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url)
     app.state.axiom_client = axiom_client or AxiomClient(base_url=resolved.qed_axiom_url)
     configure_services(resolved)
+    try:
+        llm_call_log.ensure_table(resolved)
+    except Exception as exc:  # 数据库不可达：降级日志，不阻塞启动
+        logger.warning("qed_llm_calls 建表跳过（数据库不可达）：%s", type(exc).__name__)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

@@ -20,7 +20,7 @@
 
 1. **新增 `qed_*` 共享前缀表族**（qed 库内）：承载三项目共用的基础元数据，当前为
    `qed_domain`（领域）与 `qed_course`（课程）；后续新增共享表须先登记根仓库
-   `docs/design/database-design.md`。
+   `docs/architecture/../architecture/database-design.md`。
 2. **所有权 QED-Tracker**：共享表由 QED-Tracker 的 Alembic 建表与维护（写入）；
    Axiom-Flow 与 QED-Engine **只读不写**；schema 变更以 QED-Tracker
    `docs/design/database-schema.md` 为唯一事实源，先更新根仓库登记再迁移。
@@ -38,7 +38,7 @@
 
 ## 关联
 
-- 关联设计：`docs/design/database-design.md`（表命名空间与 qed_* 共享表清单登记）、
+- 关联设计：`docs/architecture/../architecture/database-design.md`（表命名空间与 qed_* 共享表清单登记）、
   `docs/design/service-contracts.md`（统一数据库章节、对接点表）、
   QED-Tracker `docs/design/database-schema.md`（qed_*/qt_* 表唯一事实源）
 - 关联 ADR：[ADR 0003](0003-shared-qed-database-independence.md)（本决定为其补充）

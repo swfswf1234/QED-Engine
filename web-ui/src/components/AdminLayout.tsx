@@ -3,7 +3,7 @@ import { Button, Layout, Menu } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChartOutlined, ControlOutlined, DownloadOutlined, FileSearchOutlined,
-  HomeOutlined, PictureOutlined,
+  HistoryOutlined, HomeOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
@@ -12,11 +12,12 @@ const MENU_ITEMS = [
   { key: '/admin', icon: <ControlOutlined />, label: '控制台' },
   { key: '/admin/dashboard', icon: <BarChartOutlined />, label: '仪表盘' },
   { key: '/admin/downloads', icon: <DownloadOutlined />, label: '下载管理' },
-  { key: '/admin/parsing', icon: <FileSearchOutlined />, label: '解析进度' },
-  { key: '/admin/compare', icon: <PictureOutlined />, label: '原始文档对照' },
+  { key: '/admin/parsing', icon: <FileSearchOutlined />, label: '文档解析管理' },
+  { key: '/admin/llm-calls', icon: <HistoryOutlined />, label: '模型调用记录' },
 ];
 
-/** 管理台统一布局：左侧导航（控制台/仪表盘/下载管理/解析进度/原始文档对照互切）+ 内容区（嵌套路由） */
+/** 管理台统一布局：左侧导航（控制台/仪表盘/下载管理/文档解析管理/模型调用记录互切）+ 内容区（嵌套路由）
+ *  2026-08-18：解析进度改名「文档解析管理」，原始文档对照能力并入其右侧（D7 裁决） */
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ export default function AdminLayout() {
     if (location.pathname.startsWith('/admin/dashboard')) return '/admin/dashboard';
     if (location.pathname.startsWith('/admin/downloads')) return '/admin/downloads';
     if (location.pathname.startsWith('/admin/parsing')) return '/admin/parsing';
-    if (location.pathname.startsWith('/admin/compare')) return '/admin/compare';
+    if (location.pathname.startsWith('/admin/llm-calls')) return '/admin/llm-calls';
     return '/admin';
   }, [location.pathname]);
 

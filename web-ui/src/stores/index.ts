@@ -38,6 +38,79 @@ export interface LlmStatus {
 
 export type LlmStatusResponse = Record<string, LlmStatus>;
 
+// --- LLM 网关契约类型（8900 控制域，backend/qed_engine/api/control.py） ---
+
+/** /monitor/gpu：GPU + 系统内存（sys_memory_*） */
+export interface GpuStatus {
+  available: boolean;
+  name?: string;
+  memory_total_mb?: number;
+  memory_used_mb?: number;
+  utilization_percent?: number;
+  processes?: Array<{ pid: number; name: string; memory_mb: number }>;
+  sys_memory_total_mb?: number;
+  sys_memory_used_mb?: number;
+  sys_memory_percent?: number;
+  reason?: string;
+}
+
+/** /llm/test/* 测试结果 */
+export interface LlmTestResult {
+  ok: boolean;
+  detail?: string;
+  call_id?: number | null;
+}
+
+/** /monitor/lmstudio：本地文字模型（LM Studio）探测结果 */
+export interface LmStudioStatus {
+  reachable: boolean;
+  base_url?: string;
+  models?: string[];
+  reason?: string;
+}
+
+/** /monitor/mineru：本地图像模型（MinerU）探测结果 */
+export interface MineruStatus {
+  reachable: boolean;
+  port?: number;
+  reason?: string;
+}
+
+/** /llm/calls 单条记录 */
+export interface LlmCallItem {
+  id: number;
+  service: string;
+  mode: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  prompt_template?: string | null;
+  prompt: string;
+  response: string;
+  duration_ms?: number | null;
+  status: string;
+  error?: string | null;
+  created_at: string;
+}
+
+export interface CallsResponse {
+  items: LlmCallItem[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface LlmCallsQuery {
+  service?: string;
+  mode?: string;
+  model?: string;
+  status?: string;
+  start?: string;
+  end?: string;
+  page?: number;
+  size?: number;
+}
+
 // --- 五层契约类型（8900 数据域·QED-Tracker 适配，QED-031 知识层次模型） ---
 
 /** 知识行（qt_knowledge /knowledge：一套教程或一组延展资料归类） */

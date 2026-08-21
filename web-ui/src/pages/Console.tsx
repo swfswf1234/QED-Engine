@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  Alert, App, Button, Card, Col, Layout, Modal, Row, Space, Spin, Typography,
+  Alert, App, Button, Card, Col, Descriptions, Layout, Modal, Row, Space, Spin, Typography,
 } from 'antd';
 import {
-  ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined,
+  ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined, DesktopOutlined, RobotOutlined, PictureOutlined,
 } from '@ant-design/icons';
 import AppHeader from '../components/AppHeader';
-import { useConsoleStore, type OperateResult } from '../stores/console';
+import { useConsoleStore, type OperateResult, type LlmTestOutcome } from '../stores/console';
 import { WEB_SERVICE } from '../stores/webService';
-import { statusBadge, reachableBadge } from '../components/StatusBadge';
+import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
 import { selfRestart, type ServiceOp } from '../api/services';
-import type { ServiceStatus } from '../stores';
+import type { GpuStatus, ServiceStatus } from '../stores';
 
 const { Title, Text } = Typography;
 
@@ -91,17 +91,111 @@ function ServiceCard({
   );
 }
 
+/** GPU 总览条（/monitor/gpu：显卡型号/显存 used/total/利用率/模型进程/系统内存；不可用降级显示原因） */
+function GpuOverview({ gpu, gpuError }: { gpu: GpuStatus | null; gpuError: string | null }) {
+  let body: ReactNode;
+  if (gpuError) {
+    body = <Text type="secondary">GPU 探测失败（{gpuError}）。点「刷新」重试。</Text>;
+  } else if (!gpu) {
+    body = <Text type="secondary">探测中…</Text>;
+  } else if (!gpu.available) {
+    body = <Text type="secondary">GPU 不可用（{gpu.reason || '未检测到显卡'}）</Text>;
+  } else {
+    body = (
+      <>
+        <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }} colon={false}>
+          <Descriptions.Item label="显卡型号">{gpu.name || '未知'}</Descriptions.Item>
+          <Descriptions.Item label="显存使用">{gpu.memory_used_mb} / {gpu.memory_total_mb} MB</Descriptions.Item>
+          <Descriptions.Item label="利用率">{gpu.utilization_percent}%</Descriptions.Item>
+          <Descriptions.Item label="系统内存">{gpu.sys_memory_percent}%（{gpu.sys_memory_used_mb} / {gpu.sys_memory_total_mb} MB）</Descriptions.Item>
+        </Descriptions>
+        {gpu.processes && gpu.processes.length > 0 && (
+          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+            模型进程：{gpu.processes.map((p) => `${p.name} ${p.memory_mb} MB`).join('；')}
+          </Text>
+        )}
+      </>
+    );
+  }
+  return (
+    <Card size="small" title={<Space><DesktopOutlined />GPU 总览</Space>} style={{ marginTop: 24 }}>
+      {body}
+    </Card>
+  );
+}
+
+/**
+ * 依赖组件卡（MySQL/文字模型/图像模型）：
+ * 默认置灰（探测中/离线显示「未验证」）；「测试」按钮即时验证，按结果点亮（成功绿/失败红）。
+ * outcome 为本地状态（测试动作结果由 store 返回），探测失败仅降级本卡。
+ */
+function DependencyCard({
+  name, icon, probe, probeError, testing, onTest,
+}: {
+  name: string;
+  icon: ReactNode;
+  probe: { reachable: boolean; reason?: string } | null;
+  probeError: string | null;
+  testing: boolean;
+  onTest: () => Promise<LlmTestOutcome>;
+}) {
+  const { message } = App.useApp();
+  const [outcome, setOutcome] = useState<LlmTestOutcome | null>(null);
+
+  const run = async () => {
+    const res = await onTest();
+    setOutcome(res);
+    if (res.ok) {
+      message.success(`「${name}」测试通过`);
+    } else {
+      message.warning(`「${name}」测试失败：${res.detail || '未知原因'}`);
+    }
+  };
+
+  let status: ReactNode;
+  if (outcome) {
+    status = outcome.ok ? (
+      <Text type="success">在线（{outcome.detail || '测试通过'}）</Text>
+    ) : (
+      <Text type="danger">{outcome.detail || '测试失败'}</Text>
+    );
+  } else if (probeError) {
+    status = <Text type="secondary">获取失败（{probeError}）。点「刷新」重试。</Text>;
+  } else if (!probe) {
+    status = <Text type="secondary">探测中…</Text>;
+  } else if (probe.reachable) {
+    status = <Text type="secondary">在线（{probe.reason || '可达'}）· 未验证</Text>;
+  } else {
+    status = <Text type="secondary">未验证（{probe.reason || '离线'}）</Text>;
+  }
+
+  return (
+    <Card size="small" title={<Space>{icon}<span>{name}</span></Space>}>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        {status}
+        <Button size="small" loading={testing} onClick={() => void run()}>
+          测试
+        </Button>
+      </Space>
+    </Card>
+  );
+}
+
 /**
  * 控制台（`#/admin`）
  * - 顶部操作区：「刷新」（重拉数据）+「重新加载页面」（整页重载，独立按钮）
  * - 四服务卡：8900 恒在线（重启经 /self-restart，成功后自动刷新）/ 8901·8902 启停重启（确认框 +
  *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；后端注册表返回 web 时用真实状态）
- * - 依赖组件卡：本地 MySQL（/config/database，独立超时；失败仅本卡降级）
+ * - GPU 总览条：/monitor/gpu（显卡型号/显存/利用率/模型进程/系统内存；不可用降级显示原因）
+ * - 依赖组件三卡：本地 MySQL（/config/database）+ 文字模型（/monitor/lmstudio）+ 图像模型
+ *   （/monitor/mineru），默认置灰未验证，「测试」按钮即时验证点亮（各失败仅降级本卡）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
  */
 export default function Console() {
   const {
-    services, dbStatus, loading, error, dbError, operating, fetchAll, operate,
+    services, dbStatus, gpu, gpuError, lmstudio, lmstudioError, mineru, mineruError,
+    loading, error, dbError, operating, testing, fetchAll, operate,
+    testDatabase, testText, testVision,
   } = useConsoleStore();
   const { message } = App.useApp();
 
@@ -204,6 +298,8 @@ export default function Console() {
           ))}
         </Row>
 
+        <GpuOverview gpu={gpu} gpuError={gpuError} />
+
         {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应） */}
         <Modal
           open={confirmTarget !== null}
@@ -222,16 +318,35 @@ export default function Console() {
 
         <Title level={4} style={{ marginTop: 24 }}>依赖组件</Title>
         <Row gutter={[16, 16]}>
-          <Col xs={24} md={12}>
-            <Card size="small" title={<Space><DatabaseOutlined />本地 MySQL（qed 库）</Space>}>
-              {dbStatus ? (
-                reachableBadge(dbStatus.reachable, dbStatus.reason)
-              ) : dbError ? (
-                <Text type="secondary">获取失败（{describeError(dbError)}）。点「刷新」重试。</Text>
-              ) : (
-                <Text type="secondary">探测中…</Text>
-              )}
-            </Card>
+          <Col xs={24} md={12} xl={8}>
+            <DependencyCard
+              name="本地 MySQL（qed 库）"
+              icon={<DatabaseOutlined />}
+              probe={dbStatus}
+              probeError={dbError}
+              testing={testing === 'db'}
+              onTest={testDatabase}
+            />
+          </Col>
+          <Col xs={24} md={12} xl={8}>
+            <DependencyCard
+              name="本地文字模型（LM Studio）"
+              icon={<RobotOutlined />}
+              probe={lmstudio}
+              probeError={lmstudioError}
+              testing={testing === 'text'}
+              onTest={testText}
+            />
+          </Col>
+          <Col xs={24} md={12} xl={8}>
+            <DependencyCard
+              name="本地图像模型（MinerU）"
+              icon={<PictureOutlined />}
+              probe={mineru}
+              probeError={mineruError}
+              testing={testing === 'vision'}
+              onTest={testVision}
+            />
           </Col>
         </Row>
       </Layout.Content>

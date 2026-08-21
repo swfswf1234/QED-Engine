@@ -38,8 +38,11 @@
     依赖组件（MySQL）。
   - `#/admin/dashboard` 仪表盘（Dashboard）：服务在线 + 文档下载进度 + 文档解析进度。
   - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书行卡片。
-  - `#/admin/parsing` 文档解析进度（Parsing）：parse-jobs 数据源后置（离线占位）。
-  - `#/admin/compare` 原始文档对照（Compare）：解析产物对照视图。
+  - `#/admin/parsing` 文档解析管理（Parsing）：**左树右对照单视图**（2026-08-18 重构轮）——
+    左树书目+进度（领域→课程→书目，af_books 冗余课程字段）、右侧原页图 + 块级渲染 +
+    一致/不一致判定（PUT/GET review）；进入自动同步书目（POST /books/sync）。
+  - ~~`#/admin/compare` 原始文档对照~~（2026-08-18 删除，能力并入文档解析管理右侧；探索方向
+    见 [exploration.md](exploration.md)）。
 
 ## 仪表盘关键语义（2026-08-17 用户裁决）
 
@@ -68,8 +71,8 @@ LLM 供应商可达性不展示（8900 启动自检写日志，`/config/llm-stat
 
 - 唯一入口（ADR 0007）：`.env.production` VITE_API_BASE=8900；api/ 封装零 8901/8902 直连 URL。
 - 8900 端点：配置域 `/config/database`；服务域 `/services`、`/self-restart`；数据域
-  `/catalogs/`、`/knowledge`、`/books`、`/parse-jobs`（详见[配置中心 API 契约](config-center-api.md)）。
-- 路由：`#/`、`#/knowledge`、`#/admin`（dashboard/downloads/parsing/compare 嵌套）。
+  `/catalogs/`、`/knowledge`、`/books`、`/parse-jobs`（详见[配置中心 API 契约](../architecture/api-contracts.md)）。
+- 路由：`#/`、`#/knowledge`、`#/admin`（dashboard/downloads/parsing 嵌套；compare 已删除）。
 - 关键语义 token：课程完成度（≥2 套教程 verified）、message 反馈（success/warning）。
 
 ## 独立性

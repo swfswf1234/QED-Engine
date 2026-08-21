@@ -31,6 +31,7 @@ build/
 # 日志与运行产物
 /logs/
 *.log
+*.pid
 
 # 临时文件
 /tmp/

@@ -15,7 +15,7 @@
 - **数据资料（文件）**：原始数据（下载的 PDF/快照）与**整理后的数据资料**（Axiom-Flow
   解析产物——知识探索、课程学习、课后练习的数据输入），全部不入版本控制。
 - **元数据默认存数据库**（MySQL `qed` 库）：登记、状态、进度、评价、课程体系、任务记录等
-  一律入 DB（表命名空间与所有权见 [database-design.md](database-design.md)），dataset 内
+  一律入 DB（表命名空间与所有权见 [../architecture/database-design.md](../architecture/database-design.md)），dataset 内
   不再维护 JSON 状态事实源（`meta/` 退役，存量迁移归档见 [REQ-032](../trackers/todo.md)）。
 
 模型为**项目子域**：每个服务一个子域，域内使用统一职责词（`raw/` 原始数据、`tmp/` 中间
@@ -64,7 +64,7 @@ dataset/                                # QED-Engine 根仓库（git 忽略，�
 - 服务化后写操作任务记录登记目标相对路径（DB `qt_books.relative_path`），前端可
   "任务 → 文件"跳转。
 - **元数据入 DB**：登记顺序先落盘后登记（`raw/` → DB），失败可重放（幂等）；DB 为
-  元数据唯一事实源（统一数据库契约见 [database-design.md](database-design.md)）。
+  元数据唯一事实源（统一数据库契约见 [../architecture/database-design.md](../architecture/database-design.md)）。
 
 ## 现状与差距
 

@@ -38,7 +38,7 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 2026-08-16 [ADR 0009](../adr/0009-shared-qed-tables.md) 补充：新增 `qed_*` 共享前缀表族
 （`qed_domain`/`qed_course` 课程体系元数据），所有权 QED-Tracker（建表维护），其他项目
 **只读不写**；共享表不复制 JSON，QED-Tracker 侧 `courses/math.json` 退役。
-表命名空间、表清单、关键字段、迁移与敏感字段规则见[数据库设计](database-design.md)；
+表命名空间、表清单、关键字段、迁移与敏感字段规则见[数据库设计](../architecture/database-design.md)；
 凭据与库名唯一事实源为根 `.env` 的 `QED_DB_*`（见
 [configuration-and-secrets.md](configuration-and-secrets.md)），密码绝不下发到任何接口响应。
 
@@ -73,7 +73,7 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
   - `/selections`、`/downloads`、`/resources` 等三表端点已随 QED-030/031 退役（8901 返回 404）；
     三表模型历史契约见[三表模型](downloads-three-table-model.md)（Superseded）。
   - 表结构事实源为 QED-Tracker `docs/design/database-schema.md`；8900 数据域同路径透传
-    （契约见[配置中心 API 契约](config-center-api.md)）。
+    （契约见[配置中心 API 契约](../architecture/api-contracts.md)）。
 - 写操作（下载、论文推荐、扫描、Axiom 推送）一律创建**后台任务**：
   - `POST /tasks/...` 立即返回 `task_id`；`GET /tasks/{id}` 轮询状态与结果；
   - 状态机 `queued → running → succeeded / failed`；进度字段 0–100；
@@ -83,7 +83,7 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
   - 旧 `POST /tasks/catalog/evaluate`（AI 搜索评估）与 `POST /tasks/books/download` 已随
     QED-030 退役；教材下载走目录运行/CLI 经 `BookService` 直接登记 qt_books（五层模型）。
 - 该接口同时供统一 CLI（等待模式，直连 8901）与 8900 数据域语义 API（适配层，契约见
-  [配置中心 API 契约](config-center-api.md)）调用；8903 前端只经 8900 访问。
+  [配置中心 API 契约](../architecture/api-contracts.md)）调用；8903 前端只经 8900 访问。
 
 ## 8903 前端对接
 
@@ -91,7 +91,7 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 本文件只记录其对接要点：**前端只连 8900**（ADR 0007，QED-Engine 后端网关化）——配置域
 （横幅/健康）、数据域（目录/资源/任务）、服务域（/services 服务状态）全部经 8900 获取，
 浏览器不直连 8901/8902；子项目 CORS 收窄为可选后续请求（本轮不做）。8900 的接口族与角色
-见[配置中心 API 契约](config-center-api.md)。
+见[配置中心 API 契约](../architecture/api-contracts.md)。
 
 ## 独立性约定
 
