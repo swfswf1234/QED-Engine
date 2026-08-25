@@ -181,10 +181,14 @@ describe('领域探索流程（§6~§7）', () => {
     mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
       applied: [{ change_id: 'ch_0', entity: 'domain', target_id: 'math' }],
       conflicts: [{ change_id: 'ch_1', reason: '课程已存在' }],
+      skipped: [{ change_id: 'ch_0', reason: '领域已存在：高等数学' }],
       run: { run_id: 'cur_1', scope: 'curriculum', status: 'partially_applied' },
     })));
     const result = await useExploreStore.getState().applyChanges(['ch_0', 'ch_1']);
     expect(result?.conflicts).toHaveLength(1);
+    // REQ-059：重探语义 skipped 清单透传（已存在领域不重复创建）
+    expect(result?.skipped).toHaveLength(1);
+    expect(result?.skipped?.[0].reason).toBe('领域已存在：高等数学');
     expect(useExploreStore.getState().run?.status).toBe('partially_applied');
   });
 

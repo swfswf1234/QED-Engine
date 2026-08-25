@@ -189,6 +189,8 @@ function CurriculumResultView() {
   if (!run) return null;
   const appliedSet = new Set(run.adopted_proposal_ids);
   const conflictMap = new Map(run.conflicts.map((c) => [c.change_id, c.reason]));
+  // skipped（REQ-059）：重探时已存在领域的 create_domain 跳过标记（apply 响应与 run 详情随行）
+  const skippedMap = new Map((run.skipped ?? []).map((c) => [c.change_id, c.reason]));
   const terminal = run.status === 'applied' || run.status === 'partially_applied';
 
   return (
@@ -229,13 +231,21 @@ function CurriculumResultView() {
         />
       )}
 
+      {skippedMap.size > 0 && (
+        <Alert
+          type="info" showIcon style={{ marginBottom: 12 }}
+          message={`已跳过 ${skippedMap.size} 项（重探语义：已存在资源不重复创建）`}
+          description={[...skippedMap.entries()].map(([id, reason]) => <div key={id}>{id}: {reason}</div>)}
+        />
+      )}
+
       <div className="explore-changes">
         {changes.map((c) => (
           <ChangeCard
             key={c.change_id}
             change={c}
             checked={selectedIds.includes(c.change_id) || appliedSet.has(c.change_id)}
-            disabled={terminal || conflictMap.has(c.change_id)}
+            disabled={terminal || conflictMap.has(c.change_id) || skippedMap.has(c.change_id)}
             onToggle={(on) =>
               setSelectedIds((prev) => (on ? [...new Set([...prev, c.change_id])] : prev.filter((x) => x !== c.change_id)))
             }
@@ -258,7 +268,12 @@ function CurriculumResultView() {
             onClick={() => {
               void applyChanges(selectedIds).then((result) => {
                 if (result) {
-                  message.success(`已应用 ${result.applied.length} 项变更`);
+                  // 三态汇总（REQ-059）：应用 / 跳过（已存在）/ 冲突
+                  const parts = [`已应用 ${result.applied.length} 项`];
+                  const skippedN = result.skipped?.length ?? 0;
+                  if (skippedN > 0) parts.push(`跳过 ${skippedN} 项`);
+                  if (result.conflicts.length > 0) parts.push(`冲突 ${result.conflicts.length} 项`);
+                  message.success(`${parts.join('，')}变更`);
                   if (!isExploreMockEnabled()) void fetchAll();
                 }
               });

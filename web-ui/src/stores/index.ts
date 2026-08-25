@@ -339,6 +339,8 @@ export interface CurriculumRun {
   proposals: CurriculumChange[];
   adopted_proposal_ids: string[];
   conflicts: { change_id: string; reason: string }[];
+  /** 重探时已存在领域的 create_domain 跳过清单（REQ-059，apply 后随行记录） */
+  skipped: { change_id: string; reason: string }[];
   error: { code: string; message: string } | null;
   created_at: string;
   updated_at: string;

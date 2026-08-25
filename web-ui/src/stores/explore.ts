@@ -25,10 +25,11 @@ export { EXPLORE_MAX_TUTORIALS, EXPLORE_MIN_CONFIRMED, POLL_INTERVAL_MS, MAX_POL
 export { exploreStatusOf, remainingSlots, isCourseLocked } from './exploreRules';
 export { isExploreMockEnabled };
 
-/** 领域探索 apply 响应 */
+/** 领域探索 apply 响应（skipped=重探时已存在领域的 create_domain 跳过清单，REQ-059） */
 export interface CurriculumApplyResult {
   applied: { change_id: string; entity: string; target_id: string }[];
   conflicts: { change_id: string; reason: string }[];
+  skipped?: { change_id: string; reason: string }[];
   run: CurriculumRun;
 }
 

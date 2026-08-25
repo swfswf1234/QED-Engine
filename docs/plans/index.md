@@ -16,10 +16,11 @@
 
 ## 活跃计划
 
-- [2026-08 课程下载轮探索计划（探索界面 / 探索 API 契约）](../trackers/todo.md)（ARCH-019，PLAN-020~021，状态见任务台账）
+- [2026-08 课程下载轮探索计划（探索界面）](../trackers/todo.md)（ARCH-019，PLAN-020，状态见任务台账）
 - [2026-08 教材下载轮计划（textbook-download-round）](../trackers/todo.md)（ARCH-002，状态见任务台账）
 
 ## 已归档计划（2026-08）
+- 课程探索 API 契约（arch019-exploration-api）（PLAN-021，Completed 2026-08-25；按归档判定 Delete 移除——事实并入 architecture/api-contracts.md，Git 锚点 0517e5d）
 
 - [REQ-060 模型调用记录扩展与审核 UI（req060-llm-call-review）](../history/plans/2026-08/2026-08-req060-llm-call-review.md)（REQ-060，Completed 2026-08-24）
 

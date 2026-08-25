@@ -28,7 +28,7 @@
 - 范围：DB 备份/清理方案、dataset 新目录规范、`QED_DATA_ROOT` 变量设计、存量文件迁移映射、
   三项目改动清单。
 - 非目标：探索端点与界面（见 [exploration-ui](../../../plans/2026-08-arch019-exploration-ui.md) /
-  [exploration-api](../../../plans/2026-08-arch019-exploration-api.md) 两计划）；Axiom-Flow parsed 产物的
+  exploration-api 两计划（后者已移除））；Axiom-Flow parsed 产物的
   内容格式（归 ALN-003/V2 后续轮）。
 
 ## 前置条件

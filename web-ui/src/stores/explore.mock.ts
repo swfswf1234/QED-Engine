@@ -202,7 +202,7 @@ export const exploreMockBackend = {
 
   fetchCurriculum(runId: string): CurriculumRun {
     const e = registry.get(runId)!;
-    const common = { ...baseFields(e, runId), scope: 'curriculum' as const, adopted_proposal_ids: e.adoptedIds, conflicts: [], error: null };
+    const common = { ...baseFields(e, runId), scope: 'curriculum' as const, adopted_proposal_ids: e.adoptedIds, conflicts: [], skipped: [], error: null };
     if (e.status !== 'running') {
       return {
         ...common, status: e.status as CurriculumRun['status'],
@@ -222,7 +222,7 @@ export const exploreMockBackend = {
     } as CurriculumRun;
   },
 
-  applyCurriculum(runId: string, selected: string[]): { applied: { change_id: string; entity: string; target_id: string }[]; conflicts: { change_id: string; reason: string }[]; run: CurriculumRun } {
+  applyCurriculum(runId: string, selected: string[]): { applied: { change_id: string; entity: string; target_id: string }[]; conflicts: { change_id: string; reason: string }[]; skipped?: { change_id: string; reason: string }[]; run: CurriculumRun } {
     const e = registry.get(runId)!;
     e.status = 'applied';
     e.adoptedIds = [...selected];
@@ -230,6 +230,7 @@ export const exploreMockBackend = {
     return {
       applied: changes.map((c) => ({ change_id: c.change_id, entity: c.entity, target_id: c.target_id })),
       conflicts: [],
+      skipped: [],
       run: exploreMockBackend.fetchCurriculum(runId),
     };
   },
