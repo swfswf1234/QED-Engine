@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-20
+最后更新：2026-08-23
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -40,7 +40,14 @@
 
 ## 当前主线
 
-- 进行中：**第一轮主线·文档规范与架构确定轮（ARCH-018，ADR 0010，2026-08-20 立档）**——
+- 进行中：**第二轮主线·课程下载轮（ARCH-019，2026-08-23 启动）**——同轮立 ADR 0011
+  （待评审设计先入 plans/，确定后落 design/）并同步两子仓库；用户裁决清库重走（原
+  QED-026/QED-014 前置被取代）。**数据前置轮已关闭**（2026-08-23）：五表备份+恢复演练、
+  存量 PDF 迁移新结构（12 文件 sha256 全比对一致）、五表清空、8901 空态正常、
+  `QED_DATA_ROOT` 落地根仓库侧；常驻快照库 `qed_snapshot_20260823` 留存清理前数据；
+  PLAN-019 归档 history/plans/2026-08/，REQ-051/052 入 completed.md。下一步：探索界面与
+  API 契约实现（PLAN-020/021，API 契约有 5 处【待定】需先消解）。
+- 已完成：**第一轮主线·文档规范与架构确定轮（ARCH-018，ADR 0010，2026-08-21 关闭）**——
   文档体系重构为「确定文档 / 相对确定 / 实时状态」三层：architecture/ 只放确定文档（总体架构
   four-service-architecture + 服务架构 frontend/backend-architecture + 固定 API 文档
   api-contracts + 数据库总纲 database-design + code-map，project-status 移入 trackers/）；
@@ -50,7 +57,32 @@
   数据透传·Axiom/监控诊断与 LLM 网关，REQ-046）；**数据库总纲补登记 qed_llm_calls**（ARCH-016）
   并加表清单总览；**todo 按五轮主线分节排序**、REQ-041/043 关闭归档 completed.md；
   **门禁全绿（契约 50 + 全量 296 + ruff clean）**；子项目范本调整经请求由对方执行
-  （REQ-048/049 → V2-015/QED-027）；待用户验收文档体系后关闭。
+  （REQ-048/049 → V2-015/QED-027）。**同轮收尾关闭**：ARCH-012（后端三域拆分轮，三域迁移 +
+  监控诊断端点全绿，Task 18 真实环境验收随前端控制台真实消费覆盖）、ARCH-013（文档与数据边界
+  整理轮，三域文档梳理 + todo 清理合并 + dataset/dataset 边界新模式）、ARCH-014（LLM 状态收敛
+  与 DB 启动快照轮，端点删除 + 快照实施 + 冒烟通过）、ARCH-017（密钥收敛与厂商选择，文档 +
+  门禁 + QED-Tracker 回执）；**「每次版本更新重新梳理文档体系」登记长期任务 REQ-050**。
+  计划归档至 history/plans/2026-08/。
+- 已完成：**LLM 网关与模型管理轮（ARCH-016，2026-08-23 关闭）**——三项目密钥约定
+  （各 `.env` 自持 `API_KEY` 统一变量，旧变量降级别名；`QED_API_SELECT` 选 api/local 模式）、
+  8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）、
+  qed_llm_calls 调用记录（单表三项目可写，DB 不可达降级）、本地模型生命周期脚本
+  （scripts/text-model/ + scripts/image-model/，MinerU 编排迁入）、资源互斥（QED_RESOURCE_GUARD）、
+  控制台 GPU 总览条 / 依赖组件三卡 / 模型调用记录检索页；Task 17 门禁收口（后端 282 + ruff +
+  契约 48、前端 vitest 100 + tsc + build、api 模式真实冒烟 qed_llm_calls 落库）；**子项目回执
+  齐备**：REQ-043（QED-Tracker QED-037）+ REQ-044（Axiom-Flow V2-014，fcb9eb9..9573fb0，
+  T6 网关冒烟 call_id=17）；local 模式根仓库侧冒烟经用户裁决由日常使用自然覆盖。
+  计划归档至 history/plans/2026-08/。**同日关闭跨项目支线**：REQ-039（Axiom-Flow 服务化脚本，
+  V2-011 f5d9355 + 根仓库 axiom 单元黑盒接入）、REQ-044（V2-014）、REQ-040（生命周期脚本
+  `_pid_is_alive` 编码修复三方落地：根仓库 web + QED-Tracker QED-035 + Axiom-Flow V2-012 729d208）。
+- 已完成：**前端重构主轮（ARCH-011，2026-08-21 关闭）**——React 19 + AntD 全家桶
+  重建 8903（web-ui/），核心四界面（主界面/控制台/仪表盘/下载管理）Phase 0~5 全部通过
+  浏览器验证；serve_web.py 指向 dist、旧 web/ 退役、test_web.py 守护迁移至 web-ui/src 源码；
+  门禁全绿（build + vitest 100 + tsc 零错 + pytest 296）；ADR 0008 + frontend-architecture.md
+  已落盘。计划归档至 history/plans/2026-08/。
+- 已完成：**下载管理界面重构轮（ARCH-015，2026-08-21 关闭）**——左树四层（高等数学→
+  分类→课程→教程叶子+进度）、右侧流程筛选（搜索/确认/下载/验收+保留三下拉）、书行卡去
+  kind、书行排序；REQ-041 回执已收到（QED-Tracker QED-036）；浏览器验证通过。
 - 已完成：**v0.1 版本目标对齐——[文档与架构重构轮（ARCH-008）](../history/plans/2026-08/2026-08-docs-refactor-round.md)**
   （2026-08-10 归档，Achieved）：docs/ 九节逐节梳理完成（W1 adr/ 至 W9 ADR 清理 + REQ-024），
   **文档基线定格**——ADR 六份（领域枚举收敛为工程治理/架构与边界）、标准/设计/计划/台账
@@ -59,27 +91,6 @@
   **架构轮（ARCH-009，ADR 0007，2026-08-11 冒烟闭环）**：前端唯一入口 8900——目录重整（backend/
   database/tmp/scripts）、数据域语义 API（data.py）、服务域 /services 实装（service_manager.py）、
   前端唯一入口切换（app.js），P0-P5 完成，**真实冒烟闭环（8900/8901 联调：数据域真实数据 + /services 启停托管 start/stop/restart + 409 窗口 + 优雅停止），181 passed + ruff clean**，修复 ROOT 路径错位（parents 层级）与 Popen 失败句柄泄漏，归档待用户验收。
-- 进行中：**前端重构主轮（ARCH-011，ADR 0008，2026-08-16 立档）**——用户裁决前端重构为
-  当前最高优先级且**本轮只做前端**：React 19 + AntD 全家桶重建 8903（web-ui/），核心四界面
-  （主界面/控制台/仪表盘/下载管理），控制台只用既有端点（/services、/config/database 启动
-  快照）；**每阶段用户验证门禁**；后端三域拆分与监控诊断端点由 ARCH-012
-  并行承接。**四界面已实现并切换（2026-08-17）**：serve_web.py 指向 web-ui/dist、旧 web/
-  退役、`.env.production` VITE_API_BASE=8900、test_web.py 重写守护 web-ui 源码；控制台
-  启停 message 反馈 + 仪表盘课程完成度（≥2 套教程验收）已落地。LLM 网关与本地 LLM
-  （LM Studio）接入为第二轮。
-- 进行中：**后端三域拆分轮（ARCH-012，2026-08-16 立档，与 ARCH-011 并行）**——三域迁移完成
-  （clients/、services/ 能力层、api/control.py 控制域路由、api/tracker.py 数据域），控制域
-  新能力落地（/logs、/monitor/gpu、/monitor/lmstudio、/monitor/mineru、/self-restart）；
-  **门禁全绿（261 passed + ruff clean + 契约测试）**；**Task 18 真实环境实测与 8903 前端
-  回归验收延后至前端完成后统一验收**（2026-08-16 用户裁决）。
-- 进行中：**文档与数据边界整理轮（ARCH-013，2026-08-16 立档）**——后端文档按三域新模式
-  梳理、todo 清理合并（旧前端/三表轮次关闭归档）、database/dataset 边界按「dataset=数据
-  资料、元数据默认入 DB」重梳（meta/ 退役 REQ-032、QED-031 根仓库同步登记、学习表族规划）。
-- 进行中：**LLM 状态收敛与 DB 启动快照轮（ARCH-014，2026-08-16 立档）**——/config/llm-status
-  端点已删除（8900 启动时 LLM 供应商探测一次写日志）；/config/database 改启动快照（启动时
-  MySQL 探测一次，端点只读）；旧前端横幅移除 LLM 项；Axiom-Flow 端口 8902 已迁移表述更新；
-  「文档解析管理」包含关系登记前端轮。**实施完成（261 passed + ruff clean + 冒烟）**，
-  与 ARCH-012/011 一并待前端完成后统一验收。
 - 进行中：**联调矩阵与契约冻结编排（2026-08-16 立档，[integration-matrix.md](../design/integration-matrix.md)）**——
   三组并行联调：A 前端↔8900（并行推进中）/ B 8900↔8901（**QED-031 迁移 0006 已冻结**——
   2026-08-17 QED-Tracker 回执：alembic=0006、五表落库（4 知识/12 书行/16 渠道）、真实冒烟
@@ -94,23 +105,6 @@
   菜单删除；探索（块级切分校验 → 对话式召回）仅登记方向（[exploration.md](../design/exploration.md)，
   后置实施）。**根仓库侧完成（2026-08-20）**：8900 sync/review 端点 + 前端重构（vitest
   89 passed + tsc + build + 契约测试 61 passed）；**待 Axiom-Flow V2-013 执行回执后联调验收**。
-- 进行中：**LLM 网关与模型管理轮（ARCH-016，2026-08-20 立档，实施完成）**——三项目密钥约定
-  （各 `.env` 自持 `API_KEY` 统一变量，旧变量降级别名；`QED_API_SELECT` 选 api/local 模式）、
-  8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）、
-  qed_llm_calls 调用记录（单表三项目可写，DB 不可达降级）、本地模型生命周期脚本
-  （scripts/text-model/ + scripts/image-model/，MinerU 编排迁入）、资源互斥（QED_RESOURCE_GUARD）、
-  控制台 GPU 总览条 / 依赖组件三卡 / 模型调用记录检索页；REQ-043（QED-Tracker 密钥分置与
-  local 模式）与 REQ-044（Axiom-Flow 模型模式 + MinerU 移交）已文档登记待对方执行回执；
-  **Task 17 门禁收口完成（2026-08-20）**：后端 pytest 282 passed + ruff clean + 契约 48、
-  前端 vitest 100 + tsc 无错 + build 成功、api 模式真实冒烟通过（/llm/test/text ok=true、
-  qed_llm_calls 落库）；**REQ-043/044 回执后归档**（local 模式真实冒烟因本机 LM Studio 开启
-  鉴权跳过，需用户关密码或配 key 后补验）。
-- 进行中：**密钥收敛与厂商选择（2026-08-20 用户裁决，ARCH-017 登记）**——逐厂商 key
-  （QWEN/DEEPSEEK/GLM_API_KEY）正式取消，单一 `API_KEY` + `QED_API_PROVIDER`（qwen/deepseek/glm，
-  默认 qwen，仅影响 api 模式）选厂商；`/config/keys` 契约改 `{provider, configured}`，
-  `/config/models` 按 `QED_API_PROVIDER` 返回解析后生效模型（显式配置优先，否则厂商默认，deepseek
-  无视觉显示「（无视觉）」）；文档同步（configuration-and-secrets / config-center-api /
-  llm-gateway-and-model-management / tech-stack / `.env`）完成，全量门禁全绿 + qwen api 模式冒烟通过。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
   文档基线之上的主线推进为**课程收集主线（ARCH-002）**——QED-Tracker QED-019（01 数学分析
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与

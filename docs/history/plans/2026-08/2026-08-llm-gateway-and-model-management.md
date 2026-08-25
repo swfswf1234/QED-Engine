@@ -1,16 +1,16 @@
-# 2026-08 LLM 网关与模型管理实施轮（llm-gateway-and-model-management）
+﻿# 2026-08 LLM 网关与模型管理实施轮（llm-gateway-and-model-management）
 
 > ⚠ **执行后变更（2026-08-20 用户裁决）**：逐厂商 key（QWEN/DEEPSEEK/GLM_API_KEY）已正式取消，
 > 改为单一 `API_KEY` + `QED_API_PROVIDER`（qwen|deepseek|glm，默认 qwen）；本文档中涉及旧变量的
-> 实现细节以当前代码与 [configuration-and-secrets.md](../design/configuration-and-secrets.md) 为准。
+> 实现细节以当前代码与 [configuration-and-secrets.md](../../../design/configuration-and-secrets.md) 为准。
 
 状态：Accepted
 任务类型：B
 最后更新：2026-08-20
-关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
-关联设计：[llm-gateway-and-model-management.md](../design/llm-gateway-and-model-management.md)（Accepted）、
-[configuration-and-secrets.md](../design/configuration-and-secrets.md)（密钥分置修订）、
-[../architecture/api-contracts.md](../architecture/api-contracts.md)（监控诊断域扩展）
+关联 ADR：[ADR 0007](../../../adr/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../adr/0002-frontend-and-port-centralization.md)
+关联设计：[llm-gateway-and-model-management.md](../../../design/llm-gateway-and-model-management.md)（Accepted）、
+[configuration-and-secrets.md](../../../design/configuration-and-secrets.md)（密钥分置修订）、
+[../architecture/api-contracts.md](../../../architecture/api-contracts.md)（监控诊断域扩展）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-016 登记；REQ-043 / REQ-044 登记）
 归档判定：P1/P2 代码门禁全绿（pytest + ruff + 契约 + 前端 tsc/vitest/build）+ 真实冒烟（api/local 两模式）
 + 子项目文档登记完成 → Completed，归档至 `history/plans/2026-08/`

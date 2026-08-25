@@ -1,13 +1,15 @@
 /**
  * 仪表盘 store（Phase 3 + 五层化，QED-031）
  * - 五层聚合：/knowledge 一次拉取知识行列表 + 并行拉取 /knowledge/{id} 详情（含书行）
- * - 服务在线：/services（四服务；后端离线时本地判定 8903）
+ * - 服务在线卡（2026-08-24 恢复·轻量版）不在此拉取 /services：只读消费共享 runtime store
+ *   （AdminLayout 进入管理台已统一拉取）；整体错误横幅改由知识行请求的错误类别判定
+ *   （offline 类 = 8900 不可达）
  * - 独立降级：8901 不可达 → 文档下载进度卡离线提示；8900 不可达 → 整体横幅
  */
 import { create } from 'zustand';
-import { listServices } from '../api/services';
-import { listKnowledge, getKnowledge, listCatalog } from '../api/tracker';
-import type { BookRecord, CatalogTarget, KnowledgeDetail, KnowledgeRecord, ServiceStatus } from './index';
+import { ApiError } from '../api/client';
+import { getKnowledge, listCatalog, listKnowledge } from '../api/tracker';
+import type { BookRecord, CatalogTarget, KnowledgeDetail, KnowledgeRecord } from './index';
 
 export const KNOWLEDGE_TIMEOUT_MS = 8000;
 
@@ -112,9 +114,8 @@ export interface DashboardStore {
   details: Record<string, KnowledgeDetail>;
   /** catalog targets（课程清单，课程饼图分母来源；独立降级） */
   catalogTargets: CatalogTarget[];
-  services: ServiceStatus[];
   loading: boolean;
-  /** 整体错误（8900 不可达） */
+  /** 整体错误（知识行请求为 offline 类错误 → 8900 不可达；替代原 /services 判定） */
   error: string | null;
   /** 数据域独立错误（8901 不可达等） */
   dataError: string | null;
@@ -127,7 +128,6 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   knowledge: [],
   details: {},
   catalogTargets: [],
-  services: [],
   loading: false,
   error: null,
   dataError: null,
@@ -155,17 +155,17 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       .then((c) => [c, null] as const)
       .catch((err) => [null, err] as const);
 
-    const [services, servicesErr] = await listServices()
-      .then((s) => [s, null] as const)
-      .catch((err) => [null, err] as const);
+    // 整体横幅判定：知识行请求为 offline 类错误 → 8900 管理服务不可达；
+    // http 类（如 8901 经 8900 透传的 503）不算整体离线，仅数据卡降级
+    const isOffline = dataErr instanceof ApiError && dataErr.kind === 'offline';
+
     set({
       knowledge: list ?? get().knowledge,
       details,
       catalogTargets: catalog?.targets ?? get().catalogTargets,
-      services: services ?? get().services,
       dataError: dataErr ? (dataErr instanceof Error ? dataErr.message : String(dataErr)) : null,
       catalogError: catalogErr ? (catalogErr instanceof Error ? catalogErr.message : String(catalogErr)) : null,
-      error: servicesErr ? (servicesErr instanceof Error ? servicesErr.message : String(servicesErr)) : null,
+      error: isOffline ? (dataErr as ApiError).message : null,
     });
     set({ loading: false });
   },

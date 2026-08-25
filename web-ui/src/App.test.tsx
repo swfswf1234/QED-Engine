@@ -32,11 +32,13 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     expect(container.querySelector('h2')?.textContent).toBe('仪表盘');
   });
 
-  it('通过 hash 直达 #/admin/downloads 渲染下载管理', () => {
+  it('通过 hash 直达 #/admin/downloads 渲染文档下载管理', () => {
     window.location.hash = '#/admin/downloads';
     const { container } = renderApp();
     expect(container.querySelector('h2')?.textContent).toBe('文档下载管理');
   });
+
+  // 2026-08-24 REQ-059：探索确认页路由已删除（全弹窗流），原 downloads/explore 用例移除
 
   it('通过 hash 直达 #/admin/llm-calls 渲染模型调用记录', () => {
     window.location.hash = '#/admin/llm-calls';

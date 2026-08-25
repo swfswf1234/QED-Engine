@@ -1,18 +1,18 @@
-# 2026-08 文档规范与架构确定轮（docs-restructure-round）
+﻿# 2026-08 文档规范与架构确定轮（docs-restructure-round）
 
 状态：In Progress
 任务类型：B
 最后更新：2026-08-20
-关联 ADR：[ADR 0010](../adr/0010-documentation-versioning.md)（文档体系分层与版本治理）
-关联设计：[架构索引](../architecture/index.md)、[设计索引](../design/index.md)、
-[文档规范](../standards/documentation.md)
+关联 ADR：[ADR 0010](../../../adr/0010-documentation-versioning.md)（文档体系分层与版本治理）
+关联设计：[架构索引](../../../architecture/index.md)、[设计索引](../../../design/index.md)、
+[文档规范](../../../standards/documentation.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-018 第一轮主线；支线 ARCH-011~017 归并）
 归档判定：文档体系落地、契约门禁全绿、用户确认文档规范后关闭，计划正文归档
 `docs/history/plans/` 或按事实同步后删除
 
 ## 目标与成功标准
 
-第一轮主线（架构确定轮）：按 [ADR 0010](../adr/0010-documentation-versioning.md) 重构 QED-Engine
+第一轮主线（架构确定轮）：按 [ADR 0010](../../../adr/0010-documentation-versioning.md) 重构 QED-Engine
 文档体系为「确定文档 / 相对确定 / 实时状态」三层，并以 QED-Engine 为范本向 Axiom-Flow、
 QED-Tracker 发起文档体系调整请求。
 

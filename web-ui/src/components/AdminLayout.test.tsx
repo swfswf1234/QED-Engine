@@ -11,7 +11,7 @@ function renderLayout(initialPath: string) {
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<div>控制台页</div>} />
           <Route path="dashboard" element={<div>仪表盘页</div>} />
-          <Route path="downloads" element={<div>下载管理页</div>} />
+          <Route path="downloads" element={<div>文档下载管理页</div>} />
           <Route path="llm-calls" element={<div>模型调用记录页</div>} />
         </Route>
       </Routes>
@@ -25,10 +25,23 @@ describe('管理台左侧导航 AdminLayout（Phase 3 反馈）', () => {
     expect(screen.getByText('QED 管理台')).toBeInTheDocument();
     expect(screen.getByText('控制台')).toBeInTheDocument();
     expect(screen.getByText('仪表盘')).toBeInTheDocument();
-    expect(screen.getByText('下载管理')).toBeInTheDocument();
+    expect(screen.getByText('文档下载管理')).toBeInTheDocument();
     expect(screen.getByText('文档解析管理')).toBeInTheDocument();
     expect(screen.getByText('模型调用记录')).toBeInTheDocument();
     expect(screen.getByText('主界面')).toBeInTheDocument();
+  });
+
+  it('全局顶栏：品牌条（QED-Engine 从公理到证明）全宽置顶，菜单在其下展开（2026-08-24 布局重构）', () => {
+    const { container } = renderLayout('/admin');
+    // 品牌条文案
+    expect(screen.getByText('QED-Engine')).toBeInTheDocument();
+    expect(screen.getByText('从公理到证明')).toBeInTheDocument();
+    // DOM 顺序：顶栏 Header 在 Sider 之前（品牌条在上，左侧菜单在下方展开）
+    const header = container.querySelector('.ant-layout-header');
+    const sider = container.querySelector('.ant-layout-sider');
+    expect(header).not.toBeNull();
+    expect(sider).not.toBeNull();
+    expect(header!.compareDocumentPosition(sider!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('默认进入控制台；点击菜单可切换页面', async () => {
@@ -37,8 +50,8 @@ describe('管理台左侧导航 AdminLayout（Phase 3 反馈）', () => {
     const user = userEvent.setup();
     await user.click(screen.getByText('仪表盘'));
     expect(await screen.findByText('仪表盘页')).toBeInTheDocument();
-    await user.click(screen.getByText('下载管理'));
-    expect(await screen.findByText('下载管理页')).toBeInTheDocument();
+    await user.click(screen.getByText('文档下载管理'));
+    expect(await screen.findByText('文档下载管理页')).toBeInTheDocument();
     await user.click(screen.getByText('模型调用记录'));
     expect(await screen.findByText('模型调用记录页')).toBeInTheDocument();
     await user.click(screen.getByText('控制台'));

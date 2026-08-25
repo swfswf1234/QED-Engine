@@ -36,6 +36,8 @@ from qed_engine.api.schemas import (
     MineruStatus,
     ModelRoute,
     ModelsResponse,
+    ReviewCallRequest,
+    ReviewCallResponse,
 )
 from qed_engine.config import Settings
 from qed_engine.services.llm import call_log as llm_call_log
@@ -173,9 +175,13 @@ def models(request: Request) -> ModelsResponse:
 
 @router.get("/config/keys", response_model=KeysResponse)
 def keys(request: Request) -> KeysResponse:
-    """供应商配置状态（管理界面用）：单 key 布尔 + 当前厂商，不含密钥值。"""
+    """供应商配置状态（管理界面用）：单 key 布尔 + 当前厂商 + 运行模式，不含密钥值。"""
     resolved: Settings = request.app.state.settings
-    return KeysResponse(provider=resolved.qed_api_provider, configured=resolved.api_configured)
+    return KeysResponse(
+        provider=resolved.qed_api_provider,
+        configured=resolved.api_configured,
+        mode=resolved.qed_api_select,
+    )
 
 
 @router.get("/config/database", response_model=DatabaseResponse)
@@ -208,6 +214,10 @@ def gateway_call_vision(settings, **kwargs):
 
 def gateway_search_calls(settings, **kwargs):
     return llm_call_log.search_calls(settings, **kwargs)
+
+
+def gateway_review_call(settings, **kwargs):
+    return llm_call_log.review_call(settings, **kwargs)
 
 
 @router.post("/llm/text", response_model=LlmCallResponse)
@@ -275,14 +285,20 @@ def llm_calls(
     status: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    task: str | None = None,
+    step: str | None = None,
+    prompt_template: str | None = None,
+    review_status: str | None = None,
     page: int = 1,
     size: int = 20,
 ) -> CallsResponse:
-    """调用记录检索（qed_llm_calls，按 service/mode/model/status/时间过滤，倒序分页）。"""
+    """调用记录检索（qed_llm_calls，按多维度过滤，倒序分页）。"""
     resolved: Settings = request.app.state.settings
     result = gateway_search_calls(
         resolved, service=service, mode=mode, model=model, status=status,
-        start=start, end=end, page=page, size=size,
+        start=start, end=end, task=task, step=step,
+        prompt_template=prompt_template, review_status=review_status,
+        page=page, size=size,
     )
     return CallsResponse(
         items=[CallLogItem(
@@ -292,9 +308,29 @@ def llm_calls(
             duration_ms=item.get("duration_ms"),
             status=item["status"], error=item.get("error"),
             created_at=str(item["created_at"]),
+            task=item.get("task"), step=item.get("step"),
+            review_status=item.get("review_status") or "unreviewed",
+            review_note=item.get("review_note") or "",
         ) for item in result["items"]],
         total=result["total"], page=result["page"], size=result["size"],
     )
+
+
+@router.patch("/llm/calls/{call_id}/review", response_model=ReviewCallResponse)
+def llm_calls_review(
+    call_id: int,
+    payload: ReviewCallRequest,
+    request: Request,
+) -> ReviewCallResponse:
+    """审核标注（REQ-060）：更新 review_status/review_note；不存在返回 404。"""
+    resolved: Settings = request.app.state.settings
+    ok = gateway_review_call(
+        resolved, call_id=call_id,
+        review_status=payload.review_status, review_note=payload.review_note,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return ReviewCallResponse(ok=True, call_id=call_id)
 
 
 @router.post("/database/test", response_model=DatabaseResponse)

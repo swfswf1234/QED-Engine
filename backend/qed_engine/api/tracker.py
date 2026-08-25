@@ -16,6 +16,7 @@ qt_books / 渠道 qt_sources，QED-031 知识层次模型，取代三表 qt_sele
 """
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 
@@ -88,11 +89,28 @@ def _tracker(request: Request) -> TrackerClient:
     return request.app.state.tracker_client
 
 
-def _call(request: Request, fn, *args, **kwargs):
-    """执行 8901 调用并做错误映射：4xx 透传（409 状态机冲突），其余统一 503。"""
+def _call(request: Request, fn, *args, _status_code: int = 200, _manual_maintenance: bool = False, **kwargs):
+    """执行 8901 调用并做错误映射：4xx 透传（409 状态机冲突），其余统一 503。
+
+    `_manual_maintenance=True`（仅 §8 手工维护五路由，REQ-059）：上游默认形态
+    404/405（FastAPI 路由未实现/路径参数通配命中不同方法，如 GET /courses/{domain_id}
+    吞掉 PATCH|DELETE）归一为结构化 404 UPSTREAM_NOT_IMPLEMENTED——前端据此统一降级
+    提示；端点上线后业务 404 自带 {code,message} 结构自动绕过归一。
+    """
     try:
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        if _status_code != 200:
+            return JSONResponse(content=result, status_code=_status_code)
+        return result
     except TrackerError as exc:
+        if _manual_maintenance and _is_default_not_implemented(exc):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "UPSTREAM_NOT_IMPLEMENTED",
+                    "message": "该手工维护端点 8901 尚未实现（REQ-059 承接中）",
+                },
+            ) from exc
         if exc.status_code is not None and 400 <= exc.status_code < 500:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         raise HTTPException(
@@ -101,10 +119,211 @@ def _call(request: Request, fn, *args, **kwargs):
         ) from exc
 
 
+def _is_default_not_implemented(exc: TrackerError) -> bool:
+    """上游 404/405 且 detail 为框架默认字符串形态 → 判定为「端点未实现」。"""
+    if exc.status_code not in (404, 405) or not isinstance(exc.detail, str):
+        return False
+    return "Not Found" in exc.detail or "Method Not Allowed" in exc.detail
+
+
 def _require_reason(reason: str) -> None:
     """reject/supersede 缺 reason：8900 直接 422，不请求 8901。"""
     if not reason:
         raise HTTPException(status_code=422, detail="必须提供原因（reason）")
+
+
+# --- 课程探索 API（PLAN-021 冻结契约，§1~7，REQ-054 透传） ---
+
+
+class ExploreCourseBody(BaseModel):
+    mode: str
+    ref_text: str | None = None
+    ref_doc_path: str | None = None
+
+
+class ExploreAdoptBody(BaseModel):
+    selected: list[str]
+
+
+class CurriculumExploreBody(BaseModel):
+    domain_name: str
+    mode: str
+    ref_text: str | None = None
+    ref_doc_path: str | None = None
+
+
+class CurriculumApplyBody(BaseModel):
+    selected: list[str]
+
+
+@router.post("/courses/{course_id}/explore")
+def explore_course(course_id: str, body: ExploreCourseBody, request: Request) -> dict:
+    """§1 发起课程层探索（透传 8901，202 Accepted）。"""
+    return _call(
+        request,
+        _tracker(request).start_course_explore,
+        course_id,
+        _status_code=202,
+        mode=body.mode,
+        ref_text=body.ref_text,
+        ref_doc_path=body.ref_doc_path,
+    )
+
+
+@router.get("/explore-runs/{run_id}")
+def get_explore_run(run_id: str, request: Request) -> dict:
+    """§2 轮询探索运行状态（透传 8901）。"""
+    return _call(request, _tracker(request).get_explore_run, run_id)
+
+
+@router.post("/explore-runs/{run_id}/adopt")
+def adopt_explore_run(run_id: str, body: ExploreAdoptBody, request: Request) -> dict:
+    """§3 采纳所选推荐（透传 8901）。"""
+    return _call(request, _tracker(request).adopt_explore_run, run_id, selected=body.selected)
+
+
+@router.post("/explore-runs/{run_id}/discard")
+def discard_explore_run(run_id: str, request: Request) -> dict:
+    """§4 放弃本次探索（透传 8901，幂等）。"""
+    return _call(request, _tracker(request).discard_explore_run, run_id)
+
+
+@router.get("/courses/{course_id}/explore-runs")
+def list_explore_runs(course_id: str, request: Request, limit: int = 20, offset: int = 0) -> list:
+    """§5 探索历史列表（透传 8901）。"""
+    return _call(request, _tracker(request).list_explore_runs, course_id, limit=limit, offset=offset)
+
+
+@router.post("/curriculum-explore")
+def curriculum_explore(body: CurriculumExploreBody, request: Request) -> dict:
+    """§6 发起新建领域探索（透传 8901，202 Accepted）。"""
+    return _call(
+        request,
+        _tracker(request).start_curriculum_explore,
+        body.domain_name,
+        _status_code=202,
+        mode=body.mode,
+        ref_text=body.ref_text,
+        ref_doc_path=body.ref_doc_path,
+    )
+
+
+@router.get("/curriculum-runs/{run_id}")
+def get_curriculum_run(run_id: str, request: Request) -> dict:
+    """§7.1 轮询领域探索运行（透传 8901）。"""
+    return _call(request, _tracker(request).get_curriculum_run, run_id)
+
+
+@router.post("/curriculum-runs/{run_id}/apply")
+def apply_curriculum_run(run_id: str, body: CurriculumApplyBody, request: Request) -> dict:
+    """§7.2 应用课程体系变更（透传 8901）。"""
+    return _call(request, _tracker(request).apply_curriculum_run, run_id, selected=body.selected)
+
+
+# --- 领域只读/维护（REQ-059，QED-Tracker 承接端点，未上线 404 原样透传） ---
+
+
+class DomainUpdateBody(BaseModel):
+    description: str | None = None
+    stages: list[str] | None = None
+
+
+@router.get("/domains")
+def list_domains(request: Request) -> list:
+    """领域列表（左树第一层数据源，透传 8901）。"""
+    return _call(request, _tracker(request).list_domains)
+
+
+class DomainCreateBody(BaseModel):
+    name: str
+    description: str | None = None
+    stages: list[str] | None = None
+
+
+@router.post("/domains")
+def create_domain(body: DomainCreateBody, request: Request):
+    """手工新建领域（REQ-059 §8；domain_id 由上游生成；未上线前归一结构化 404）。"""
+    return _call(
+        request,
+        _tracker(request).create_domain,
+        name=body.name,
+        description=body.description,
+        stages=body.stages,
+        _manual_maintenance=True,
+    )
+
+
+@router.patch("/domains/{domain_id}")
+def update_domain(domain_id: str, body: DomainUpdateBody, request: Request):
+    """修改领域描述/阶段（name 锁死不在请求体，透传 8901）。"""
+    return _call(
+        request,
+        _tracker(request).update_domain,
+        domain_id,
+        description=body.description,
+        stages=body.stages,
+        _manual_maintenance=True,
+    )
+
+
+@router.delete("/domains/{domain_id}")
+def delete_domain(domain_id: str, request: Request):
+    """删除领域（有课程时上游 409 保护；§8 未上线前归一结构化 404）。"""
+    return _call(request, _tracker(request).delete_domain, domain_id, _manual_maintenance=True)
+
+
+@router.get("/courses")
+def list_course_system(request: Request) -> list:
+    """领域课程体系（GET /courses，左树 v2 数据源，透传 8901 QED-033）。"""
+    return _call(request, _tracker(request).list_courses_system)
+
+
+class CourseCreateBody(BaseModel):
+    name: str
+    stage: str | None = None
+    sort_order: int | None = None
+    note: str | None = None
+
+
+@router.post("/domains/{domain_id}/courses")
+def create_course_for_domain(domain_id: str, body: CourseCreateBody, request: Request):
+    """手工新增课程（REQ-059 §8；上游未上线前归一结构化 404）。"""
+    return _call(
+        request,
+        _tracker(request).create_course_for_domain,
+        domain_id,
+        name=body.name,
+        stage=body.stage,
+        sort_order=body.sort_order,
+        note=body.note,
+        _manual_maintenance=True,
+    )
+
+
+class CourseUpdateBody(BaseModel):
+    stage: str | None = None
+    sort_order: int | None = None
+    note: str | None = None
+
+
+@router.patch("/courses/{course_id}")
+def update_course(course_id: str, body: CourseUpdateBody, request: Request):
+    """修改课程阶段/排序/备注（name 锁死；仅提交显式字段）。"""
+    return _call(
+        request,
+        _tracker(request).update_course,
+        course_id,
+        stage=body.stage,
+        sort_order=body.sort_order,
+        note=body.note,
+        _manual_maintenance=True,
+    )
+
+
+@router.delete("/courses/{course_id}")
+def delete_course(course_id: str, request: Request):
+    """删除课程（有知识行时上游 409 保护；§8 未上线前归一结构化 404）。"""
+    return _call(request, _tracker(request).delete_course, course_id, _manual_maintenance=True)
 
 
 # --- 目录 ---

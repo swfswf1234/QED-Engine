@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Col, Empty, Layout, Progress, Row, Select, Space, Spin, Tag, Tree, Typography } from 'antd';
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons';
-import AppHeader from '../components/AppHeader';
 import BlockView from '../components/BlockView';
 import { describeError } from '../api/client';
 import { useParsingStore, buildParsingTree, type ParsingBook, type ParsingTreeNode } from '../stores/parsing';
@@ -130,31 +129,20 @@ export default function Parsing() {
   );
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
-      <AppHeader
-        actions={
-          <Space>
-            <Button
-              type="primary" ghost icon={<SyncOutlined />} loading={syncing}
-              style={{ color: '#ffffff', borderColor: '#ffffff' }}
-              onClick={() => void fetchBooks(true)}
-            >
-              同步书目
-            </Button>
-            <Button
-              type="primary" ghost icon={<ReloadOutlined />} loading={loading}
-              style={{ color: '#ffffff', borderColor: '#ffffff' }}
-              onClick={() => void fetchBooks(false)}
-            >
-              刷新
-            </Button>
-          </Space>
-        }
-      />
-      <Layout.Content style={{ padding: 24, maxWidth: 1600, width: '96%', margin: '0 auto' }}>
-        <Title level={2} style={{ marginTop: 0 }}>文档解析管理</Title>
+    <Layout.Content style={{ padding: 24, maxWidth: 1600, width: '96%', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>文档解析管理</Title>
+        <Space>
+          <Button icon={<SyncOutlined />} loading={syncing} onClick={() => void fetchBooks(true)}>
+            同步书目
+          </Button>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchBooks(false)}>
+            刷新
+          </Button>
+        </Space>
+      </div>
 
-        {error && (
+      {error && (
           <Alert
             type="error" showIcon style={{ marginBottom: 16 }}
             message="解析数据获取失败"
@@ -281,8 +269,7 @@ export default function Parsing() {
             )}
           </Col>
         </Row>
-      </Layout.Content>
-    </Layout>
+    </Layout.Content>
   );
 }
 

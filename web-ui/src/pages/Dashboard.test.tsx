@@ -7,7 +7,8 @@ import Dashboard from './Dashboard';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDashboardStore } from '../stores/dashboard';
-import type { BookRecord, KnowledgeDetail, KnowledgeRecord } from '../stores';
+import { useRuntimeStore } from '../stores/runtime';
+import type { BookRecord, KnowledgeDetail, KnowledgeRecord, ServiceStatus } from '../stores';
 
 // ECharts 依赖 canvas，jsdom 不可用；渲染层由 EChart.test 覆盖，此处以占位验证组装
 vi.mock('../components/EChart', () => ({
@@ -20,17 +21,7 @@ vi.mock('../components/EChart', () => ({
   ),
 }));
 
-const servicesFixture = {
-  services: [
-    { name: 'config', label: 'QED 管理服务（配置中心）', port: 8900, log_path: '', status: 'online', pid: null, started_at: null, reason: '' },
-    { name: 'tracker', label: 'QED-Tracker 文档下载服务', port: 8901, log_path: '', status: 'offline', pid: null, started_at: null, reason: '未启动' },
-    { name: 'axiom', label: 'Axiom-Flow 文档解析服务', port: 8902, log_path: '', status: 'online', pid: 9, started_at: '', reason: '' },
-    { name: 'web', label: 'QED 前端服务', port: 8903, log_path: '', status: 'online', pid: 10, started_at: '', reason: '' },
-  ],
-};
-
-function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_id: string }): KnowledgeRecord {
-  return {
+function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_id: string }): KnowledgeRecord {  return {
     domain_id: 'math',
     kind: 'tutorial',
     set_no: '',
@@ -123,35 +114,48 @@ function renderDashboard() {
   );
 }
 
+/** runtime store 预置服务快照（仪表盘只读消费共享数据，不发请求） */
+const runtimeServices: ServiceStatus[] = [
+  { name: 'config', label: 'QED 管理服务（配置中心）', port: 8900, log_path: '', status: 'online', pid: null, started_at: null, reason: '' },
+  { name: 'tracker', label: 'QED-Tracker 文档下载服务', port: 8901, log_path: '', status: 'offline', pid: null, started_at: null, reason: '未启动' },
+  { name: 'axiom', label: 'Axiom-Flow 文档解析服务', port: 8902, log_path: '', status: 'online', pid: 9, started_at: '', reason: '' },
+];
+
 describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
   beforeEach(() => {
     useDashboardStore.setState({
-      knowledge: [], details: {}, catalogTargets: [], services: [], loading: false, error: null, dataError: null, catalogError: null,
+      knowledge: [], details: {}, catalogTargets: [], loading: false, error: null, dataError: null, catalogError: null,
     });
+    useRuntimeStore.setState({ services: runtimeServices });
   });
 
-  it('渲染标题/四服务摘要/课程完成度+教程饼图/解析占位；上下布局', async () => {
+  it('渲染标题/服务在线速览（共享数据零请求）/课程完成度+教程饼图/解析占位；上下布局', async () => {
     mockApi({
-      '/services': servicesFixture,
       '/catalogs/': catalogFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDashboard();
     expect(await screen.findByText('仪表盘')).toBeInTheDocument();
-    // 服务在线：只含四服务，无 MySQL
-    await waitFor(() => {
-      expect(useDashboardStore.getState().services.length).toBe(4);
-    });
+    // 服务在线卡恢复（2026-08-24 二次裁决）：轻量只读展示，数据来自共享 runtime store
     expect(screen.getByText('服务在线')).toBeInTheDocument();
     expect(screen.getByText('QED 管理服务（配置中心）')).toBeInTheDocument();
+    expect(screen.getByText('QED-Tracker 文档下载服务')).toBeInTheDocument();
+    expect(screen.getByText(/离线（未启动）/)).toBeInTheDocument();
+    // 缺 web 条目时兜底显示 8903（withWebServiceFallback）
     expect(screen.getByText('QED 前端服务')).toBeInTheDocument();
-    expect(screen.queryByText(/MySQL/)).not.toBeInTheDocument();
+    // 零额外请求契约：渲染过程不发出 /services
+    expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('/services'))).toBe(false);
+    // 布局顺序：服务在线 → 文档下载进度 → 文档解析进度
+    const healthCard = screen.getByText('服务在线').closest('.ant-card')!;
+    const downloadCard = screen.getByText('文档下载进度');
+    const parseCard = screen.getByText('文档解析进度');
+    expect(healthCard.compareDocumentPosition(downloadCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(downloadCard.compareDocumentPosition(parseCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // 双饼图占位 + 统计数字
     const charts = screen.getAllByTestId('echart');
     expect(charts).toHaveLength(2);
     // 饼图1 课程完成度：分母 2 门（math/analysis）；math 仅 k2 全验收（k1 有 downloaded）→ 完成 0
-    // 两扇区 [已完成 0, 未完成 2]
     const completionSeries = JSON.parse(charts[0].getAttribute('data-series') ?? '[]');
     expect(completionSeries[0].data.map((d: { value: number }) => d.value)).toEqual([0, 2]);
     expect(charts[0].getAttribute('data-title')).toContain('课程下载完成度 0/2');
@@ -166,19 +170,10 @@ describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
     expect(screen.getByText('已验收')).toBeInTheDocument();
     // 解析占位
     expect(screen.getByText('解析任务数据源后置')).toBeInTheDocument();
-    // 上下布局：下载进度卡在解析进度卡之前（DOM 顺序）
-    const downloadCard = screen.getByText('文档下载进度');
-    const parseCard = screen.getByText('文档解析进度');
-    expect(downloadCard.compareDocumentPosition(parseCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('8901 不可达（/knowledge 503）→ 文档下载状况降级提示，其余卡片正常', async () => {
+  it('8901 不可达（/knowledge 503）→ 文档下载状况降级提示，无整体横幅；服务在线卡仍展示', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/services')) {
-        return Promise.resolve(
-          new Response(JSON.stringify(servicesFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
       if (url.includes('/knowledge')) {
         return Promise.resolve(
           new Response(JSON.stringify({ detail: 'QED-Tracker 服务不可达' }), { status: 503, headers: { 'Content-Type': 'application/json' } }),
@@ -188,9 +183,9 @@ describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
     });
     renderDashboard();
     expect(await screen.findByText('QED-Tracker 数据不可达')).toBeInTheDocument();
-    // 无整体错误横幅（8900 正常）
+    // 无整体错误横幅（503 为 http 类错误，不等同 8900 离线）
     expect(screen.queryByText('仪表盘数据获取失败')).not.toBeInTheDocument();
-    // 服务在线卡仍正常
+    // 服务在线卡来自共享 runtime store，不受 8901 影响
     expect(screen.getByText('服务在线')).toBeInTheDocument();
   });
 
@@ -202,7 +197,6 @@ describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
 
   it('刷新按钮触发重新拉取', async () => {
     mockApi({
-      '/services': servicesFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });

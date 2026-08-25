@@ -22,7 +22,33 @@ MINERU_URL = "http://127.0.0.1:8002"
 MINERU_HEALTH_PATH = "/health"
 PROBE_TIMEOUT = 5.0
 
+# 模型进程名关键词白名单（REQ-038 GPU 饼图分类口径，2026-08-21 用户裁决）：
+# 进程名小写包含任一关键词 → kind="model"，否则 "other"（前端饼图高亮非模型占用）。
+# 覆盖：LM Studio（GUI 名含空格）、llama-server、qwen 推理、MinerU（WSL vmmem）、
+# python 通用推理/训练进程、ollama；后续发现漏网之鱼在此追加。
+MODEL_PROCESS_PATTERNS = (
+    "lm studio",
+    "lmstudio",
+    "llama",
+    "qwen",
+    "mineru",
+    "python",
+    "vmmem",
+    "ollama",
+)
+
 Runner = Callable[[list[str]], str]
+
+# 利用率读数说明（2026-08-23 用户裁决）：WDDM 模式下 nvidia-smi 的 utilization.gpu
+# 存在固有失真（低值与顶格 100% 间二值化跳变，实测对照性能计数器确认），但**超显存
+# 判断不依赖它**——95% 警告以显存使用率（memory.used / memory.total，nvidia-smi 实测
+# 准确）为准；利用率仅作参考展示，前端标注「仅供参考」。
+
+
+def classify_process(name: str) -> str:
+    """进程名 → kind：命中模型关键词白名单为 model，其余 other（大小写不敏感）。"""
+    lowered = name.lower()
+    return "model" if any(pattern in lowered for pattern in MODEL_PROCESS_PATTERNS) else "other"
 
 
 def _run_smi(cmd: list[str]) -> str:
@@ -92,10 +118,21 @@ def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None
             if len(cells) < 3:
                 continue
             pid, pname, mem = cells[0], cells[1], cells[2]
-            # Windows WDDM 模式下 used_memory 常为 [N/A]，跳过无效行
-            if mem in ("[N/A]", "[Insufficient Permissions]", ""):
+            try:
+                pid_num = int(pid)
+            except ValueError:
                 continue
-            processes.append({"pid": int(pid), "name": pname, "memory_mb": int(float(mem))})
+            # Windows WDDM 模式下 used_memory 常为 [N/A]/[Insufficient Permissions]：
+            # 显存数值拿不到，但进程清单与名称可得——保留行（memory_mb=None）供
+            # 「非模型任务」清单识别（REQ-038 用户核心诉求），不参与前端 MB 聚合
+            if mem in ("[N/A]", "[Insufficient Permissions]", ""):
+                processes.append(
+                    {"pid": pid_num, "name": pname, "memory_mb": None, "kind": classify_process(pname)}
+                )
+                continue
+            processes.append(
+                {"pid": pid_num, "name": pname, "memory_mb": int(float(mem)), "kind": classify_process(pname)}
+            )
     except (ValueError, IndexError):
         return {"available": False, "reason": "nvidia-smi 输出解析失败"}
     result = {

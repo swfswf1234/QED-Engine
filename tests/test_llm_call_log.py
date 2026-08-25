@@ -15,6 +15,7 @@ class FakeCursor:
         self.fetchone_result = None
         self.fetchall_result = []
         self.lastrowid = None
+        self.rowcount = 0
 
     def __enter__(self):
         return self
@@ -26,6 +27,9 @@ class FakeCursor:
         self.executed.append((sql, params))
         if "INSERT INTO qed_llm_calls" in sql:
             self.lastrowid = 7
+        if "UPDATE qed_llm_calls" in sql:
+            # REQ-060：review_call 影响行数（ID 99999 视为不存在）
+            self.rowcount = 0 if (params and params.get("id") == 99999) else 1
 
     def fetchone(self):
         return self.fetchone_result
@@ -113,9 +117,9 @@ def test_search_calls_filters_and_paginates(monkeypatch):
     sqls = [s for s, _ in conn.executed]
     assert any("COUNT(*)" in s for s in sqls)
     where_sql, params = conn.executed[-1]
-    assert "service = %(service)s" in where_sql and "LIMIT" in where_sql and "OFFSET" in where_sql
-    assert params["service"] == "qed_tracker" and params["status"] == "success"
-    assert "start" in params and "end" in params
+    assert "service = %s" in where_sql and "LIMIT" in where_sql and "OFFSET" in where_sql
+    assert params[0] == "qed_tracker" and params[1] == "success"
+    assert len(params) >= 4  # service, status, start, end, limit, offset
 
 
 def test_search_calls_bad_date_degrades():
@@ -132,3 +136,83 @@ def test_search_calls_clamps_pagination(monkeypatch):
     assert (result["page"], result["size"]) == (1, 20)
     result = call_log.search_calls(_settings(), page=-3, size=999)
     assert (result["page"], result["size"]) == (1, 200)
+
+
+# --- REQ-060：Schema 扩展 + 新过滤 + 审核 ---
+
+
+def test_ensure_table_includes_new_columns(monkeypatch):
+    """建表 SQL 含 REQ-060 新列：task/step/review_status/review_note。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    call_log.ensure_table(_settings())
+    sql = conn.executed[0][0]
+    assert "task VARCHAR(64)" in sql
+    assert "step VARCHAR(32)" in sql
+    assert "review_status VARCHAR(16)" in sql
+    assert "review_note VARCHAR(1000)" in sql
+    assert "DEFAULT 'unreviewed'" in sql
+
+
+def test_record_call_includes_new_fields(monkeypatch):
+    """写入：INSERT 含 task/step/review_status/review_note。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    call_log.record_call(
+        _settings(),
+        service="qed_tracker", mode="api", provider="qwen", model="qwen-plus",
+        endpoint="text", prompt="p", response="r", duration_ms=100,
+        status="success", task="paper-plan", step="plan",
+        review_status="unreviewed", review_note="",
+    )
+    sql, params = conn.executed[1]
+    assert "task" in sql and "step" in sql and "review_status" in sql and "review_note" in sql
+    assert params["task"] == "paper-plan" and params["step"] == "plan"
+    assert params["review_status"] == "unreviewed"
+
+
+def test_search_calls_new_filters(monkeypatch):
+    """检索：task/step/prompt_template/review_status 过滤。"""
+    conn = FakeConn(fetchone_result={"n": 1}, fetchall_result=[{"id": 5}])
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    result = call_log.search_calls(
+        _settings(),
+        task="paper-plan", step="assess",
+        prompt_template="paper-plan", review_status="passed",
+        page=1, size=10,
+    )
+    assert result["total"] == 1
+    sql, params = conn.executed[-1]
+    assert "task = %s" in sql
+    assert "step = %s" in sql
+    assert "prompt_template LIKE %s" in sql
+    assert "review_status = %s" in sql
+    assert "paper-plan" in params
+    assert "%paper-plan%" in params
+    assert "passed" in params
+
+
+def test_review_call_updates(monkeypatch):
+    """审核：review_call UPDATE 返回 True。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    ok = call_log.review_call(
+        _settings(), call_id=42, review_status="passed", review_note="效果好",
+    )
+    assert ok is True
+    sql, params = conn.executed[-1]
+    assert "UPDATE qed_llm_calls" in sql
+    assert "review_status" in sql and "review_note" in sql
+    assert params["id"] == 42
+    assert params["review_status"] == "passed"
+    assert params["review_note"] == "效果好"
+
+
+def test_review_call_not_found(monkeypatch):
+    """审核：review_call 不存在 ID 返回 False。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    ok = call_log.review_call(
+        _settings(), call_id=99999, review_status="rejected",
+    )
+    assert ok is False

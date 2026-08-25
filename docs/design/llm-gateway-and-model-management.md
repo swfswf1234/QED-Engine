@@ -175,7 +175,8 @@ backend/qed_engine/services/llm/
 | `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen-vl / local MinerU；deepseek 无视觉）；记录调用；`{reply, call_id}` |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
-| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / page / size`，分页返回 |
+| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |
+| `PATCH /llm/calls/{id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
 | `POST /database/test` | MySQL 即时连接探测（控制台测试按钮，替代启动快照只读） |
 | `GET /monitor/gpu` | 扩展：原 nvidia-smi 字段 + 系统内存（psutil，兜底 wmic） |
 | `GET /monitor/lmstudio` | 现状保留（5001 探测） |
@@ -202,6 +203,10 @@ backend/qed_engine/services/llm/
 | `status` | VARCHAR(16) | `success` / `error` |
 | `error` | VARCHAR(500) | 失败原因，可空 |
 | `created_at` | DATETIME | 调用时间 |
+| `task` | VARCHAR(64) | 任务标识（如 paper-plan、book-eval），可空（REQ-060） |
+| `step` | VARCHAR(32) | 步骤标识（如 plan、assess、propose），可空（REQ-060） |
+| `review_status` | VARCHAR(16) | 审核状态：`unreviewed` / `passed` / `rejected`（REQ-060） |
+| `review_note` | VARCHAR(1000) | 审核备注，可空（REQ-060） |
 
 - 表结构以根仓库 Alembic 迁移落地（qed 库）；三项目各自持有 `QED_DB_*` 写权限。
 - 写入方约定：网关统一写（QED-Engine 模式天然覆盖三项目）；子项目 local 直连时由各自 `llm_client.py` 自写（`service` 标识自身）。

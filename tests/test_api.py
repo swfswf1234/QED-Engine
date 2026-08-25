@@ -39,9 +39,12 @@ def _mock_startup_llm_probe(monkeypatch):
     monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
 
 
-def _client(monkeypatch, *, api_key="", provider="qwen", db_password="", tracker=None, axiom=None):
+def _client(
+    monkeypatch, *, api_key="", provider="qwen", db_password="", tracker=None, axiom=None, mode="api",
+):
     monkeypatch.setenv("API_KEY", api_key)
     monkeypatch.setenv("QED_API_PROVIDER", provider)
+    monkeypatch.setenv("QED_API_SELECT", mode)
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
     monkeypatch.setenv("QED_OCR_MODEL", "qwen-vl-plus")
     monkeypatch.setenv("QED_EMBEDDING_MODEL", "text-embedding-v4")
@@ -92,12 +95,12 @@ def test_models_configured(monkeypatch):
 
 
 def test_keys_status(monkeypatch):
-    """config/keys 返回当前厂商与配置状态，绝不包含密钥值。"""
+    """config/keys 返回当前厂商、配置状态与运行模式（api/local），绝不包含密钥值。"""
     client = _client(monkeypatch, api_key="sk-qwen")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"provider": "qwen", "configured": True}
+    assert body == {"provider": "qwen", "configured": True, "mode": "api"}
     assert "sk-qwen" not in response.text
 
 
@@ -106,7 +109,7 @@ def test_keys_unconfigured(monkeypatch):
     client = _client(monkeypatch)
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
-    assert response.json() == {"provider": "qwen", "configured": False}
+    assert response.json() == {"provider": "qwen", "configured": False, "mode": "api"}
 
 
 def test_keys_glm_provider(monkeypatch):
@@ -114,7 +117,15 @@ def test_keys_glm_provider(monkeypatch):
     client = _client(monkeypatch, api_key="sk-glm", provider="glm")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
-    assert response.json() == {"provider": "glm", "configured": True}
+    assert response.json() == {"provider": "glm", "configured": True, "mode": "api"}
+
+
+def test_keys_local_mode(monkeypatch):
+    """QED_API_SELECT=local：mode=local（前端依赖卡模式感知：local 才探测 LM Studio/MinerU）。"""
+    client = _client(monkeypatch, api_key="sk-local", mode="local")
+    response = client.get("/api/v1/config/keys")
+    assert response.status_code == 200
+    assert response.json() == {"provider": "qwen", "configured": True, "mode": "local"}
 
 
 def test_cors_allowlist_covers_all_services(monkeypatch):
@@ -1336,3 +1347,278 @@ def test_axiom_block_review_verdict_validation(monkeypatch):
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/review", json={"verdict": "unknown"})
     assert response.status_code == 422
+
+
+# --- 课程探索透传路由测试（REQ-054，PLAN-021 冻结端点） ---
+
+
+def test_explore_course_passthrough(monkeypatch):
+    """§1 POST /courses/{id}/explore → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(202, json={
+            "run_id": "exp_9f31c2", "task_id": "tk_5b20a1", "status": "running",
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
+    assert resp.status_code == 202
+    assert resp.json()["run_id"] == "exp_9f31c2"
+
+
+def test_explore_run_poll_passthrough(monkeypatch):
+    """§2 GET /explore-runs/{run_id} → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "run_id": "exp_9f31c2", "scope": "course", "status": "ready", "proposals": [],
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/explore-runs/exp_9f31c2")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ready"
+
+
+def test_explore_run_adopt_passthrough(monkeypatch):
+    """§3 POST /explore-runs/{run_id}/adopt → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "adopted": [{"knowledge_id": "kn_1", "set_name": "套一"}],
+            "remaining_slots": 3, "run": {"run_id": "exp_9f31c2", "status": "adopted"},
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/explore-runs/exp_9f31c2/adopt", json={"selected": ["pp_1"]})
+    assert resp.status_code == 200
+    assert resp.json()["adopted"][0]["knowledge_id"] == "kn_1"
+
+
+def test_explore_run_discard_passthrough(monkeypatch):
+    """§4 POST /explore-runs/{run_id}/discard → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"run_id": "exp_9f31c2", "status": "discarded"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/explore-runs/exp_9f31c2/discard")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "discarded"
+
+
+def test_explore_runs_history_passthrough(monkeypatch):
+    """§5 GET /courses/{id}/explore-runs → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"run_id": "exp_1", "status": "adopted"}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/courses/01_math_analysis/explore-runs")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+def test_curriculum_explore_passthrough(monkeypatch):
+    """§6 POST /curriculum-explore → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(202, json={
+            "run_id": "cr_001", "task_id": "tk_c1", "status": "running",
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/curriculum-explore", json={
+        "domain_name": "计算机科学", "mode": "doc", "ref_doc_path": "/tmp/cs.txt",
+    })
+    assert resp.status_code == 202
+    assert resp.json()["run_id"] == "cr_001"
+
+
+def test_curriculum_run_poll_passthrough(monkeypatch):
+    """§7.1 GET /curriculum-runs/{run_id} → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "run_id": "cr_001", "scope": "curriculum", "status": "ready", "changes": [],
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/curriculum-runs/cr_001")
+    assert resp.status_code == 200
+    assert resp.json()["scope"] == "curriculum"
+
+
+def test_curriculum_run_apply_passthrough(monkeypatch):
+    """§7.2 POST /curriculum-runs/{run_id}/apply → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "applied": [{"change_id": "ch_01", "entity": "domain", "target_id": "cs"}],
+            "conflicts": [], "run": {"run_id": "cr_001", "status": "applied"},
+        })
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/curriculum-runs/cr_001/apply", json={"selected": ["ch_01"]})
+    assert resp.status_code == 200
+    assert len(resp.json()["applied"]) == 1
+
+
+def test_explore_upstream_409_passthrough(monkeypatch):
+    """§1 8901 返回 409 CAPACITY_REACHED → 8900 原码透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": {"code": "CAPACITY_REACHED", "message": "已达上限"}})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "CAPACITY_REACHED"
+
+
+def test_explore_upstream_5xx_becomes_503(monkeypatch):
+    """§1 8901 返回 5xx → 8900 映射为 503。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "internal error"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
+    assert resp.status_code == 503
+
+
+# --- 领域只读/维护透传（REQ-059） ---
+
+
+def test_list_domains_passthrough(monkeypatch):
+    """GET /domains → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"domain_id": "d1", "name": "高等数学"}])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/domains")
+    assert resp.status_code == 200
+    assert resp.json()[0]["domain_id"] == "d1"
+
+
+def test_update_domain_passthrough(monkeypatch):
+    """PATCH /domains/{id} → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"domain_id": "d1", "description": "新"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.patch("/api/v1/domains/d1", json={"description": "新"})
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "新"
+
+
+def test_course_system_passthrough(monkeypatch):
+    """GET /courses → 8901 领域课程体系透传（左树 v2 数据源）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[
+            {"domain_id": "d1", "name": "高等数学", "courses": [
+                {"course_id": "c1", "name": "数学分析"},
+            ]},
+        ])
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/courses")
+    assert resp.status_code == 200
+    assert resp.json()[0]["courses"][0]["name"] == "数学分析"
+
+
+def test_delete_domain_passthrough(monkeypatch):
+    """DELETE /domains/{id} → 8901 透传；409 保护原码转发。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": {"code": "DOMAIN_NOT_EMPTY", "message": "仍有课程"}})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.delete("/api/v1/domains/d1")
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "DOMAIN_NOT_EMPTY"
+
+
+def test_create_course_for_domain_passthrough(monkeypatch):
+    """POST /domains/{id}/courses → 8901 透传（成功态规整为 200）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json={"course_id": "c9", "name": "复变函数"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/domains/d1/courses", json={"name": "复变函数"})
+    assert resp.status_code == 200
+    assert resp.json()["course_id"] == "c9"
+
+
+def test_update_course_passthrough(monkeypatch):
+    """PATCH /courses/{id} → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"course_id": "c1", "note": "已更新"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.patch("/api/v1/courses/c1", json={"note": "已更新"})
+    assert resp.status_code == 200
+    assert resp.json()["note"] == "已更新"
+
+
+def test_delete_course_passthrough(monkeypatch):
+    """DELETE /courses/{id} → 8901 透传。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(204)
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.delete("/api/v1/courses/c1")
+    assert resp.status_code in (200, 204)
+
+
+def test_course_crud_upstream_404_forwarded(monkeypatch):
+    """§8 未上线：上游默认形态 404/405 归一为结构化 404 UPSTREAM_NOT_IMPLEMENTED（前端降级提示）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    for method, url, json_body in (
+        ("post", "/api/v1/domains", {"name": "x"}),
+        ("delete", "/api/v1/domains/d1", None),
+        ("post", "/api/v1/domains/d1/courses", {"name": "x"}),
+        ("patch", "/api/v1/courses/c1", {}),
+        ("delete", "/api/v1/courses/c1", None),
+    ):
+        resp = client.request(method, url, json=json_body)
+        assert resp.status_code == 404, f"{method} {url}"
+        assert resp.json()["detail"]["code"] == "UPSTREAM_NOT_IMPLEMENTED"
+
+
+def test_create_domain_passthrough(monkeypatch):
+    """POST /domains → 8901 手工新建领域透传（§8）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"domain_id": "d9", "name": "高等数学", "description": ""})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/domains", json={"name": "高等数学", "description": ""})
+    assert resp.status_code == 200
+    assert resp.json()["domain_id"] == "d9"
+
+
+def test_course_crud_upstream_405_normalized(monkeypatch):
+    """§8 上游路径通配命中不同方法（如 8901 GET /courses/{domain_id} 吞掉 PATCH/DELETE）→ 405 归一结构化 404。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(405, json={"detail": "Method Not Allowed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.patch("/api/v1/courses/c1", json={"stage": "本科一"})
+    assert resp.status_code == 404
+    body = resp.json()["detail"]
+    assert body["code"] == "UPSTREAM_NOT_IMPLEMENTED"
+    assert "REQ-059" in body["message"]
+
+
+def test_structured_404_passthrough_not_rewritten(monkeypatch):
+    """端点上线后的业务 404（带结构化 code）原样透传，不被归一改写。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": {"code": "DOMAIN_NOT_FOUND", "message": "领域不存在"}})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.delete("/api/v1/domains/d1")
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "DOMAIN_NOT_FOUND"
+
+
+def test_explore_route_upstream_405_not_normalized(monkeypatch):
+    """探索路由不做归一：上游 405 原样透传（归一仅限 §8 手工维护五路由）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(405, json={"detail": "Method Not Allowed"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.get("/api/v1/explore-runs/run_001")
+    assert resp.status_code == 405
+    assert resp.json()["detail"] == "Method Not Allowed"

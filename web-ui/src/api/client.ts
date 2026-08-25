@@ -90,6 +90,8 @@ async function request<T>(path: string, init?: RequestInit, opts?: ApiRequestOpt
       detail = body;
       if (typeof body?.message === 'string') message = body.message;
       else if (typeof body?.detail === 'string') message = body.detail;
+      // QED-Tracker 结构化错误 {detail:{code,message}}（REQ-054/059）：message 即展示文案
+      else if (typeof body?.detail?.message === 'string') message = body.detail.message;
     } catch {
       /* 非 JSON 响应体，保留默认 message */
     }
@@ -109,6 +111,13 @@ export const api = {
   },
   put<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
     return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }, opts);
+  },
+  patch<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
+    return request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }, opts);
+  },
+  /** DELETE（204 No Content → undefined） */
+  del<T>(path: string, opts?: ApiRequestOptions): Promise<T> {
+    return request<T>(path, { method: 'DELETE' }, opts);
   },
 };
 

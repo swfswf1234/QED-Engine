@@ -405,3 +405,303 @@ def test_supersede_book_sends_reason():
     assert seen["path"] == "/api/v1/books/bk_abc/supersede"
     assert seen["body"] == {"reason": "被第 9 版替代"}
     assert result["status"] == "superseded"
+
+
+# --- 课程探索 API 契约测试（PLAN-021 冻结端点，REQ-054 透传） ---
+
+
+def test_start_course_explore_sends_post():
+    """§1 POST /courses/{id}/explore：发起课程层探索。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(202, json={
+            "run_id": "exp_9f31c2", "task_id": "tk_5b20a1", "status": "running",
+        })
+
+    client = _client(handler)
+    result = client.start_course_explore("01_math_analysis", mode="direct")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/courses/01_math_analysis/explore"
+    assert seen["body"] == {"mode": "direct"}
+    assert result["run_id"] == "exp_9f31c2"
+    assert result["status"] == "running"
+
+
+def test_start_course_explore_text_mode():
+    """§1 mode=text 时携带 ref_text。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(202, json={"run_id": "exp_x", "task_id": "tk_x", "status": "running"})
+
+    client = _client(handler)
+    client.start_course_explore("01_math_analysis", mode="text", ref_text="优先美版经典教材")
+    assert seen["body"] == {"mode": "text", "ref_text": "优先美版经典教材"}
+
+
+def test_start_course_explore_doc_mode():
+    """§1 mode=doc 时携带 ref_doc_path。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(202, json={"run_id": "exp_x", "task_id": "tk_x", "status": "running"})
+
+    client = _client(handler)
+    client.start_course_explore("01_math_analysis", mode="doc", ref_doc_path="/tmp/exploration/test.txt")
+    assert seen["body"] == {"mode": "doc", "ref_doc_path": "/tmp/exploration/test.txt"}
+
+
+def test_get_explore_run():
+    """§2 GET /explore-runs/{run_id}：轮询运行状态。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "run_id": "exp_9f31c2", "scope": "course", "course_id": "01_math_analysis",
+            "status": "ready", "proposals": [{"proposal_id": "pp_1", "set_name": "套一"}],
+        })
+
+    client = _client(handler)
+    result = client.get_explore_run("exp_9f31c2")
+    assert result["status"] == "ready"
+    assert len(result["proposals"]) == 1
+
+
+def test_adopt_explore_run():
+    """§3 POST /explore-runs/{run_id}/adopt：采纳所选推荐。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={
+            "adopted": [{"knowledge_id": "kn_77e0aa", "set_name": "套一"}],
+            "remaining_slots": 2,
+            "run": {"run_id": "exp_9f31c2", "status": "adopted"},
+        })
+
+    client = _client(handler)
+    result = client.adopt_explore_run("exp_9f31c2", selected=["pp_a1b2c3"])
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/explore-runs/exp_9f31c2/adopt"
+    assert seen["body"] == {"selected": ["pp_a1b2c3"]}
+    assert result["adopted"][0]["knowledge_id"] == "kn_77e0aa"
+    assert result["remaining_slots"] == 2
+
+
+def test_discard_explore_run():
+    """§4 POST /explore-runs/{run_id}/discard：放弃本次探索。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={
+            "run_id": "exp_9f31c2", "status": "discarded",
+        })
+
+    client = _client(handler)
+    result = client.discard_explore_run("exp_9f31c2")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/explore-runs/exp_9f31c2/discard"
+    assert result["status"] == "discarded"
+
+
+def test_list_explore_runs():
+    """§5 GET /courses/{id}/explore-runs：探索历史列表。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["query"] = str(request.url.query)
+        return httpx.Response(200, json=[
+            {"run_id": "exp_1", "status": "adopted", "created_at": "2026-08-23T10:00:00"},
+        ])
+
+    client = _client(handler)
+    result = client.list_explore_runs("01_math_analysis", limit=10, offset=5)
+    assert seen["path"] == "/api/v1/courses/01_math_analysis/explore-runs"
+    assert "limit=10" in seen["query"]
+    assert "offset=5" in seen["query"]
+    assert len(result) == 1
+
+
+def test_start_curriculum_explore():
+    """§6 POST /curriculum-explore：发起新建领域探索。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(202, json={
+            "run_id": "cr_001", "task_id": "tk_c1", "status": "running",
+        })
+
+    client = _client(handler)
+    result = client.start_curriculum_explore(
+        domain_name="计算机科学",
+        mode="doc",
+        ref_doc_path="/tmp/exploration/cs.txt",
+    )
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/curriculum-explore"
+    assert seen["body"] == {
+        "domain_name": "计算机科学",
+        "mode": "doc",
+        "ref_doc_path": "/tmp/exploration/cs.txt",
+    }
+    assert result["run_id"] == "cr_001"
+
+
+def test_get_curriculum_run():
+    """§7.1 GET /curriculum-runs/{run_id}：轮询领域探索运行。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "run_id": "cr_001", "scope": "curriculum",
+            "status": "ready", "changes": [{"change_id": "ch_01", "action": "create_domain"}],
+        })
+
+    client = _client(handler)
+    result = client.get_curriculum_run("cr_001")
+    assert result["scope"] == "curriculum"
+    assert len(result["changes"]) == 1
+
+
+def test_apply_curriculum_run():
+    """§7.2 POST /curriculum-runs/{run_id}/apply：应用课程体系变更。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={
+            "applied": [{"change_id": "ch_01", "entity": "domain", "target_id": "cs"}],
+            "conflicts": [],
+            "run": {"run_id": "cr_001", "status": "applied"},
+        })
+
+    client = _client(handler)
+    result = client.apply_curriculum_run("cr_001", selected=["ch_01", "ch_02"])
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/curriculum-runs/cr_001/apply"
+    assert seen["body"] == {"selected": ["ch_01", "ch_02"]}
+    assert len(result["applied"]) == 1
+
+
+# --- 领域只读/维护透传（REQ-059，GET /domains + PATCH /domains/{id}） ---
+
+
+def test_list_domains():
+    """GET /domains：领域列表。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[
+            {"domain_id": "gao_deng_shu_xue", "name": "高等数学", "description": "...", "stages": []},
+        ])
+
+    client = _client(handler)
+    result = client.list_domains()
+    assert result[0]["domain_id"] == "gao_deng_shu_xue"
+
+
+def test_update_domain_sends_patch():
+    """PATCH /domains/{id}：仅 description/stages 可改，name 不在请求体。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"domain_id": "d1", "description": "新描述"})
+
+    client = _client(handler)
+    result = client.update_domain("d1", description="新描述", stages=["本科基础"])
+    assert seen["method"] == "PATCH"
+    assert seen["path"] == "/api/v1/domains/d1"
+    assert seen["body"] == {"description": "新描述", "stages": ["本科基础"]}
+    assert result["description"] == "新描述"
+
+
+# --- 课程体系只读 + 手工维护透传（REQ-059，2026-08-24 左树 v2 数据源） ---
+
+
+def test_list_courses_system():
+    """GET /courses：领域课程体系（领域含嵌套课程，左树 v2 数据源）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[
+            {
+                "domain_id": "d1", "name": "高等数学", "description": "", "stages": [],
+                "courses": [{"course_id": "c1", "name": "数学分析", "aliases": [], "stage": "", "prerequisites": []}],
+            },
+        ])
+
+    client = _client(handler)
+    result = client.list_courses_system()
+    assert result[0]["courses"][0]["course_id"] == "c1"
+
+
+def test_delete_domain_sends_delete():
+    """DELETE /domains/{id}：删除领域（有课程时上游 409）。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        return httpx.Response(204)
+
+    client = _client(handler)
+    assert client.delete_domain("d1") in (None, {}, [])
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/domains/d1"
+
+
+def test_create_course_for_domain():
+    """POST /domains/{id}/courses：手工新增课程。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(201, json={"course_id": "c9", "name": "复变函数"})
+
+    client = _client(handler)
+    result = client.create_course_for_domain("d1", name="复变函数", stage="本科二")
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/api/v1/domains/d1/courses"
+    assert seen["body"]["name"] == "复变函数"
+    assert result["course_id"] == "c9"
+
+
+def test_update_course_omits_unset_fields():
+    """PATCH /courses/{id}：仅提交显式字段（sort_order 留空不入请求体）。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"course_id": "c1", "stage": "本科一"})
+
+    client = _client(handler)
+    client.update_course("c1", stage="本科一")
+    assert seen["body"] == {"stage": "本科一"}
+
+
+def test_delete_course_sends_delete():
+    """DELETE /courses/{id}：删除课程（有知识行时上游 409）。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        return httpx.Response(204)
+
+    client = _client(handler)
+    client.delete_course("c1")
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/api/v1/courses/c1"

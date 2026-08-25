@@ -89,6 +89,10 @@ QED-Tracker 托管建表，**三项目可写**（网关统一写 + 子项目 loc
 | `status` | VARCHAR(16) | `success` / `error` |
 | `error` | VARCHAR(500) | 失败原因，可空 |
 | `created_at` | DATETIME | 调用时间 |
+| `task` | VARCHAR(64) | 任务标识（如 paper-plan、book-eval），可空（REQ-060） |
+| `step` | VARCHAR(32) | 步骤标识（如 plan、assess、propose），可空（REQ-060） |
+| `review_status` | VARCHAR(16) | 审核状态：`unreviewed` / `passed` / `rejected`（REQ-060） |
+| `review_note` | VARCHAR(1000) | 审核备注，可空（REQ-060） |
 
 ## qt_*（QED-Tracker，私有）
 

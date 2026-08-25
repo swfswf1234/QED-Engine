@@ -1,14 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildTreeNodes, domainOf, courseOrderCmp, DOMAIN_OTHER, DOMAIN_NAME, tutorialLabel,
-  sortBooks, bookInFlow,
+  buildTreeNodes, tutorialLabel,
+  sortBooks, bookInStage, STAGE_OPTIONS,
 } from './downloads';
-import type { BookRecord, CatalogTarget, KnowledgeDetail, KnowledgeRecord } from './index';
+import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
 
-function target(courseId: string, courseName: string, id = `${courseId}-t`): CatalogTarget {
+function course(partial: Partial<CourseRecord> & { course_id: string; name: string }): CourseRecord {
   return {
-    id, course_id: courseId, course_name: courseName, kind: 'book', title: courseName,
-    authors: [], language: 'zh', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'],
+    aliases: [], stage: '', prerequisites: [], related_targets: [],
+    ...partial,
+  };
+}
+
+function domain(partial: Partial<DomainSystem> & { domain_id: string; name: string }): DomainSystem {
+  return {
+    description: '', stages: [], courses: [],
+    ...partial,
   };
 }
 
@@ -74,77 +81,67 @@ describe('教程节点标签 tutorialLabel（五层）', () => {
   });
 });
 
-describe('下载管理左树构建（Phase 4a + 五层化 + 2026-08-18 重构）', () => {
-  it('领域常量与分类映射：领域=高等数学，分类=分析/代数/概率，未映射归「其他」', () => {
-    expect(DOMAIN_NAME).toBe('高等数学');
-    expect(domainOf('01_math_analysis')).toBe('分析');
-    expect(domainOf('02_linear_algebra')).toBe('代数');
-    expect(domainOf('11_probability')).toBe('概率');
-    expect(domainOf('99_unknown')).toBe(DOMAIN_OTHER);
-  });
-
-  it('课程排序：COURSE_ORDER 优先，未知课程靠后', () => {
-    expect(courseOrderCmp('01_math_analysis', '02_linear_algebra')).toBeLessThan(0);
-    // 10_qe_prep 在 COURSE_ORDER 末尾（QE 冲刺排最后）
-    expect(courseOrderCmp('10_qe_prep', '11_probability')).toBeGreaterThan(0);
-    expect(courseOrderCmp('99_unknown', '01_math_analysis')).toBeGreaterThan(0);
-  });
-
-  it('领域 → 分类 → 课程 → 教程四层结构：分类仅展示、教程为叶子', () => {
-    const targets = [target('01_math_analysis', '数学分析'), target('02_linear_algebra', '线性代数')];
-    const k1 = kn({ knowledge_id: 'k1', course_id: '01_math_analysis', set_no: '1', name: '教程1：数学分析原理（Rudin）' });
-    const k2 = kn({ knowledge_id: 'k2', course_id: '01_math_analysis', set_no: '2', name: '教程2：微积分学教程（菲赫金哥尔茨）' });
-    const k3 = kn({ knowledge_id: 'k3', course_id: '02_linear_algebra', kind: 'other_material', name: '线性代数延展资料' });
-    const tree = buildTreeNodes(targets, [k1, k2, k3]);
-    // 单一领域：高等数学
-    expect(tree.map((d) => d.name)).toEqual([DOMAIN_NAME]);
-    const domain = tree[0];
-    // 分类按顺序：分析 / 代数
-    expect(domain.categories.map((c) => c.name)).toEqual(['分析', '代数']);
-    const analysis = domain.categories[0];
-    expect(analysis.courses).toHaveLength(1);
-    expect(analysis.courses[0].name).toBe('数学分析');
-    const tutorials = analysis.courses[0].tutorials;
+describe('文档下载管理左树构建 v2（真实领域课程体系，2026-08-24 REQ-059 交互改版）', () => {
+  it('领域 → 课程 → 教程三层结构：数据源为 GET /courses 领域体系，保持服务端排序', () => {
+    const systems = [
+      domain({
+        domain_id: 'dm_math', name: '高等数学',
+        courses: [course({ course_id: '01_math_analysis', name: '数学分析' }), course({ course_id: '02_linear_algebra', name: '线性代数' })],
+      }),
+      domain({ domain_id: 'dm_cs', name: '计算机科学', courses: [course({ course_id: '10_ml', name: '机器学习' })] }),
+    ];
+    const k1 = kn({ knowledge_id: 'k1', domain_id: 'dm_math', course_id: '01_math_analysis', set_no: '1', name: '教程1：数学分析原理（Rudin）' });
+    const k2 = kn({ knowledge_id: 'k2', domain_id: 'dm_math', course_id: '01_math_analysis', set_no: '2', name: '教程2：微积分学教程（菲赫金哥尔茨）' });
+    const k3 = kn({ knowledge_id: 'k3', domain_id: 'dm_math', course_id: '02_linear_algebra', kind: 'other_material', name: '线性代数延展资料' });
+    const tree = buildTreeNodes(systems, [k1, k2, k3]);
+    // 多领域并列，顺序 = 服务端返回序
+    expect(tree.map((d) => d.name)).toEqual(['高等数学', '计算机科学']);
+    expect(tree[0].domainId).toBe('dm_math');
+    expect(tree[0].key).toBe('d:dm_math');
+    // 课程按体系内顺序
+    expect(tree[0].courses.map((c) => c.name)).toEqual(['数学分析', '线性代数']);
+    const analysis = tree[0].courses[0];
+    expect(analysis.id).toBe('01_math_analysis');
+    expect(analysis.domainId).toBe('dm_math');
     // 套号数值升序：套1 → 套2；教程名 = 知识行 name
-    expect(tutorials.map((t) => t.label)).toEqual(['教程1：数学分析原理（Rudin）', '教程2：微积分学教程（菲赫金哥尔茨）']);
-    expect(tutorials[0].items).toEqual([]);
-    expect(tutorials[0].isSet).toBe(true);
-    // other_material 为叶子（isSet=false），归入代数分类
-    const algebra = domain.categories[1];
-    expect(algebra.courses[0].tutorials[0]).toMatchObject({ label: '线性代数延展资料', isSet: false });
+    expect(analysis.tutorials.map((t) => t.label)).toEqual(['教程1：数学分析原理（Rudin）', '教程2：微积分学教程（菲赫金哥尔茨）']);
+    expect(analysis.tutorials[0].items).toEqual([]);
+    expect(analysis.tutorials[0].isSet).toBe(true);
+    // other_material 为叶子（isSet=false）
+    expect(tree[0].courses[1].tutorials[0]).toMatchObject({ label: '线性代数延展资料', isSet: false });
   });
 
   it('教程叶子进度：verified 书行数/总数（来自详情缓存）', () => {
-    const targets = [target('01_math_analysis', '数学分析')];
-    const k1 = kn({ knowledge_id: 'k1', course_id: '01_math_analysis', set_no: '1', name: '教程1' });
+    const systems = [domain({ domain_id: 'd1', name: '高等数学', courses: [course({ course_id: 'c1', name: '数学分析' })] })];
+    const k1 = kn({ knowledge_id: 'k1', domain_id: 'd1', course_id: 'c1', set_no: '1', name: '教程1' });
     const b1 = book({ book_id: 'b1', knowledge_id: 'k1', status: 'verified', display_title: 'Rudin 中译' });
     const b2 = book({ book_id: 'b2', knowledge_id: 'k1', status: 'downloaded', display_title: '吉米多维奇' });
     const b3 = book({ book_id: 'b3', knowledge_id: 'k1', status: 'candidate', display_title: '题解' });
-    const tree = buildTreeNodes(targets, [k1], { k1: detail(k1, [b1, b2, b3]) });
-    const t = tree[0].categories[0].courses[0].tutorials[0];
+    const tree = buildTreeNodes(systems, [k1], { k1: detail(k1, [b1, b2, b3]) });
+    const t = tree[0].courses[0].tutorials[0];
     expect(t.items.map((b) => b.book_id)).toEqual(['b1', 'b2', 'b3']);
     expect(t.verified).toBe(1);
     expect(t.total).toBe(3);
   });
 
   it('教程叶子进度：无详情缓存时 0/0', () => {
-    const targets = [target('01_math_analysis', '数学分析')];
-    const k1 = kn({ knowledge_id: 'k1', course_id: '01_math_analysis', set_no: '1', name: '教程1' });
-    const tree = buildTreeNodes(targets, [k1], {});
-    const t = tree[0].categories[0].courses[0].tutorials[0];
+    const systems = [domain({ domain_id: 'd1', name: '高等数学', courses: [course({ course_id: 'c1', name: '数学分析' })] })];
+    const k1 = kn({ knowledge_id: 'k1', domain_id: 'd1', course_id: 'c1', set_no: '1', name: '教程1' });
+    const tree = buildTreeNodes(systems, [k1], {});
+    const t = tree[0].courses[0].tutorials[0];
     expect(t.verified).toBe(0);
     expect(t.total).toBe(0);
   });
 
-  it('知识行独有课程（catalog 未列出）兜底加入「其他」分类', () => {
-    const k1 = kn({ knowledge_id: 'k1', course_id: '99_unknown', name: '未知课程教程' });
+  it('知识行所属课程不在课程体系中 → 不进树（不再虚构兜底节点）', () => {
+    const k1 = kn({ knowledge_id: 'k1', domain_id: 'ghost', course_id: '99_unknown', name: '孤儿知识行' });
     const tree = buildTreeNodes([], [k1]);
-    expect(tree.map((d) => d.name)).toEqual([DOMAIN_NAME]);
-    expect(tree[0].categories.map((c) => c.name)).toEqual([DOMAIN_OTHER]);
-    expect(tree[0].categories[0].courses[0]).toMatchObject({ id: '99_unknown', name: '99_unknown' });
+    expect(tree).toEqual([]);
   });
 
-  it('无数据 → 空树', () => {
+  it('空课程体系 → 空树（即使有知识行）', () => {
+    const k1 = kn({ knowledge_id: 'k1', course_id: 'c1', name: 'x' });
+    expect(buildTreeNodes([], [k1])).toEqual([]);
     expect(buildTreeNodes([], [])).toEqual([]);
   });
 });
@@ -186,29 +183,29 @@ describe('书行排序 sortBooks（中文教材 → 中文习题集 → 其余�
   });
 });
 
-describe('流程筛选 bookInFlow（搜索/确认/下载/验收）', () => {
+describe('状态筛选 bookInStage（书行生命周期四阶段，2026-08-24 用户裁决）', () => {
   const knowledgeId = 'k1';
+  const mk = (status: string) => book({ book_id: 'b', knowledge_id: knowledgeId, status });
 
-  it('搜索=候选；确认=已决定', () => {
-    const candidate = book({ book_id: 'b1', knowledge_id: knowledgeId, status: 'candidate' });
-    const decided = book({ book_id: 'b2', knowledge_id: knowledgeId, status: 'decided' });
-    expect(bookInFlow(candidate, 'search')).toBe(true);
-    expect(bookInFlow(candidate, 'confirm')).toBe(false);
-    expect(bookInFlow(decided, 'confirm')).toBe(true);
-    expect(bookInFlow(decided, 'search')).toBe(false);
-  });
-
-  it('下载=下载中+已下载+失败；验收=已验证', () => {
-    for (const status of ['downloading', 'downloaded', 'failed']) {
-      expect(bookInFlow(book({ book_id: 'b', knowledge_id: knowledgeId, status }), 'download')).toBe(true);
-      expect(bookInFlow(book({ book_id: 'b', knowledge_id: knowledgeId, status }), 'verify')).toBe(false);
+  it('待确认=candidate；decided/downloading/failed 归下载；downloaded=待验证；verified=已完成', () => {
+    expect(bookInStage(mk('candidate'), 'confirm')).toBe(true);
+    expect(bookInStage(mk('candidate'), 'download')).toBe(false);
+    for (const status of ['decided', 'downloading', 'failed']) {
+      expect(bookInStage(mk(status), 'download')).toBe(true);
+      expect(bookInStage(mk(status), 'confirm')).toBe(false);
+      expect(bookInStage(mk(status), 'await_verify')).toBe(false);
+      expect(bookInStage(mk(status), 'completed')).toBe(false);
     }
-    expect(bookInFlow(book({ book_id: 'b1', knowledge_id: knowledgeId, status: 'verified' }), 'verify')).toBe(true);
-    expect(bookInFlow(book({ book_id: 'b1', knowledge_id: knowledgeId, status: 'verified' }), 'download')).toBe(false);
+    expect(bookInStage(mk('downloaded'), 'await_verify')).toBe(true);
+    expect(bookInStage(mk('downloaded'), 'download')).toBe(false);
+    expect(bookInStage(mk('verified'), 'completed')).toBe(true);
+    expect(bookInStage(mk('verified'), 'await_verify')).toBe(false);
   });
 
-  it('空流程（全部）不过滤', () => {
+  it('空阶段（全部）不过滤；STAGE_OPTIONS 四选项值与标签', () => {
     const b = book({ book_id: 'b1', knowledge_id: knowledgeId, status: 'candidate' });
-    expect(bookInFlow(b, '')).toBe(true);
+    expect(bookInStage(b, '')).toBe(true);
+    expect(STAGE_OPTIONS.map((o) => o.label)).toEqual(['待确认', '下载', '待验证', '已完成']);
+    expect(STAGE_OPTIONS.map((o) => o.value)).toEqual(['confirm', 'download', 'await_verify', 'completed']);
   });
 });

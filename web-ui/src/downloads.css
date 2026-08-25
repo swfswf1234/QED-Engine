@@ -211,6 +211,24 @@
   border-bottom: none;
 }
 
+.dl-course-head {
+  margin-bottom: 12px;
+}
+
+.dl-course-head-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.dl-course-head-note {
+  color: #666;
+  font-size: 13px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dl-knowledge-head {
   display: flex;
   align-items: center;
@@ -275,4 +293,114 @@
   color: #999;
   font-size: 13px;
   padding: 8px 0;
+}
+/* ===== 课程探索（exploration-ui §1~§4，2026-08-23） ===== */
+
+/* 树节点：探索状态色点 + hover 探索按钮 */
+.explore-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.explore-dot-none { background: #bfbfbf; }
+.explore-dot-insufficient { background: #faad14; }
+.explore-dot-ready { background: #52c41a; }
+
+/* v2（2026-08-24 REQ-059）：hover 探索按钮与右侧顶部按钮已移除，样式随之清理 */
+
+/* 领域信息卡（右面板顶部，选中领域时展示；含探索按钮状态机） */
+.dl-domain-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+.dl-domain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dl-domain-name { font-weight: 600; font-size: 15px; }
+.dl-domain-desc { color: #8c8c8c; font-size: 12px; margin-top: 4px; white-space: pre-wrap; }
+
+/* 确认页 */
+.explore-page .explore-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.explore-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f5f8ff;
+  border: 1px solid #d6e4ff;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.explore-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 32px 0;
+}
+
+.explore-proposals,
+.explore-changes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+.explore-proposal-card,
+.explore-change-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  transition: border-color 0.2s;
+}
+.explore-proposal-card.selected,
+.explore-change-card.selected { border-color: #1677ff; background: #f0f5ff; }
+.explore-proposal-card.disabled,
+.explore-change-card.disabled { opacity: 0.55; }
+.explore-proposal-head,
+.explore-change-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.explore-proposal-name { font-weight: 600; }
+.explore-change-target { font-weight: 600; }
+.explore-proposal-body,
+.explore-change-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.explore-proposal-intro {
+  color: #595959;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.explore-proposal-reason { color: #1677ff; font-size: 12px; }
+
+.explore-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.explore-terminal { margin-top: 16px; display: flex; gap: 10px; }
+.explore-adopted-note { margin-top: 10px; color: #8c8c8c; font-size: 12px; }
+
+/* 左栏底部：添加领域固定条（2026-08-23 用户裁决） */
+.dl-tree-footer {
+  padding: 8px;
+  border-top: 1px solid #e5e7eb;
+  background: #fafbfe;
 }

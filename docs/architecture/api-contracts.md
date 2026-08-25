@@ -100,15 +100,19 @@
 
 ### GET /api/v1/config/keys
 
-供应商配置状态（CLI/内部降级判断用）：单 key + 当前厂商选择，只返回布尔，**永不返回密钥值**。
+供应商配置状态（CLI/内部降级判断用）：单 key + 当前厂商选择 + 运行模式，只返回布尔与枚举，
+**永不返回密钥值**。
 
 ```json
-{"provider": "qwen", "configured": true}
+{"provider": "qwen", "configured": true, "mode": "api"}
 ```
 
 - `provider`：当前 `QED_API_PROVIDER`（qwen / deepseek / glm）。
 - `configured`：`API_KEY` 是否已配置。该布尔仅表示「key 是否已配置」，**不代表服务可达**。
   供应商可达性由 8900 **启动自检**负责（见下节），前端横幅不再展示。
+- `mode`：当前 `QED_API_SELECT`（api / local，2026-08-24 契约扩展）。前端控制台依赖卡
+  模式感知用——api 模式文字/图像模型为云端厂商（不探测 LM Studio/MinerU），local 模式
+  探测本地服务。
 
 ### GET /api/v1/config/database
 
@@ -173,6 +177,33 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 一条，ok 表达成败。`GET /books` 被数据域·Axiom 预留路由占用（axiom.py，仅 GET，与 tracker 的
 POST /books 不冲突），五层 GET 端点无此路径冲突。
 
+### 探索与领域课程体系端点（REQ-054/055/056/059，2026-08-24）
+
+契约事实源：[exploration-api 计划](../plans/2026-08-arch019-exploration-api.md) §0~8（冻结 +
+REQ-059 增补待对方承接）。8901 未实现的手工维护端点按上游 404 结构化透传，前端降级提示。
+
+| 端点 | 语义 | 内部适配 |
+| --- | --- | --- |
+| `GET /courses` | 领域课程体系 `DomainSystem[]`（领域含嵌套课程，服务端按 sort_order 有序；下载管理左树 v2 数据源，QED-033） | TrackerClient.list_courses_system |
+| `GET /domains` | 领域列表（只读；REQ-059 R1，8901 承接中） | TrackerClient.list_domains |
+| `PATCH /domains/{id}` `{"description","stages"}` | 修改领域描述/阶段（name 锁死不入请求体；REQ-059 R2） | TrackerClient.update_domain |
+| `DELETE /domains/{id}` | 删除领域（有课程 409 保护） | TrackerClient.delete_domain |
+| `POST /domains` `{"name","description","stages"}` | 手工新建领域（§8；domain_id 服务端生成为请求口径） | TrackerClient.create_domain |
+| `POST /domains/{id}/courses` `{"name","stage","sort_order","note"}` | 手工新增课程（§8） | TrackerClient.create_course_for_domain |
+| `PATCH /courses/{id}` `{"stage","sort_order","note"}` | 修改课程阶段/排序/备注（name 锁死） | TrackerClient.update_course |
+| `DELETE /courses/{id}` | 删除课程（有知识行 409 保护） | TrackerClient.delete_course |
+| `POST /courses/{id}/explore` | 发起课程层探索（202 Accepted；幂等 deduplicated） | TrackerClient.start_course_explore |
+| `GET /explore-runs/{id}` | 课程探索运行轮询 | TrackerClient.get_explore_run |
+| `POST /explore-runs/{id}/adopt` `{"selected"}` | 采纳所选推荐 → draft 知识行 | TrackerClient.adopt_explore_run |
+| `POST /explore-runs/{id}/discard` | 放弃本次（幂等） | TrackerClient.discard_explore_run |
+| `GET /courses/{id}/explore-runs?limit=&offset=` | 课程探索历史分页 | TrackerClient.list_explore_runs |
+| `POST /curriculum-explore` | 发起领域课程体系探索（202；重探=目标领域已存在，apply 时 create_domain 跳过标记） | TrackerClient.start_curriculum_explore |
+| `GET /curriculum-runs/{id}` | 领域探索运行详情（changes/conflicts） | TrackerClient.get_curriculum_run |
+| `POST /curriculum-runs/{id}/apply` `{"selected"}` | 应用所选变更 → qed_domain/qed_course（applied/partially_applied） | TrackerClient.apply_curriculum_run |
+
+成功态规整说明：上游 201/204 一律以 200 返回（透传层不做状态码直通）；发起类端点显式 202。
+409 携带上游结构化 `detail: {code, message}` 原样透传（如 CAPACITY_REACHED/RUN_STATE_CONFLICT）。
+
 > 历史：旧 `/resources` 清单/详情/预览/状态机端点与 `/tasks/catalog/evaluate`、
 > `/tasks/books/download` 已随 QED-030（qt_resources 退役）移除；三表语义 API 已随 QED-031
 > 知识层次重构退役，8900 不再暴露，历史契约见
@@ -183,7 +214,9 @@ POST /books 不冲突），五层 GET 端点无此路径冲突。
 8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409 处理生效）；
 8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，独立性铁律）。
 reject/supersede 缺 reason 与 create/register/complete 缺必填字段由 8900 校验直接 422，
-不请求 8901。
+不请求 8901。结构化错误统一 `{detail: {code, message}}`，`message` 即前端展示文案
+（api 客户端解包 detail.message；§8 手工维护端点未上线时归一码为 `UPSTREAM_NOT_IMPLEMENTED`，
+REQ-059）。
 
 ## ④ 数据透传·Axiom-Flow（8902 适配）
 
@@ -235,17 +268,27 @@ V2-013 承接）。
 
 ### GET /api/v1/monitor/gpu
 
-GPU 状态（nvidia-smi 解析 + 系统内存 psutil/兜底 wmic）：型号、显存总量/已用、利用率、
-占用进程列表、系统内存使用。
+GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用、利用率、占用进程列表
+（含 kind 分类）、系统内存使用。
 
 ```json
 {"available": true, "name": "NVIDIA GeForce RTX 4080", "memory_total_mb": 16376,
  "memory_used_mb": 4096, "utilization_percent": 65,
- "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096}]}
+ "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096, "kind": "model"}]}
 ```
 
 - `available=false` 附 `reason`（nvidia-smi 不存在/无 GPU/解析失败）。
-- 该数据用于控制台「本地 LLM 与 mineru 不能同时进 GPU」的显存提示与 GPU 总览条。
+- **利用率读数说明（2026-08-23 用户裁决）**：Windows WDDM 模式下 `utilization.gpu` 存在
+  固有失真（低值与顶格 100% 间二值化跳变），仅作参考展示；**95% 超显存警告以显存使用率
+  （`memory.used` / `memory.total`）为准**——该读数经实测准确。
+- `processes[].kind`（REQ-038，2026-08-21）：模型进程名关键词白名单
+  （lmstudio/lm studio/llama/qwen/mineru/python/vmmem/ollama，大小写不敏感包含匹配）
+  命中 → `"model"`，其余（浏览器/图形程序/陌生计算任务）→ `"other"`；前端饼图据此
+  高亮「非模型任务占用」。
+- Windows WDDM 模式下每进程显存为 `[N/A]`/`[Insufficient Permissions]` → 该行保留，
+  `memory_mb=null`（清单供非模型任务识别，不参与 MB 聚合）；compute-apps 不含部分图形
+  进程，前端以「总量 − Σ进程」呈现「系统·图形占用」片；全部无 MB 时饼图退化已用/空闲。
+- 该数据用于控制台 GPU 总览条与显存构成饼图（≥95% 警告、60s 自动刷新）。
 
 ### GET /api/v1/monitor/lmstudio
 
@@ -284,7 +327,8 @@ local 走本地模型（文字 LM Studio / 图像 MinerU，经 `QED_RESOURCE_GUA
 | `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?}` → 路由 api/local（deepseek 无视觉）→ `{reply, call_id}` |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
-| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / page / size`，分页返回 |
+| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |
+| `PATCH /llm/calls/{id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
 | `POST /database/test` | MySQL 即时连接探测（控制台测试按钮，替代启动快照只读） |
 
 ## 强制规则

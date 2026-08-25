@@ -1,13 +1,13 @@
-# 2026-08 LLM 状态收敛与 DB 启动快照轮（llm-status-convergence）
+﻿# 2026-08 LLM 状态收敛与 DB 启动快照轮（llm-status-convergence）
 
 状态：Accepted
 任务类型：B
 最后更新：2026-08-16
-关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
-关联设计：[../architecture/api-contracts.md](../architecture/api-contracts.md)（五合一角色与契约）、
-[backend-domain-split.md](../design/backend-domain-split.md)（三域）、
-[frontend-react-refactor.md](../design/frontend-react-refactor.md)（控制台/界面结构）、
-[service-control.md](../design/service-control.md)（控制台）
+关联 ADR：[ADR 0007](../../../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../../../adr/0008-frontend-react-refactor.md)
+关联设计：[../architecture/api-contracts.md](../../../architecture/api-contracts.md)（五合一角色与契约）、
+[backend-domain-split.md](../../../design/backend-domain-split.md)（三域）、
+[frontend-react-refactor.md](../../../design/frontend-react-refactor.md)（控制台/界面结构）、
+[service-control.md](../../../design/service-control.md)（控制台）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-014 登记）
 归档判定：代码改动全绿（261 基线 → 改造后全量）+ 契约全绿 + 文档同步 → Completed，
 归档至 `history/plans/2026-08/`

@@ -180,3 +180,56 @@ def test_llm_test_vision_endpoint_local_mode(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False and body["detail"] == "连接失败"
+
+
+# --- REQ-060：新过滤参数 + 审核端点 ---
+
+
+def test_llm_calls_new_filter_params(monkeypatch):
+    """GET /llm/calls：task/step/prompt_template/review_status 透传。"""
+    from qed_engine.api import control
+
+    captured = {}
+    def fake_search(settings, **kw):
+        captured.update(kw)
+        return {"items": [], "total": 0, "page": 1, "size": 20}
+
+    monkeypatch.setattr(control, "gateway_search_calls", fake_search)
+    client = _client(monkeypatch)
+    resp = client.get(
+        "/api/v1/llm/calls?task=paper-plan&step=assess&prompt_template=plan&review_status=passed"
+    )
+    assert resp.status_code == 200
+    assert captured["task"] == "paper-plan"
+    assert captured["step"] == "assess"
+    assert captured["prompt_template"] == "plan"
+    assert captured["review_status"] == "passed"
+
+
+def test_llm_calls_review_endpoint(monkeypatch):
+    """PATCH /llm/calls/{id}/review：审核标注成功 → ok=True。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(control, "gateway_review_call", lambda settings, **kw: True)
+    client = _client(monkeypatch)
+    resp = client.patch(
+        "/api/v1/llm/calls/42/review",
+        json={"review_status": "passed", "review_note": "效果好"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True and body["call_id"] == 42
+
+
+def test_llm_calls_review_not_found(monkeypatch):
+    """PATCH /llm/calls/{id}/review：不存在 ID → 404。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(control, "gateway_review_call", lambda settings, **kw: False)
+    client = _client(monkeypatch)
+    resp = client.patch(
+        "/api/v1/llm/calls/99999/review",
+        json={"review_status": "passed"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "记录不存在"

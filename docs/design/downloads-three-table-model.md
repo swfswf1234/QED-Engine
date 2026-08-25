@@ -33,7 +33,7 @@ qt_sources（私有）五层结构，唯一事实源为 QED-Tracker `docs/design
 两者并存导致：同一门课的选书结果与下载过程分散两处、状态语义不一致、前端展示无法分层
 （候选/确认/下载/否定历史全部混在一个资源列表）。用户裁决（2026-08-13）：**双轨统一为三张表**，
 表结构由 QED-Tracker 确认维护（详细 DDL 见其仓库
-[three-table-schema.md](../../QED-Tracker/docs/design/three-table-schema.md)，本文件定义
+[three-table-schema.md](../../QED-Tracker/docs/history/three-table-schema.md)，本文件定义
 根仓库侧的模型视图、API 对齐与前端契约）。
 
 ## 2. 三表模型总览

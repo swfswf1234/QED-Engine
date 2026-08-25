@@ -28,7 +28,7 @@ class TrackerError(RuntimeError):
         self,
         message: str,
         status_code: int | None = None,
-        detail: str | None = None,
+        detail: str | dict | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -226,6 +226,153 @@ class TrackerClient:
             json={"reason": reason},
         )
 
+    # --- 课程探索 API（PLAN-021 冻结契约，§1~7） ---
+
+    def start_course_explore(
+        self,
+        course_id: str,
+        *,
+        mode: str,
+        ref_text: str | None = None,
+        ref_doc_path: str | None = None,
+    ) -> dict:
+        """§1 POST /courses/{course_id}/explore：发起课程层探索（202 Accepted）。"""
+        body: dict = {"mode": mode}
+        if ref_text:
+            body["ref_text"] = ref_text
+        if ref_doc_path:
+            body["ref_doc_path"] = ref_doc_path
+        return self._request("POST", f"{API_PREFIX}/courses/{course_id}/explore", json=body)
+
+    def get_explore_run(self, run_id: str) -> dict:
+        """§2 GET /explore-runs/{run_id}：轮询探索运行状态。"""
+        return self._request("GET", f"{API_PREFIX}/explore-runs/{run_id}")
+
+    def adopt_explore_run(self, run_id: str, *, selected: list[str]) -> dict:
+        """§3 POST /explore-runs/{run_id}/adopt：采纳所选推荐。"""
+        return self._request("POST", f"{API_PREFIX}/explore-runs/{run_id}/adopt", json={"selected": selected})
+
+    def discard_explore_run(self, run_id: str) -> dict:
+        """§4 POST /explore-runs/{run_id}/discard：放弃本次探索（幂等）。"""
+        return self._request("POST", f"{API_PREFIX}/explore-runs/{run_id}/discard")
+
+    def list_explore_runs(self, course_id: str, *, limit: int = 20, offset: int = 0) -> list:
+        """§5 GET /courses/{course_id}/explore-runs：探索历史列表。"""
+        return self._request(
+            "GET",
+            f"{API_PREFIX}/courses/{course_id}/explore-runs",
+            params={"limit": limit, "offset": offset},
+        )
+
+    def start_curriculum_explore(
+        self,
+        domain_name: str,
+        *,
+        mode: str,
+        ref_text: str | None = None,
+        ref_doc_path: str | None = None,
+    ) -> dict:
+        """§6 POST /curriculum-explore：发起新建领域探索（202 Accepted）。"""
+        body: dict = {"domain_name": domain_name, "mode": mode}
+        if ref_text:
+            body["ref_text"] = ref_text
+        if ref_doc_path:
+            body["ref_doc_path"] = ref_doc_path
+        return self._request("POST", f"{API_PREFIX}/curriculum-explore", json=body)
+
+    def get_curriculum_run(self, run_id: str) -> dict:
+        """§7.1 GET /curriculum-runs/{run_id}：轮询领域探索运行。"""
+        return self._request("GET", f"{API_PREFIX}/curriculum-runs/{run_id}")
+
+    def apply_curriculum_run(self, run_id: str, *, selected: list[str]) -> dict:
+        """§7.2 POST /curriculum-runs/{run_id}/apply：应用课程体系变更。"""
+        return self._request("POST", f"{API_PREFIX}/curriculum-runs/{run_id}/apply", json={"selected": selected})
+
+    # --- 领域只读/维护（REQ-059，端点由 QED-Tracker 承接，未上线前 404 透传） ---
+
+    def list_domains(self) -> list:
+        """GET /domains：领域列表（树第一层数据源）。"""
+        return self._request("GET", f"{API_PREFIX}/domains")
+
+    def create_domain(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        stages: list[str] | None = None,
+    ) -> dict:
+        """POST /domains：手工新建领域（§8；domain_id 由上游服务端生成）。"""
+        body: dict = {"name": name}
+        if description is not None:
+            body["description"] = description
+        if stages is not None:
+            body["stages"] = stages
+        return self._request("POST", f"{API_PREFIX}/domains", json=body)
+
+    def update_domain(
+        self,
+        domain_id: str,
+        *,
+        description: str | None = None,
+        stages: list[str] | None = None,
+    ) -> dict:
+        """PATCH /domains/{domain_id}：修改领域描述/阶段（name 不可变，不在请求体）。"""
+        body: dict = {}
+        if description is not None:
+            body["description"] = description
+        if stages is not None:
+            body["stages"] = stages
+        return self._request("PATCH", f"{API_PREFIX}/domains/{domain_id}", json=body)
+
+    def delete_domain(self, domain_id: str) -> dict | list | None:
+        """DELETE /domains/{domain_id}：删除领域（有课程时上游 409 保护）。"""
+        return self._request("DELETE", f"{API_PREFIX}/domains/{domain_id}")
+
+    def list_courses_system(self) -> list:
+        """GET /courses：领域课程体系（领域含嵌套课程，左树 v2 数据源）。"""
+        return self._request("GET", f"{API_PREFIX}/courses")
+
+    def create_course_for_domain(
+        self,
+        domain_id: str,
+        *,
+        name: str,
+        stage: str | None = None,
+        sort_order: int | None = None,
+        note: str | None = None,
+    ) -> dict:
+        """POST /domains/{domain_id}/courses：手工新增课程。"""
+        body: dict = {"name": name}
+        if stage is not None:
+            body["stage"] = stage
+        if sort_order is not None:
+            body["sort_order"] = sort_order
+        if note is not None:
+            body["note"] = note
+        return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/courses", json=body)
+
+    def update_course(
+        self,
+        course_id: str,
+        *,
+        stage: str | None = None,
+        sort_order: int | None = None,
+        note: str | None = None,
+    ) -> dict:
+        """PATCH /courses/{course_id}：修改课程阶段/排序/备注（仅提交显式字段）。"""
+        body: dict = {}
+        if stage is not None:
+            body["stage"] = stage
+        if sort_order is not None:
+            body["sort_order"] = sort_order
+        if note is not None:
+            body["note"] = note
+        return self._request("PATCH", f"{API_PREFIX}/courses/{course_id}", json=body)
+
+    def delete_course(self, course_id: str) -> dict | list | None:
+        """DELETE /courses/{course_id}：删除课程（有知识行时上游 409 保护）。"""
+        return self._request("DELETE", f"{API_PREFIX}/courses/{course_id}")
+
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         try:
             response = self._client.request(method, path, **kwargs)
@@ -238,15 +385,18 @@ class TrackerClient:
                 status_code=response.status_code,
                 detail=detail,
             )
+        # 204/空 body（DELETE 等）→ None；非 JSON 空响应同样按无内容处理
+        if response.status_code == 204 or not response.content:
+            return None
         return response.json()
 
     @staticmethod
-    def _detail(response: httpx.Response) -> str:
+    def _detail(response: httpx.Response) -> str | dict:
         try:
             body = response.json()
         except ValueError:
             return response.text
         detail = body.get("detail")
-        if isinstance(detail, str):
+        if isinstance(detail, (str, dict)):
             return detail
         return str(body)

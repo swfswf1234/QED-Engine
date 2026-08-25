@@ -24,5 +24,6 @@
 | [`0008`](0008-frontend-react-refactor.md) | 前端框架与工程化选型：React 全家桶重构 8903 | 架构与边界 | v0.1 | Accepted | — |
 | [`0009`](0009-shared-qed-tables.md) | qed 库新增 qed_* 共享表族（课程体系元数据跨项目共享） | 架构与边界 | v0.1 | Accepted | — |
 | [`0010`](0010-documentation-versioning.md) | 文档体系分层与版本治理（确定文档 / 相对确定 / 实时状态） | 工程治理 | v0.1 | Accepted | — |
+| [`0011`](0011-pending-design-location.md) | 待评审设计的目录流转（Draft 设计先入 plans/，确定后落 design/） | 工程治理 | v0.1 | Accepted | — |
 
-下一个可用编号：0011
+下一个可用编号：0012

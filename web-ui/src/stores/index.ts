@@ -40,14 +40,23 @@ export type LlmStatusResponse = Record<string, LlmStatus>;
 
 // --- LLM 网关契约类型（8900 控制域，backend/qed_engine/api/control.py） ---
 
-/** /monitor/gpu：GPU + 系统内存（sys_memory_*） */
+/** /monitor/gpu：GPU + 系统内存（sys_memory_*）+ 进程 kind 分类（REQ-038 饼图） */
+export interface GpuProcess {
+  pid: number;
+  name: string;
+  /** 每进程显存 MB；Windows WDDM 下 nvidia-smi 返回 [N/A] → null（清单保留，MB 未知） */
+  memory_mb: number | null;
+  /** 模型白名单关键词命中 → model；其余（浏览器/图形/陌生任务）→ other */
+  kind: 'model' | 'other';
+}
+
 export interface GpuStatus {
   available: boolean;
   name?: string;
   memory_total_mb?: number;
   memory_used_mb?: number;
   utilization_percent?: number;
-  processes?: Array<{ pid: number; name: string; memory_mb: number }>;
+  processes?: GpuProcess[];
   sys_memory_total_mb?: number;
   sys_memory_used_mb?: number;
   sys_memory_percent?: number;
@@ -59,6 +68,14 @@ export interface LlmTestResult {
   ok: boolean;
   detail?: string;
   call_id?: number | null;
+}
+
+/** GET /config/keys 响应：厂商 + 配置布尔 + 运行模式（2026-08-24 契约扩展，不含密钥值） */
+export interface KeysStatus {
+  provider: string;
+  configured: boolean;
+  /** 运行模式：api（云端厂商）/ local（本地 LM Studio / MinerU） */
+  mode: 'api' | 'local';
 }
 
 /** /monitor/lmstudio：本地文字模型（LM Studio）探测结果 */
@@ -91,6 +108,10 @@ export interface LlmCallItem {
   status: string;
   error?: string | null;
   created_at: string;
+  task?: string | null;
+  step?: string | null;
+  review_status?: string;
+  review_note?: string;
 }
 
 export interface CallsResponse {
@@ -107,6 +128,10 @@ export interface LlmCallsQuery {
   status?: string;
   start?: string;
   end?: string;
+  task?: string;
+  step?: string;
+  prompt_template?: string;
+  review_status?: string;
   page?: number;
   size?: number;
 }
@@ -209,10 +234,120 @@ export interface Catalog {
   targets: CatalogTarget[];
 }
 
+/** 课程记录（QED-Tracker GET /courses 嵌套行；2026-08-24 起为文档下载管理左树真实数据源） */
+export interface CourseRecord {
+  course_id: string;
+  name: string;
+  aliases: string[];
+  stage: string;
+  prerequisites: string[];
+  related_targets?: string[];
+  note?: string;
+}
+
+/** 领域课程体系行（GET /courses：领域 + 嵌套课程；服务端已按 sort_order 排序） */
+export interface DomainSystem {
+  domain_id: string;
+  name: string;
+  description?: string;
+  stages?: string[];
+  courses: CourseRecord[];
+}
+
+// --- 探索契约类型（exploration-api 冻结契约 §1~§7，2026-08-23） ---
+
+/** 探索发起方式：direct 直接开始 / text 粘贴参考文本 / doc 指定文本文档路径 */
+export type ExploreLaunchMode = 'direct' | 'text' | 'doc';
+
+/** 推荐套（Proposal，字段与 qt_knowledge textbook_ref/exercise_ref/intro 对齐） */
+export interface ExploreProposal {
+  proposal_id: string;
+  set_name: string;
+  textbook: {
+    title: string;
+    authors?: string[];
+    version?: { edition?: string; publisher?: string; year?: number | null } | null;
+    intro?: string;
+  };
+  exercise?: {
+    title: string;
+    version?: { edition?: string; publisher?: string; year?: number | null } | null;
+    intro?: string;
+  } | null;
+  reason: string;
+}
+
+/** 课程层探索运行（GET /explore-runs/{run_id}） */
+export interface ExploreRun {
+  run_id: string;
+  scope: 'course';
+  course_id: string;
+  status: 'running' | 'ready' | 'adopted' | 'discarded' | 'failed';
+  params: { mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string };
+  proposals: ExploreProposal[];
+  adopted_proposal_ids: string[];
+  error: { code: string; message: string } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /courses/{id}/explore 响应 */
+export interface ExploreLaunchResult {
+  run_id: string;
+  task_id: string;
+  status: 'running';
+  /** 幂等去重命中时 true（同对象已有 running 运行，返回既有 run） */
+  deduplicated?: boolean;
+}
+
+/** POST /explore-runs/{id}/adopt 响应 */
+export interface ExploreAdoptResult {
+  adopted: { knowledge_id: string; set_name: string }[];
+  remaining_slots: number;
+  run: ExploreRun;
+}
+
+/** 探索历史摘要（GET /courses/{id}/explore-runs 行） */
+export interface ExploreRunSummary {
+  run_id: string;
+  scope: 'course';
+  course_id: string;
+  status: ExploreRun['status'];
+  created_at: string;
+  updated_at: string;
+  proposal_count: number;
+  adopted_count: number;
+}
+
+/** 领域探索变更项（curriculum-runs proposals 行；字段名与后端 _explore_run_view 对齐） */
+export interface CurriculumChange {
+  change_id: string;
+  action: 'create_domain' | 'create_course' | 'update_course' | 'delete_course';
+  entity: 'domain' | 'course';
+  target_id: string;
+  payload: Record<string, unknown>;
+  reason: string;
+}
+
+/** 新建领域探索运行（GET /curriculum-runs/{run_id}） */
+export interface CurriculumRun {
+  run_id: string;
+  scope: 'curriculum';
+  status: 'running' | 'ready' | 'applied' | 'partially_applied' | 'discarded' | 'failed';
+  params: { domain_name: string; mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string };
+  /** 服务端键为 proposals（2026-08-24 修复：原误作 changes 致弹窗空列表） */
+  proposals: CurriculumChange[];
+  adopted_proposal_ids: string[];
+  conflicts: { change_id: string; reason: string }[];
+  error: { code: string; message: string } | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // --- 服务控制 store（Console 填充） ---
 // Phase 2：/services 轮询 + 启停操作 + 过渡态收敛
 
-// --- 下载管理 store（Downloads 填充） ---
+// --- 文档下载管理 store（Downloads 填充） ---
 // Phase 4：左树（领域→课程→教程[知识行]）展开/折叠、树宽、筛选（领域/课程/状态）、选择联动
 
 // --- 仪表盘 store（Dashboard 填充） ---

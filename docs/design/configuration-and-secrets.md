@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-20
+最后更新：2026-08-23
 关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](../architecture/api-contracts.md)）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
@@ -76,6 +76,12 @@ Axiom-Flow 参照执行。原「根 `.env` 是密钥唯一事实源、子项目�
 - 存量库（Axiom-Flow `xqfm11`）不迁移、不改名；`qed` 库由各项目 Alembic 独立初始化（建表与迁移见各自仓库门禁）。
 - 数据库配置状态由配置中心 `/config/database` 接口暴露（configured/reachable/reason，
   密码不下发），见[配置中心 API 契约](../architecture/api-contracts.md)。
+
+### 数据根（2026-08-23 ARCH-019 新增）
+
+| 变量 | 用途 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `QED_DATA_ROOT` | 三项目统一数据根目录 | `<进程工作目录>/dataset/` | 解析优先级：**真实环境变量 > 自身 `.env` > 向上走查父目录 `.env` > 内置默认**；顶层布局 `raw\|tmp\|parsed/<领域>/<课程>/`（派生路径表见 [dataset-conventions.md](dataset-conventions.md)）；三项目各持 `.env` 配置相同绝对路径即共享同一目录树（推荐 `D:\coding\QED-Engine\dataset`）；子项目独立降级启动时默认值为各自目录下 `dataset/`，结构相同，满足独立性铁律 |
 
 ## 强制规则
 

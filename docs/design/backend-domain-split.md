@@ -14,7 +14,7 @@
 关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（8900 网关化）、
 [ADR 0008](../adr/0008-frontend-react-refactor.md)（前端重构，后端改造独立成轮与之并行）
 
-> 实现轮计划：[ARCH-012 后端三域拆分轮](../plans/2026-08-backend-domain-refactor.md)（Accepted，实施完成，待真实环境验收归档）。
+> 实现轮计划：[ARCH-012 后端三域拆分轮](../history/plans/2026-08/2026-08-backend-domain-refactor.md)（Achieved，2026-08-21 已关闭归档）。
 
 ## 目的与边界
 

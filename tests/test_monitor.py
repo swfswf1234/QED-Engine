@@ -24,7 +24,7 @@ def _fake_smi(gpu_out: str, proc_out: str = ""):
 
 
 def test_gpu_ok_parses_fields():
-    """nvidia-smi 正常输出：字段齐全（型号/显存/利用率/进程）。"""
+    """nvidia-smi 正常输出：字段齐全（型号/显存/利用率/进程，进程带 kind 分类）。"""
     runner = _fake_smi(
         "NVIDIA GeForce RTX 4080, 16376, 4096, 65",
         "1234, LM Studio, 4096",
@@ -36,8 +36,78 @@ def test_gpu_ok_parses_fields():
         "memory_total_mb": 16376,
         "memory_used_mb": 4096,
         "utilization_percent": 65,
-        "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096}],
+        "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096, "kind": "model"}],
     }
+
+
+def test_gpu_process_kind_classifies_model_vs_other():
+    """进程 kind 分类（REQ-038 GPU 饼图）：模型白名单关键词 → model，其余 → other。
+
+    口径（2026-08-21 用户裁决）：进程名小写包含 lmstudio/lm studio/llama/qwen/mineru/
+    python/vmmem/ollama 任一关键词即视为模型相关进程；其余（如浏览器/训练脚本外的
+    图形程序）标记 other，供前端饼图高亮「非模型任务占用」。
+    """
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 12000, 90",
+        # 模型类：LM Studio（GUI）、llama-server、python 推理、MinerU 容器（vmmem/WSL）
+        "100, LM Studio, 5000\n"
+        "101, llama-server.exe, 3000\n"
+        "102, python.exe, 1500\n"
+        "103, vmmemWSL, 800\n"
+        # 非模型：浏览器硬件加速 + 陌生计算任务
+        "200, chrome.exe, 600\n"
+        "201, some_game.exe, 1100",
+    )
+    result = monitor.probe_gpu(runner=runner)
+    kinds = {p["pid"]: p["kind"] for p in result["processes"]}
+    assert kinds == {100: "model", 101: "model", 102: "model", 103: "model", 200: "other", 201: "other"}
+
+
+def test_gpu_process_kind_case_insensitive():
+    """kind 分类大小写不敏感（LLM STUDIO / Llama-Server 同样命中白名单）。"""
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 4096, 65",
+        "300, LLM STUDIO, 2000\n301, Llama-Server, 2096",
+    )
+    result = monitor.probe_gpu(runner=runner)
+    assert all(p["kind"] == "model" for p in result["processes"])
+
+
+def test_gpu_wddm_na_processes_kept_with_null_memory():
+    """WDDM 模式（每进程显存 [N/A]）：保留进程行 memory_mb=None + kind 分类（不丢弃清单）。
+
+    本机实测（2026-08-21）：nvidia-smi --query-compute-apps 返回 LM Studio/chrome/explorer
+    等进程名但 used_memory 全为 [N/A]——显存数值拿不到，进程清单正是「非模型任务识别」所需。
+    """
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 4635, 62",
+        "28252, C:\\Program Files\\LM Studio\\LM Studio.exe, [N/A]\n"
+        "20216, C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe, [N/A]\n"
+        "11156, [Insufficient Permissions], [N/A]",
+    )
+    result = monitor.probe_gpu(runner=runner)
+    assert result["available"] is True
+    by_pid = {p["pid"]: p for p in result["processes"]}
+    assert by_pid[28252] == {
+        "pid": 28252,
+        "name": "C:\\Program Files\\LM Studio\\LM Studio.exe",
+        "memory_mb": None,
+        "kind": "model",
+    }
+    assert by_pid[20216]["kind"] == "other"
+    assert by_pid[20216]["memory_mb"] is None
+    # [Insufficient Permissions] 行同样保留（pid 可解析、名称原样）
+    assert by_pid[11156]["memory_mb"] is None
+
+
+def test_gpu_invalid_pid_row_skipped():
+    """pid 非数字的异常行跳过，不影响其余行解析。"""
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 4096, 65",
+        "notapid, weird.exe, 100\n1234, python.exe, 200",
+    )
+    result = monitor.probe_gpu(runner=runner)
+    assert [p["pid"] for p in result["processes"]] == [1234]
 
 
 def test_gpu_no_processes_returns_empty_list():

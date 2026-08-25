@@ -56,6 +56,25 @@ describe('api client（统一 API 客户端）', () => {
     }
   });
 
+  it('HTTP 404 结构化 detail 对象 → 解包 detail.message 为展示文案（Fix C，2026-08-24）', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ detail: { code: 'UPSTREAM_NOT_IMPLEMENTED', message: '该手工维护端点 8901 尚未实现（REQ-059 承接中）' } }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    try {
+      await api.post('/domains', { name: 'x' });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(404);
+      expect(apiErr.message).toBe('该手工维护端点 8901 尚未实现（REQ-059 承接中）');
+      expect(describeError(apiErr)).toBe('该手工维护端点 8901 尚未实现（REQ-059 承接中）');
+    }
+  });
+
   it('HTTP 422 校验失败 → describeError 输出校验失败语义', async () => {
     mockFetch.mockResolvedValue(
       new Response(JSON.stringify({ detail: 'reason 必填' }), { status: 422, headers: { 'Content-Type': 'application/json' } }),

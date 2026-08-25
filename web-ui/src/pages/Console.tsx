@@ -1,17 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert, App, Button, Card, Col, Descriptions, Layout, Modal, Row, Space, Spin, Typography,
 } from 'antd';
 import {
-  ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined, DesktopOutlined, RobotOutlined, PictureOutlined,
+  ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined, RobotOutlined, PictureOutlined,
 } from '@ant-design/icons';
-import AppHeader from '../components/AppHeader';
-import { useConsoleStore, type OperateResult, type LlmTestOutcome } from '../stores/console';
-import { WEB_SERVICE } from '../stores/webService';
+import GpuOverview from '../components/GpuOverview';
+import {
+  useRuntimeStore, withWebServiceFallback, GPU_REFRESH_INTERVAL_MS,
+  type OperateResult, type LlmTestOutcome,
+} from '../stores/runtime';
 import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
 import { selfRestart, type ServiceOp } from '../api/services';
-import type { GpuStatus, ServiceStatus } from '../stores';
+import type { ServiceStatus } from '../stores';
 
 const { Title, Text } = Typography;
 
@@ -91,49 +93,26 @@ function ServiceCard({
   );
 }
 
-/** GPU 总览条（/monitor/gpu：显卡型号/显存 used/total/利用率/模型进程/系统内存；不可用降级显示原因） */
-function GpuOverview({ gpu, gpuError }: { gpu: GpuStatus | null; gpuError: string | null }) {
-  let body: ReactNode;
-  if (gpuError) {
-    body = <Text type="secondary">GPU 探测失败（{gpuError}）。点「刷新」重试。</Text>;
-  } else if (!gpu) {
-    body = <Text type="secondary">探测中…</Text>;
-  } else if (!gpu.available) {
-    body = <Text type="secondary">GPU 不可用（{gpu.reason || '未检测到显卡'}）</Text>;
-  } else {
-    body = (
-      <>
-        <Descriptions size="small" column={{ xs: 1, sm: 2, md: 4 }} colon={false}>
-          <Descriptions.Item label="显卡型号">{gpu.name || '未知'}</Descriptions.Item>
-          <Descriptions.Item label="显存使用">{gpu.memory_used_mb} / {gpu.memory_total_mb} MB</Descriptions.Item>
-          <Descriptions.Item label="利用率">{gpu.utilization_percent}%</Descriptions.Item>
-          <Descriptions.Item label="系统内存">{gpu.sys_memory_percent}%（{gpu.sys_memory_used_mb} / {gpu.sys_memory_total_mb} MB）</Descriptions.Item>
-        </Descriptions>
-        {gpu.processes && gpu.processes.length > 0 && (
-          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-            模型进程：{gpu.processes.map((p) => `${p.name} ${p.memory_mb} MB`).join('；')}
-          </Text>
-        )}
-      </>
-    );
-  }
-  return (
-    <Card size="small" title={<Space><DesktopOutlined />GPU 总览</Space>} style={{ marginTop: 24 }}>
-      {body}
-    </Card>
-  );
-}
-
 /**
- * 依赖组件卡（MySQL/文字模型/图像模型）：
- * 默认置灰（探测中/离线显示「未验证」）；「测试」按钮即时验证，按结果点亮（成功绿/失败红）。
- * outcome 为本地状态（测试动作结果由 store 返回），探测失败仅降级本卡。
+ * 依赖组件卡（MySQL/文字模型/图像模型，2026-08-24 结构化重构 + 模式感知）：
+ * - 字段行：来源（静态 prop，本地/云端）/ 类型（服务标识，api 模式模型卡显示云端厂商）/
+ *   可达 / 备注（单行省略，悬停看全文）
+ * - 可达判定（模式感知，修复「LM Studio 未启动却显示已验证在线」错位 bug）：
+ *   云端卡（api 模式模型卡）：验证对象即云端厂商 → 测试结果直接决定可达；
+ *   本地探测卡：探测优先——探测离线时陈旧「已验证在线」不得残留，测试结论只并入备注；
+ *   mode 未加载（null）按本地语义渲染兜底。
  */
 function DependencyCard({
-  name, icon, probe, probeError, testing, onTest,
+  name, icon, origin, svcType, cloud, probe, probeError, testing, onTest,
 }: {
   name: string;
-  icon: ReactNode;
+  icon: React.ReactNode;
+  /** 部署来源：本地 / 云端 */
+  origin: string;
+  /** 服务类型标识：MySQL / LM Studio / MinerU / 云端 · {provider} */
+  svcType: string;
+  /** 云端卡：api 模式下的文字/图像模型（验证对象=云端厂商，无本地探测语义） */
+  cloud: boolean;
   probe: { reachable: boolean; reason?: string } | null;
   probeError: string | null;
   testing: boolean;
@@ -152,41 +131,67 @@ function DependencyCard({
     }
   };
 
-  let status: ReactNode;
-  if (outcome) {
-    status = outcome.ok ? (
-      <Text type="success">在线（{outcome.detail || '测试通过'}）</Text>
-    ) : (
-      <Text type="danger">{outcome.detail || '测试失败'}</Text>
-    );
-  } else if (probeError) {
-    status = <Text type="secondary">获取失败（{probeError}）。点「刷新」重试。</Text>;
+  /** 可达 + 备注：见组件 JSDoc 判定规则 */
+  let reach: React.ReactNode;
+  let remark: string;
+  const probeOffline = probeError != null || (probe != null && !probe.reachable);
+  if (!cloud && probeOffline) {
+    // 探测失败/离线优先：陈旧测试结论不冒充可达，仅并入备注留痕
+    reach = probeError ? <Text type="secondary">探测失败</Text> : <Text type="secondary">离线</Text>;
+    remark = outcome
+      ? `最近测试${outcome.ok ? '通过' : '失败'}：${outcome.detail || ''}`
+      : (probeError || probe?.reason || '—');
+  } else if (outcome) {
+    // 测试结果有效（云端卡恒有效；本地卡在探测可达时有效）
+    reach = outcome.ok ? <Text type="success">已验证在线</Text> : <Text type="danger">验证失败</Text>;
+    remark = outcome.detail || '—';
+  } else if (cloud) {
+    reach = <Text type="secondary">云端 · 未验证</Text>;
+    remark = '—';
   } else if (!probe) {
-    status = <Text type="secondary">探测中…</Text>;
-  } else if (probe.reachable) {
-    status = <Text type="secondary">在线（{probe.reason || '可达'}）· 未验证</Text>;
+    reach = <Text type="secondary">探测中…</Text>;
+    remark = '—';
   } else {
-    status = <Text type="secondary">未验证（{probe.reason || '离线'}）</Text>;
+    reach = <Text type="secondary">在线 · 未验证</Text>;
+    remark = probe.reason || '—';
   }
 
   return (
     <Card size="small" title={<Space>{icon}<span>{name}</span></Space>}>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {status}
-        <Button size="small" loading={testing} onClick={() => void run()}>
-          测试
-        </Button>
-      </Space>
+      <Descriptions size="small" column={1} colon={false}>
+        <Descriptions.Item label="来源">{origin}</Descriptions.Item>
+        <Descriptions.Item label="类型">{svcType}</Descriptions.Item>
+        <Descriptions.Item label="可达">{reach}</Descriptions.Item>
+        <Descriptions.Item label="备注">
+          <Text
+            type="secondary"
+            style={{
+              display: 'inline-block', maxWidth: '100%', overflow: 'hidden',
+              textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom',
+            }}
+            title={remark}
+          >
+            {remark}
+          </Text>
+        </Descriptions.Item>
+      </Descriptions>
+      <Button size="small" loading={testing} onClick={() => void run()} style={{ marginTop: 8 }}>
+        测试
+      </Button>
     </Card>
   );
 }
 
 /**
  * 控制台（`#/admin`）
- * - 顶部操作区：「刷新」（重拉数据）+「重新加载页面」（整页重载，独立按钮）
+ * - 数据源：全局 runtime store（AdminLayout 进入管理台拉取一次，本页挂载补拉保新鲜；
+ *   GPU 显存构成 60s 定时刷新）
+ * - 操作区：「刷新」（fetchAll 数据重拉）置于标题行右侧——全局顶栏已提升至 AdminLayout，
+ *   页面按钮动作下沉（方案 A，2026-08-24）；「重新加载页面」已删（与浏览器刷新等价）
  * - 四服务卡：8900 恒在线（重启经 /self-restart，成功后自动刷新）/ 8901·8902 启停重启（确认框 +
- *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；后端注册表返回 web 时用真实状态）
- * - GPU 总览条：/monitor/gpu（显卡型号/显存/利用率/模型进程/系统内存；不可用降级显示原因）
+ *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；web 兜底合并见 runtime store）
+ * - 区块顺序（2026-08-24 用户裁决）：资源总览 → 服务管理（节标题）→ 四服务卡 → 依赖组件三卡
+ * - 资源总览卡：/monitor/gpu（原「GPU 总览」；组件独立模块 components/GpuOverview）
  * - 依赖组件三卡：本地 MySQL（/config/database）+ 文字模型（/monitor/lmstudio）+ 图像模型
  *   （/monitor/mineru），默认置灰未验证，「测试」按钮即时验证点亮（各失败仅降级本卡）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
@@ -194,19 +199,29 @@ function DependencyCard({
 export default function Console() {
   const {
     services, dbStatus, gpu, gpuError, lmstudio, lmstudioError, mineru, mineruError,
-    loading, error, dbError, operating, testing, fetchAll, operate,
+    keys, loading, error, dbError, operating, testing, fetchAll, fetchGpu, operate,
     testDatabase, testText, testVision,
-  } = useConsoleStore();
+  } = useRuntimeStore();
   const { message } = App.useApp();
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
 
-  const cards = useMemo(() => {
-    const merged = services.some((s) => s.name === 'web') ? services : [...services, WEB_SERVICE];
-    return [...merged].sort((a, b) => a.port - b.port);
-  }, [services]);
+  /** GPU 显存构成 60s 静默自动刷新（REQ-038）：操作收敛轮询期间跳过，卸载清理 */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!useRuntimeStore.getState().operating) void fetchGpu();
+    }, GPU_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [fetchGpu]);
+
+  const cards = useMemo(() => withWebServiceFallback(services), [services]);
+
+  // 模式感知（2026-08-24）：api 模式下文字/图像模型为云端厂商，类型行标注且不采信本地探测；
+  // mode 未加载（null）按 local 语义兜底
+  const cloudModels = keys?.mode === 'api';
+  const providerLabel = `云端 · ${keys?.provider ?? '厂商未配置'}`;
 
   /** 统一成功/失败提示（2026-08-17 用户裁决：只提示收敛结果；失败统一用 message） */
   const notifyResult = (result: OperateResult) => {
@@ -249,59 +264,46 @@ export default function Console() {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
-      <AppHeader
-        actions={
-          <Space>
-            <Button
-              type="primary" ghost icon={<ReloadOutlined />} loading={loading}
-              style={{ color: '#ffffff', borderColor: '#ffffff' }} onClick={() => void fetchAll()}
-            >
-              刷新
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              style={{ color: '#ffffff', borderColor: '#ffffff', background: 'transparent' }}
-              onClick={() => window.location.reload()}
-            >
-              重新加载页面
-            </Button>
-          </Space>
-        }
-      />
-      <Layout.Content style={{ padding: 32, maxWidth: 1280, width: '92%', margin: '0 auto' }}>
-        <Title level={2} style={{ marginTop: 0 }}>
+    <Layout.Content style={{ padding: 32, maxWidth: 1280, width: '92%', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Title level={2} style={{ marginTop: 0, marginBottom: 0 }}>
           控制台
         </Title>
-        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          全局俯瞰：服务启停托管（操作后自动收敛状态）；依赖组件真实探测（60s 缓存）。
-        </Text>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchAll()}>
+          刷新
+        </Button>
+      </div>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 16, marginTop: 8 }}>
+        QED服务全局俯瞰：资源总览、服务管理、组件管理
+      </Text>
 
-        {error && (
-          <Alert
-            type="error" showIcon style={{ marginBottom: 16 }}
-            message="控制台数据获取失败"
-            description={`${error}。请确认 8900 管理服务已启动后点「刷新」。`}
-          />
-        )}
+      {error && (
+        <Alert
+          type="error" showIcon style={{ marginBottom: 16 }}
+          message="控制台数据获取失败"
+          description={`${error}。请确认 8900 管理服务已启动后点「刷新」。`}
+        />
+      )}
 
-        <Row gutter={[16, 16]}>
-          {cards.map((svc) => (
-            <Col xs={24} md={12} xl={6} key={svc.name}>
-              <ServiceCard
-                svc={svc}
-                operating={operating === svc.name}
-                onConfirm={(op) => setConfirmTarget({ name: svc.name, op, display: displayName(svc) })}
-                onRestartConfig={() => setConfirmTarget({ name: svc.name, op: 'restart', display: displayName(svc) })}
-              />
-            </Col>
+      <GpuOverview gpu={gpu} gpuError={gpuError} />
+
+      {/* 分节标题（2026-08-24 用户裁决）：隔开资源总览与服务管理 */}
+      <Title level={4} style={{ marginTop: 24 }}>服务管理</Title>
+      <Row gutter={[16, 16]}>
+        {cards.map((svc) => (
+          <Col xs={24} md={12} xl={6} key={svc.name}>
+            <ServiceCard
+              svc={svc}
+              operating={operating === svc.name}
+              onConfirm={(op) => setConfirmTarget({ name: svc.name, op, display: displayName(svc) })}
+              onRestartConfig={() => setConfirmTarget({ name: svc.name, op: 'restart', display: displayName(svc) })}
+            />
+          </Col>
           ))}
         </Row>
 
-        <GpuOverview gpu={gpu} gpuError={gpuError} />
-
-        {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应） */}
-        <Modal
+      {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应） */}
+      <Modal
           open={confirmTarget !== null}
           title={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}「${confirmTarget.display}」？` : ''}
           okText={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}` : ''}
@@ -320,8 +322,11 @@ export default function Console() {
         <Row gutter={[16, 16]}>
           <Col xs={24} md={12} xl={8}>
             <DependencyCard
-              name="本地 MySQL（qed 库）"
+              name="MySQL"
               icon={<DatabaseOutlined />}
+              origin="本地"
+              svcType="MySQL"
+              cloud={false}
               probe={dbStatus}
               probeError={dbError}
               testing={testing === 'db'}
@@ -330,8 +335,11 @@ export default function Console() {
           </Col>
           <Col xs={24} md={12} xl={8}>
             <DependencyCard
-              name="本地文字模型（LM Studio）"
+              name="文字模型"
               icon={<RobotOutlined />}
+              origin={cloudModels ? '云端' : '本地'}
+              svcType={cloudModels ? providerLabel : 'LM Studio'}
+              cloud={cloudModels}
               probe={lmstudio}
               probeError={lmstudioError}
               testing={testing === 'text'}
@@ -340,8 +348,11 @@ export default function Console() {
           </Col>
           <Col xs={24} md={12} xl={8}>
             <DependencyCard
-              name="本地图像模型（MinerU）"
+              name="图像模型"
               icon={<PictureOutlined />}
+              origin={cloudModels ? '云端' : '本地'}
+              svcType={cloudModels ? providerLabel : 'MinerU'}
+              cloud={cloudModels}
               probe={mineru}
               probeError={mineruError}
               testing={testing === 'vision'}
@@ -349,7 +360,6 @@ export default function Console() {
             />
           </Col>
         </Row>
-      </Layout.Content>
-    </Layout>
+    </Layout.Content>
   );
 }

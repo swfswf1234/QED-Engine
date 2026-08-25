@@ -6,22 +6,24 @@ import Downloads from './Downloads';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDownloadsStore } from '../stores/downloads';
-import type { BookRecord, Catalog, KnowledgeDetail, KnowledgeRecord } from '../stores';
+import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from '../stores';
 
-const catalogFixture: Catalog = {
-  id: 'math-qe',
-  name: '突破朗道位垒',
-  description: '博士资格考试目录',
-  status: 'frozen',
-  targets: [
-    { id: '01-rudin', course_id: '01_math_analysis', course_name: '数学分析', kind: 'book', title: '数学分析原理', authors: [], language: 'zh', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'] },
-    { id: '02-axler', course_id: '02_linear_algebra', course_name: '线性代数', kind: 'book', title: '线性代数应该这样学', authors: [], language: 'zh', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'] },
-  ],
-};
+const domainsFixture: DomainSystem[] = [
+  {
+    domain_id: 'dm1',
+    name: '高等数学',
+    description: '本科数学核心领域',
+    stages: ['基础', '进阶'],
+    courses: [
+      { course_id: '01_math_analysis', name: '数学分析', aliases: [], stage: '', prerequisites: [] },
+      { course_id: '02_linear_algebra', name: '线性代数', aliases: [], stage: '', prerequisites: [] },
+    ],
+  },
+];
 
 function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_id: string }): KnowledgeRecord {
   return {
-    domain_id: 'math',
+    domain_id: 'dm1',
     kind: 'tutorial',
     set_no: '',
     name: partial.name ?? '',
@@ -79,7 +81,10 @@ const detailsFixture: Record<string, KnowledgeDetail> = {
     books: [book({ book_id: 'b1', knowledge_id: 'k1', display_title: 'Rudin 中译', status: 'verified' })],
   },
   k2: { ...k2, books: [] },
-  k3: { ...k3, books: [] },
+  k3: {
+    ...k3,
+    books: [book({ book_id: 'b4', knowledge_id: 'k3', display_title: '线性代数习题册', status: 'downloaded' })],
+  },
 };
 
 /** 路由匹配：URL 包含路由 key；详情路由（更长 key）优先于列表路由；函数值按 URL 动态返回 */
@@ -110,67 +115,60 @@ function renderDownloads() {
   );
 }
 
-describe('下载管理 Downloads（Phase 4a + 五层化 + 2026-08-18 ARCH-015 重构）', () => {
+describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-24 REQ-059）', () => {
   beforeEach(() => {
     useDownloadsStore.setState({
-      catalogTargets: [], knowledge: [], details: {}, loading: false, error: null,
-      catalogError: null, knowledgeError: null,
-      filters: { domain: '', course: '', status: '', flow: '' }, selected: null, treeWidth: 400,
+      domains: [], knowledge: [], details: {}, loading: false, error: null,
+      systemError: null, knowledgeError: null,
+      filters: { domain: '', course: '', stage: '' }, selected: null, treeWidth: 400,
     });
   });
 
-  it('渲染左树：领域(高等数学)常驻展开、分类头仅展示、课程默认折叠、教程叶子只展示+进度', async () => {
+  it('渲染左树：领域展开、课程默认折叠、点击课程展开显示教程叶子+验收进度', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDownloads();
     expect(await screen.findByText('文档下载管理')).toBeInTheDocument();
     const tree = await screen.findByRole('tree');
-    // 领域唯一「高等数学」+ 分类头（分析/代数，仅展示不可点）
+    // 真实体系：领域 + 课程（无分类层）
     expect(within(tree).getByText('高等数学')).toBeInTheDocument();
-    expect(within(tree).getByText('分析')).toBeInTheDocument();
-    expect(within(tree).getByText('代数')).toBeInTheDocument();
-    // 课程可见（分类下常驻展示），默认折叠：教程叶子不可见
     expect(within(tree).getByText('数学分析')).toBeInTheDocument();
+    expect(within(tree).queryByText('分析')).not.toBeInTheDocument();
+    // 课程默认折叠：教程叶子不可见
     expect(within(tree).queryByText('Rudin 教程')).not.toBeInTheDocument();
-    // 课程点击展开 → 教程叶子展示 name + 验收进度
+    // 点击课程展开 → 教程叶子展示 name + 验收进度
     fireEvent.click(within(tree).getByText('数学分析'));
     expect(await within(tree).findByText('Rudin 教程')).toBeInTheDocument();
     expect(within(tree).getByText('1/1 已验收')).toBeInTheDocument();
     expect(within(tree).getByText('候选教程')).toBeInTheDocument();
-    // 教程叶子不可点击、不可展开：点教程不改变选中、无书行明细
+    // 教程叶子不改变选中（选中保持课程）
     fireEvent.click(within(tree).getByText('Rudin 教程'));
-    expect(useDownloadsStore.getState().selected).toEqual({ kind: 'course', id: '01_math_analysis' });
-    expect(within(tree).queryByText('《Rudin 中译》')).not.toBeInTheDocument();
-    // 分类头不可点击：选中保持课程不变
-    fireEvent.click(within(tree).getByText('分析'));
     expect(useDownloadsStore.getState().selected).toEqual({ kind: 'course', id: '01_math_analysis' });
   });
 
-  it('领域可折叠：点击领域折叠箭头后隐藏分类/课程', async () => {
+  it('领域可折叠：点击领域折叠箭头后隐藏课程，再点恢复', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
-    expect(within(tree).getByText('分析')).toBeInTheDocument();
+    expect(within(tree).getByText('数学分析')).toBeInTheDocument();
     const domainCaret = tree.querySelector('.dl-tree-domain .dl-tree-caret');
     expect(domainCaret).not.toBeNull();
     fireEvent.click(domainCaret as Element);
-    expect(within(tree).queryByText('分析')).not.toBeInTheDocument();
     expect(within(tree).queryByText('数学分析')).not.toBeInTheDocument();
-    // 再点击展开恢复
     fireEvent.click(domainCaret as Element);
-    expect(await within(tree).findByText('分析')).toBeInTheDocument();
+    expect(await within(tree).findByText('数学分析')).toBeInTheDocument();
   });
 
-  it('领域点击 → 选中「高等数学」+ 清课程筛选（显示全部）', async () => {
+  it('领域点击 → 选中 domain_id + 领域筛选 + 右侧领域信息卡（探索按钮状态机 idle 态）', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
@@ -178,14 +176,21 @@ describe('下载管理 Downloads（Phase 4a + 五层化 + 2026-08-18 ARCH-015 �
     const tree = await screen.findByRole('tree');
     fireEvent.click(within(tree).getByText('高等数学'));
     const st = useDownloadsStore.getState();
-    expect(st.selected).toEqual({ kind: 'domain', id: '高等数学' });
-    expect(st.filters).toEqual({ domain: '高等数学', course: '', status: '', flow: '' });
+    expect(st.selected).toEqual({ kind: 'domain', id: 'dm1' });
+    expect(st.filters).toEqual({ domain: 'dm1', course: '', stage: '' });
     expect(await screen.findByText('筛选结果：3 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
+    // 领域信息卡：名称 + 描述 + 探索按钮（idle 可点）
+    const card = await screen.findByTestId('domain-info-card');
+    expect(within(card).getByText('高等数学')).toBeInTheDocument();
+    expect(within(card).getByText('本科数学核心领域')).toBeInTheDocument();
+    expect(within(card).getByText('2 门课程')).toBeInTheDocument();
+    const exploreBtn = within(card).getByRole('button', { name: /探索课程体系/ });
+    expect(exploreBtn).not.toBeDisabled();
   });
 
-  it('课程点击 → 展开 + 选中 + 联动课程筛选（领域=分类名）', async () => {
+  it('课程点击 → 展开 + 选中 + 联动筛选（domain=真实 domain_id）', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
@@ -194,56 +199,63 @@ describe('下载管理 Downloads（Phase 4a + 五层化 + 2026-08-18 ARCH-015 �
     fireEvent.click(within(tree).getByText('数学分析'));
     const st = useDownloadsStore.getState();
     expect(st.selected).toEqual({ kind: 'course', id: '01_math_analysis' });
-    expect(st.filters).toEqual({ domain: '分析', course: '01_math_analysis', status: '', flow: '' });
+    expect(st.filters).toEqual({ domain: 'dm1', course: '01_math_analysis', stage: '' });
     expect(await screen.findByText('筛选结果：2 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
   });
 
-  it('筛选栏：状态筛选与树选择独立叠加 AND', async () => {
+  it('筛选栏三栏（领域/课程/状态）：状态=书行阶段，与树选择叠加 AND', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
-    // 树选课程（筛选 course=01_math_analysis）
+    // 三栏契约：领域/课程/状态三个下拉，流程筛选已移除（2026-08-24 用户裁决）
+    expect(screen.getByRole('combobox', { name: '领域筛选' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '课程筛选' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '状态筛选' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '流程筛选' })).not.toBeInTheDocument();
     fireEvent.click(within(tree).getByText('数学分析'));
-    // 手动改状态筛选 → confirmed
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '状态筛选' }));
-    fireEvent.click(await screen.findByTitle('已定稿'));
+    fireEvent.click(await screen.findByTitle('已完成'));
     await waitFor(() => {
-      expect(useDownloadsStore.getState().filters.status).toBe('confirmed');
+      expect(useDownloadsStore.getState().filters.stage).toBe('completed');
     });
+    // 仅 k1（Rudin 教程，含 verified 书行）保留
     expect(await screen.findByText('筛选结果：1 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
   });
 
-  it('流程筛选（验收）：仅保留含匹配书行的知识行，无匹配行隐藏', async () => {
+  it('状态筛选（待验证）：仅保留含 downloaded 书行的知识行（k3），其余隐藏、左树保留', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
+    // 展开两门课程（默认折叠），使教程叶子可见后再筛选
     fireEvent.click(within(tree).getByText('数学分析'));
-    // 流程下拉 → 验收（k1 有 verified 书行；k2 无书行 → 整行隐藏）
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '流程筛选' }));
-    fireEvent.click(await screen.findByTitle('验收'));
+    fireEvent.click(within(tree).getByText('线性代数'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '状态筛选' }));
+    fireEvent.click(await screen.findByTitle('待验证'));
     await waitFor(() => {
-      expect(useDownloadsStore.getState().filters.flow).toBe('verify');
+      expect(useDownloadsStore.getState().filters.stage).toBe('await_verify');
     });
+    // 仅 k3（线性代数教程，含 downloaded 书行）保留；k1（已验收）与空书行 k2 隐藏
     expect(await screen.findByText('筛选结果：1 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
-    // 右栏知识行区：k2（无书行）整行隐藏；树中教程叶子仍展示（流程筛选仅作用于右栏）
     const content = document.querySelector('.dl-content') as HTMLElement;
+    expect(within(content).queryByText('Rudin 教程')).not.toBeInTheDocument();
     expect(within(content).queryByText('候选教程')).not.toBeInTheDocument();
-    expect(within(screen.getByRole('tree')).getByText('候选教程')).toBeInTheDocument();
-    // 右侧书行卡仍在（Rudin 中译 已验证）
-    expect(await screen.findByText('Rudin 中译')).toBeInTheDocument();
+    expect(within(content).getByText('线性代数习题册')).toBeInTheDocument();
+    // 左树不受筛选影响：教程叶子仍全部可见
+    expect(within(tree).getByText('Rudin 教程')).toBeInTheDocument();
+    expect(within(tree).getByText('候选教程')).toBeInTheDocument();
   });
 
   it('书行卡去 kind 标签：只保留 状态 + roles 标签', async () => {
     mockApi({
-      '/catalogs/math-qe': catalogFixture,
+      '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
@@ -252,16 +264,15 @@ describe('下载管理 Downloads（Phase 4a + 五层化 + 2026-08-18 ARCH-015 �
     fireEvent.click(within(tree).getByText('数学分析'));
     const card = (await screen.findByText('Rudin 中译')).closest('.dl-book-card') as HTMLElement;
     expect(card).not.toBeNull();
-    // roles=textbook → 「教材」标签仅出现一次（kind 标签已移除）
     expect(within(card).getAllByText('教材')).toHaveLength(1);
     expect(within(card).getByText('已验证')).toBeInTheDocument();
   });
 
-  it('8901 不可达（/knowledge 503）→ 知识行降级提示，树目录正常', async () => {
+  it('8901 不可达（/knowledge 503）→ 知识行降级提示，课程体系树正常', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/catalogs/math-qe')) {
+      if (url.includes('/courses')) {
         return Promise.resolve(
-          new Response(JSON.stringify(catalogFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+          new Response(JSON.stringify(domainsFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
         );
       }
       if (url.includes('/knowledge')) {
@@ -273,19 +284,97 @@ describe('下载管理 Downloads（Phase 4a + 五层化 + 2026-08-18 ARCH-015 �
     });
     renderDownloads();
     expect(await screen.findByText('知识行数据不可达')).toBeInTheDocument();
-    // 树仍可用（catalog 正常）：领域+分类+课程
     const tree = screen.getByRole('tree');
     expect(within(tree).getByText('高等数学')).toBeInTheDocument();
-    expect(within(tree).getByText('分析')).toBeInTheDocument();
-    expect(within(tree).getByText('代数')).toBeInTheDocument();
-    // 无整体错误横幅
-    expect(screen.queryByText('下载管理数据获取失败')).not.toBeInTheDocument();
+    expect(within(tree).getByText('数学分析')).toBeInTheDocument();
+    expect(within(tree).getByText('线性代数')).toBeInTheDocument();
+    expect(screen.queryByText('文档下载管理数据获取失败')).not.toBeInTheDocument();
   });
 
-  it('8900 不可达 → 整体错误横幅 + 树区空态', async () => {
+  it('8900 不可达 → 整体错误横幅 + 树区空态（v2 文案）', async () => {
     mockFetch.mockRejectedValue(new TypeError('fetch failed'));
     renderDownloads();
-    expect(await screen.findByText('下载管理数据获取失败')).toBeInTheDocument();
-    expect(await screen.findByText('课程目录数据不可达（8900 离线或服务未启动）')).toBeInTheDocument();
+    expect(await screen.findByText('文档下载管理数据获取失败')).toBeInTheDocument();
+    expect(await screen.findByText('课程体系数据不可达（8900/8901 未启动或离线）')).toBeInTheDocument();
+  });
+
+  it('课程头：右面板置顶展示一次——课程名一行 + 课程介绍一行（2026-08-25 #3）', async () => {
+    const withNote: DomainSystem[] = [
+      {
+        ...domainsFixture[0],
+        courses: domainsFixture[0].courses.map((c) =>
+          c.course_id === '01_math_analysis' ? { ...c, note: '高等数学核心基础课' } : c,
+        ),
+      },
+    ];
+    mockApi({
+      '/courses': withNote,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('数学分析'));
+    // 课程介绍只在课程头出现一次（不随教程数量重复）
+    const notes = await screen.findAllByText('高等数学核心基础课');
+    expect(notes.length).toBe(1);
+  });
+
+  it('确认知识行 → 自动按决定引用生成两册候选书行（2026-08-25 #4 改造）', async () => {
+    const kdraft = kn({
+      knowledge_id: 'k9', course_id: '01_math_analysis', set_no: '', name: '待确认教程',
+      status: 'draft',
+      textbook_ref: { title: '数学分析教程（中文）' },
+      exercise_ref: { title: '数学分析习题集（中文）' },
+    });
+    let booksCalls = 0;
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/k9': { ...kdraft, books: [] },
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': [kdraft],
+      '/confirm': { ok: true, knowledge_id: 'k9', status: 'confirmed' },
+      '/books': () => {
+        booksCalls += 1;
+        return book({ book_id: `bnew${booksCalls}`, knowledge_id: 'k9' });
+      },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('数学分析'));
+    // 点「确认」打开弹窗（antd 两字按钮渲染为「确 认」）
+    fireEvent.click(await screen.findByRole('button', { name: /确\s*认/ }));
+    // 提交弹窗（书名已从决定引用预填）
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    await waitFor(() => {
+      expect(booksCalls).toBe(2);
+    });
+  });
+
+  it('confirmed 无书行且有决定引用 → 显示「按决定引用补建书行」兜底并可生成', async () => {
+    const kconf = kn({
+      knowledge_id: 'k8', course_id: '01_math_analysis', set_no: '', name: '已定稿教程',
+      status: 'confirmed',
+      textbook_ref: { title: '数学分析教程（中文）' },
+    });
+    let booksCalls = 0;
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/k8': { ...kconf, books: [] },
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': [kconf],
+      '/books': () => {
+        booksCalls += 1;
+        return book({ book_id: `bb${booksCalls}`, knowledge_id: 'k8' });
+      },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('数学分析'));
+    const btn = await screen.findByRole('button', { name: '按决定引用补建书行' });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      expect(booksCalls).toBe(1);
+    });
   });
 });

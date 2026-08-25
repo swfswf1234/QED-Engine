@@ -2,12 +2,12 @@ import { useEffect, useMemo } from 'react';
 import {
   Alert, Button, Card, Col, Layout, Row, Space, Statistic, Typography,
 } from 'antd';
-import { ReloadOutlined, DatabaseOutlined, CloudServerOutlined, FileSearchOutlined } from '@ant-design/icons';
+import { ReloadOutlined, CloudServerOutlined, DatabaseOutlined, FileSearchOutlined } from '@ant-design/icons';
 import type { EChartsCoreOption } from 'echarts/core';
-import AppHeader from '../components/AppHeader';
 import EChart from '../components/EChart';
 import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
+import { useRuntimeStore, withWebServiceFallback } from '../stores/runtime';
 import {
   useDashboardStore,
   buildBookSummary,
@@ -15,7 +15,6 @@ import {
   buildKnowledgeDownloadPie,
   type DownloadSlice,
 } from '../stores/dashboard';
-import { WEB_SERVICE } from '../stores/webService';
 
 const { Title, Text } = Typography;
 
@@ -74,16 +73,19 @@ function buildCompletionOption(completed: number, total: number): EChartsCoreOpt
 
 /**
  * 仪表盘（`#/admin/dashboard`，五层化 QED-031）
- * - 服务在线：四服务（/services，8903 由后端注册表返回；后端离线时本地判定）
+ * - 服务在线（2026-08-24 二次裁决恢复·轻量版）：只读展示共享 runtime store 的服务快照
+ *   （不发请求；启停操作在控制台）
  * - 文档下载进度（/knowledge + /catalogs + 并行 /knowledge/{id}：课程完成度两段饼图
  *   + 教程下载工作量饼图 + 汇总统计：教程数 / 目标书目 / 已下载 / 已验收）
+ * - 整体横幅由知识行请求 offline 类错误判定（8900 不可达），见 dashboard store
  * - 文档解析进度：8902 parse-jobs 数据源后置（离线占位）
- * - 布局：上下分列（下载在上、解析在下）；独立降级：8901 不可达 → 下载大盘离线提示
+ * - 布局：服务在线 → 下载在上、解析在下；独立降级：8901 不可达 → 下载大盘离线提示
  */
 export default function Dashboard() {
   const {
-    knowledge, details, catalogTargets, services, loading, error, dataError, catalogError, fetchAll,
+    knowledge, details, catalogTargets, loading, error, dataError, catalogError, fetchAll,
   } = useDashboardStore();
+  const services = useRuntimeStore((s) => s.services);
 
   useEffect(() => {
     void fetchAll();
@@ -92,28 +94,19 @@ export default function Dashboard() {
   const summary = useMemo(() => buildBookSummary(details), [details]);
   const completion = useMemo(() => buildCourseCompletion(catalogTargets, details), [catalogTargets, details]);
   const knowledgePie = useMemo(() => buildKnowledgeDownloadPie(details), [details]);
-
-  const healthItems = useMemo(() => {
-    const merged = services.some((s) => s.name === 'web') ? services : [...services, WEB_SERVICE];
-    return [...merged].sort((a, b) => a.port - b.port);
-  }, [services]);
+  /** web 兜底 + 端口排序（纯函数；数据来自共享 runtime store，零额外请求） */
+  const healthItems = useMemo(() => withWebServiceFallback(services), [services]);
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
-      <AppHeader
-        actions={
-          <Button
-            type="primary" ghost icon={<ReloadOutlined />} loading={loading}
-            style={{ color: '#ffffff', borderColor: '#ffffff' }} onClick={() => void fetchAll()}
-          >
-            刷新
-          </Button>
-        }
-      />
-      <Layout.Content style={{ padding: 32, maxWidth: 1280, width: '92%', margin: '0 auto' }}>
-        <Title level={2} style={{ marginTop: 0 }}>仪表盘</Title>
+    <Layout.Content style={{ padding: 32, maxWidth: 1280, width: '92%', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>仪表盘</Title>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchAll()}>
+          刷新
+        </Button>
+      </div>
 
-        {error && (
+      {error && (
           <Alert
             type="error" showIcon style={{ marginBottom: 16 }}
             message="仪表盘数据获取失败"
@@ -121,7 +114,12 @@ export default function Dashboard() {
           />
         )}
 
-        <Card size="small" title={<Space><CloudServerOutlined />服务在线</Space>} style={{ marginBottom: 16 }}>
+        <Card
+          size="small"
+          title={<Space><CloudServerOutlined />服务在线</Space>}
+          extra={<Text type="secondary">数据与控制台共享 · 启停操作请到控制台</Text>}
+          style={{ marginBottom: 16 }}
+        >
           <Row gutter={[16, 8]}>
             {healthItems.map((svc) => (
               <Col xs={12} md={6} key={svc.name}>
@@ -190,7 +188,6 @@ export default function Dashboard() {
             description="parse-jobs 端点随 backend-domain-split 后续轮接入；8902 离线时此处保持离线提示（不占位拉取）。"
           />
         </Card>
-      </Layout.Content>
-    </Layout>
+    </Layout.Content>
   );
 }

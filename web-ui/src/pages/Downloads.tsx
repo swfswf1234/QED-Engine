@@ -1,32 +1,24 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, App, Button, Form, Input, Layout, Modal, Select, Space, Switch, Tag, Typography,
+  Alert, App, Button, Form, Input, Layout, Modal, Select, Space, Switch, Tag, Tooltip, Typography,
 } from 'antd';
-import { ReloadOutlined, CloudServerOutlined, PlusOutlined, EyeOutlined } from '@ant-design/icons';
-import AppHeader from '../components/AppHeader';
+import { ReloadOutlined, CloudServerOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
 import DownloadsTree from '../components/DownloadsTree';
+import ExploreFlowModal from '../components/ExploreFlowModal';
 import { describeError } from '../api/client';
 import {
   confirmKnowledge, completeKnowledge, rejectKnowledge, supersedeKnowledge,
   createBook, decideBook, startBook, failBook, retryBook, verifyBook,
   rejectBook, supersedeBook, registerBook, listBookSources, addBookSource,
 } from '../api/tracker';
-import {
-  DOMAIN_NAME, DOMAIN_MAP, DOMAIN_ORDER, DOMAIN_OTHER, FLOW_OPTIONS, bookInFlow, sortBooks,
-  tutorialLabel, useDownloadsStore,
-} from '../stores/downloads';
-import type { BookRecord, KnowledgeDetail, KnowledgeRecord, SourceRecord } from '../stores';
+import { STAGE_OPTIONS, bookInStage, sortBooks, tutorialLabel, useDownloadsStore } from '../stores/downloads';
+import { useExploreUiStore } from '../stores/explore';
+import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord, SourceRecord } from '../stores';
 import '../downloads.css';
 
 const { Title, Text } = Typography;
 
-// --- 状态/角色中文映射（五层模型） ---
-
-const KNOWLEDGE_STATUS_OPTIONS = [
-  { value: 'draft', label: '探索中' },
-  { value: 'confirmed', label: '已定稿' },
-  { value: 'completed', label: '已完成' },
-];
+// --- 知识行状态/角色中文映射（五层模型；状态筛选已收敛为书行阶段，见 store STAGE_OPTIONS） ---
 
 const KNOWLEDGE_STATUS: Record<string, { label: string; color: string }> = {
   draft: { label: '探索中', color: 'default' },
@@ -75,8 +67,16 @@ function versionText(v: Record<string, unknown> | null | undefined): string {
   return [edition, year].filter(Boolean).join(' · ');
 }
 
-function domainOfCourse(courseId: string): string {
-  return DOMAIN_MAP[courseId] ?? DOMAIN_OTHER;
+/** 全部课程扁平视图（真实领域体系；FilterBar / 右面板名称回显共用） */
+function useCourseIndex(): { byId: Map<string, CourseRecord & { domainId: string; domainName: string }>; domains: DomainSystem[] } {
+  const domains = useDownloadsStore((s) => s.domains);
+  return useMemo(() => {
+    const byId = new Map<string, CourseRecord & { domainId: string; domainName: string }>();
+    for (const d of domains) {
+      for (const c of d.courses) byId.set(c.course_id, { ...c, domainId: d.domain_id, domainName: d.name });
+    }
+    return { byId, domains };
+  }, [domains]);
 }
 
 // --- 筛选栏 ---
@@ -84,26 +84,27 @@ function domainOfCourse(courseId: string): string {
 function FilterBar() {
   const filters = useDownloadsStore((s) => s.filters);
   const setFilter = useDownloadsStore((s) => s.setFilter);
-  const catalogTargets = useDownloadsStore((s) => s.catalogTargets);
   const knowledge = useDownloadsStore((s) => s.knowledge);
+  const { byId, domains } = useCourseIndex();
 
   const courseOptions = useMemo(() => {
-    const ids = new Set<string>();
-    for (const t of catalogTargets) ids.add(t.course_id);
+    const ids = new Set<string>(byId.keys());
     for (const k of knowledge) ids.add(k.course_id);
-    const nameOf = (cid: string) => catalogTargets.find((t) => t.course_id === cid)?.course_name ?? cid;
-    return [...ids].sort().map((cid) => ({ value: cid, label: nameOf(cid) }));
-  }, [catalogTargets, knowledge]);
+    return [...ids].sort().map((cid) => ({ value: cid, label: byId.get(cid)?.name ?? cid }));
+  }, [byId, knowledge]);
 
+  // 领域筛选项：真实体系领域优先，知识行残留域兜底（数据一致性边缘）
   const domainOptions = useMemo(() => {
-    const used = new Set<string>();
-    for (const t of catalogTargets) used.add(domainOfCourse(t.course_id));
-    for (const k of knowledge) used.add(domainOfCourse(k.course_id));
-    const options = [DOMAIN_NAME];
-    for (const d of DOMAIN_ORDER) if (used.has(d)) options.push(d);
-    if (used.has(DOMAIN_OTHER)) options.push(DOMAIN_OTHER);
-    return options.map((d) => ({ value: d, label: d }));
-  }, [catalogTargets, knowledge]);
+    const options = domains.map((d) => ({ value: d.domain_id, label: d.name }));
+    const known = new Set(domains.map((d) => d.domain_id));
+    for (const k of knowledge) {
+      if (!known.has(k.domain_id)) {
+        known.add(k.domain_id);
+        options.push({ value: k.domain_id, label: k.domain_id });
+      }
+    }
+    return options;
+  }, [domains, knowledge]);
 
   return (
     <Space size={8} wrap>
@@ -122,15 +123,9 @@ function FilterBar() {
       />
       <Select
         allowClear placeholder="状态" style={{ width: 120 }} aria-label="状态筛选"
-        value={filters.status || undefined}
-        options={KNOWLEDGE_STATUS_OPTIONS}
-        onChange={(v) => setFilter('status', v ?? '')}
-      />
-      <Select
-        allowClear placeholder="流程" style={{ width: 110 }} aria-label="流程筛选"
-        value={filters.flow || undefined}
-        options={[...FLOW_OPTIONS]}
-        onChange={(v) => setFilter('flow', v ?? '')}
+        value={filters.stage || undefined}
+        options={[...STAGE_OPTIONS]}
+        onChange={(v) => setFilter('stage', v ?? '')}
       />
     </Space>
   );
@@ -187,91 +182,43 @@ function KnowledgeConfirmModal({ knowledge, onCancel, onSubmit }: {
       open={knowledge !== null}
       onCancel={onCancel}
       destroyOnClose
-      onOk={() => form.validateFields().then(onSubmit)}
+      onOk={() =>
+        form.validateFields().then((v: { tb_title?: string; ex_title?: string; textbook_intro?: string; exercise_intro?: string }) => {
+          // 2026-08-24 用户裁决：版本字段取消；书名预填（后端 adopt 落库推荐值后自动带出，中文优先）
+          // 修复：此前表单平铺字段从未映射为嵌套 ref，决定引用实际未被提交过
+          const tb = v.tb_title?.trim() ? { title: v.tb_title.trim() } : undefined;
+          const ex = v.ex_title?.trim() ? { title: v.ex_title.trim() } : undefined;
+          onSubmit({
+            ...(tb ? { textbook_ref: tb } : {}),
+            ...(ex ? { exercise_ref: ex } : {}),
+            textbook_intro: v.textbook_intro ?? '',
+            exercise_intro: v.exercise_intro ?? '',
+          });
+        })
+      }
     >
       <Form
         form={form}
         layout="vertical"
         initialValues={{
-          tb_title: ref.title ?? '',
-          tb_version: ref.version ?? '',
-          ex_title: knowledge?.exercise_ref?.title ?? '',
-          ex_version: knowledge?.exercise_ref?.version ?? '',
+          tb_title: (ref.title as string) ?? '',
+          ex_title: (knowledge?.exercise_ref?.title as string) ?? '',
           textbook_intro: knowledge?.textbook_intro ?? '',
           exercise_intro: knowledge?.exercise_intro ?? '',
         }}
       >
-        <Text type="secondary">定稿后进入已定稿状态，可继续组织书行下载。</Text>
+        <Text type="secondary">定稿后进入已定稿状态，可继续组织书行下载。书名/简介默认取探索推荐（可修订）。</Text>
         <Form.Item name="tb_title" label="教材决定引用 · 书名" style={{ marginTop: 12 }}>
-          <Input placeholder="如：微积分学教程" />
-        </Form.Item>
-        <Form.Item name="tb_version" label="教材决定引用 · 版本">
-          <Input placeholder="如：第 8 版" />
+          <Input placeholder="如：数学分析（中文优先）" />
         </Form.Item>
         <Form.Item name="ex_title" label="习题集决定引用 · 书名">
-          <Input placeholder="如：数学分析习题集" />
-        </Form.Item>
-        <Form.Item name="ex_version" label="习题集决定引用 · 版本">
-          <Input placeholder="如：第 3 版" />
+          <Input placeholder="如：数学分析习题集（中文优先）" />
         </Form.Item>
         <Form.Item name="textbook_intro" label="教材简介">
           <Input.TextArea rows={2} placeholder="指引检索（LLM 预填 + 人工审）" />
         </Form.Item>
         <Form.Item name="exercise_intro" label="习题集简介">
           <Input.TextArea rows={2} />
-        </Form.Item>
-      </Form>
-    </Modal>
-  );
-}
-
-/** 新建书行弹窗（POST /books） */
-function CreateBookModal({ knowledge, onCancel, onSubmit }: {
-  knowledge: KnowledgeRecord | null;
-  onCancel: () => void;
-  onSubmit: (values: Record<string, unknown>) => void;
-}) {
-  const [form] = Form.useForm();
-  return (
-    <Modal
-      title={`新建书行：${knowledge ? tutorialLabel(knowledge) : ''}`}
-      open={knowledge !== null}
-      onCancel={onCancel}
-      destroyOnClose
-      onOk={() => form.validateFields().then(onSubmit)}
-    >
-      <Form form={form} layout="vertical" initialValues={{ kind: 'textbook', roles: ['textbook'] }}>
-        <Form.Item name="title" label="书名（必填）" rules={[{ required: true, message: '请填写书名' }]}>
-          <Input placeholder="如：微积分学教程" />
-        </Form.Item>
-        <Form.Item name="part" label="卷标识">
-          <Input placeholder="如：第一册 / 上册（单册留空）" />
-        </Form.Item>
-        <Form.Item name="kind" label="类型">
-          <Select
-            options={[
-              { value: 'textbook', label: '教材' },
-              { value: 'exercise', label: '习题集' },
-              { value: 'supplement', label: '配套资料' },
-              { value: 'paper', label: '论文' },
-              { value: 'blog', label: '博客' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="roles" label="角色">
-          <Select
-            mode="multiple" allowClear
-            options={[
-              { value: 'textbook', label: '教材' },
-              { value: 'exercise', label: '习题' },
-              { value: 'solutions', label: '题解' },
-              { value: 'reference', label: '参考' },
-              { value: 'supplement', label: '配套资料' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="authors" label="作者（逗号分隔）">
-          <Input placeholder="如：菲赫金哥尔茨" />
         </Form.Item>
       </Form>
     </Modal>
@@ -490,19 +437,35 @@ function KnowledgeSection({ knowledge, detail, run }: {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [knReasonOpen, setKnReasonOpen] = useState(false);
   const [knReasonAction, setKnReasonAction] = useState<'reject' | 'supersede'>('reject');
-  const [createOpen, setCreateOpen] = useState(false);
   const [registerTarget, setRegisterTarget] = useState<BookRecord | null>(null);
   const [detailBook, setDetailBook] = useState<BookRecord | null>(null);
   const [bookReason, setBookReason] = useState<{ action: 'reject' | 'supersede'; book: BookRecord } | null>(null);
 
+  /** 按决定引用生成候选书行（教材 kind=textbook / 习题集 kind=exercise）；返回生成数 */
+  const genBooksFromRefs = async (): Promise<number> => {
+    const tbTitle = String(knowledge.textbook_ref?.title ?? '').trim();
+    const exTitle = String(knowledge.exercise_ref?.title ?? '').trim();
+    let n = 0;
+    if (tbTitle) {
+      await createBook({ knowledge_id: knowledge.knowledge_id, title: tbTitle, kind: 'textbook', roles: ['textbook'], part: '', authors: [] });
+      n += 1;
+    }
+    if (exTitle) {
+      await createBook({ knowledge_id: knowledge.knowledge_id, title: exTitle, kind: 'exercise', roles: ['exercise'], part: '', authors: [] });
+      n += 1;
+    }
+    return n;
+  };
+
   const books = sortBooks(detail?.books ?? []);
-  const flow = useDownloadsStore((s) => s.filters.flow);
-  const shownBooks = flow ? books.filter((b) => bookInFlow(b, flow)) : books;
+  const stage = useDownloadsStore((s) => s.filters.stage);
+  const shownBooks = stage ? books.filter((b) => bookInStage(b, stage)) : books;
   const st = KNOWLEDGE_STATUS[knowledge.status] ?? { label: knowledge.status, color: 'default' };
   const intro = knowledge.kind === 'other_material'
     ? knowledge.materials_intro
     : [knowledge.textbook_intro && `教材：${knowledge.textbook_intro}`, knowledge.exercise_intro && `习题集：${knowledge.exercise_intro}`]
       .filter(Boolean).join('\n');
+  const refEmpty = !String(knowledge.textbook_ref?.title ?? '').trim() && !String(knowledge.exercise_ref?.title ?? '').trim();
 
   return (
     <div className="dl-knowledge-section">
@@ -532,12 +495,15 @@ function KnowledgeSection({ knowledge, detail, run }: {
         {knowledge.status === 'completed' && (
           <Button size="small" onClick={() => { setKnReasonAction('supersede'); setKnReasonOpen(true); }}>过时</Button>
         )}
-        <Button
-          size="small" icon={<PlusOutlined />} style={{ marginLeft: 4 }}
-          onClick={() => setCreateOpen(true)}
-        >
-          新建书行
-        </Button>
+        {/* 兜底（2026-08-25）：确认时自动生成失败或旧数据引用后补——非表单，一键按决定引用创建 */}
+        {knowledge.status === 'confirmed' && shownBooks.length === 0 && !refEmpty && (
+          <Button
+            size="small" type="primary" ghost style={{ marginLeft: 4 }}
+            onClick={() => run(genBooksFromRefs().then((n) => n), `已按决定引用生成书行候选`, knowledge.knowledge_id)}
+          >
+            按决定引用补建书行
+          </Button>
+        )}
       </div>
 
       {intro && <div className="dl-knowledge-intro">{intro}</div>}
@@ -546,8 +512,11 @@ function KnowledgeSection({ knowledge, detail, run }: {
         <div className="dl-books-empty">书行详情加载失败（该知识行数据不可达）</div>
       ) : shownBooks.length === 0 ? (
         <div className="dl-books-empty">
-          暂无书行，点「新建书行」登记候选册（先登记再下载）。
-          {knowledge.status === 'draft' && ' 也可先「确认」定稿知识行。'}
+          {knowledge.status === 'draft'
+            ? '暂无书行。确认知识行后将按决定引用自动生成候选册。'
+            : refEmpty
+              ? '暂无书行（该知识行无决定引用，无法自动生成）。'
+              : '暂无书行。点上方「按决定引用补建书行」登记候选册。'}
         </div>
       ) : (
         <div className="dl-books-row">
@@ -584,7 +553,12 @@ function KnowledgeSection({ knowledge, detail, run }: {
           if (values.exercise_ref) body.exercise_ref = values.exercise_ref;
           if (values.textbook_intro) body.textbook_intro = values.textbook_intro;
           if (values.exercise_intro) body.exercise_intro = values.exercise_intro;
-          run(confirmKnowledge(knowledge.knowledge_id, body), '知识行已确认（定稿）', knowledge.knowledge_id);
+          // 确认即自动生成（2026-08-25 用户裁决）：定稿成功后按决定引用建候选册
+          run(
+            confirmKnowledge(knowledge.knowledge_id, body).then(() => genBooksFromRefs()),
+            '知识行已确认，书行候选已按决定引用生成',
+            knowledge.knowledge_id,
+          );
           setConfirmOpen(false);
         }}
       />
@@ -604,30 +578,6 @@ function KnowledgeSection({ knowledge, detail, run }: {
             knowledge.knowledge_id,
           );
           setKnReasonOpen(false);
-        }}
-      />
-
-      {/* 新建书行 */}
-      <CreateBookModal
-        knowledge={createOpen ? knowledge : null}
-        onCancel={() => setCreateOpen(false)}
-        onSubmit={(values) => {
-          const authors = typeof values.authors === 'string'
-            ? (values.authors as string).split(/[,，]/).map((s: string) => s.trim()).filter(Boolean)
-            : (values.authors as string[] | undefined) ?? [];
-          run(
-            createBook({
-              knowledge_id: knowledge.knowledge_id,
-              title: String(values.title),
-              kind: String(values.kind ?? 'textbook'),
-              roles: (values.roles as string[] | undefined) ?? [],
-              part: String(values.part ?? ''),
-              authors,
-            }),
-            '书行候选已登记',
-            knowledge.knowledge_id,
-          );
-          setCreateOpen(false);
         }}
       />
 
@@ -682,14 +632,65 @@ function bookActionPromise(action: 'decide' | 'start' | 'fail' | 'retry' | 'veri
 
 // --- 页面 ---
 
-/** 右侧面板（4b 卡片区 + 4c/4d 操作闭环） */
+/**
+ * 领域信息卡（2026-08-24 REQ-059）：选中领域时展示在内容区顶部
+ * - 领域名/描述/阶段/课程数 + 探索按钮状态机：
+ *   idle 可点「探索」/ running 置灰「探索进行中」/ ready「查看探索结果」可点 / applied 终态置灰
+ */
+function DomainInfoCard({ domain }: { domain: DomainSystem }) {
+  const runStatus = useExploreUiStore((s) => s.domainRunStatus[domain.domain_id]);
+  const openFlow = useExploreUiStore((s) => s.openFlow);
+  return (
+    <div className="dl-domain-card" data-testid="domain-info-card">
+      <div className="dl-domain-head">
+        <span className="dl-domain-name">{domain.name}</span>
+        <Tag>{domain.courses.length} 门课程</Tag>
+        {(domain.stages ?? []).map((s) => <Tag key={s} color="blue">{s}</Tag>)}
+        <span style={{ marginLeft: 'auto' }}>
+          {runStatus === 'running' ? (
+            <Button size="small" disabled icon={<SearchOutlined />}>探索进行中…</Button>
+          ) : runStatus === 'ready' ? (
+            <Button
+              size="small" type="primary" ghost icon={<SearchOutlined />}
+              onClick={() => openFlow({ variant: 'curriculum', domainId: domain.domain_id, domainName: domain.name })}
+            >
+              查看探索结果
+            </Button>
+          ) : runStatus === 'applied' ? (
+            <Tooltip title="本次探索结果已应用；可再次发起重探">
+              <Button size="small" disabled icon={<SearchOutlined />}>已应用</Button>
+            </Tooltip>
+          ) : (
+            <Button
+              size="small" type="primary" ghost icon={<SearchOutlined />}
+              onClick={() => openFlow({ variant: 'curriculum', domainId: domain.domain_id, domainName: domain.name })}
+            >
+              {domain.courses.length === 0 ? '探索课程体系（初始）' : '探索课程体系（重探）'}
+            </Button>
+          )}
+        </span>
+      </div>
+      {domain.description && <div className="dl-domain-desc">{domain.description}</div>}
+    </div>
+  );
+}
+
+/** 右侧面板（4b 卡片区 + 4c/4d 操作闭环 + 领域探索按钮状态机） */
 function RightPanel() {
   const filters = useDownloadsStore((s) => s.filters);
   const selected = useDownloadsStore((s) => s.selected);
   const knowledge = useDownloadsStore((s) => s.knowledge);
   const details = useDownloadsStore((s) => s.details);
   const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
+  const { byId } = useCourseIndex();
   const { message } = App.useApp();
+
+  // 选中领域（信息卡数据源）；课程层探索入口已收敛到左树右键菜单
+  const domains = useDownloadsStore((s) => s.domains);
+  const selectedDomain = useMemo(() => {
+    if (selected?.kind !== 'domain') return null;
+    return domains.find((d) => d.domain_id === selected.id) ?? null;
+  }, [selected, domains]);
 
   const run = useCallback(async (p: Promise<unknown>, successText: string, knowledgeId: string) => {
     try {
@@ -704,14 +705,13 @@ function RightPanel() {
   const filtered = useMemo(
     () =>
       knowledge.filter((k) => {
-        // 领域=高等数学 → 不过滤（分类筛选才过滤）
-        if (filters.domain && filters.domain !== DOMAIN_NAME && domainOfCourse(k.course_id) !== filters.domain) return false;
+        // 领域筛选存 domain_id（v2 真实体系）
+        if (filters.domain && k.domain_id !== filters.domain) return false;
         if (filters.course && k.course_id !== filters.course) return false;
-        if (filters.status && k.status !== filters.status) return false;
-        // 流程筛选为书行级：无匹配书行的教程行整行隐藏
-        if (filters.flow) {
+        // 状态筛选为书行阶段（2026-08-24 三栏收敛）：无匹配书行的教程行整行隐藏
+        if (filters.stage) {
           const books = details[k.knowledge_id]?.books ?? [];
-          if (!books.some((b) => bookInFlow(b, filters.flow))) return false;
+          if (!books.some((b) => bookInStage(b, filters.stage))) return false;
         }
         return true;
       }),
@@ -720,16 +720,21 @@ function RightPanel() {
 
   const selectedLabel =
     selected?.kind === 'domain'
-      ? `领域：${selected.id}`
+      ? `领域：${domains.find((d) => d.domain_id === selected.id)?.name ?? selected.id}`
       : selected?.kind === 'course'
-        ? `课程：${selected.id}`
+        ? `课程：${byId.get(selected.id)?.name ?? selected.id}`
         : selected?.kind === 'tutorial'
-          ? `教程：${selected.key}`
+          ? `教程：${knowledge.find((k) => selected.key.endsWith(`kn:${k.knowledge_id}`))?.name ?? selected.key}`
           : '未选中';
+
+  // 课程头（2026-08-25 #3）：选中课程时置顶展示一次——课程名一行 + 课程介绍（note）一行
+  const selectedCourse = selected?.kind === 'course' ? byId.get(selected.id) ?? null : null;
 
   return (
     <div className="dl-right">
-      <div className="dl-filter-bar"><FilterBar /></div>
+      <div className="dl-filter-bar">
+        <FilterBar />
+      </div>
       <div className="dl-summary">
         <Space direction="vertical" size={4}>
           <Text strong>当前选择：{selectedLabel}</Text>
@@ -737,6 +742,13 @@ function RightPanel() {
         </Space>
       </div>
       <div className="dl-content">
+        {selectedDomain && <DomainInfoCard domain={selectedDomain} />}
+        {selectedCourse && filtered.length > 0 && (
+          <div className="dl-course-head">
+            <div className="dl-course-head-name">{selectedCourse.name}</div>
+            {selectedCourse.note && <div className="dl-course-head-note">{selectedCourse.note}</div>}
+          </div>
+        )}
         {filtered.length === 0 ? (
           <div className="dl-placeholder">
             <CloudServerOutlined style={{ fontSize: 40, color: '#bbb' }} />
@@ -753,41 +765,37 @@ function RightPanel() {
 }
 
 /**
- * 下载管理（`#/admin/downloads`，Phase 4a + 五层化 4b/4c/4d）
- * - 左树（领域→课程→教程[知识行]）+ 右侧筛选栏 + 知识行区（书行卡片横排）
- * - 4b 卡片区：教程行横排书行卡片；4c 详情弹窗（书行信息 + 渠道列表 + 添加渠道）；
- *   4d 操作闭环：知识行 confirm/complete/reject/supersede + 书行全生命周期 + 新建书行
- * - 独立降级：8900 不可达 → 整体横幅；catalog / knowledge 各自失败 → 树区/汇总提示
+ * 文档下载管理（`#/admin/downloads`，五层模型 + 2026-08-24 REQ-059 交互改版）
+ * - 左树 v2（领域→课程→教程，真实体系；右键菜单管理/探索）+ 右侧筛选栏
+ *   + 知识行区（书行卡片横排）+ 领域信息卡（探索按钮状态机）
+ * - 探索全弹窗流：ExploreFlowModal 挂载于页内（发起→轮询→结果→应用/采纳）
+ * - 独立降级：8900 不可达 → 整体横幅；课程体系 / knowledge 各自失败 → 树区/汇总提示
  */
 export default function Downloads() {
   const loading = useDownloadsStore((s) => s.loading);
   const error = useDownloadsStore((s) => s.error);
   const knowledgeError = useDownloadsStore((s) => s.knowledgeError);
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  const flowTarget = useExploreUiStore((s) => s.flowTarget);
+  const closeFlow = useExploreUiStore((s) => s.closeFlow);
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
-      <AppHeader
-        actions={
-          <Button
-            type="primary" ghost icon={<ReloadOutlined />} loading={loading}
-            style={{ color: '#ffffff', borderColor: '#ffffff' }} onClick={() => void fetchAll()}
-          >
-            刷新
-          </Button>
-        }
-      />
-      <Layout.Content style={{ padding: 32, maxWidth: 1500, width: '94%', margin: '0 auto' }}>
-        <Title level={2} style={{ marginTop: 0 }}>文档下载管理</Title>
+    <Layout.Content style={{ padding: 32, maxWidth: 1500, width: '94%', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>文档下载管理</Title>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchAll()}>
+          刷新
+        </Button>
+      </div>
 
-        {error && (
+      {error && (
           <Alert
             type="error" showIcon style={{ marginBottom: 16 }}
-            message="下载管理数据获取失败"
+            message="文档下载管理数据获取失败"
             description={`${error}。请确认 8900 管理服务已启动后点「刷新」。`}
           />
         )}
@@ -803,7 +811,9 @@ export default function Downloads() {
           <DownloadsTree />
           <RightPanel />
         </div>
-      </Layout.Content>
-    </Layout>
+
+        {/* 探索全弹窗流（左树右键 / 领域信息卡按钮共用入口） */}
+        <ExploreFlowModal target={flowTarget} onClose={closeFlow} />
+    </Layout.Content>
   );
 }

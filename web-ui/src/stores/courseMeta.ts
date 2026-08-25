@@ -3,13 +3,13 @@
  * - 数据源：QED-Tracker catalog math-qe（课程名）+ courses/math.json（stage/prerequisites，冻结内置文件）
  * - 过渡期前端内置常量（对齐 ARCH-004 D2 前端映射契约模式）；元数据入 DB 后经 8900
  *   GET /api/v1/courses 响应切换（接口契约见 stores/knowledge.ts listCourses）
- * - 2026-08-18（ARCH-015）：领域收敛为唯一「高等数学」，分析/代数/概率为分类（下载管理
+ * - 2026-08-18（ARCH-015）：领域收敛为唯一「高等数学」，分析/代数/概率为分类（文档下载管理
  *   左树仅展示分组；学习中心仍用独立 KNOWLEDGE_DOMAINS，互不影响）
  */
 
 // --- 领域与分类（course_id → 分类名；ARCH-015 用户裁决） ---
 
-/** 唯一领域名（下载管理左树根） */
+/** 唯一领域名（文档下载管理左树根） */
 export const DOMAIN_NAME = '高等数学';
 
 export const DOMAIN_MAP: Record<string, string> = {
