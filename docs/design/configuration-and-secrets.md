@@ -2,29 +2,38 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-23
+最后更新：2026-08-26
 关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](../architecture/api-contracts.md)）
 关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
 
 ## 目的与边界
 
-本标准规定三个项目的 API key、模型选择、模型模式与服务端口如何配置。**2026-08-20 起密钥
-按项目分置**：三项目各自内置 `.env`、各负责自身配置，统一使用 `QED_API_SELECT`（模式选择）
-+ `API_KEY`（唯一密钥）+ `QED_API_PROVIDER`（厂商选择）三个核心变量；QED-Tracker 与
-Axiom-Flow 参照执行。原「根 `.env` 是密钥唯一事实源、子项目直读根 `.env` 的 `QED_*` 变量」
-规则被本方案取代（`scripts/load-env.ps1` 过渡映射层已于 2026-08-17 退役删除）。
+本标准规定三个项目的 API key、模型选择、模型模式与服务端口如何配置。**2026-08-26 起
+回归「根 `.env` 唯一事实源」**（用户裁决，修订 2026-08-20「密钥按项目分置」方向）：
+统一使用 `QED_API_SELECT`（模式选择）+ `API_KEY`（唯一密钥）+ `QED_API_PROVIDER`
+（厂商选择）三个核心变量，公共变量只在仓库根 `.env` 维护一份。
+
+修订动机（实测教训）：① QED-Engine 后端原 `env_file=".env"` 相对 CWD 解析——脚本启动
+（cwd=仓库根）读根 .env、手动 `cd backend` 启动读 backend/.env（不存在），同一服务两种
+启动方式读到不同配置，密钥空/数据库不可达；② 三个 .env 并存导致 API_KEY/QED_DB_* 等
+公共键三处手工同步，漂移风险已现实存在。
+
+现状与分工：QED-Engine 后端 env_file 绝对定位仓库根（任何 CWD 一致）；子项目解析器
+本就「CWD 起向上走查父目录 .env 兜底」，天然兼容根 .env——各自 `.env` 中与根重复的
+公共键经请求精简删除（QED-Tracker 见任务台账请求条目；Axiom-Flow 并入 REQ-003），
+仅保留真正私有键。`scripts/load-env.ps1` 过渡映射层已于 2026-08-17 退役删除。
 
 模型网关、本地模型生命周期与资源互斥见 [llm-gateway-and-model-management.md](llm-gateway-and-model-management.md)
 （Accepted，2026-08-20）；本文件只定义跨项目变量与映射。
 
 ## 变量总表
 
-### 供应商 API Key（三项目各自 `.env` 分置，统一变量）
+### 供应商 API Key（根 `.env` 统一维护，统一变量）
 
 | 变量 | 用途 | 说明 |
 | --- | --- | --- |
-| `API_KEY` | 唯一供应商密钥 | **唯一密钥变量**（逐厂商 key 已取消，无别名回退）；由 `QED_API_PROVIDER` 选择厂商；三项目各自 `.env` 各持一份，local 模式直连供应商用 |
+| `API_KEY` | 唯一供应商密钥 | **唯一密钥变量**（逐厂商 key 已取消，无别名回退）；由 `QED_API_PROVIDER` 选择厂商；根 `.env` 维护一份（2026-08-26 起子项目公共键经向上查找兜底，不再重复持有），local 模式直连供应商用 |
 | `QED_API_PROVIDER` | 厂商选择（api 模式） | 取值 `qwen`（默认，当前唯一启用）/ `deepseek` / `glm`（注册表预留，启用时验证真实可用性）；**仅影响 api 模式**；厂商地址表见 [llm-gateway-and-model-management.md](llm-gateway-and-model-management.md) |
 | `AXIOM_API_KEY` | Axiom-Flow 旧变量（别名） | Axiom-Flow 侧保留兼容，由其执行侧按自身门禁决定退役 |
 | `DASHSCOPE_API_KEY` | QED-Tracker 旧变量（别名） | QED-Tracker 侧保留兼容，由其执行侧按自身门禁决定退役 |
@@ -35,6 +44,7 @@ Axiom-Flow 参照执行。原「根 `.env` 是密钥唯一事实源、子项目�
 | --- | --- | --- | --- |
 | `QED_API_SELECT` | 模型模式 | `api` | `api`（默认，API key 调用）/ `local`（本地模型）/ `qed-engine`（仅子项目，经 8900 网关） |
 | `QED_LLM_GATEWAY_URL` | 网关地址 | `http://127.0.0.1:8900` | 子项目 `qed-engine` 模式读取；api/local 模式忽略 |
+| `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉上游透传（REQ-061：原 60s 硬编码导致长生成 ReadTimeout）；按需调大 |
 | `QED_LMSTUDIO_URL` | 本地文字模型地址 | `http://127.0.0.1:5001/v1` | local 模式文字模型（LM Studio，OpenAI 兼容）；默认值由 1234 调整为 5001（本机实际端口） |
 | `QED_MINERU_URL` | 本地图像模型地址 | `http://127.0.0.1:8002` | local 模式图像模型（MinerU 容器） |
 | `QED_RESOURCE_GUARD` | 资源互斥开关 | `true` | 启动一方本地模型前先停另一方（4080 16GB 显存约束）；`false` 时跳过 |

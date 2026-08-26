@@ -1,23 +1,35 @@
-"""统一配置：读取根 .env，集中管理 API_KEY 与厂商/模型选择。
+"""统一配置：读取仓库根 `.env`（绝对定位），集中管理 API_KEY 与厂商/模型选择。
 
 设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_config.py
+
+2026-08-26（root-env-single-source）：env_file 由相对路径改为绝对定位仓库根——
+原 `env_file=".env"` 相对 CWD 解析，导致同一服务两种启动方式读到不同配置
+（脚本启动 cwd=根 → 根 .env；手动 cd backend 启动 → backend/.env 不存在 → 密钥空）。
+现任何 CWD 一致读 `<repo-root>/.env`；部署脱离仓库结构时文件缺失按「未配置」降级，
+符合独立性铁律。
 """
+
+from pathlib import Path
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 仓库根 .env 唯一事实源（backend/qed_engine/config.py → parents[2] = 仓库根；
+# 与子项目服务脚本的 __file__ 绝对定位先例一致）
+ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
-    """读取根 .env 的统一配置。空 key 视为未配置，服务保持可用。
+    """读取仓库根 .env 的统一配置。空 key 视为未配置，服务保持可用。
 
     2026-08-20（provider-registry）：API_KEY 为唯一密钥变量 + QED_API_PROVIDER 选择厂商；
     逐厂商 key（QWEN_API_KEY 等）已正式取消。
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ROOT_ENV),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -41,6 +53,8 @@ class Settings(BaseSettings):
     qed_resource_guard: bool = True
     # LLM 网关地址（子项目 qed-engine 模式读取；api/local 模式忽略）
     qed_llm_gateway_url: str = "http://127.0.0.1:8900"
+    # LLM 上游调用超时秒数（QED_LLM_TIMEOUT 可覆盖；REQ-061：原 60s 硬编码导致长生成 ReadTimeout）
+    qed_llm_timeout: float = 300.0
     # 模型选择（空=未配置，实际生效值由厂商注册表兜底；embedding 保持推荐值，RAG 轮再解析）
     qed_model: str = ""
     qed_ocr_model: str = ""

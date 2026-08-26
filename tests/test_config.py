@@ -165,6 +165,32 @@ def test_api_select_default_and_override(monkeypatch):
     assert settings.qed_api_select == "local"
 
 
+def test_env_file_binds_to_repo_root_absolute_path():
+    """根 .env 绝对定位（2026-08-26 root-env-single-source）：任何 CWD 启动读同一份配置。
+
+    回归背景：原 env_file=".env" 相对 CWD——手动 cd backend 启动时读 backend/.env
+    （不存在）导致密钥空、DB 不可达；现必须绑定 <repo-root>/.env。
+    """
+    from pathlib import Path
+
+    from qed_engine import config as config_module
+
+    bound = Path(Settings.model_config["env_file"])
+    assert bound.is_absolute(), f"env_file 必须为绝对路径，实际 {bound}"
+    assert bound == config_module.ROOT_ENV
+    assert (bound.parent / "pyproject.toml").is_file(), "env_file 应位于仓库根"
+
+
+def test_llm_timeout_default_and_override(monkeypatch):
+    """LLM 网关上游调用超时：默认 300s，QED_LLM_TIMEOUT 可覆盖（REQ-061：60s 硬编码导致长生成 ReadTimeout）。"""
+    monkeypatch.delenv("QED_LLM_TIMEOUT", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.qed_llm_timeout == 300.0
+    monkeypatch.setenv("QED_LLM_TIMEOUT", "120")
+    settings = Settings(_env_file=None)
+    assert settings.qed_llm_timeout == 120.0
+
+
 def test_local_model_vars(monkeypatch):
     """本地模型变量：QED_LMSTUDIO_URL 默认 5001/v1、QED_MINERU_URL、QED_RESOURCE_GUARD、
     QED_LLM_GATEWAY_URL 默认 8900。"""

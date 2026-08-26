@@ -62,7 +62,8 @@ def test_config_hides_secret_values_never_printed(monkeypatch, capsys):
 def test_footer_reminder_when_no_keys_configured(monkeypatch, tmp_path, capsys):
     """API_KEY 缺失（含 .env 缺失场景）：输出最小配置尾注提醒。"""
     _clear_env(monkeypatch)
-    monkeypatch.chdir(tmp_path)  # 无 .env 的干净目录，Settings 按内置默认降级
+    # 2026-08-26 根 .env 绝对定位：chdir 不再隔离配置，改为把 env_file 指向不存在路径
+    monkeypatch.setitem(Settings.model_config, "env_file", str(tmp_path / "nonexistent.env"))
     main(["config"])
     output = capsys.readouterr().out
     assert "API_KEY" in output
@@ -71,7 +72,7 @@ def test_footer_reminder_when_no_keys_configured(monkeypatch, tmp_path, capsys):
 def test_no_footer_reminder_when_configured(monkeypatch, tmp_path, capsys):
     """API_KEY 已配置：不输出最小配置尾注。"""
     _clear_env(monkeypatch)
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", str(tmp_path / "nonexistent.env"))
     monkeypatch.setenv("API_KEY", "sk-qwen-test")
     main(["config"])
     output = capsys.readouterr().out
