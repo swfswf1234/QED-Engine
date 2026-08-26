@@ -99,6 +99,70 @@ def test_mineru_parse_polls_result():
     assert "标题" in reply
 
 
+# ---------- max_tokens 透传（REQ-061：payload 非 None 时必须含 max_tokens） ----------
+
+
+def test_provider_text_chat_sends_max_tokens():
+    """多厂商文字：max_tokens 非 None 时写入请求体。"""
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(handler) as client:
+        clients.provider_text_chat(
+            api_key="sk", model="m", messages=[{"role": "user", "content": "hi"}],
+            client=client, max_tokens=1024,
+        )
+    assert '"max_tokens":1024' in bodies[0].replace(" ", "").replace("\n", "")
+
+
+def test_provider_text_chat_omits_max_tokens_when_none():
+    """多厂商文字：max_tokens 为 None 时请求体不含该键（不发送 null）。"""
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(handler) as client:
+        clients.provider_text_chat(api_key="sk", model="m", messages=[], client=client)
+    assert "max_tokens" not in bodies[0]
+
+
+def test_lmstudio_chat_sends_max_tokens():
+    """LM Studio：max_tokens 非 None 时写入请求体（显式指定 model 免探测）。"""
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(handler) as client:
+        clients.lmstudio_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[{"role": "user", "content": "hi"}],
+            model="qwen3-8b", client=client, max_tokens=512,
+        )
+    assert '"max_tokens":512' in bodies[0].replace(" ", "").replace("\n", "")
+
+
+def test_provider_vision_chat_sends_max_tokens():
+    """多厂商视觉：max_tokens 非 None 时写入请求体。"""
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(handler) as client:
+        clients.provider_vision_chat(
+            api_key="sk", model="qwen-vl-plus", image_base64="aGVsbG8=", prompt="识别",
+            client=client, max_tokens=256,
+        )
+    assert '"max_tokens":256' in bodies[0].replace(" ", "").replace("\n", "")
+
+
 # ---------- 厂商注册表解析（resolve_text / resolve_vision） ----------
 
 

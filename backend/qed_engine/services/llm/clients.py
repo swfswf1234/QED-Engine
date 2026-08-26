@@ -12,6 +12,8 @@ import time
 
 import httpx
 
+# 客户端级兜底超时（仅直接调用 client 函数时生效）；网关一律透传 Settings.qed_llm_timeout
+# （env QED_LLM_TIMEOUT，默认 300s——REQ-061：60s 对长生成不够）。
 DEFAULT_TIMEOUT = 60.0
 
 # 厂商注册表：api 模式路由的唯一事实源（地址/默认模型；deepseek/glm 为预留）。
@@ -81,16 +83,23 @@ def provider_text_chat(
     client: httpx.Client | None = None,
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
     timeout: float = DEFAULT_TIMEOUT,
+    max_tokens: int | None = None,
 ) -> str:
-    """多厂商文字对话（OpenAI 兼容 chat/completions），base_url 由注册表解析后传入。"""
+    """多厂商文字对话（OpenAI 兼容 chat/completions），base_url 由注册表解析后传入。
+
+    max_tokens 非 None 时写入请求体（REQ-061：网关透传，不再静默丢弃）。
+    """
     own = client is None
     http = client or httpx.Client(timeout=timeout)
     try:
+        payload: dict = {"model": model, "messages": messages}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         data = _post_json(
             http,
             f"{base_url.rstrip('/')}/chat/completions",
             {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            {"model": model, "messages": messages},
+            payload,
         )
         return _extract_content(data)
     finally:
@@ -104,8 +113,12 @@ def lmstudio_chat(
     client: httpx.Client | None = None,
     model: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
+    max_tokens: int | None = None,
 ) -> str:
-    """LM Studio 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。"""
+    """LM Studio 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。
+
+    max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
+    """
     own = client is None
     http = client or httpx.Client(timeout=timeout)
     try:
@@ -117,11 +130,14 @@ def lmstudio_chat(
             if not models:
                 raise RuntimeError("LM Studio 未加载任何模型（请先在 LM Studio 加载 qwen 模型）")
             model = models[0]
+        payload: dict = {"model": model, "messages": messages}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         data = _post_json(
             http,
             f"{base_url.rstrip('/')}/chat/completions",
             {"Content-Type": "application/json"},
-            {"model": model, "messages": messages},
+            payload,
         )
         return _extract_content(data)
     finally:
@@ -137,25 +153,32 @@ def provider_vision_chat(
     client: httpx.Client | None = None,
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
     timeout: float = DEFAULT_TIMEOUT,
+    max_tokens: int | None = None,
 ) -> str:
-    """多厂商视觉（OCR）：图片 base64 以 data URI 形式随对话发送，base_url 由注册表解析后传入。"""
+    """多厂商视觉（OCR）：图片 base64 以 data URI 形式随对话发送，base_url 由注册表解析后传入。
+
+    max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
+    """
     own = client is None
     http = client or httpx.Client(timeout=timeout)
     try:
+        payload: dict = {
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         data = _post_json(
             http,
             f"{base_url.rstrip('/')}/chat/completions",
             {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            {
-                "model": model,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
-            },
+            payload,
         )
         return _extract_content(data)
     finally:

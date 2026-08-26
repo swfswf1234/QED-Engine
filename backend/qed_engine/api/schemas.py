@@ -91,6 +91,7 @@ class LlmVisionRequest(BaseModel):
     pdf_filename: str = "input.pdf"
     prompt: str = "识别并输出图片内容"
     prompt_template: str | None = None
+    max_tokens: int | None = None
 
 
 class LlmCallResponse(BaseModel):

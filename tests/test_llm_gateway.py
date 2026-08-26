@@ -203,3 +203,92 @@ def test_call_vision_local_requires_pdf(monkeypatch):
     assert "PDF" in result["error"]
     assert captured["record"]["status"] == "error"
     assert captured["record"]["provider"] == "gateway"
+
+
+# ---------- 超时与 max_tokens 透传（REQ-061：网关必须向上游透传，不得静默丢弃） ----------
+
+
+def test_call_text_api_passes_timeout_and_max_tokens(monkeypatch):
+    """api 模式：timeout 取 QED_LLM_TIMEOUT 配置、max_tokens 透传 provider_text_chat。"""
+    captured = {}
+
+    def fake_chat(api_key, model, messages, base_url=None, timeout=None, max_tokens=None):
+        captured["timeout"] = timeout
+        captured["max_tokens"] = max_tokens
+        return "ok"
+
+    def fake_record(settings, **kwargs):
+        return 1
+
+    monkeypatch.setattr(gateway.clients, "provider_text_chat", fake_chat)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    settings = _settings(qed_api_select="api", api_key="sk-x", qed_llm_timeout=120.0)
+    result = gateway.call_text(settings, prompt="hi", max_tokens=2048)
+    assert result["success"] is True
+    assert captured["timeout"] == 120.0
+    assert captured["max_tokens"] == 2048
+
+
+def test_call_text_local_passes_timeout_and_max_tokens(monkeypatch):
+    """local 模式：timeout/max_tokens 同样透传 lmstudio_chat（不因本地模式丢失）。"""
+    captured = {}
+
+    def fake_lmstudio(base_url, messages, timeout=None, max_tokens=None, **kw):
+        captured["timeout"] = timeout
+        captured["max_tokens"] = max_tokens
+        return "ok"
+
+    def fake_ensure(settings, script_runner=None, log=None):
+        pass
+
+    def fake_record(settings, **kwargs):
+        return 1
+
+    monkeypatch.setattr(gateway.model_manager, "ensure_text_ready", fake_ensure)
+    monkeypatch.setattr(gateway.clients, "lmstudio_chat", fake_lmstudio)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    settings = _settings(qed_api_select="local", qed_llm_timeout=90.0)
+    result = gateway.call_text(settings, prompt="hi", max_tokens=512)
+    assert result["success"] is True
+    assert captured["timeout"] == 90.0
+    assert captured["max_tokens"] == 512
+
+
+def test_call_text_default_timeout_from_settings(monkeypatch):
+    """未显式配置时：timeout 使用 Settings 默认值（300s）。"""
+    captured = {}
+
+    def fake_chat(api_key, model, messages, base_url=None, timeout=None, max_tokens=None):
+        captured["timeout"] = timeout
+        return "ok"
+
+    def fake_record(settings, **kwargs):
+        return 1
+
+    monkeypatch.delenv("QED_LLM_TIMEOUT", raising=False)
+    monkeypatch.setattr(gateway.clients, "provider_text_chat", fake_chat)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    result = gateway.call_text(_settings(qed_api_select="api", api_key="sk-x"), prompt="hi")
+    assert result["success"] is True
+    assert captured["timeout"] == 300.0
+
+
+def test_call_vision_passes_timeout_and_max_tokens(monkeypatch):
+    """api 模式视觉：timeout/max_tokens 透传 provider_vision_chat（REQ-061 一并纳入）。"""
+    captured = {}
+
+    def fake_vision(api_key, model, image_base64, prompt, base_url=None, timeout=None, max_tokens=None):
+        captured["timeout"] = timeout
+        captured["max_tokens"] = max_tokens
+        return "ok"
+
+    def fake_record(settings, **kwargs):
+        return 1
+
+    monkeypatch.setattr(gateway.clients, "provider_vision_chat", fake_vision)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    settings = _settings(qed_api_select="api", api_key="sk-x", qed_llm_timeout=150.0)
+    result = gateway.call_vision(settings, image_base64="aGVsbG8=", max_tokens=256)
+    assert result["success"] is True
+    assert captured["timeout"] == 150.0
+    assert captured["max_tokens"] == 256

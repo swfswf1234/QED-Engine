@@ -323,8 +323,8 @@ local 走本地模型（文字 LM Studio / 图像 MinerU，经 `QED_RESOURCE_GUA
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 路由 api/local → `{reply, call_id}` |
-| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?}` → 路由 api/local（deepseek 无视觉）→ `{reply, call_id}` |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 路由 api/local → `{reply, call_id}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061） |
+| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?, max_tokens?}` → 路由 api/local（deepseek 无视觉）→ `{reply, call_id}`；超时与 `max_tokens` 语义同 text（REQ-061） |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |

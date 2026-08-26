@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PLANS = ROOT / "docs" / "plans"
 PLAN_INDEX = PLANS / "index.md"
 PLAN_FILE = re.compile(r"\d{4}-\d{2}-(?:v\d{2}-)?[a-z0-9]+(?:-[a-z0-9]+)*\.md")
+# 长期滚动文档豁免（REQ-062，2026-08-26 用户裁决）：AI 知识收件箱常驻 plans/ 但不是计划
+# ——不适用计划命名/元数据/todo 镜像治理，也不随任务归档；定位声明与例外依据见其头部。
+STANDING_DOCS = {"ai-agent-knowledge-inbox.md"}
 ACTIVE_STATUSES = {"Accepted", "In Progress", "Blocked"}
 TASK_TYPES = {"A", "B", "C", "D"}
 REQUIRED_FIELDS = (
@@ -45,7 +48,7 @@ def _field(content: str, name: str) -> str:
 def _active_plans() -> dict[str, dict[str, str]]:
     plans = {}
     for path in sorted(PLANS.glob("*.md")):
-        if path.name == "index.md":
+        if path.name == "index.md" or path.name in STANDING_DOCS:
             continue
         assert PLAN_FILE.fullmatch(path.name), path.name
         content = path.read_text(encoding="utf-8")

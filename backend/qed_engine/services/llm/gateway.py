@@ -42,6 +42,8 @@ def call_text(
             reply = clients.lmstudio_chat(
                 base_url=settings.qed_lmstudio_url,
                 messages=messages,
+                timeout=settings.qed_llm_timeout,
+                max_tokens=max_tokens,
             )
             provider, model = "lmstudio", "local"
         else:
@@ -50,6 +52,7 @@ def call_text(
             reply = clients.provider_text_chat(
                 api_key=settings.resolved_api_key(), model=model,
                 messages=messages, base_url=base_url,
+                timeout=settings.qed_llm_timeout, max_tokens=max_tokens,
             )
             # provider, model = provider, model（记录真实厂商与生效模型）
         call_id = call_log.record_call(
@@ -76,6 +79,7 @@ def call_vision(
     pdf_filename: str = "input.pdf",
     prompt: str = "识别并输出图片内容",
     prompt_template: str | None = None,
+    max_tokens: int | None = None,
     service: str = "qed_engine",
 ) -> dict:
     """视觉模型调用：api → 厂商视觉模型（图片 base64）；local → MinerU（PDF 解析）。
@@ -107,6 +111,7 @@ def call_vision(
             reply = clients.provider_vision_chat(
                 api_key=settings.resolved_api_key(), model=model,
                 image_base64=image_base64, prompt=prompt, base_url=base_url,
+                timeout=settings.qed_llm_timeout, max_tokens=max_tokens,
             )
             # provider, model = provider, model（记录真实厂商与生效模型）
         call_id = call_log.record_call(

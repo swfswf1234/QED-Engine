@@ -171,8 +171,13 @@ backend/qed_engine/services/llm/
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen / local LM Studio）；记录调用；`{reply, call_id}` |
-| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen-vl / local MinerU；deepseek 无视觉）；记录调用；`{reply, call_id}` |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen / local LM Studio）；记录调用；`{reply, call_id}`。`max_tokens` 非 None 时透传上游写入请求体（REQ-061：原「预留字段」已转正，不再静默丢弃） |
+| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?, max_tokens?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen-vl / local MinerU；deepseek 无视觉）；记录调用；`{reply, call_id}`。`max_tokens` 语义同 text（REQ-061 一并纳入） |
+
+**上游调用超时（REQ-061，2026-08-26）**：网关向所有文字/视觉上游客户端透传
+`Settings.qed_llm_timeout`（env `QED_LLM_TIMEOUT`，默认 **300 秒**）。原实现 `DEFAULT_TIMEOUT=60.0`
+硬编码且网关未透传，长生成（4000+ 字符 JSON）必现 ReadTimeout——该缺陷已修复，
+`clients.DEFAULT_TIMEOUT` 仅保留为直连 client 函数时的兜底默认。
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |

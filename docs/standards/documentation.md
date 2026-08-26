@@ -30,7 +30,7 @@
 | `adr/` | 影响长期约束的决定、理由、后果和取代关系（当前版本的架构决策登记）。 |
 | `standards/` | 工程治理规则（本文档及后续规范），确定文档。 |
 | `guides/` | 人类可读的**操作文档**（启停服务等各类操作）与**开发文档**（介绍项目怎么开发）。 |
-| `plans/` | 对应进行中任务的讨论与计划（不确定文档）。 |
+| `plans/` | 对应进行中任务的讨论与计划（不确定文档）。**例外**：长期滚动文档（当前仅 [AI Agent 知识收件箱](../plans/ai-agent-knowledge-inbox.md)，REQ-062）常驻本目录但不适用计划命名/元数据/todo 镜像治理、不随任务归档，豁免清单由 `tests/contract/test_plan_governance.py::STANDING_DOCS` 守护。 |
 | `trackers/` | 全部未关闭任务、简短关闭台账、无状态能力路线图与**实时状态快照**（../trackers/project-status.md）。 |
 | `history/` | 选择性保留的长期审计证据、旧基线文档和 Git 锚点。 |
 | `learning/` | QED-Engine 独有的个人学习资料（数学课程规划、笔记提纲等），不参与工程治理，内容自由组织；第四轮主线（Axiom-Flow 探索轮）开始时进行学习探索。 |

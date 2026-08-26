@@ -247,7 +247,7 @@ def llm_vision(request: Request, payload: LlmVisionRequest) -> LlmCallResponse:
     return LlmCallResponse(**gateway_call_vision(
         resolved, image_base64=payload.image_base64, pdf_bytes=pdf_bytes,
         pdf_filename=payload.pdf_filename, prompt=payload.prompt,
-        prompt_template=payload.prompt_template,
+        prompt_template=payload.prompt_template, max_tokens=payload.max_tokens,
     ))
 
 

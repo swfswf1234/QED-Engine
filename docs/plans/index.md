@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-08-24
+最后更新：2026-08-26
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../adr/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -16,6 +16,8 @@
 
 ## 活跃计划
 
+- [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
+  利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
 - [2026-08 课程下载轮探索计划（探索界面）](../trackers/todo.md)（ARCH-019，PLAN-020，状态见任务台账）
 - [2026-08 教材下载轮计划（textbook-download-round）](../trackers/todo.md)（ARCH-002，状态见任务台账）
 

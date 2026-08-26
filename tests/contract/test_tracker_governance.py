@@ -104,7 +104,14 @@ def test_todo_plan_rows_exactly_mirror_active_plan_bodies():
         assert link.group("path") not in plan_rows
         plan_rows[link.group("path")] = (row, link.group("title"))
 
-    plan_files = {path.name: path for path in PLANS.glob("*.md") if path.name != "index.md"}
+    # 长期滚动收件箱（REQ-062）不属计划，不参与 todo Plan 行镜像
+    # （豁免清单与理由见 test_plan_governance.STANDING_DOCS）
+    standing = {"ai-agent-knowledge-inbox.md"}
+    plan_files = {
+        path.name: path
+        for path in PLANS.glob("*.md")
+        if path.name != "index.md" and path.name not in standing
+    }
     assert set(plan_rows) == set(plan_files)
     for filename, path in plan_files.items():
         content = path.read_text(encoding="utf-8")
