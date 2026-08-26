@@ -1,7 +1,7 @@
 # 任务台账
 
 状态：Current
-最后更新：2026-08-23
+最后更新：2026-08-26
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -37,7 +37,7 @@
 | ID | 类别 | 类型 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ARCH-020 | 主线 | 实现 | 高 | 待开始 | 第三轮主线：与 Axiom-Flow 联调（local 和 api 模式），不断优化解析效果直至用户确认（至少完成一个教程的解析） | 前置：第二轮主线（ARCH-019）课程下载闭环 + Axiom-Flow REQ-044 / REQ-042 回执；V2-013 执行回执后联调验收 |
-| REQ-003 | 支线 | 请求 | 高 | 待开始 | Axiom-Flow 数据目录指向根 dataset/axiom-flow/parsed、直读 QED_* 变量（含 QED_DB_*，qed 库）（请求：Axiom-Flow） | Axiom-Flow todo ALN-003 承接；用户已确认（2026-08-04），B 类计划 ALN-007 执行 |
+| REQ-003 | 支线 | 请求 | 高 | 待开始 | Axiom-Flow 数据目录指向根 dataset/axiom-flow/parsed、直读 QED_* 变量（含 QED_DB_*，qed 库）（请求：Axiom-Flow）**2026-08-26 并入**：根 .env 唯一事实源裁决（见 configuration-and-secrets.md）后，本项扩展为同口径 .env 精简——其自身 .env 删除与根重复的 API_KEY/QED_API_SELECT/QED_LLM_GATEWAY_URL，仅留 AXIOM_* 私有键；AXIOM_MYSQL_* → QED_DB_* 键名对齐属本项代码改动范围（其解析器已支持向上走查根 .env 兜底） | Axiom-Flow todo ALN-003 承接；用户已确认（2026-08-04），B 类计划 ALN-007 执行 |
 | REQ-015 | 支线 | 请求 | 中 | 待开始 | Axiom-Flow 读取 dataset/qed-tracker/raw/ 的批量导入解析接口（Phase 2 前置；请求：Axiom-Flow） | Axiom-Flow todo ALN-006 承接；教材下载轮联调后确认，拆 B/D 类计划执行 |
 | REQ-034 | 支线 | 实现 | 中 | 进行中 | 数据域·Axiom 适配（C 组第二阶段前置，编排见 [integration-matrix.md](../design/integration-matrix.md)）：Axiom-Flow v2 契约冻结（V2-007 回执）后，建 api/axiom.py + clients/axiom_client.py（解析进度/原始文档对照端点） | 2026-08-16 ARCH-014 轮登记；**同步开发已实施**（backend 五端点 + 前端解析进度/对照两视图，269→271 pytest + 70 vitest passed）；**2026-08-16 联调冒烟通过**（8902 真实数据：01-rudin-trial 20 页 md + 页图 5.2MB 经 8900 代理加载）：契约偏差已适配——① image_url 为 8902 相对路径 → 8900 新增图片代理端点 GET /books/{id}/pages/{no}/image（浏览器只连 8900）；② BookMeta 无进度字段（实际 page_count/author/strategy）→ 前端 manifest 推导页进度（契约冻结后切换上游字段）；③ parse-jobs strategy 枚举 local/hybrid；V2-007 契约冻结后按回执微调 |
 | REQ-036 | 支线 | 请求 | 高 | 待开始 | v2 服务建设与 V2-003 移交审阅（请求：Axiom-Flow，C 组联调前置）：① V2-003 ingest 代码已由根仓库侧误建在对方工作区（未提交，81 passed + ruff clean，含单元测试与文档同步）——请审阅后自行提交或调整；② V2-004/005/007（orchestrator / MinerU 接入 / API v1）按对方 todo 推进，8902 API 服务建立后回执根仓库（C 组第一阶段联调与 REQ-034 前置解除） | 2026-08-16 登记（亡羊补牢：误产生的代码改动登记移交，对方审阅后自行提交；V2 联调前置已在对方 todo 标注）；**对方承接回执后关闭** |
@@ -63,12 +63,13 @@
 
 | ID | 类别 | 类型 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- | --- |
-| REQ-061 | 支线 | 实现 | 高 | 待开始 | **LLM 网关缺陷修复（2026-08-24 QED-043 真实评估发现，与 REQ-060 不同源；根仓库自办）**：① `services/llm/clients.py` `DEFAULT_TIMEOUT=60.0` 硬编码且 `gateway.call_text` 未向 provider_text_chat/lmstudio_chat 透传超时——qwen3.8-2.4t-a95b 生成长 JSON（课程清单 4000+ 字符）实测 >60s 必现 ReadTimeout（证据：qed_llm_calls call_id 62/64~65/68~69/71~72，duration_ms≈60100、error=模型调用失败 ReadTimeout）；② `gateway.call_text` 收了 `max_tokens` 形参但函数体未使用、provider_text_chat 无 max_tokens 入参——调用方 max_tokens 静默失效。请求：超时可配置（env 或参数，建议默认 ≥300s 或按 endpoint 区分）+ max_tokens 透传上游 | 由根仓库实现；回执 = 提交号 + 长生成复测输出（QED-Tracker 将用 courses 步骤真实 prompt 复测网关链路）；关联 todo QED-043 Phase B0 |
+| REQ-063 | 支线 | 请求 | 中 | 待开始 | **请求：QED-Tracker**——自身 `.env` 公共键精简（2026-08-26 根 .env 唯一事实源裁决，见 configuration-and-secrets.md「目的与边界」）：删除 `QED-Tracker/.env` 中与根重复的 API_KEY/QED_LLM_GATEWAY_URL/QED_MODEL/QED_DB_PORT/QED_DB_NAME/QED_DB_USER/QED_DB_PASSWORD，仅保留私有键（QED_TRACKER_PORT）；公共值经其既有「向上走查父目录 .env」解析器从根兜底生效；**零代码改动**（配置文件瘦身 + 其文档同步，其测试若断言键存在需一并调整属其侧决定） | 对方评审承接、自行执行并回执后关闭；根仓库不代改子项目 .env |
 
 ### 长期任务
 
 | ID | 类别 | 类型 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- | --- |
+| REQ-062 | 长期 | 实现 | 中 | 进行中 | **AI 开发指引优化（2026-08-26 登记，同日用户裁决改收件箱机制）**：四段式——① **捕获**：大任务完成后把 agent 利用经验写入 [ai-agent-knowledge-inbox.md](../plans/ai-agent-knowledge-inbox.md)（长期滚动收件箱，不随任务归档；可手动要求补充）；② **审核**：三判据（复用价值/非瞬时状态/未被正式文档覆盖）逐条过，任一不满足不入池；③ **批量晋升触发**：待评审 ≥10 条或单主题聚集 ≥3 条或每月例行（先到为准）；④ **体系优化**：分析轮聚类产出结构性结论，修订正式文档乃至开发流程。首批内容已落 development.md「环境准备（AI 开发速查）」节 | 收件箱已建立 + 首批 1 条待评审（8900 改码后须重启）；持续进行无单一终态；每次入池/晋升后运行 tests/contract 门禁 |
 | REQ-002 | 长期 | 实现 | 中 | 进行中 | 文档治理与同步（**吸收 REQ-021/025，2026-08-16 ARCH-013 合并**）：标准/ADR/计划/台账与契约测试随需求同步更新（ADR 0001 已落地）；README/AGENTS 大变动同步（原 REQ-021）；四类设计文档（架构/API 契约/数据库/技术栈）先文档后实现同步（原 REQ-025） | 每次文档变更前运行 `tests/contract/` 门禁；大变动评审时同步 README/AGENTS |
 | REQ-010 | 长期 | 流程 | 中 | 进行中 | 跨项目协作流程演练：向 Axiom-Flow/QED-Tracker 登记改造请求 todo | 双方回执并关闭其 todo 后完成 |
 | REQ-046 | 长期 | 实现 | 高 | 进行中 | API 接口开发：先确定接口类型，按类型写 API 文档落入各自项目——① QED-Engine 前端无 API（静态页面只连 8900，声明于 [api-contracts](../architecture/api-contracts.md)）；② QED-Engine 后端三类（控制域启停/重启/健康、QED-Tracker 透传及相关处理、Axiom-Flow 透传及相关处理）；③ QED-Tracker 三类（自身生命周期+健康、数据库知识查询传递、LLM 检索课程教程/选书业务）；④ Axiom-Flow 四类（生命周期+健康、数据查询、解析结果与 PDF 对照、未来 RAG/知识图谱预留）；检查是否有遗漏；关联 ARCH-012（全流程跑通 + Axiom-Flow 完成前端验收 + 流程完整走完为止） | 第一步（接口类型确认 + QED-Engine 文档落位）随 ARCH-018 完成（architecture/api-contracts.md 已落位、前端无 API 已声明）；子项目 API 文档经请求由对方执行（Axiom-Flow / QED-Tracker todo 承接）；接口类型清单评审确认后按类型分别落各自项目 |

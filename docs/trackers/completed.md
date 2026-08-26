@@ -1,13 +1,14 @@
 # 已关闭任务台账
 
 状态：Current
-最后更新：2026-08-23
+最后更新：2026-08-26
 
 本文件登记已关闭任务（终态时从[任务台账](todo.md)原子移除并移入本表）。关闭结果枚举：
 Achieved（达成）/ Rejected（未采纳）/ Partial（部分达成）/ Not Applicable（不适用）。
 
 | ID | 类型 | 任务 | 关闭结果 | 证据 |
 | --- | --- | --- | --- | --- |
+| REQ-061 | 实现 | LLM 网关缺陷修复：① 超时可配置（env/参数，默认 ≥300s）；② max_tokens 透传上游（gateway 收形参未用 + clients 无入参静默失效） | Achieved | 2026-08-26 关闭（用户裁决「提交后即标完成」）：提交 `438cc79`（配置层地基：根 .env 唯一事实源 + qed_llm_timeout 默认 300s）+ `29188a9`（clients 三客户端 max_tokens 形参非 None 写 payload + gateway call_text/call_vision 透传 timeout/max_tokens + vision schema 补字段；TDD 8 测试先红后绿）。真实验证：超时四次精确踩中配置上限（300155/600157/600205/1200170ms，env 进程级可调）；>60s 长生成成功实证 call 83（qwen-plus 合成课程 JSON 72922ms）与 Tracker 模板三步全链路 qwen3.7-plus（domain 49.6s/courses 107s·13 门/path 58.1s，call 88~90），旧代码均必死于 ~60100ms；原始事故解释闭环——历史 courses@v3 用 qwen-plus 稳定 42~56s（call 46~79），60s 硬顶下偶发越线即死。模型诊断结论：courses prompt 无问题，qwen3.8 系思考型模型在结构化长生成上病态慢（>600s~1200s），探索管线选快速模型族。门禁：全量 357 passed + ruff clean + contract 50 passed；QED-Tracker Phase B0 复测随其循环自然覆盖（模型选型建议已同步） |
 | REQ-054 | 实现 | 8900 透传适配探索端点（exploration-api §工作项3）：tracker_client 8 方法 + api/tracker 8 路由 + 20 契约测试 | Achieved | 2026-08-24 实现完成并关闭：tracker_client 8 方法（start_course_explore/get_explore_run/adopt/discard/list/start_curriculum/get_curriculum/apply_curriculum）+ api/tracker 8 路由（§1~7 + 202/409 结构化 detail 透传）+ 20 契约测试；门禁 pytest 320 passed；真实冒烟 COURSE_NOT_FOUND 结构化保留、领域探索 404 归一、qwen 真实调用 ok |
 | REQ-055 | 请求 | 课程层探索端点组（请求：QED-Tracker）：POST /courses/{id}/explore、GET /explore-runs/{id}、adopt/discard、历史列表 + draft qt_knowledge 创建；附带统一数据根适配 | Achieved | 2026-08-24 对方回执关闭：提交 4098a03（数据根适配 Phase 1）+ e4072ef（8 端点 + 双 advisor + 任务编排）；B 组联调真实冒烟通过——explore→ready（约10s）→adopt→qt_knowledge 3 行 draft 落库，前端经 8900 可见 |
 | REQ-056 | 请求 | 新建领域探索端点组（请求：QED-Tracker）：POST /curriculum-explore、curriculum-runs 详情/apply + 领域/课程手工 CRUD 五端点 | Achieved | 2026-08-24 对方回执关闭：提交 e4072ef 含领域层 3 端点 + CurriculumExploreAdvisor + 幂等 create_domain/create_course；真实冒烟「高等数学」doc 模式 ready（约17s）提议 7 变更全选 apply 零冲突落库 |
