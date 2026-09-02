@@ -3,9 +3,10 @@
 设计状态：Draft
 实现状态：Not Started
 最后更新：2026-08-18
+确认状态：暂定
 关联代码：—（仅规划设计，实现待解析管理闭环后单独立轮）
 关联测试：—（规划，无实现）
-关联 ADR：[ADR 0008](../adr/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）
+关联 ADR：[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）
 关联文档：[learning-center.md](learning-center.md)（知识问答多 Agent 方向）、
 [chunking-notes.md](../learning/chunking-notes.md)（切分策略）、
 [rag-notes.md](../learning/rag-notes.md)（召回链路）、

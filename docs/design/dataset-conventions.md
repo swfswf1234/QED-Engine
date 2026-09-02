@@ -3,11 +3,12 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-23
+确认状态：暂定
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
 关联测试：无（子项目各自契约测试守护其数据根行为）
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、
-[ADR 0003](../adr/0003-shared-qed-database-independence.md)（元数据入 DB 与表命名空间）；
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、
+[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)（元数据入 DB 与表命名空间）；
 本规范由 [计划 2026-08-arch019-data-foundation](../history/plans/2026-08/2026-08-arch019-data-foundation.md)
 设计正文经用户评审确定后迁入（2026-08-23，ADR 0011 流程）。
 

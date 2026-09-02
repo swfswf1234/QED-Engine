@@ -1,17 +1,23 @@
 # 文档与代码双向追溯规范
 
 状态：Current
-最后更新：2026-08-09
-治理对象：code-map、模块 DesignRef、架构/设计关联和语义同步门禁
-依据 ADR：`docs/adr/0001-root-contract-tests.md`
-关联测试：`tests/contract/test_code_document_mapping.py`、`tests/contract/test_architecture_documents.py`、`tests/contract/test_design_documents.py`
+最后更新：2026-08-30
+确认状态：已确认
+治理对象：code-map、模块 DesignRef 和语义同步门禁
+依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`
+关联测试：`tests/contract/test_code_document_mapping.py`、`tests/contract/test_api_endpoint_inventory.py`
+移出内容暂存：`../plans/2026-08-30-traceability-refactor.md`（ARCH-NNN/DES-NNN 规则待归入
+architecture/ 或 design/ 维护规则）
 
 ## 目的与边界
 
-本标准让人工和 Agent 能从代码定位设计依据，也能从设计定位实际代码与测试。
+本标准让人和 Agent 能从代码定位设计依据，也能从设计定位实际代码与测试。
 `docs/architecture/code-map.md` 是代码、设计与测试映射的唯一事实源；文件头 DesignRef 只用于
-阅读代码时反查，不是第二份映射表。文档分类查[文档规范](documentation.md)，决策准入查
+阅读代码时反查，不是第二份映射表。文档分类查[文档治理规范](doc-governance.md)，决策准入查
 [ADR 治理](adr-governance.md)。
+
+架构/设计文档的内容质量标准（ARCH-NNN/DES-NNN 登记、关联代码与 ADR 等）已从本标准移出，
+待评审后归入各自领域维护规则。
 
 ## 强制规则
 
@@ -35,29 +41,12 @@
 """
 ```
 
-### 架构同步
-
-- 活跃架构声明关联代码、关联测试和关联 ADR；无实现时写"尚未实现"，不得指向无关代码。
-- 服务边界、端口规划、独立性规则、能力归属或 DesignRef 变化时，同步正文、Mermaid、code-map
-  和架构语义测试。
-- Accepted 约束与当前实现有偏差时，使用稳定 `ARCH-NNN` 在架构符合度和 tracker 双向登记，文档
-  实现状态不得写成完全实现。
-
-### 设计同步
-
-- Design 按可执行流程划分，描述输入输出、接口与数据、状态、失败语义和当前符合度；没有代码
-  所有权的概念说明不得单独成为活跃设计。
-- 接口字段、端口、跨服务契约或 DesignRef 变化时，同步正文、Mermaid、code-map 和设计语义测试。
-- 已接受但未实现的能力使用稳定 `DES-NNN` 在设计符合度和 tracker 双向登记，文档不得标记为
-  完全实现。
-
 ## 执行与门禁
 
-1. 先在 code-map 定位模块职责、DesignRef、状态和定向测试，再修改代码或文档。
-2. 职责或契约变化时先完成适用 ADR/设计，再同步实现、文件头、code-map 和语义测试。
-3. `tests/contract/test_code_document_mapping.py` 守护受管路径、文件头和双向引用；架构与设计
-   语义测试分别从文件与元数据验证当前契约。
-4. 自动测试不能判断设计是否合理；计划必须声明人工审阅边界、当前符合度和未实现偏差。
+1. 修改代码前：先在 code-map 定位模块职责、DesignRef、状态和定向测试。
+2. 新增/移动/删除模块或改变职责时：同步更新 code-map、文件头和关联测试。
+3. 职责或契约变化时：先完成适用 ADR/设计，再同步实现、文件头、code-map 和语义测试。
+4. `tests/contract/test_code_document_mapping.py` 守护受管路径、文件头和双向引用。
 
 ## 变更与取代
 

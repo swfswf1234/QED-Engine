@@ -3,7 +3,7 @@
 状态：Accepted
 任务类型：A
 最后更新：2026-08-09
-关联 ADR：[ADR 0006](../../../adr/0006-engineering-governance-contract.md)（治理契约范本化，本轮治理基础）
+关联 ADR：[ADR 0006](../../../history/adr/v0.1/0006-engineering-governance-contract.md)（治理契约范本化，本轮治理基础）
 关联设计：[项目状态快照](../../../trackers/../trackers/project-status.md)（当前主线维护）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-008 登记；REQ-024 承接 ADR 重新治理；REQ-021 大变动同步）
 归档判定：W1-W9 全部完成、REQ-024（ADR 重新治理）完成、门禁全绿、用户确认后关闭并归档

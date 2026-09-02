@@ -3,13 +3,14 @@
 设计状态：Accepted
 实现状态：Implemented
 最后更新：2026-08-20
+确认状态：暂定
 关联代码：`web-ui/`（唯一消费方）、`scripts/qed_engine_service.py`（生命周期脚本）；
 后端三域模块（`api/`、`services/`、`clients/`）受管清单见 [code-map.md](code-map.md)
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_log_viewer.py`、
 `tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_llm_*.py`
-关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（8900 网关化）、
-[ADR 0005](../adr/0005-control-center-service-hosting.md)（控制中心托管）、
-[ADR 0008](../adr/0008-frontend-react-refactor.md)（前端独立演进）
+关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（8900 网关化）、
+[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)（控制中心托管）、
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端独立演进）
 
 ## 定位与边界
 

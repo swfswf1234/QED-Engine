@@ -3,6 +3,7 @@
 设计状态：Accepted
 实现状态：Not Started
 最后更新：2026-08-09
+确认状态：暂定
 关联代码：`web-ui/src/`（web-ui React 版；旧 web/ 三文件版已随 2026-08-17 切换退役）
 关联测试：`tests/test_web.py`
 关联 ADR：无
@@ -13,7 +14,7 @@
 本文件是**课程收集完整流程**的根仓库侧事实源：从先验课程体系到一轮课程完成（两套教程确认）。
 执行主体是 QED-Tracker（评估/下载/登记），本文件定义流程规则与 QED-Engine 前端（8903
 文档下载管理，现状基座见[8903 前端契约](web-frontend.md)）的对齐契约。涉及 QED-Tracker 内部
-实现的部分以其自身设计与 todo 承接（见[跨项目协作流程](../standards/cross-project-collaboration.md)）。
+实现的部分以其自身设计与 todo 承接（见[跨项目协作规范](../standards/cross-project-collaboration.md)）。
 
 - 当前阶段聚焦数学课程体系（13 门课程）；计算机科学（AI 方向）课程体系在后续轮次扩展，
   五阶段流程规则通用。
@@ -84,7 +85,7 @@
 | 找书找得率榜单 | 各来源渠道的命中率/下载成功率实测统计 | QED-Tracker 来源评估矩阵输入（见 QED-018） | 已登记请求 REQ-020（请求：QED-Tracker） |
 
 榜单数据收集为**执行任务**，主体在 QED-Tracker 侧实施（跨项目请求，见
-[跨项目协作流程](../standards/cross-project-collaboration.md)）：产出回填其
+[跨项目协作规范](../standards/cross-project-collaboration.md)）：产出回填其
 `source-discovery.md` 来源评估矩阵与本流程阶段 1 的选书规则，回执后关闭；根仓库不建界面、
 不重复登记数据。
 

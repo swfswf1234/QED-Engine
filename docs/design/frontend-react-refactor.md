@@ -3,14 +3,15 @@
 设计状态：Superseded
 实现状态：Implemented
 最后更新：2026-08-20
+确认状态：暂定
 
 > 勘误：2026-08-20 文档规范轮——前端重构已完成使命（web-ui 已接管 8903），目标态契约并入
 > [frontend-architecture](../architecture/frontend-architecture.md)，本文件保留为审计留档。
 关联代码：`web-ui/`（React 重构版，已接管 8903）、`scripts/serve_web.py`、`web-ui/.env.production`；旧 `web/` 三文件版已退役（git 保留）
 关联测试：`tests/test_web.py`（守护 web-ui/src 源码 + serve_web）、`web-ui/` Vitest
-关联 ADR：[ADR 0008](../adr/0008-frontend-react-refactor.md)（框架与工程化选型）、
-[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
-[ADR 0002](../adr/0002-frontend-and-port-centralization.md)（全局端口）
+关联 ADR：[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（框架与工程化选型）、
+[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
+[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)（全局端口）
 
 ## 目的与边界
 
@@ -19,7 +20,7 @@
 `.env.production` VITE_API_BASE=8900、旧 web/ 退役）；[web-frontend.md](web-frontend.md)
 已重写为 v2 以本设计为准。
 
-驱动背景与框架选型理由见 [ADR 0008](../adr/0008-frontend-react-refactor.md)：原生单文件
+驱动背景与框架选型理由见 [ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)：原生单文件
 app.js 约 1684 行/91KB 定位困难；九大界面需要稳定组件边界；知识图谱/大图/聊天/标注等
 复杂交互需要成熟生态。
 
@@ -101,12 +102,12 @@ web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript，�
   单元；8900 离线时本地判定兜底 + 去重；不展示 MySQL，2026-08-16 用户裁决）；
   8900 不可达 → 整体错误横幅，不白屏。
 - **文档下载进度卡**（全宽，在上；ECharts，echarts/core 按需引入，窗口 resize 自适应）：
-  数据源 `/knowledge` 一次拉取知识行列表 + **并行拉取 `/knowledge/{id}` 详情**（含所辖书行
+  数据源 `/knowledge` 一次拉取教程列表 + **并行拉取 `/knowledge/{id}` 详情**（含所辖书籍
   books，逐行独立降级——五层模型 QED-031，2026-08-17 五层化）。
   - **双饼图「文档下载进度（本）」（2026-08-17 用户裁决）**：饼图1 按课程（course_id）、
-    饼图2 按教程（知识行），扇区值 = 该维度已下载书行数（downloaded+verified）——看
+    饼图2 按教程（教程），扇区值 = 该维度已下载书籍数（downloaded+verified）——看
     各课程/各教程的下载工作量分布；
-  - 书行汇总统计行：教程数（kind=tutorial）/ 目标书目 / 已下载 / 已验收（books 聚合）；
+  - 书籍汇总统计行：教程数（kind=tutorial）/ 目标书目 / 已下载 / 已验收（books 聚合）；
   - 8901 不可达（503）→ 本卡离线提示降级，其余卡片正常。
 - **文档解析进度卡**（全宽，在下；卡名副标「Axiom-Flow监控」）：8902 parse-jobs 端点后置
   （backend-domain-split 后续轮），当前显示「数据源后置」离线占位，不占位拉取。
@@ -120,41 +121,41 @@ web-ui/                   # 新 React 项目（Vite + React 19 + TypeScript，�
 
 **左侧知识点树**（类 Excel 合并单元格/文件列表折叠语义，延续现状语义）：
 
-- 层级：**领域 → 课程 → 教程**；教程节点 = 知识行（kind=tutorial 为套节点可展开显示
-  所辖书行条目行；kind=other_material 为叶子，名称即归类名）。
+- 层级：**领域 → 课程 → 教程**；教程节点 = 教程（kind=tutorial 为套节点可展开显示
+  所辖书籍条目行；kind=other_material 为叶子，名称即归类名）。
 - 折叠行为：领域常驻展开，课程/教程点名称展开折叠（文件列表式）；箭头与名称交互分离
   （箭头=展开折叠、名称=选中联动右侧）。
 - 领域/课程节点点击**联动右侧筛选**（领域→领域筛选、课程→课程筛选，十二期单向联动语义）。
 - 树宽可拖拽（手柄 + 左右侧可调），有最大最小限制（如 280–640px，localStorage 记忆）。
 
 **4a 落地实现**（2026-08-16）：数据源 `/catalogs/math-qe`（课程结构）+ `/knowledge`
-（知识行，rejected/superseded 数据层隐藏）。教程节点按知识行构建：kind=tutorial 为
+（教程，rejected/superseded 数据层隐藏）。教程节点按教程构建：kind=tutorial 为
 套节点（可展开显示条目行：角色+书名+状态）；other_material 为叶子。领域 = DOMAIN_MAP
 （course_id→分析/代数/概率论与数理统计，未映射归「其他」），DOMAIN_ORDER 排序；课程 =
-catalog targets 去重（COURSE_ORDER 排序），知识行独有课程兜底。筛选栏（领域/课程/状态，
-Select，与树选择单向联动：树→筛选；筛选只作用于知识行卡列表）。独立降级：8900 不可达 →
-整体横幅 + 树区空态；catalog/knowledge 各自失败互不拖累（知识行失败 → 警示 + 树仅课程骨架）。
+catalog targets 去重（COURSE_ORDER 排序），教程独有课程兜底。筛选栏（领域/课程/状态，
+Select，与树选择单向联动：树→筛选；筛选只作用于教程卡列表）。独立降级：8900 不可达 →
+整体横幅 + 树区空态；catalog/knowledge 各自失败互不拖累（教程失败 → 警示 + 树仅课程骨架）。
 树宽：`qed-downloads-tree-w`（280–640px，默认 400）。
 
 **右侧面板**：
 
 - **筛选栏**（统一逻辑、同风格）：领域 / 课程 / 状态 三筛选项（Select 下拉，
-  与树选择独立叠加 AND）；"无论怎么筛选都是同一套逻辑"——筛选只作用于知识行列表。
-- **知识行区**（4b/4d 完成 2026-08-17）：每行 = 教程名（tutorialLabel）+ 类型徽标
-  （教程套系/延展资料）+ 状态标签（探索中/已定稿/已完成）+ 操作按钮；书行 **横排一排**
+  与树选择独立叠加 AND）；"无论怎么筛选都是同一套逻辑"——筛选只作用于教程列表。
+- **教程区**（4b/4d 完成 2026-08-17）：每行 = 教程名（tutorialLabel）+ 类型徽标
+  （教程套系/延展资料）+ 状态标签（探索中/已定稿/已完成）+ 操作按钮；书籍 **横排一排**
   （有最小长度；超宽页面内出现横向滑动栏，布局自适应），书目为**卡片**，卡片内容：
-  - 书名（display_title）、类型徽标（教材/习题集/配套资料/题解）、书行状态（候选/已决定/
+  - 书名（display_title）、类型徽标（教材/习题集/配套资料/题解）、书籍状态（候选/已决定/
     下载中/已下载/已验证/失败）；
   - 简介：作者、版本（edition·year）、页数、否定原因；
-  - 详情弹窗（4c）：书行完整信息（作者/版本/语言/页数/sha256/路径/来源）+ **渠道尝试列表**
+  - 详情弹窗（4c）：书籍完整信息（作者/版本/语言/页数/sha256/路径/来源）+ **渠道尝试列表**
     （sources 逐条：渠道/成败/页面/下载链接/备注）+ **添加渠道尝试**表单；
 - **卡内操作闭环**（4d，五层模型语义，409/422 透传）：
-  - 知识行：确认（draft→confirmed，决定引用+简介）/ 完成（confirmed→completed）/
+  - 教程：确认（draft→confirmed，决定引用+简介）/ 完成（confirmed→completed）/
     否定 / 过时（reason 必填）；
-  - 书行：决定（candidate→decided）/ 开始下载（decided→downloading）/ 标记失败 /
+  - 书籍：决定（candidate→decided）/ 开始下载（decided→downloading）/ 标记失败 /
     重试（failed→downloading）/ 验收（downloaded→verified）/ 否定 / 过时 / 登记下载
     （人工下载 candidate→downloaded，relative_path 必填）；
-  - 新建书行（POST /books，title 必填；kind/roles/authors）；操作成功后仅刷新该知识行
+  - 新建书籍（POST /books，title 必填；kind/roles/authors）；操作成功后仅刷新该教程
     详情（refreshDetail，不整树重拉）。
 
 **布局**：左侧树显示全但有 min/max；右侧书目行固定最小宽度、超出滚动；整体自适应。

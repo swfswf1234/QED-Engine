@@ -16,14 +16,18 @@ class FakeCursor:
         self.fetchall_result = []
         self.lastrowid = None
         self.rowcount = 0
+        self._closed = False
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
+        self._closed = True  # 模拟 pymysql with 退出即关游标
         return False
 
     def execute(self, sql, params=None):
+        if self._closed:
+            raise RuntimeError("Cursor closed")
         self.executed.append((sql, params))
         if "INSERT INTO qed_llm_calls" in sql:
             self.lastrowid = 7
@@ -216,3 +220,50 @@ def test_review_call_not_found(monkeypatch):
         _settings(), call_id=99999, review_status="rejected",
     )
     assert ok is False
+
+
+# --- 表/列注释补齐（2026-08-28，与 shared-tables.md 表3 文案对齐）---
+
+
+def test_create_table_sql_carries_comments():
+    """建表 SQL 带表注释与列注释（新库直接带注释）。"""
+    sql = call_log.CREATE_TABLE_SQL
+    assert "COMMENT='LLM 调用审计表" in sql
+    assert "COMMENT '调用方标识" in sql
+    assert "COMMENT '调用模式" in sql
+    assert "COMMENT '模板编号" in sql
+    assert "COMMENT '审核态" in sql
+
+
+def test_ensure_comments_alters_only_stale_columns(monkeypatch):
+    """ensure_comments：只对注释缺失/不一致的非自增列 ALTER；一致列跳过。"""
+    conn = FakeConn(fetchall_result=[
+        # id（自增主键）不在返回中也应被跳过；service 注释缺失；mode 一致
+        {"COLUMN_NAME": "service", "COLUMN_TYPE": "varchar(32)",
+         "IS_NULLABLE": "NO", "COLUMN_DEFAULT": None, "COLUMN_COMMENT": ""},
+        {"COLUMN_NAME": "mode", "COLUMN_TYPE": "varchar(16)",
+         "IS_NULLABLE": "NO", "COLUMN_DEFAULT": None,
+         "COLUMN_COMMENT": call_log._COLUMN_COMMENTS["mode"]},
+    ])
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    altered = call_log.ensure_comments(_settings())
+    assert altered == ["service"]
+    alter_sqls = [s for s, _ in conn.executed if "MODIFY COLUMN" in s]
+    assert len(alter_sqls) == 1
+    assert "COMMENT '调用方标识" in alter_sqls[0]
+    # 表注释幂等更新（无列级 ALTER 时也要校正表注释）
+    assert any("ALTER TABLE qed_llm_calls COMMENT" in s for s, _ in conn.executed)
+
+
+def test_ensure_comments_rebuilds_defaults(monkeypatch):
+    """ensure_comments：重建列定义保留 NOT NULL 与字符串默认值。"""
+    conn = FakeConn(fetchall_result=[
+        {"COLUMN_NAME": "review_status", "COLUMN_TYPE": "varchar(16)",
+         "IS_NULLABLE": "YES", "COLUMN_DEFAULT": "unreviewed", "COLUMN_COMMENT": "旧"},
+    ])
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    altered = call_log.ensure_comments(_settings())
+    assert altered == ["review_status"]
+    sql = [s for s, _ in conn.executed if "MODIFY COLUMN" in s][0]
+    assert "varchar(16)" in sql and "DEFAULT 'unreviewed'" in sql
+    assert "COMMENT '审核态" in sql

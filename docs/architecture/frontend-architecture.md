@@ -3,12 +3,13 @@
 设计状态：Accepted
 实现状态：Implemented
 最后更新：2026-08-20
+确认状态：暂定
 关联代码：`web-ui/`（React 19 + TypeScript + Vite 构建，构建产物 `web-ui/dist/` 由
 `scripts/serve_web.py` 静态托管 8903）、`web-ui/.env.production`（`VITE_API_BASE`）
 关联测试：`tests/test_web.py`（守护 serve_web 契约与 web-ui 源码 token）
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)（全局端口）、
-[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
-[ADR 0008](../adr/0008-frontend-react-refactor.md)（React 全家桶重构）
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)（全局端口）、
+[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（React 全家桶重构）
 
 ## 定位与边界
 
@@ -49,12 +50,12 @@ web-ui/
 ## 信息架构（hash 路由）
 
 - `#/` 主界面（Home）：学习中心框架（领域→课程→章节/知识点浏览，数学试点）+ 使用手册。
-- `#/knowledge` 学习中心（Knowledge）：课程图 + 知识行浏览。
+- `#/knowledge` 学习中心（Knowledge）：课程图 + 教程浏览。
 - `#/admin` 管理后台（AdminLayout 嵌套）：
   - `#/admin` 控制台（Console）：四服务卡（启停/重启 + message 成功失败提示）+ GPU 总览条
     + 依赖组件三卡（MySQL/文字模型/图像模型）+ 模型调用记录检索页（`#/admin/llm-calls`）。
   - `#/admin/dashboard` 仪表盘（Dashboard）：服务在线 + 文档下载进度双饼图 + 文档解析进度。
-  - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书行卡片 + 流程筛选。
+  - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书籍卡片 + 流程筛选。
   - `#/admin/parsing` 文档解析管理（Parsing）：左树右对照单视图（书目+进度 → 原页图 + 块级渲染 + 判定）。
 
 ## 与后端的交互

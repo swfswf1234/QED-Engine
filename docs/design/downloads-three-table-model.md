@@ -3,6 +3,7 @@
 设计状态：Superseded
 实现状态：Implemented
 最后更新：2026-08-16
+确认状态：暂定
 取代说明：本设计（qt_selections/qt_downloads/qt_sources 三表模型）已随 **QED-031 知识层次
 重构**被取代（2026-08-16）：新模型为 qed_domain/qed_course（共享）+ qt_knowledge/qt_books/
 qt_sources（私有）五层结构，唯一事实源为 QED-Tracker `docs/design/database-schema.md`。

@@ -149,12 +149,12 @@ def test_api_endpoint_tokens_present():
 
 
 def test_dashboard_course_completion_semantics():
-    """仪表盘课程完成度口径（用户裁决 2026-08-17）：≥2 套教程完成验收（书行全部 verified）
+    """仪表盘课程完成度口径（用户裁决 2026-08-17）：≥2 套教程完成验收（书籍全部 verified）
     计为课程完成下载；分母 = catalog targets 课程数。"""
     src = (SRC / "stores" / "dashboard.ts").read_text(encoding="utf-8")
     assert "buildCourseCompletion" in src, "dashboard store 应实现 buildCourseCompletion"
     assert ">= 2" in src or ">=2" in src, "课程完成判定应含 ≥2 套教程"
-    assert "verified" in src, "完成验收判定应基于书行 verified"
+    assert "verified" in src, "完成验收判定应基于书籍 verified"
 
 
 def test_console_message_feedback():

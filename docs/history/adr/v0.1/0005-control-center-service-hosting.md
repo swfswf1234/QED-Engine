@@ -1,6 +1,6 @@
 # ADR 0005：控制中心服务托管规划
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-09
 领域：架构与边界
 决策阶段：v0.1
@@ -34,7 +34,7 @@ README 与指南中。2026-08-09 服务控制设计定稿（service-control.md�
 
 ## 关联
 
-- 关联设计：[service-control.md](../design/service-control.md)（服务控制设计，Accepted / Not
+- 关联设计：[service-control.md](../../../design/service-control.md)（服务控制设计，Accepted / Not
   Started）
-- 关联架构：[four-service-architecture.md](../architecture/four-service-architecture.md)
+- 关联架构：[four-service-architecture.md](../../../architecture/four-service-architecture.md)
 - 关联 ADR：[ADR 0002](0002-frontend-and-port-centralization.md)（全局端口规划）

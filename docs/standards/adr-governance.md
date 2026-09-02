@@ -1,9 +1,10 @@
 # ADR 治理规范
 
 状态：Current
-最后更新：2026-08-20
+最后更新：2026-08-30
+确认状态：已确认
 治理对象：ADR 准入、全局编号、元数据、状态、取代关系与归档路径
-依据 ADR：`docs/adr/0001-root-contract-tests.md`
+依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_adr_governance.py`
 
 ## 目的与边界
@@ -30,11 +31,11 @@ standards 的实质规则时必须新增 ADR。实现细节、操作步骤、实
 ### 编号与路径
 
 - 文件名固定为 `NNNN-lowercase-slug.md`，编号在整个仓库单调递增且进入主分支后永不复用。
-- Proposed 和 Accepted 位于 `docs/adr/`；Rejected 和 Superseded 位于 `docs/history/adr/`。
-  两处使用扁平目录，不按年份或产品版本分组。
+- Proposed 和 Accepted 位于 `docs/adr/`（当前版本）；Rejected 和 Superseded 立即移入
+  `history/adr/<version>/`（版本结束前已归档的 ADR 按版本号分目录存放）。
 - 新 ADR 使用当前最大编号加一，并在同一变更登记 `docs/adr/index.md`；并行分支冲突在合入前
-  重新编号。
-- `docs/adr/index.md` 是当前与历史 ADR 的唯一全局登记表，声明下一个可用编号。
+  重新编号。新版本的 ADR 从 0001 重新开始（上一版本全部 ADR 已归档至 `history/`）。
+- `docs/adr/index.md` 是当前版本的 ADR 登记表，声明下一个可用编号。
 
 ### 元数据与状态
 
@@ -44,35 +45,39 @@ standards 的实质规则时必须新增 ADR。实现细节、操作步骤、实
 - 领域只允许 `工程治理`、`架构与边界`（2026-08-10 REQ-024 清理：裁剪未实际使用的
   `API 与任务`、`数据与持久化`、`质量与评测` 枚举；新增领域须先经 ADR 扩展本清单）。
 - 决策阶段使用 `v<主版本>.<次版本>`，表示决定首次形成的阶段，不限制后续版本继续适用。
-  当前项目处于探索期，统一使用 v0.x（v0.1 为探索期首轮）；进入正式版本阶段时经 ADR 更新
-  本定义。
+  当前项目处于探索期，统一使用 v0.x（v0.1 ADR 已归档，特例清理；当前版本仍为 v0.1）；
+  进入正式版本阶段时经 ADR 更新本定义。
 - 没有取代关系时写 `—`；存在关系时使用指向实际文件的 `ADR NNNN` Markdown 链接。
 
 `Proposed` 可变为 Accepted 或 Rejected；Accepted 只能由后续 Accepted ADR 完整取代并变为
 Superseded。完整取代必须在新旧 ADR 中双向登记；部分补充、范围收紧或实验恢复只写正文关联，
-不改变旧 ADR 状态。
+不改变旧 ADR 状态。跨版本完整取代（新版本 ADR 取代上一版本 ADR）时，旧 ADR 已在
+`history/adr/<old-version>/`，新 ADR 在 `## 关联` 中声明取代关系（链接使用相对路径
+`../../history/adr/<old-version>/NNNN-slug.md`），旧 ADR 的 `被取代` 字段同步更新。
 
 ### 章节
 
 每份 ADR 使用统一章节：`## 背景`、`## 决定`、`## 后果`、`## 关联`。`## 关联` 列出现有标准、
 测试、设计与 ADR 链接，不复制其正文。
 
-### 版本登记与版本末期合并
+### 版本登记与版本末期归档
 
 - `docs/adr/index.md` 声明当前项目版本，是**当前版本的架构决策登记**（决策阶段字段保持决定
   首次形成的阶段，见「元数据与状态」）。
-- 版本末期（用户确认升版本时）将本版本 ADR 决策合并进 `architecture/` 或其他固定文档，
-  `history/` 记录前版本；ADR 正文与编号保留（编号全局唯一、进入主分支后不复用），合并只做
-  正文关联与索引说明，不改变 ADR 状态与取代关系。
-- 新版本的长期决策仍新增 ADR 并登记索引；固定文档的版本差异由 history/ 归档与决策阶段体现
-  （详见[文档规范](documentation.md#版本与固定文档)）。
+- 版本末期（用户确认升版本时）执行归档：将 `docs/adr/` 中全部 Accepted ADR 迁移至
+  `history/adr/<version>/`（如 `history/adr/v0.1/`），`docs/adr/index.md` 同步归入该目录；
+  ADR 正文与编号保留（编号全局唯一、进入主分支后不复用），不改变 ADR 状态与取代关系。
+  归档后用户决定哪些 ADR 决策应纳入固定文档（architecture/、design/）——纳入操作由用户
+  驱动，不由 ADR 流程强制。
+- 新版本 ADR 从 0001 重新开始，`docs/adr/index.md` 重建并声明新版本号与下一个可用编号。
+- 固定文档的版本差异由 history/ 归档与决策阶段体现（详见[文档治理规范](doc-governance.md#版本与固定文档)）。
 
 ## 执行与门禁
 
 1. 按本标准创建 Proposed ADR，分配下一编号并登记 ADR index。
 2. 依次写入 `背景`、`决定`、`后果`、`关联`；依赖外部质量时先完成冻结实验。
 3. 接受或拒绝后同步状态、索引、关联架构/设计与独立实施计划。
-4. 完整取代时同步双向元数据并把旧 ADR 移入 `history/adr/`。
+4. 完整取代时同步双向元数据并把旧 ADR 移入 `history/adr/<version>/`。
 5. 运行 ADR 结构、Markdown 链接测试；人工确认决定没有复制实现计划或实验原始数据。
 
 ## 变更与取代

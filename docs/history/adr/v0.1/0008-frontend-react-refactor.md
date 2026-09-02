@@ -1,6 +1,6 @@
 # ADR 0008：前端框架与工程化选型：React 全家桶重构 8903
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-16
 领域：架构与边界
 决策阶段：v0.1
@@ -21,7 +21,7 @@ app.js 已膨胀至约 1684 行、91KB，承载 17 期迭代的全部逻辑（�
    RAG/Agent 调试面板——原生手写维护成本高，成熟组件与可视化生态可显著降低实现风险。
 
 同时后端规划为三域解耦（配置/控制、QED-Tracker 适配、Axiom-Flow 适配，见
-[backend-domain-split.md](../design/backend-domain-split.md)），前端独立演进与之配套，
+[backend-domain-split.md](../../../design/backend-domain-split.md)），前端独立演进与之配套，
 为后续「前端独立 + 后端各域独立」的并行推进做准备（2026-08-16 用户方向裁决）。
 
 ## 决定
@@ -40,7 +40,7 @@ app.js 已膨胀至约 1684 行、91KB，承载 17 期迭代的全部逻辑（�
 5. **纯前端改造（2026-08-16 用户裁决修订）**：本轮只做前端部分；控制台只用既有端点
    （/services、/config/database、/config/llm-status）。GPU 监控 / LM Studio 探测 /
    mineru 健康 / 服务日志查看 / 8900 自身重启等监控与诊断端点不再本轮实现，契约登记于
-   [../architecture/api-contracts.md](../architecture/api-contracts.md) 后续轮（后端三域拆分轮）落地。
+   [../architecture/api-contracts.md](../../../architecture/api-contracts.md) 后续轮（后端三域拆分轮）落地。
 
 > 修订记录：2026-08-16 原文「控制台配套：8900 后端新增监控与诊断能力（GPU nvidia-smi
 > 监控、LM Studio 探测、mineru 健康探测、服务日志查看、8900 自身重启）」经用户裁决

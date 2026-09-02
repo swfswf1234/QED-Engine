@@ -1,5 +1,5 @@
 """
-模块职责：守护跨项目协作流程的登记格式与边界：子项目独立 git、根仓库不越权修改、
+模块职责：守护跨项目协作规范的登记格式与边界：子项目独立 git、根仓库不越权修改、
 todo 请求行标注目标仓库、设计文档模板字段齐全。
 设计关联（DesignRef）：docs/standards/cross-project-collaboration.md
 实现状态：Current
@@ -21,7 +21,7 @@ TEMPLATE_FIELDS = ("需求方", "目标项目", "接口面", "评审方", "执�
 
 
 def _todo_rows() -> list[dict[str, str]]:
-    columns = ("ID", "类别", "类型", "优先级", "状态", "任务", "证据/下一条件")
+    columns = ("ID", "类别", "优先级", "状态", "任务", "证据/下一条件")
     lines = TODO.read_text(encoding="utf-8").splitlines()
     header = f"| {' | '.join(columns)} |"
     start = lines.index(header)
@@ -54,7 +54,8 @@ def test_gitignore_keeps_sub_projects_out_of_root_index():
 
 def test_todo_request_rows_annotate_target_project():
     rows = _todo_rows()
-    requests = [row for row in rows if row["类型"] == "请求"]
+    # 请求行：任务列包含「请求：<目标仓库>」标注（ID 前缀 REQ- 包含实现类，不可靠）
+    requests = [row for row in rows if TARGET_RE.search(row["任务"])]
     assert requests
     for row in requests:
         match = TARGET_RE.search(row["任务"])
@@ -77,7 +78,7 @@ def test_collaboration_standard_declares_execution_boundary():
     缺失会导致跨项目代码越权。
     """
     content = STANDARD.read_text(encoding="utf-8")
-    assert "执行边界" in content, "跨项目协作标准必须声明「执行边界」小节"
+    assert "执行纪律" in content, "跨项目协作标准必须声明「执行纪律」小节"
     assert "合法动作仅限" in content
     for marker in ("用户口头指令不豁免", "subagent 派发合规", "误产生的代码改动"):
         assert marker in content, f"执行边界小节缺少条款：{marker}"
@@ -86,7 +87,7 @@ def test_collaboration_standard_declares_execution_boundary():
 def test_todo_request_rows_track_receipt_progress():
     """请求行的证据/下一条件列必须体现对方承接或回执（推动回执闭环，防请求悬空）。"""
     rows = _todo_rows()
-    requests = [row for row in rows if row["类型"] == "请求"]
+    requests = [row for row in rows if TARGET_RE.search(row["任务"])]
     assert requests
     for row in requests:
         evidence = row["证据/下一条件"]

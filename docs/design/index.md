@@ -7,7 +7,7 @@
 （ADR 0010）。相关任务完成后按三态梳理：合并进 `architecture/` 固定文档 / 归档 `history/` /
 保持原状。**8900 固定 API 契约与数据库总纲已迁入 `architecture/`**（[api-contracts](../architecture/api-contracts.md)、
 [database-design](../architecture/database-design.md)）。文档分类与元数据规则见
-[文档规范](../standards/documentation.md)。
+[文档治理规范](../standards/doc-governance.md)。
 
 ## 当前文档
 
@@ -27,4 +27,4 @@
 | [tech-stack.md](tech-stack.md) | Accepted | In Progress | 技术栈选型：三服务/前端/数据库/模型/解析/向量库选型记录 |
 | [downloads-three-table-model.md](downloads-three-table-model.md) | Superseded | Implemented | 三表模型（qt_selections/qt_downloads/qt_sources）历史契约留档：被 QED-031 知识层次重构取代，唯一事实源见 QED-Tracker database-schema.md |
 | [integration-matrix.md](integration-matrix.md) | Accepted | In Progress | 联调矩阵与契约冻结编排：A（前端↔8900）/B（8900↔8901）/C（8900↔8902）三组联调边界、契约事实源、前置与验收窗口 |
-| [downloads-manage-redesign.md](downloads-manage-redesign.md) | Accepted | Not Started | 下载管理界面重构：左树四层（高等数学→分类→课程→教程叶子+进度）、右侧流程筛选（搜索/确认/下载/验收）、书行排序、教程命名规范（跨项目 QED-Tracker） |
+| [downloads-manage-redesign.md](downloads-manage-redesign.md) | Accepted | Not Started | 下载管理界面重构：左树四层（高等数学→分类→课程→教程叶子+进度）、右侧流程筛选（搜索/确认/下载/验收）、书籍排序、教程命名规范（跨项目 QED-Tracker） |

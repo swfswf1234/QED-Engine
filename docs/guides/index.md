@@ -5,7 +5,7 @@
 
 本目录保存 QED-Engine 人类可读指南（ADR 0010）：**操作文档**（启停服务等各类操作）与
 **开发文档**（介绍项目怎么开发）。每次主线 TODO 任务完成后梳理是否更新。文档分类与元数据
-规则见[文档规范](../standards/documentation.md)。
+规则见[文档治理规范](../standards/doc-governance.md)。
 
 ## 当前指南
 

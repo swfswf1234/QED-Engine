@@ -1,6 +1,6 @@
 """
 模块职责：验证标准目录的边界、统一契约、索引和测试反向关联保持一致。
-设计关联（DesignRef）：docs/standards/documentation.md
+设计关联（DesignRef）：docs/standards/doc-governance.md
 实现状态：Current
 被测代码：docs/standards、AGENTS.md
 守护面：标准治理
@@ -15,15 +15,22 @@ STANDARDS = ROOT / "docs" / "standards"
 STANDARD_INDEX = STANDARDS / "index.md"
 STANDARD_FILES = {
     "task-lifecycle.md",
-    "documentation.md",
+    "doc-governance.md",
     "adr-governance.md",
     "code-document-traceability.md",
     "testing.md",
-    "governance-contract.md",
     "cross-project-collaboration.md",
+    "local-dev.md",
 }
-REQUIRED_FIELDS = ("状态", "最后更新", "治理对象", "依据 ADR", "关联测试")
+# 治理标准须声明确认状态，须完整元数据与四公共章节（doc-governance.md 是其治理约定）
+# 事实文档（local-dev.md）只要求 状态/最后更新/治理对象/确认状态 + 目的与边界
+GOVERNED_STANDARDS = STANDARD_FILES - {"local-dev.md"}
+FACT_DOCUMENTS = {"local-dev.md"}
+REQUIRED_FIELDS = ("状态", "最后更新", "治理对象", "依据 ADR", "关联测试", "确认状态")
+FACT_FIELDS = ("状态", "最后更新", "治理对象", "确认状态")
 REQUIRED_SECTIONS = ("## 目的与边界", "## 强制规则", "## 执行与门禁", "## 变更与取代")
+CONFIRMED_STANDARDS = {"doc-governance.md", "local-dev.md", "code-document-traceability.md", "cross-project-collaboration.md", "adr-governance.md"}
+VALID_CONFIRM_STATUSES = {"暂定", "已确认"}
 PATH_REFERENCE = re.compile(r"`((?:docs/adr|tests)/[^`]+)`")
 INDEX_LINK = re.compile(r"\[(?P<title>[^]]+)]\((?P<path>[^)]+\.md)\)")
 
@@ -42,7 +49,9 @@ def _standards() -> dict[str, dict[str, object]]:
             "title": content.splitlines()[0].removeprefix("# "),
             "content": content,
             "object": _field(content, "治理对象"),
-            "tests": set(PATH_REFERENCE.findall(_field(content, "关联测试"))),
+            "tests": set(PATH_REFERENCE.findall(_field(content, "关联测试")))
+            if filename in GOVERNED_STANDARDS
+            else set(),
         }
     return records
 
@@ -72,22 +81,33 @@ def test_standards_directory_has_only_governed_documents_and_index():
 def test_every_standard_has_uniform_metadata_and_sections():
     for filename, record in _standards().items():
         content = str(record["content"])
-        for field in REQUIRED_FIELDS:
+        fields = REQUIRED_FIELDS if filename in GOVERNED_STANDARDS else FACT_FIELDS
+        for field in fields:
             assert _field(content, field), f"{filename}: {field} 不能为空"
         assert _field(content, "状态") == "Current", filename
-        positions = [content.index(section) for section in REQUIRED_SECTIONS]
+        confirm = _field(content, "确认状态")
+        assert confirm in VALID_CONFIRM_STATUSES, filename
+        if filename in CONFIRMED_STANDARDS:
+            assert confirm == "已确认", filename
+        else:
+            assert confirm == "暂定", filename
+        sections = REQUIRED_SECTIONS if filename in GOVERNED_STANDARDS else ("## 目的与边界",)
+        positions = [content.index(section) for section in sections]
         assert positions == sorted(positions), filename
 
-        for reference in PATH_REFERENCE.findall(_field(content, "依据 ADR")):
-            assert reference.startswith("docs/adr/"), reference
-            assert (ROOT / reference).is_file(), reference
-        assert record["tests"], filename
-        for test_path in record["tests"]:
-            assert (ROOT / test_path).is_file(), test_path
+        if filename in GOVERNED_STANDARDS:
+            for reference in PATH_REFERENCE.findall(_field(content, "依据 ADR")):
+                assert reference.startswith("docs/adr/"), reference
+                assert (ROOT / reference).is_file(), reference
+            assert record["tests"], filename
+            for test_path in record["tests"]:
+                assert (ROOT / test_path).is_file(), test_path
 
 
 def test_declared_tests_reference_their_governing_standard():
     for filename, record in _standards().items():
+        if filename not in GOVERNED_STANDARDS:
+            continue
         design_ref = f"设计关联（DesignRef）：docs/standards/{filename}"
         for test_path in record["tests"]:
             content = (ROOT / test_path).read_text(encoding="utf-8")
@@ -116,4 +136,4 @@ def test_agents_routes_to_all_standard_sources():
 
 def test_standards_index_contains_no_rule_body():
     content = STANDARD_INDEX.read_text(encoding="utf-8")
-    assert "## 规则" not in content, "standards index 只导航，不保存正文事实（见 documentation.md）"
+    assert "## 规则" not in content, "standards index 只导航，不保存正文事实（见 doc-governance.md）"

@@ -1,6 +1,6 @@
 # ADR 0001：根仓库建立工程治理契约测试
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-04
 领域：工程治理
 决策阶段：v0.1
@@ -9,7 +9,7 @@
 
 ## 背景
 
-`docs/standards/documentation.md` 原声明"根仓库不复制子项目的文档契约测试"，文档目录、元数据
+`docs/standards/doc-governance.md` 原声明"根仓库不复制子项目的文档契约测试"，文档目录、元数据
 与链接规则依赖人工审阅。本轮根仓库文档体系扩展（多份标准、ADR、架构、计划、学习资料），人工
 审阅无法可靠守门，需要自动契约测试保护已采纳的治理规则。
 
@@ -20,7 +20,7 @@
 2. 根仓库 `docs/standards/` 补齐 `task-lifecycle.md`、`adr-governance.md`、
    `code-document-traceability.md`、`testing.md`，与 Axiom-Flow 对应标准语义一致，作为三项目
    治理模式的上游参照；子项目各自维护自己的标准副本。
-3. 更新 `documentation.md` 的"执行与门禁"章节：根仓库文档变更由契约测试守护，不再声明"不复制
+3. 更新 `doc-governance.md` 的"执行与门禁"章节：根仓库文档变更由契约测试守护，不再声明"不复制
    契约测试"。
 
 ## 后果
@@ -32,7 +32,7 @@
 
 ## 关联
 
-- 关联标准：`docs/standards/documentation.md`、`docs/standards/adr-governance.md`、
+- 关联标准：`docs/standards/doc-governance.md`、`docs/standards/adr-governance.md`、
   `docs/standards/code-document-traceability.md`、`docs/standards/testing.md`
 - 关联测试：`tests/contract/` 全部测试文件
 - 关联 ADR：[ADR 0002](0002-frontend-and-port-centralization.md)（同轮治理对齐）

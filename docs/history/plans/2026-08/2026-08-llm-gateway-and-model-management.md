@@ -7,7 +7,7 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-08-20
-关联 ADR：[ADR 0007](../../../adr/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../adr/0002-frontend-and-port-centralization.md)
+关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../history/adr/v0.1/0002-frontend-and-port-centralization.md)
 关联设计：[llm-gateway-and-model-management.md](../../../design/llm-gateway-and-model-management.md)（Accepted）、
 [configuration-and-secrets.md](../../../design/configuration-and-secrets.md)（密钥分置修订）、
 [../architecture/api-contracts.md](../../../architecture/api-contracts.md)（监控诊断域扩展）

@@ -2,7 +2,7 @@
 
 状态：Current
 最后更新：2026-08-26
-依据 ADR：`docs/adr/0001-root-contract-tests.md`
+依据 ADR：`docs/history/adr/v0.1/0001-root-contract-tests.md`
 
 本指南保存根仓库 QED-Engine **怎么开发**：环境准备、门禁命令、开发工作流与代码-文档追溯。
 服务启停等**操作步骤见 [operations.md](operations.md)**；架构与契约见
@@ -90,7 +90,7 @@ conda run -n QED_env python -m ruff check backend tests
   `tests/contract/test_code_document_mapping.py`；架构变更运行
   `tests/contract/test_architecture_documents.py`；设计变更运行
   `tests/contract/test_design_documents.py`。
-- 文档体系规则（确定/相对确定/实时状态、版本机制、归档）见[文档规范](../standards/documentation.md)。
+- 文档体系规则（确定/相对确定/实时状态、版本机制、归档）见[文档治理规范](../standards/doc-governance.md)。
 
 ## 子项目开发速览
 
@@ -99,5 +99,5 @@ conda run -n QED_env python -m ruff check backend tests
 | Axiom-Flow | 8902（已迁移，2026-08-11 ALN-002；8000 兼容保留） | 分支 `release`，本地门禁 + 契约测试；启动/验证命令见 `Axiom-Flow/docs/guides/` |
 | QED-Tracker | 8901（已服务化，写操作后台任务 + 轮询） | 分支 `dev`→`release`→`main`；启动/验证命令见 `QED-Tracker/docs/guides/` |
 
-跨项目协作流程（根仓库不得产生子项目代码改动）见
-[跨项目协作流程](../standards/cross-project-collaboration.md)。
+跨项目协作规范（根仓库不得产生子项目代码改动）见
+[跨项目协作规范](../standards/cross-project-collaboration.md)。

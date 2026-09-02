@@ -1,6 +1,6 @@
 # ADR 0002：前端统一到 QED-Engine 与全局端口规划
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-04
 领域：工程治理
 决策阶段：v0.1
@@ -44,8 +44,8 @@ QED-Engine 下，需要明确前端归属与端口规划。
 - 关联设计：`docs/design/service-contracts.md`、`docs/design/configuration-and-secrets.md`、
   `docs/architecture/api-contracts.md`
 - 关联架构：`docs/architecture/four-service-architecture.md`
-- 关联计划：`../history/plans/2026-08/2026-08-sync-alignment.md`（已归档，原登记于
-  `docs/plans/2026-08-sync-alignment.md`，2026-08-10 REQ-024 清理时修正链接）
+- 关联计划：`../../../history/plans/2026-08/2026-08-sync-alignment.md`（已归档，原登记于
+   `docs/plans/2026-08-sync-alignment.md`，2026-08-10 REQ-024 清理时修正链接）
 - 关联 ADR：[ADR 0001](0001-root-contract-tests.md)（同轮治理对齐）
 - 勘误：2026-08-10（REQ-024 清理）：8901 已服务化、8903 已运行，端口表归属注记更新；
   关联计划 sync-alignment 已归档，链接改指历史路径。

@@ -3,7 +3,7 @@
 状态：In Progress
 任务类型：A
 最后更新：2026-08-04
-关联 ADR：`docs/adr/0001-root-contract-tests.md`、`docs/adr/0002-frontend-and-port-centralization.md`
+关联 ADR：`docs/history/adr/v0.1/0001-root-contract-tests.md`、`docs/history/adr/v0.1/0002-frontend-and-port-centralization.md`
 关联设计：`docs/architecture/four-service-architecture.md`
 关联 Tracker：`docs/trackers/todo.md`（REQ-001）
 归档判定：完成后 2026-08 计划目录进入 `docs/history/plans/2026-08/` 或按文档规范删除

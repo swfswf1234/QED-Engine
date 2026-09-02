@@ -1,6 +1,6 @@
 """
 模块职责：验证活跃文档入口、目录边界和 Agent 协议保持单一。
-设计关联（DesignRef）：docs/standards/documentation.md
+设计关联（DesignRef）：docs/standards/doc-governance.md
 实现状态：Current
 被测代码：README.md、AGENTS.md、docs、pyproject.toml
 守护面：文档结构与导航

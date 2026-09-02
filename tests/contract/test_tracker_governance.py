@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TRACKERS = ROOT / "docs" / "trackers"
 PLANS = ROOT / "docs" / "plans"
-TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-\d{3}")
+TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z])?")
 PLAN_LINK = re.compile(r"^\[(?P<title>[^]]+)]\(\.\./plans/(?P<path>[^)]+\.md)\)$")
 ACTIVE_STATUSES = {"Accepted", "In Progress", "Blocked"}
 
@@ -47,13 +47,13 @@ def _field(content: str, name: str) -> str:
 def _todo_rows() -> list[dict[str, str]]:
     return _table(
         TRACKERS / "todo.md",
-        ("ID", "类别", "类型", "优先级", "状态", "任务", "证据/下一条件"),
+        ("ID", "类别", "优先级", "状态", "任务", "证据/下一条件"),
     )
 
 
 def test_tracker_directory_has_exact_governed_files_and_index_links():
     # completed.md 为按需创建的关闭台账（见 task-lifecycle 终态规则）；project-status.md
-    # 为实时状态快照（ADR 0010 移入，见 documentation.md），其余文件必须齐全
+    # 为实时状态快照（ADR 0010 移入，见 doc-governance.md），其余文件必须齐全
     names = {path.name for path in TRACKERS.glob("*.md")}
     assert names <= {"index.md", "roadmap.md", "todo.md", "completed.md", "project-status.md"}
     assert {"index.md", "roadmap.md", "todo.md"} <= names
@@ -97,10 +97,9 @@ def test_task_categories_follow_hierarchy_enum():
 def test_todo_plan_rows_exactly_mirror_active_plan_bodies():
     plan_rows = {}
     for row in _todo_rows():
-        if row["类型"] != "Plan":
-            continue
         link = PLAN_LINK.fullmatch(row["任务"])
-        assert link, row["ID"]
+        if not link:
+            continue
         assert link.group("path") not in plan_rows
         plan_rows[link.group("path")] = (row, link.group("title"))
 

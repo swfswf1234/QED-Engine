@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PLANS = ROOT / "docs" / "plans"
 PLAN_INDEX = PLANS / "index.md"
-PLAN_FILE = re.compile(r"\d{4}-\d{2}-(?:v\d{2}-)?[a-z0-9]+(?:-[a-z0-9]+)*\.md")
+PLAN_FILE = re.compile(r"\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md")
 # 长期滚动文档豁免（REQ-062，2026-08-26 用户裁决）：AI 知识收件箱常驻 plans/ 但不是计划
 # ——不适用计划命名/元数据/todo 镜像治理，也不随任务归档；定位声明与例外依据见其头部。
 STANDING_DOCS = {"ai-agent-knowledge-inbox.md"}

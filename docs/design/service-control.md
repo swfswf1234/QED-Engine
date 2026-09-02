@@ -3,9 +3,10 @@
 设计状态：Accepted
 实现状态：Implemented
 最后更新：2026-08-17
+确认状态：暂定
 关联代码：`backend/qed_engine/services/service_manager.py`
 关联测试：`tests/test_api.py`、`tests/test_web.py`、`tests/test_qed_web_service.py`
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../adr/0008-frontend-react-refactor.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)
 
 ## 目的与边界
 

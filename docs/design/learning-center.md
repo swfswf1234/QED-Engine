@@ -3,8 +3,9 @@
 设计状态：Draft
 实现状态：In Progress
 最后更新：2026-08-17
+确认状态：暂定
 关联代码：web-ui/src/pages/Home.tsx（主界面学习中心框架）、web-ui/src/pages/Knowledge.tsx
-（课程图/知识行浏览，web-ui React 版；旧 web/ 三文件版已随 2026-08-17 切换退役）
+（课程图/教程浏览，web-ui React 版；旧 web/ 三文件版已随 2026-08-17 切换退役）
 关联测试：web-ui/src/App.test.tsx、web-ui/src/pages/*.test.tsx（vitest）；tests/test_web.py
 （web-ui 源码契约守护）
 关联 ADR：无

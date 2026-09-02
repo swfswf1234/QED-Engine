@@ -4,7 +4,7 @@
 最后更新：2026-08-20
 
 本文件只负责导航。项目定位、能力和快速启动见[根 README](../README.md)，Agent 执行总纲见
-[AGENTS.md](../AGENTS.md)，文档治理规则见[文档规范](standards/documentation.md)
+[AGENTS.md](../AGENTS.md)，文档治理规则见[文档治理规范](standards/doc-governance.md)
 （ADR 0010 确立「确定文档 / 相对确定 / 实时状态」三层结构）。
 
 | 目录 | 内容 | 索引 |

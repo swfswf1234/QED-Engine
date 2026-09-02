@@ -79,24 +79,11 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 ### 本地环境识别
 
-当 agent 检测到当前机器 UUID 为 `2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8` 时，必须遵循 [本地开发环境](docs/standards/local-dev.md) 中的配置约定，包括：
-- Conda 环境：`QED_env`（Python 3.12.0）
-- 前端环境：Node.js v24.16.0、npm 11.13.0
-- 代码改动后必须执行构建命令（前端：`npm run build && npm test`；后端：`pytest`）
-- 服务端口：前端 8903、后端 8900、Axiom-Flow 8902、QED-Tracker 8901
-
-其他环境需复制该文档并修改 UUID 和主机名。
+当 agent 检测到当前机器 UUID 为 `2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8` 时，必须遵循 [本地开发环境](docs/standards/local-dev.md) 中的配置约定，其他环境需复制该文档并修改 UUID 和主机名。
 
 ### 文档治理遵守
 
-修改文档或执行 todo 任务时，必须遵守 [文档治理规范](docs/standards/doc-governance.md) 中的规定，包括：
-- 文档分类与事实边界：不同目录保存不同事实，一个事实只设一个维护位置
-- 确认状态：已确认文档优先于暂定文档
-- 文档生命周期：新建文档按 todo → plans → design/architecture 流转
-- 任务与文档绑定：每个 todo 任务可关联 plans 文档
-- 写作与命名：中文说明使用短句，标识符保留英文，文件名使用小写连字符
-- 元数据：架构/设计文档需声明设计状态、实现状态、确认状态等
-- 归档与删除：关闭计划需用户判定 Retain 或 Delete
+修改文档或执行 todo 任务时，必须遵守 [文档治理规范](docs/standards/doc-governance.md) 中的规定，包括文档生命周期、确认状态和归档规则。
 
 ## 完成检查
 

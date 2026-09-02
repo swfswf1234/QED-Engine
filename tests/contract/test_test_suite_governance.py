@@ -1,9 +1,8 @@
 """
 模块职责：守护测试目录边界、根测试文件与文档治理测试的分层一致。
 设计关联（DesignRef）：docs/standards/testing.md
-设计关联（DesignRef）：docs/standards/governance-contract.md
 实现状态：Current
-被测代码：tests、pyproject.toml
+被测代码：tests、pyproject.toml、docs/standards/testing.md
 守护面：测试工程与门禁
 失效后果：测试分层、目录或门禁配置漂移，门禁失效
 """
@@ -16,16 +15,29 @@ TESTS = ROOT / "tests"
 
 
 def _governance_areas() -> set[str]:
-    """从治理契约规范正文提取守护面清单（表格第一列），保持单一事实源。"""
-    contract = (ROOT / "docs" / "standards" / "governance-contract.md").read_text(encoding="utf-8")
-    areas = set()
-    for line in contract.splitlines():
+    """从测试架构标准正文提取守护面清单（表格第一列），保持单一事实源。
+
+    「守护面清单」表格固定 3 列（治理面 / 守护内容 / 契约测试），首行为表头；
+    提取时校验格式，防止表格结构漂移导致清单静默失效。
+    """
+    standard = (ROOT / "docs" / "standards" / "testing.md").read_text(encoding="utf-8")
+    areas = {}
+    for line in standard.splitlines():
         if not line.startswith("| "):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 3 and cells[0] != "治理面" and not cells[0].startswith("---"):
-            areas.add(cells[0])
-    return areas
+        if len(cells) != 3:
+            continue
+        if cells[0] == "治理面":
+            assert cells == ["治理面", "守护内容", "契约测试"], "守护面清单表头漂移"
+            continue
+        if cells[0].startswith("---"):
+            continue
+        assert cells[0] and cells[1] and cells[2], f"守护面清单行不完整：{cells}"
+        assert cells[0] not in areas, f"守护面清单出现重复治理面：{cells[0]}"
+        areas[cells[0]] = cells
+    assert areas, "未从测试架构标准提取到任何守护面"
+    return set(areas)
 
 
 def test_test_directories_are_limited_to_contract_layer():
@@ -40,6 +52,7 @@ def test_root_test_files_are_the_config_center_suite():
         "test_api.py",
         "test_config.py",
         "test_cli.py",
+        "test_explore_sessions.py",
         "test_llm_call_log.py",
         "test_llm_clients.py",
         "test_llm_endpoints.py",

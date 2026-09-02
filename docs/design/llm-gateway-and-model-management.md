@@ -3,15 +3,16 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-20
+确认状态：暂定
 关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/model_manager.py`、`backend/qed_engine/services/llm/call_log.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（本设计落盘后的新增/改动模块；`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，本设计只在正文引用）
 关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_lmstudio_service.py`、`tests/test_qed_mineru_service.py`
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0005](../adr/0005-control-center-service-hosting.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)
 
 ## 背景与目的
 
 QED-Engine 三项目当前模型调用形态：
 
-- **根 `.env`**：密钥唯一事实源（`API_KEY` 唯一密钥 + `QED_API_PROVIDER` 选厂商；逐厂商 key 已取消），`configuration-and-secrets.md` 规定子项目各自内置 `.env`；QED-Tracker 无自身 `.env`，Axiom-Flow 虽有自身 `.env` 但与根密钥重复。
+- **根 `.env`**：密钥唯一事实源（`API_KEY` 唯一密钥 + `QED_API_PROVIDER` 选厂商；逐厂商 key 已取消），子项目公共键自 2026-08-26（REQ-063）起经「向上查找父目录 `.env`」由根兜底、不再重复持有；QED-Tracker 自身 `.env` 仅存私有底线键（API_KEY/QED_DB_PASSWORD 等），Axiom-Flow 侧精简见 REQ-003 备注（待其承接）。
 - **LLM 网关不存在**（文档记为第二轮规划）：8900 只有 `/monitor/lmstudio`、`/monitor/mineru` 探测端点，无真实调用能力。
 - **本地模型**：LM Studio（qwen 7b 量化，`http://127.0.0.1:5001`）已启动可用于测试；MinerU 容器编排脚本（`compose.yaml`/`infra-*.ps1`/`Dockerfile`）位于 Axiom-Flow 仓库 `scripts/`，由 Axiom-Flow 维护。
 - **前端控制台**：仅四服务卡 + MySQL 依赖卡；GPU/显存、文字/图像模型状态与调用记录均无展示。

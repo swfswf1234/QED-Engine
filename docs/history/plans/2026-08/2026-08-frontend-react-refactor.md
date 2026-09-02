@@ -3,8 +3,8 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-08-16
-关联 ADR：[ADR 0008](../../../adr/0008-frontend-react-refactor.md)（框架与工程化选型）、
-[ADR 0007](../../../adr/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../adr/0002-frontend-and-port-centralization.md)
+关联 ADR：[ADR 0008](../../../history/adr/v0.1/0008-frontend-react-refactor.md)（框架与工程化选型）、
+[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../history/adr/v0.1/0002-frontend-and-port-centralization.md)
 关联设计：[前端重构设计](../../../design/frontend-react-refactor.md)、
 [配置中心 API 契约](../../../architecture/api-contracts.md)（监控与诊断域登记，实施后置）、[服务控制设计](../../../design/service-control.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-011 登记；REQ-021 大变动同步承接文档）

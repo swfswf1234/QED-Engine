@@ -3,7 +3,7 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-08-16
-关联 ADR：[ADR 0007](../../../adr/0007-qed-engine-backend-gateway.md)、[ADR 0008](../../../adr/0008-frontend-react-refactor.md)
+关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../../../history/adr/v0.1/0008-frontend-react-refactor.md)
 关联设计：[../architecture/api-contracts.md](../../../architecture/api-contracts.md)（五合一角色与契约）、
 [backend-domain-split.md](../../../design/backend-domain-split.md)（三域）、
 [frontend-react-refactor.md](../../../design/frontend-react-refactor.md)（控制台/界面结构）、

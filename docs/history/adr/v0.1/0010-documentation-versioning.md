@@ -1,6 +1,6 @@
 # ADR 0010：文档体系分层与版本治理（确定文档 / 相对确定 / 实时状态）
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-20
 领域：工程治理
 决策阶段：v0.1
@@ -12,7 +12,7 @@
 项目从探索期进入稳定交付期，文档积累已覆盖全部子系统，但目录事实边界模糊：`architecture/`
 混放固定架构与实时状态快照，API 契约与数据库设计散落在 `design/`，guides 未区分操作与开发。
 2026-08-20 用户裁决重构文档体系，确立「确定文档 / 相对确定 / 实时状态」三层结构，并以
-QED-Engine 为范本对齐 Axiom-Flow 与 QED-Tracker。结构调整改变了[文档规范](../standards/documentation.md)
+QED-Engine 为范本对齐 Axiom-Flow 与 QED-Tracker。结构调整改变了[文档治理规范](../../../standards/doc-governance.md)
 的分类与事实归属（属 standards 实质规则变更），故本 ADR 先行登记。
 
 ## 决定
@@ -46,12 +46,12 @@ QED-Engine 为范本对齐 Axiom-Flow 与 QED-Tracker。结构调整改变了[�
 
 ## 关联
 
-- 关联设计：`docs/architecture/api-contracts.md`、`docs/architecture/../architecture/database-design.md`
+- 关联设计：`docs/architecture/api-contracts.md`、`docs/architecture/database-design.md`
   （本轮新建固定文档）、`docs/design/`（相对确定设计文档）
 - 关联架构：`docs/architecture/four-service-architecture.md`（总体架构）、
   `docs/architecture/frontend-architecture.md`、`docs/architecture/backend-architecture.md`、
   `docs/architecture/code-map.md`
-- 关联规范：[文档规范](../standards/documentation.md)、[ADR 治理规范](../standards/adr-governance.md)、
-  [任务生命周期](../standards/task-lifecycle.md)（本轮同步修订）
+- 关联规范：[文档治理规范](../../../standards/doc-governance.md)、[ADR 治理规范](../../../standards/adr-governance.md)、
+  [任务生命周期](../../../standards/task-lifecycle.md)（本轮同步修订）
 - 关联 ADR：[ADR 0001](0001-root-contract-tests.md)（工程治理契约测试）、
   [ADR 0006](0006-engineering-governance-contract.md)（治理契约范本）

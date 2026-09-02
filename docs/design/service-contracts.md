@@ -3,9 +3,10 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-17
+确认状态：暂定
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)、[ADR 0003](../adr/0003-shared-qed-database-independence.md)、[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)、[ADR 0009](../adr/0009-shared-qed-tables.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)
 
 ## 目的与边界
 
@@ -33,9 +34,9 @@
 
 ## 统一数据库（MySQL 8，qed 库）
 
-2026-08-04 用户裁决、[ADR 0003](../adr/0003-shared-qed-database-independence.md) 登记：新建
+2026-08-04 用户裁决、[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md) 登记：新建
 MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离，属独立性铁律的明确例外）。
-2026-08-16 [ADR 0009](../adr/0009-shared-qed-tables.md) 补充：新增 `qed_*` 共享前缀表族
+2026-08-16 [ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md) 补充：新增 `qed_*` 共享前缀表族
 （`qed_domain`/`qed_course` 课程体系元数据），所有权 QED-Tracker（建表维护），其他项目
 **只读不写**；共享表不复制 JSON，QED-Tracker 侧 `courses/math.json` 退役。
 表命名空间、表清单、关键字段、迁移与敏感字段规则见[数据库设计](../architecture/database-design.md)；
@@ -53,21 +54,21 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 
   | 端点 | 语义 |
   | --- | --- |
-  | `GET /knowledge?course_id=&status=` | 知识行列表（rejected/superseded 彻底隐藏由数据层保证） |
-  | `GET /knowledge/{id}` | 知识行详情（含所辖书行列表） |
-  | `POST /knowledge/{id}/confirm` `{"textbook_ref","exercise_ref","textbook_intro","exercise_intro"}` | 知识行 draft→confirmed（定稿：引用 {title,version} + 简介，均可空） |
-  | `POST /knowledge/{id}/complete` | 知识行 confirmed→completed（所辖书行全部 verified 聚合触发） |
-  | `POST /knowledge/{id}/reject` `{"reason"}` | 知识行否定（reason 必填；终态彻底隐藏） |
-  | `POST /knowledge/{id}/supersede` `{"reason"}` | 知识行过时（被新版本替代，reason 必填） |
-  | `POST /books` `{"knowledge_id","title",...}` | 新建书行候选（先登记再下载） |
+  | `GET /knowledge?course_id=&status=` | 教程列表（rejected/superseded 彻底隐藏由数据层保证） |
+  | `GET /knowledge/{id}` | 教程详情（含所辖书籍列表） |
+  | `POST /knowledge/{id}/confirm` `{"textbook_ref","exercise_ref","textbook_intro","exercise_intro"}` | 教程 draft→confirmed（定稿：引用 {title,version} + 简介，均可空） |
+  | `POST /knowledge/{id}/complete` | 教程 confirmed→completed（所辖书籍全部 verified 聚合触发） |
+  | `POST /knowledge/{id}/reject` `{"reason"}` | 教程否定（reason 必填；终态彻底隐藏） |
+  | `POST /knowledge/{id}/supersede` `{"reason"}` | 教程过时（被新版本替代，reason 必填） |
+  | `POST /books` `{"knowledge_id","title",...}` | 新建书籍候选（先登记再下载） |
   | `GET /books/{id}/sources` | 渠道尝试列表（详情弹窗；失败尝试留痕不展示由上游过滤） |
   | `POST /books/{id}/sources` `{"channel",...}` | 登记一次渠道尝试（ok 表达成败） |
   | `POST /books/{id}/register` `{"relative_path"}` | 人工下载登记（candidate→downloaded 直转，PDF 校验与改名落盘在 8901 侧） |
   | `POST /books/{id}/decide` / `start` / `fail` / `retry` | 候选→决定 / 决定→下载中 / 失败标记 / 失败重试 |
   | `POST /books/{id}/complete` `{"sha256","relative_path","page_count",...}` | 下载完成回填（服务端/自动下载链路；sha256+relative_path 必填） |
   | `POST /books/{id}/verify` | 人工验收通过（downloaded→verified 终态） |
-  | `POST /books/{id}/reject` `{"reason","note"}` | 书行否定（reason 必填，硬删+留痕；note 可选） |
-  | `POST /books/{id}/supersede` `{"reason"}` | 书行过时（版本换代留痕） |
+  | `POST /books/{id}/reject` `{"reason","note"}` | 书籍否定（reason 必填，硬删+留痕；note 可选） |
+  | `POST /books/{id}/supersede` `{"reason"}` | 书籍过时（版本换代留痕） |
 
   - `GET /catalogs`、`GET /catalogs/{id}`：内置 JSON 课程目录（math-qe），不受五表重构影响。
   - `/selections`、`/downloads`、`/resources` 等三表端点已随 QED-030/031 退役（8901 返回 404）；

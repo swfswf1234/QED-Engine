@@ -365,7 +365,7 @@ def test_knowledge_list_via_semantic_api(monkeypatch):
 
 
 def test_knowledge_detail_via_semantic_api(monkeypatch):
-    """GET /api/v1/knowledge/{id}：知识行详情（含所辖书行）经 8900。"""
+    """GET /api/v1/knowledge/{id}：教程详情（含所辖书籍）经 8900。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/knowledge/kn_abc"
@@ -425,7 +425,7 @@ def test_knowledge_reject_forwards_reason(monkeypatch):
 
 
 def test_knowledge_reject_without_reason_is_422(monkeypatch):
-    """知识行 reject 缺 reason：8900 直接 422，不发 8901。"""
+    """教程 reject 缺 reason：8900 直接 422，不发 8901。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
@@ -450,7 +450,7 @@ def test_knowledge_supersede_via_semantic_api(monkeypatch):
 
 
 def test_book_create_via_semantic_api(monkeypatch):
-    """POST /api/v1/books：新建书行候选（knowledge_id + title 必填）经 8900。"""
+    """POST /api/v1/books：新建书籍候选（knowledge_id + title 必填）经 8900。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/books"
@@ -552,7 +552,7 @@ def test_book_register_via_semantic_api(monkeypatch):
 
 
 def test_book_register_without_path_is_422(monkeypatch):
-    """书行 register 缺 relative_path：8900 直接 422。"""
+    """书籍 register 缺 relative_path：8900 直接 422。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
@@ -563,7 +563,7 @@ def test_book_register_without_path_is_422(monkeypatch):
 
 
 def test_book_state_actions_via_semantic_api(monkeypatch):
-    """POST /books/{id}/decide|start|fail|retry|verify：书行生命周期动作经 8900。"""
+    """POST /books/{id}/decide|start|fail|retry|verify：书籍生命周期动作经 8900。"""
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -623,7 +623,7 @@ def test_book_reject_forwards_reason_and_note(monkeypatch):
 
 
 def test_book_reject_without_reason_is_422(monkeypatch):
-    """书行 reject 缺 reason：8900 直接 422。"""
+    """书籍 reject 缺 reason：8900 直接 422。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
@@ -1207,7 +1207,7 @@ def _sync_tracker_handler(knowledge_rows, details):
 
 
 def test_axiom_sync_books_via_gateway(monkeypatch):
-    """POST /api/v1/books/sync：聚合 8901 verified 书行（仅 verified，课程名映射）→ 转发 8902。"""
+    """POST /api/v1/books/sync：聚合 8901 verified 书籍（仅 verified，课程名映射）→ 转发 8902。"""
 
     knowledge_rows = [
         {
@@ -1349,132 +1349,8 @@ def test_axiom_block_review_verdict_validation(monkeypatch):
     assert response.status_code == 422
 
 
-# --- 课程探索透传路由测试（REQ-054，PLAN-021 冻结端点） ---
-
-
-def test_explore_course_passthrough(monkeypatch):
-    """§1 POST /courses/{id}/explore → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(202, json={
-            "run_id": "exp_9f31c2", "task_id": "tk_5b20a1", "status": "running",
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
-    assert resp.status_code == 202
-    assert resp.json()["run_id"] == "exp_9f31c2"
-
-
-def test_explore_run_poll_passthrough(monkeypatch):
-    """§2 GET /explore-runs/{run_id} → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "run_id": "exp_9f31c2", "scope": "course", "status": "ready", "proposals": [],
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.get("/api/v1/explore-runs/exp_9f31c2")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ready"
-
-
-def test_explore_run_adopt_passthrough(monkeypatch):
-    """§3 POST /explore-runs/{run_id}/adopt → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "adopted": [{"knowledge_id": "kn_1", "set_name": "套一"}],
-            "remaining_slots": 3, "run": {"run_id": "exp_9f31c2", "status": "adopted"},
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/explore-runs/exp_9f31c2/adopt", json={"selected": ["pp_1"]})
-    assert resp.status_code == 200
-    assert resp.json()["adopted"][0]["knowledge_id"] == "kn_1"
-
-
-def test_explore_run_discard_passthrough(monkeypatch):
-    """§4 POST /explore-runs/{run_id}/discard → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"run_id": "exp_9f31c2", "status": "discarded"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/explore-runs/exp_9f31c2/discard")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "discarded"
-
-
-def test_explore_runs_history_passthrough(monkeypatch):
-    """§5 GET /courses/{id}/explore-runs → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=[{"run_id": "exp_1", "status": "adopted"}])
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.get("/api/v1/courses/01_math_analysis/explore-runs")
-    assert resp.status_code == 200
-    assert len(resp.json()) == 1
-
-
-def test_curriculum_explore_passthrough(monkeypatch):
-    """§6 POST /curriculum-explore → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(202, json={
-            "run_id": "cr_001", "task_id": "tk_c1", "status": "running",
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/curriculum-explore", json={
-        "domain_name": "计算机科学", "mode": "doc", "ref_doc_path": "/tmp/cs.txt",
-    })
-    assert resp.status_code == 202
-    assert resp.json()["run_id"] == "cr_001"
-
-
-def test_curriculum_run_poll_passthrough(monkeypatch):
-    """§7.1 GET /curriculum-runs/{run_id} → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "run_id": "cr_001", "scope": "curriculum", "status": "ready", "changes": [],
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.get("/api/v1/curriculum-runs/cr_001")
-    assert resp.status_code == 200
-    assert resp.json()["scope"] == "curriculum"
-
-
-def test_curriculum_run_apply_passthrough(monkeypatch):
-    """§7.2 POST /curriculum-runs/{run_id}/apply → 8901 透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "applied": [{"change_id": "ch_01", "entity": "domain", "target_id": "cs"}],
-            "conflicts": [], "run": {"run_id": "cr_001", "status": "applied"},
-        })
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/curriculum-runs/cr_001/apply", json={"selected": ["ch_01"]})
-    assert resp.status_code == 200
-    assert len(resp.json()["applied"]) == 1
-
-
-def test_explore_upstream_409_passthrough(monkeypatch):
-    """§1 8901 返回 409 CAPACITY_REACHED → 8900 原码透传。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(409, json={"detail": {"code": "CAPACITY_REACHED", "message": "已达上限"}})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "CAPACITY_REACHED"
-
-
-def test_explore_upstream_5xx_becomes_503(monkeypatch):
-    """§1 8901 返回 5xx → 8900 映射为 503。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, json={"detail": "internal error"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.post("/api/v1/courses/01_math_analysis/explore", json={"mode": "direct"})
-    assert resp.status_code == 503
+# 注：旧探索透传路由测试（PLAN-021 冻结端点 §1~§7.2）已随 B1 删除——8900 改由自有
+# /explore-sessions 会话端点承接探索（PLAN-022），见 tests/test_explore_sessions.py。
 
 
 # --- 领域只读/维护透传（REQ-059） ---
@@ -1611,14 +1487,3 @@ def test_structured_404_passthrough_not_rewritten(monkeypatch):
     resp = client.delete("/api/v1/domains/d1")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "DOMAIN_NOT_FOUND"
-
-
-def test_explore_route_upstream_405_not_normalized(monkeypatch):
-    """探索路由不做归一：上游 405 原样透传（归一仅限 §8 手工维护五路由）。"""
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(405, json={"detail": "Method Not Allowed"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    resp = client.get("/api/v1/explore-runs/run_001")
-    assert resp.status_code == 405
-    assert resp.json()["detail"] == "Method Not Allowed"

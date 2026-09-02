@@ -3,9 +3,10 @@
 设计状态：Accepted
 实现状态：Implemented
 最后更新：2026-08-17
+确认状态：暂定
 关联代码：`web-ui/src/`（React 重构版）、`scripts/serve_web.py`、`web-ui/.env.production`
 关联测试：`tests/test_web.py`（守护 serve_web + web-ui 源码契约）
-关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0007-qed-engine-backend-gateway.md`、`docs/adr/0008-frontend-react-refactor.md`
+关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`、`../history/adr/v0.1/0008-frontend-react-refactor.md`
 
 ## 目的与边界
 
@@ -32,12 +33,12 @@
 ## 信息架构（hash 路由，App.tsx）
 
 - `#/` 主界面（Home）：学习中心框架（领域→课程→章节/知识点浏览，数学试点）。
-- `#/knowledge` 学习中心（Knowledge）：课程图 + 知识行浏览。
+- `#/knowledge` 学习中心（Knowledge）：课程图 + 教程浏览。
 - `#/admin` 管理后台（AdminLayout 嵌套）：
   - `#/admin` 控制台（Console，index）：四服务卡（启停/重启 + message 成功失败提示）+
     依赖组件（MySQL）。
   - `#/admin/dashboard` 仪表盘（Dashboard）：服务在线 + 文档下载进度 + 文档解析进度。
-  - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书行卡片。
+  - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书籍卡片。
   - `#/admin/parsing` 文档解析管理（Parsing）：**左树右对照单视图**（2026-08-18 重构轮）——
     左树书目+进度（领域→课程→书目，af_books 冗余课程字段）、右侧原页图 + 块级渲染 +
     一致/不一致判定（PUT/GET review）；进入自动同步书目（POST /books/sync）。
@@ -50,8 +51,8 @@
 - **文档下载进度**：
   - **课程下载完成度饼图**（两段式：已完成/未完成）：分母 = 已探索课程数
     （`/catalogs/math-qe` targets course_id 去重，如数学 13 门）；分子 = 完成下载课程数
-    （该课程 ≥2 套教程完成验收——教程书行全部 verified——计为完成下载）；
-  - **教程下载工作量饼图**：每教程一块扇区，值 = 已下载书行数（downloaded+verified）；
+    （该课程 ≥2 套教程完成验收——教程书籍全部 verified——计为完成下载）；
+  - **教程下载工作量饼图**：每教程一块扇区，值 = 已下载书籍数（downloaded+verified）；
   - 统计行：教程数（kind=tutorial）/ 目标书目 / 已下载 / 已验收。
 - 8901 不可达 → 下载卡离线降级；catalog 不可达 → 课程饼图降级提示，不阻塞其他卡。
 

@@ -3,9 +3,10 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-20
+确认状态：已确认
 关联代码：服务各自代码见服务架构文档（前端/后端见本目录，Axiom-Flow/QED-Tracker 见各自仓库）
 关联测试：`tests/contract/test_architecture_documents.py`
-关联 ADR：`docs/adr/0002-frontend-and-port-centralization.md`、`docs/adr/0003-shared-qed-database-independence.md`、`docs/adr/0004-personal-library-positioning.md`、`docs/adr/0005-control-center-service-hosting.md`、`docs/adr/0007-qed-engine-backend-gateway.md`
+关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0003-shared-qed-database-independence.md`、`../history/adr/v0.1/0004-personal-library-positioning.md`、`../history/adr/v0.1/0005-control-center-service-hosting.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`
 
 ## 服务视图
 
@@ -19,10 +20,10 @@ flowchart LR
         FE[QED-Engine 前端<br/>学习中心 + 管理后台 8903]
         CC[QED-Engine 后端 8900<br/>控制域 + 数据域·Tracker + 数据域·Axiom]
     end
-    subgraph AF[QED-Engine 仓库/Axiom-Flow 子仓库]
+    subgraph AF[Axiom-Flow 子仓库（独立 git）]
         A[API + Worker 8902]
     end
-    subgraph TR[QED-Engine 仓库/QED-Tracker 子仓库]
+    subgraph TR[QED-Tracker 子仓库（独立 git）]
         T[下载/校验/登记服务 8901]
     end
 
@@ -44,8 +45,15 @@ flowchart LR
 | Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已迁移，8000 兼容保留，ADR 0002） | PDF 解析、OCR、质量审阅与知识发布；只保留 API + Worker | Axiom-Flow `docs/architecture/` |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901（已服务化） | 教材/习题集/论文的发现、下载、校验、登记；写操作后台任务 + 轮询 | QED-Tracker `docs/architecture/` |
 
-端口规划见 [ADR 0002](../adr/0002-frontend-and-port-centralization.md)；前端唯一入口与 8900
-网关化见 [ADR 0007](../adr/0007-qed-engine-backend-gateway.md)。
+端口规划见 [ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)；前端唯一入口与 8900
+网关化见 [ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)。
+
+## 项目定位
+
+本项目是长期演进中的**个人图书馆（Personal Library）**系统，当前以高等数学学习起步；个人核心
+领域为数学与计算机科学（AI 方向），后续随学习需求扩展。资料类型覆盖教材、习题集、论文、博客与
+官方文档；学习交互参考港大 DeepTutor 等前沿智能学习项目。项目仍处探索阶段，形态随学习需求
+持续演进（源自 [ADR 0004](../history/adr/v0.1/0004-personal-library-positioning.md)）。
 
 ## 三中心产品形态
 
@@ -60,8 +68,8 @@ flowchart LR
 - Axiom-Flow 与 QED-Tracker 未启动时，QED-Engine 前端对话/展示必须正常，管理界面显示服务离线。
 - QED-Engine 配置中心离线时，Axiom-Flow 与 QED-Tracker 用本地默认配置降级运行。
 - 三个项目各自独立部署、独立升级，不共享 Python 包或代码仓库；MySQL 例外为共享 `qed` 库实例
-  （[ADR 0003](../adr/0003-shared-qed-database-independence.md)），以 `qt_*`/`af_*` 表命名空间
-  隔离、`qed_*` 共享表族例外（[ADR 0009](../adr/0009-shared-qed-tables.md)）。
+  （[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)），以 `qt_*`/`af_*` 表命名空间
+  隔离、`qed_*` 共享表族例外（[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)）。
 - 跨项目传递只通过：HTTP 接口、共享 dataset 目录、环境变量与表隔离的共享 qed 库（见
   [统一配置与密钥规范](../design/configuration-and-secrets.md)）。
 

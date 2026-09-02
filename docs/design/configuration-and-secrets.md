@@ -3,9 +3,10 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-26
+确认状态：暂定
 关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](../architecture/api-contracts.md)）
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)
 
 ## 目的与边界
 

@@ -3,8 +3,8 @@
 状态：In Progress
 任务类型：B
 最后更新：2026-08-23
-关联 ADR：[ADR 0011](../../../adr/0011-pending-design-location.md)（本文档承载待评审设计）、
-[ADR 0009](../../../adr/0009-shared-qed-tables.md)（共享表族所有权）、[ADR 0003](../../../adr/0003-shared-qed-database-independence.md)（独立性铁律例外）
+关联 ADR：[ADR 0011](../../../history/adr/v0.1/0011-pending-design-location.md)（本文档承载待评审设计）、
+[ADR 0009](../../../history/adr/v0.1/0009-shared-qed-tables.md)（共享表族所有权）、[ADR 0003](../../../history/adr/v0.1/0003-shared-qed-database-independence.md)（独立性铁律例外）
 关联设计：[dataset-conventions.md](../../../design/dataset-conventions.md)（现行约定，本计划确定后由其承接更新）、
 [configuration-and-secrets.md](../../../design/configuration-and-secrets.md)（变量表届时补 QED_DATA_ROOT）
 关联 Tracker：docs/trackers/todo.md（主线 ARCH-019；本计划行 PLAN-019；支线 REQ-051、REQ-052）
@@ -27,7 +27,7 @@
 
 - 范围：DB 备份/清理方案、dataset 新目录规范、`QED_DATA_ROOT` 变量设计、存量文件迁移映射、
   三项目改动清单。
-- 非目标：探索端点与界面（见 [exploration-ui](../../../plans/2026-08-arch019-exploration-ui.md) /
+- 非目标：探索端点与界面（见 [exploration-ui](../../../plans/2026-08-23-arch019-exploration-ui.md) /
   exploration-api 两计划（后者已移除））；Axiom-Flow parsed 产物的
   内容格式（归 ALN-003/V2 后续轮）。
 

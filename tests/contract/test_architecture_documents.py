@@ -31,6 +31,7 @@ VALID_IMPLEMENTATION_STATUSES = {
     "Blocked",
     "Completed",
 }
+VALID_CONFIRM_STATUSES = {"暂定", "已确认"}
 
 
 def _mermaid(document: str) -> list[str]:
@@ -52,6 +53,12 @@ def test_architecture_directory_has_one_index_and_current_documents():
     index = (ARCHITECTURE / "index.md").read_text(encoding="utf-8")
     for document in CURRENT_DOCUMENTS:
         assert f"]({document})" in index
+
+
+def test_every_architecture_document_declares_confirm_status():
+    for document in CURRENT_DOCUMENTS:
+        content = (ARCHITECTURE / document).read_text(encoding="utf-8")
+        assert _field(content, "确认状态") in VALID_CONFIRM_STATUSES, document
 
 
 def test_service_architecture_documents_declare_metadata():

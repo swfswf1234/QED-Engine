@@ -1,6 +1,6 @@
 # ADR 0004：项目定位为个人图书馆与三中心形态
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-09
 领域：架构与边界
 决策阶段：v0.1
@@ -35,7 +35,7 @@
 
 ## 关联
 
-- 关联设计：[learning-center.md](../design/learning-center.md)（学习中心探索）、
-  [course-acquisition-flow.md](../design/course-acquisition-flow.md)（课程收集流程）
+- 关联设计：[learning-center.md](../../../design/learning-center.md)（学习中心探索）、
+  [course-acquisition-flow.md](../../../design/course-acquisition-flow.md)（课程收集流程）
 - 关联文档：`README.md`、`AGENTS.md`
 - 关联 ADR：无

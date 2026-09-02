@@ -38,6 +38,7 @@ VALID_IMPLEMENTATION_STATUSES = {
     "Blocked",
     "Completed",
 }
+VALID_CONFIRM_STATUSES = {"暂定", "已确认"}
 PATH_REFERENCE = re.compile(r"`((?:src|tests|scripts)/[^`]+)`")
 
 
@@ -59,6 +60,7 @@ def test_every_current_design_declares_complete_metadata():
         content = (DESIGN / document).read_text(encoding="utf-8")
         assert _field(content, "设计状态") in VALID_DESIGN_STATUSES, document
         assert _field(content, "实现状态") in VALID_IMPLEMENTATION_STATUSES, document
+        assert _field(content, "确认状态") in VALID_CONFIRM_STATUSES, document
         _field(content, "最后更新")
         _field(content, "关联代码")
         _field(content, "关联测试")

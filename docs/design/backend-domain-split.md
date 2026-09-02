@@ -3,6 +3,7 @@
 设计状态：Superseded
 实现状态：Implemented
 最后更新：2026-08-20
+确认状态：暂定
 
 > 勘误：2026-08-20 文档规范轮——ARCH-012 已实施完成，本设计的目标态契约并入
 > [backend-architecture](../architecture/backend-architecture.md)，本文件保留为审计留档。
@@ -11,8 +12,8 @@
 `services/log_viewer.py`、`services/monitor.py` 在实现轮落地后登记 [code-map](../architecture/code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`（迁移后保持全绿；新增
 `tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`）
-关联 ADR：[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（8900 网关化）、
-[ADR 0008](../adr/0008-frontend-react-refactor.md)（前端重构，后端改造独立成轮与之并行）
+关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（8900 网关化）、
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端重构，后端改造独立成轮与之并行）
 
 > 实现轮计划：[ARCH-012 后端三域拆分轮](../history/plans/2026-08/2026-08-backend-domain-refactor.md)（Achieved，2026-08-21 已关闭归档）。
 

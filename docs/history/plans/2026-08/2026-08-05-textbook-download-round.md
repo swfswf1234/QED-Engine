@@ -2,11 +2,15 @@
 
 状态：Accepted
 任务类型：B
-最后更新：2026-08-05
-关联 ADR：[ADR 0001](../adr/0001-root-contract-tests.md)、[ADR 0002](../adr/0002-frontend-and-port-centralization.md)
+最后更新：2026-09-01
+关联 ADR：[ADR 0001](../history/adr/v0.1/0001-root-contract-tests.md)、[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)
 关联设计：[服务契约](../design/service-contracts.md)、[dataset 目录约定](../design/dataset-conventions.md)、[统一配置与密钥规范](../design/configuration-and-secrets.md)、[配置中心 API 契约](../architecture/api-contracts.md)；QED-Tracker [服务接口设计](../../QED-Tracker/docs/design/tracker-service.md)（子仓库）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-002 及 REQ-001~015；子项目 QED-Tracker QED-008~016、Axiom-Flow ALN-001~007）
 归档判定：全链路联调验收通过后 Completed，Retain 归档至 `history/plans/2026-08/`
+
+> **归档说明（2026-09-01）**：本计划概念（教材下载、LLM 筛选、三表模型方向、下载工作台）
+> 已被 ARCH-019（课程下载轮）继承；数据模型已过时（qt_resources → qt_knowledge/qt_books/qt_sources）。
+> 保留供历史参考。
 
 ## 目标与成功标准
 

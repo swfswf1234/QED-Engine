@@ -1,6 +1,6 @@
 # ADR 0003：三项目共享 qed 数据库与独立性铁律修订
 
-状态：Accepted
+状态：Superseded
 日期：2026-08-05
 领域：架构与边界
 决策阶段：v0.1
@@ -41,7 +41,7 @@ Python 包、**数据库**或代码仓库"，与统一 `qed` 库决策直接冲�
 
 - 关联设计：`docs/design/service-contracts.md`（独立性约定、统一数据库章节）、
   `docs/design/configuration-and-secrets.md`（QED_DB_* 唯一事实源）
-- 关联计划：`docs/plans/2026-08-textbook-download-round.md`（目标 1：统一数据库落地）
+- 关联计划：`docs/plans/2026-08-05-textbook-download-round.md`（目标 1：统一数据库落地）
 - 关联 ADR：[ADR 0002](0002-frontend-and-port-centralization.md)（端口与归属规划，本决定为其
-  数据层配套）；QED-Tracker [ADR 0001](../../QED-Tracker/docs/adr/0001-tracker-service-architecture.md)
+  数据层配套）；   QED-Tracker [ADR 0001](../../../../QED-Tracker/docs/adr/0001-tracker-service-architecture.md)
   （服务化架构，子仓库独立编号）

@@ -3,12 +3,13 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-08-16
+确认状态：暂定
 关联代码：—（本文件只做编排，不映射具体模块；契约事实源为各关联文档）
 关联测试：—（分组独立性由既有契约测试守护：test_web / test_api / test_tracker_client）
-关联 ADR：[ADR 0002](../adr/0002-frontend-and-port-centralization.md)（端口规划）、
-[ADR 0007](../adr/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
-[ADR 0008](../adr/0008-frontend-react-refactor.md)（前端重构）、
-[ADR 0009](../adr/0009-shared-qed-tables.md)（qed_* 共享表族）
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)（端口规划）、
+[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端重构）、
+[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)（qed_* 共享表族）
 
 ## 目的与边界
 
