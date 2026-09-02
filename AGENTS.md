@@ -32,6 +32,10 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 状态、三中心定位与当前主线一览（30 秒了解项目到哪）。未关闭任务与未来方向分别见
 [任务台账](docs/trackers/todo.md) 与[能力路线图](docs/trackers/roadmap.md)。
 
+**文档优先级**：agent 与项目开发优先读取**已确认文档**（当前：`standards/doc-governance.md`、
+`standards/local-dev.md`；`architecture/`、`design/` 与其余 standards 文档目前为**暂定**，可读
+可执行但待评审）。文档链路规则见[文档治理规范](docs/standards/doc-governance.md)。
+
 ## 四个服务与独立性
 
 | 服务 | 位置 | 端口 | 实现状态 | 职责 |
@@ -52,7 +56,8 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 | 项目当前状态（开发状态指针） | [docs/trackers/project-status.md](docs/trackers/project-status.md) |
 | 系统结构与服务边界（固定架构文档） | [docs/architecture/](docs/architecture/index.md)：总体架构、服务架构、固定 API 文档（[api-contracts.md](docs/architecture/api-contracts.md)）、数据库总纲（[database-design.md](docs/architecture/database-design.md)）、映射见 [code-map.md](docs/architecture/code-map.md) |
 | 服务契约、dataset 约定、统一配置接口（相对确定设计文档） | [docs/design/](docs/design/index.md) |
-| 工程治理规则（文档规范等） | `docs/standards/` 是工程治理规则的唯一事实源，入口 [docs/standards/](docs/standards/index.md)，具体采用 [任务生命周期](docs/standards/task-lifecycle.md)、[文档规范](docs/standards/documentation.md)、[ADR 治理](docs/standards/adr-governance.md)、[代码与文档追溯](docs/standards/code-document-traceability.md)、[测试架构与门禁](docs/standards/testing.md)、[工程治理契约](docs/standards/governance-contract.md)、[跨项目协作流程](docs/standards/cross-project-collaboration.md) |
+| 工程治理规则（文档规范等） | `docs/standards/` 是工程治理规则的唯一事实源，入口 [docs/standards/](docs/standards/index.md)，具体采用 [任务生命周期](docs/standards/task-lifecycle.md)、[文档治理规范](docs/standards/doc-governance.md)、[ADR 治理](docs/standards/adr-governance.md)、[代码与文档追溯](docs/standards/code-document-traceability.md)、[测试架构与门禁](docs/standards/testing.md)、[跨项目协作规范](docs/standards/cross-project-collaboration.md)（已确认：文档治理规范、本地开发环境、代码与文档追溯、跨项目协作规范、ADR 治理；其余暂定） |
+| 本地开发环境 | [docs/standards/local-dev.md](docs/standards/local-dev.md)：机器标识、环境依赖、构建命令与开发约定 |
 | 开发/联调步骤 | [docs/guides/](docs/guides/index.md) |
 | 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md)，任务台账 [todo.md](docs/trackers/todo.md) |
 | 长期决策（ADR） | [docs/adr/](docs/adr/index.md) |
@@ -65,21 +70,33 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 - 技能清单（精简保留）：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`requesting-code-review`、`receiving-code-review`。
 - 已移出禁用：`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
-- **跨项目协作（硬性边界，2026-08-16 亡羊补牢强化）**：根仓库 agent（含派发的 subagent）
-  在 Axiom-Flow / QED-Tracker 工作区的合法动作**仅限：① 读取；② 修改其文档（设计/计划/
-  todo 登记等）**——**不得产生任何代码改动**。任何涉及子项目代码的任务，一律走：
-  根仓库 todo 登记请求（标注「请求：<目标仓库>」）→ 在对方仓库建设计文档 + todo 条目
-  （我们只写文档）→ 用户评审确认 → 由对方项目执行 → 回执。**用户口头指令「优化/改造某
-  子项目服务」不豁免此流程**（代码改动必须由对方仓库执行）。误产生的子项目代码改动须登记
-  移交（对方审阅后自行提交）。规则见
-  [跨项目协作流程](docs/standards/cross-project-collaboration.md)；收到对方发起的配合需求时，
-  先评审后执行。
-- **子项目 git 操作边界（2026-08-16 用户裁决固化）**：**Axiom-Flow / QED-Tracker 的 git
-  提交与推送一律不归根仓库 agent 执行**——即使其工作区存在未提交改动（无论改动由谁产生）、
-  即使「上传 GitHub」之类的用户指令包含子项目，根仓库 agent 也只做**只读检查**（git status/
-  log/diff 等）并向用户报告状态，提交/推送由用户或对方仓库自行执行；用户明确逐个授权
-  例外时才可代执行。
+- **跨项目协作**：规则见[跨项目协作规范](docs/standards/cross-project-collaboration.md)。
+  核心要点：① 根仓库 agent 在子项目工作区只读+写文档，不得产生代码改动；② 子项目 git
+  提交/推送不归根仓库 agent 执行；③ 误产生的代码改动须登记移交。
 - 中文交流；文档默认中文，标识符/API 字段保持英文。
+
+## 执行规范
+
+### 本地环境识别
+
+当 agent 检测到当前机器 UUID 为 `2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8` 时，必须遵循 [本地开发环境](docs/standards/local-dev.md) 中的配置约定，包括：
+- Conda 环境：`QED_env`（Python 3.12.0）
+- 前端环境：Node.js v24.16.0、npm 11.13.0
+- 代码改动后必须执行构建命令（前端：`npm run build && npm test`；后端：`pytest`）
+- 服务端口：前端 8903、后端 8900、Axiom-Flow 8902、QED-Tracker 8901
+
+其他环境需复制该文档并修改 UUID 和主机名。
+
+### 文档治理遵守
+
+修改文档或执行 todo 任务时，必须遵守 [文档治理规范](docs/standards/doc-governance.md) 中的规定，包括：
+- 文档分类与事实边界：不同目录保存不同事实，一个事实只设一个维护位置
+- 确认状态：已确认文档优先于暂定文档
+- 文档生命周期：新建文档按 todo → plans → design/architecture 流转
+- 任务与文档绑定：每个 todo 任务可关联 plans 文档
+- 写作与命名：中文说明使用短句，标识符保留英文，文件名使用小写连字符
+- 元数据：架构/设计文档需声明设计状态、实现状态、确认状态等
+- 归档与删除：关闭计划需用户判定 Retain 或 Delete
 
 ## 完成检查
 
