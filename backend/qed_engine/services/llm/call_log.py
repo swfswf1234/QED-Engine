@@ -20,25 +20,51 @@ logger = logging.getLogger("qed_engine.llm")
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS qed_llm_calls (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  service VARCHAR(32) NOT NULL,
-  mode VARCHAR(16) NOT NULL,
-  provider VARCHAR(32) NOT NULL,
-  model VARCHAR(64) NOT NULL,
-  endpoint VARCHAR(16) NOT NULL,
-  prompt_template VARCHAR(255),
-  prompt MEDIUMTEXT,
-  response MEDIUMTEXT,
-  duration_ms INT,
-  status VARCHAR(16) NOT NULL,
-  error VARCHAR(500),
-  created_at DATETIME NOT NULL,
-  task VARCHAR(64),
-  step VARCHAR(32),
-  review_status VARCHAR(16) DEFAULT 'unreviewed',
-  review_note VARCHAR(1000) DEFAULT ''
+  id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
+  service VARCHAR(32) NOT NULL COMMENT '调用方标识：qed_engine/qed_tracker/axiom_flow',
+  mode VARCHAR(16) NOT NULL COMMENT '调用模式：api（经 8900 网关）/ local（直连厂商）',
+  provider VARCHAR(32) NOT NULL COMMENT '模型提供方：qwen/deepseek/glm/lmstudio/gateway',
+  model VARCHAR(64) NOT NULL COMMENT '实际模型名（如 qwen-plus、qwen3.7-plus）',
+  endpoint VARCHAR(16) NOT NULL COMMENT '调用类型：text/vision/embedding',
+  prompt_template VARCHAR(255) COMMENT '模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）',
+  prompt MEDIUMTEXT COMMENT '完整 prompt（JSON 序列化的 messages 数组）',
+  response MEDIUMTEXT COMMENT '模型原始响应文本',
+  duration_ms INT COMMENT '调用耗时（毫秒）',
+  status VARCHAR(16) NOT NULL COMMENT '调用结果：success/error',
+  error VARCHAR(500) COMMENT '失败原因（截断至 500 字符）',
+  created_at DATETIME NOT NULL COMMENT 'UTC 调用时间',
+  task VARCHAR(64) COMMENT '任务标识（REQ-060 扩展，如 paper-plan、domain-explore）',
+  step VARCHAR(32) COMMENT '步骤标识（REQ-060 扩展，如 plan、assess、domain）',
+  review_status VARCHAR(16) DEFAULT 'unreviewed' COMMENT '审核态：unreviewed/passed/rejected（REQ-060 扩展）',
+  review_note VARCHAR(1000) DEFAULT '' COMMENT '审核备注（REQ-060 扩展）'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='LLM 调用审计表：一行 = 一次 LLM 调用（成功或失败），记录完整 prompt 输入、模型响应、耗时与审核态（三项目共用，service 区分调用方）'
 """
+
+# 列注释注册表（与 shared-tables.md 表3 列说明一致）；ensure_comments 用其幂等补齐存量表。
+_COLUMN_COMMENTS: dict[str, str] = {
+    "service": "调用方标识：qed_engine/qed_tracker/axiom_flow",
+    "mode": "调用模式：api（经 8900 网关）/ local（直连厂商）",
+    "provider": "模型提供方：qwen/deepseek/glm/lmstudio/gateway",
+    "model": "实际模型名（如 qwen-plus、qwen3.7-plus）",
+    "endpoint": "调用类型：text/vision/embedding",
+    "prompt_template": "模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）",
+    "prompt": "完整 prompt（JSON 序列化的 messages 数组）",
+    "response": "模型原始响应文本",
+    "duration_ms": "调用耗时（毫秒）",
+    "status": "调用结果：success/error",
+    "error": "失败原因（截断至 500 字符）",
+    "created_at": "UTC 调用时间",
+    "task": "任务标识（REQ-060 扩展，如 paper-plan、domain-explore）",
+    "step": "步骤标识（REQ-060 扩展，如 plan、assess、domain）",
+    "review_status": "审核态：unreviewed/passed/rejected（REQ-060 扩展）",
+    "review_note": "审核备注（REQ-060 扩展）",
+}
+
+TABLE_COMMENT = (
+    "LLM 调用审计表：一行 = 一次 LLM 调用（成功或失败），记录完整 prompt 输入、"
+    "模型响应、耗时与审核态（三项目共用，service 区分调用方）"
+)
 
 INSERT_SQL = """
 INSERT INTO qed_llm_calls
@@ -103,6 +129,57 @@ def ensure_columns(settings: Settings) -> list[str]:
                     added.append(col)
         conn.commit()
         return added
+    finally:
+        conn.close()
+
+
+def _default_sql(value, col_type: str) -> str:
+    """列默认值重建（与 QED-Tracker 迁移 0007 同策略：字符串加引号、其余直写）。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return f"DEFAULT '{value.replace(chr(39), chr(39) * 2)}'"
+    return f"DEFAULT {value}"
+
+
+def ensure_comments(settings: Settings) -> list[str]:
+    """幂等补齐表注释与列注释（对比 information_schema，仅不一致列 ALTER）。
+
+    自增主键 `id` 跳过（MODIFY 需保留 AUTO_INCREMENT 属性，注释固定随建表 DDL）。
+    返回本次被 ALTER 的列名；数据库不可达时抛异常由调用方降级。
+    """
+    conn = _connect(settings)
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            # 表注释校正（幂等，无列级副作用）
+            cursor.execute(
+                "ALTER TABLE qed_llm_calls COMMENT = "
+                f"'{TABLE_COMMENT.replace(chr(39), chr(39) * 2)}'"
+            )
+            cursor.execute(
+                "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT "
+                "FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'qed_llm_calls'",
+                (settings.qed_db_name,),
+            )
+            rows = cursor.fetchall()
+            altered: list[str] = []
+            for row in rows:
+                name = row["COLUMN_NAME"]
+                if name == "id" or name not in _COLUMN_COMMENTS:
+                    continue
+                if row["COLUMN_COMMENT"] == _COLUMN_COMMENTS[name]:
+                    continue
+                null_sql = "NULL" if row["IS_NULLABLE"] == "YES" else "NOT NULL"
+                comment_sql = _COLUMN_COMMENTS[name].replace(chr(39), chr(39) * 2)
+                cursor.execute(
+                    f"ALTER TABLE qed_llm_calls MODIFY COLUMN `{name}` {row['COLUMN_TYPE']} "
+                    f"{null_sql} {_default_sql(row['COLUMN_DEFAULT'], row['COLUMN_TYPE'])} "
+                    f"COMMENT '{comment_sql}'"
+                )
+                altered.append(name)
+        conn.commit()
+        return altered
     finally:
         conn.close()
 

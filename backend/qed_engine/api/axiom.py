@@ -4,7 +4,7 @@
 本模块暴露，内部经 clients/axiom_client.py 适配 8902。契约按 Axiom-Flow
 8902-integration-contract.md（V2-007 冻结草案）与 af-books-sync.md（REQ-042 同步开发）：
 GET /books、GET /books/{id}/pages/{no}、GET /books/{id}/manifest、POST /parse-jobs、
-GET /parse-jobs/{id}、POST /books/sync（聚合 8901 verified 书行转发 8902 upsert）、
+GET /parse-jobs/{id}、POST /books/sync（聚合 8901 verified 书籍转发 8902 upsert）、
 PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（块判定）。
 
 错误映射：8902 返回 4xx（400 参数非法 / 404 book/page 不存在）→ 同码透传 detail；
@@ -58,9 +58,9 @@ def _call(request: Request, fn, *args, **kwargs):
 
 
 def _verified_books_from_tracker(request: Request) -> list[dict]:
-    """聚合 8901 已验证（verified）书行，归一化为 af_books 同步 payload。
+    """聚合 8901 已验证（verified）书籍，归一化为 af_books 同步 payload。
 
-    取数：/knowledge 列表 + 逐行 /knowledge/{id} 详情（书行在详情内，书目少可 N+1）；
+    取数：/knowledge 列表 + 逐行 /knowledge/{id} 详情（书籍在详情内，书目少可 N+1）；
     课程名经 /catalogs/math-qe 映射（缺失时回退 course_id 原文）。
     8901 不可达（list_knowledge 失败）→ TrackerError → 503 由调用方映射。
     """
@@ -115,7 +115,7 @@ def list_books(request: Request) -> list:
 
 @router.post("/books/sync")
 def sync_books(request: Request) -> dict:
-    """同步已验证书目：聚合 8901 verified 书行 → 8902 upsert af_books（幂等）。
+    """同步已验证书目：聚合 8901 verified 书籍 → 8902 upsert af_books（幂等）。
 
     文档解析管理进入界面/点「同步书目」触发（REQ-042 用户裁决：前端触发同步）。
     """

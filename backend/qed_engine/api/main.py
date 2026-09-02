@@ -65,11 +65,21 @@ def create_app(
     _startup_llm_check(resolved)
     app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url)
     app.state.axiom_client = axiom_client or AxiomClient(base_url=resolved.qed_axiom_url)
+    from qed_engine.services.explore_sessions import ExploreSessionManager
+
+    # 测试注入 tracker_client（MockTransport）时 dry-run 复用同一客户端；
+    # 生产环境由 manager 自建长超时客户端（LLM 管线数分钟）
+    app.state.explore_sessions = ExploreSessionManager(
+        resolved,
+        tracker_client=app.state.tracker_client,
+        dry_run_client=tracker_client,
+    )
     configure_services(resolved)
     try:
         llm_call_log.ensure_table(resolved)
+        llm_call_log.ensure_comments(resolved)
     except Exception as exc:  # 数据库不可达：降级日志，不阻塞启动
-        logger.warning("qed_llm_calls 建表跳过（数据库不可达）：%s", type(exc).__name__)
+        logger.warning("qed_llm_calls 建表/注释补齐跳过（数据库不可达）：%s", type(exc).__name__)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -94,6 +104,9 @@ def create_app(
     app.include_router(control_router)
     app.include_router(tracker_router)
     app.include_router(axiom_router)
+    from qed_engine.api.explore import router as explore_router
+
+    app.include_router(explore_router)
     return app
 
 
