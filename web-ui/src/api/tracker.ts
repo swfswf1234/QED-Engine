@@ -2,14 +2,14 @@
  * 数据域·QED-Tracker 端点封装（8900 唯一入口，ADR 0007）
  * 契约来源：backend/qed_engine/api/tracker.py（透传 8901 /api/v1，五层模型 QED-031）
  * - /catalogs/{catalog_id}：课程目录（targets 提供课程结构，文档下载管理主数据源）
- * - /knowledge：知识行列表（一套教程/延展资料归类；可 course_id/status 过滤）
- * - /knowledge/{id}：知识行详情（含所辖书行 books）
- * - /books、/books/{id}/sources、/books/{id}/...：书行全生命周期操作
+ * - /knowledge：教程列表（一套教程/延展资料归类；可 course_id/status 过滤）
+ * - /knowledge/{id}：教程详情（含所辖书籍 books）
+ * - /books、/books/{id}/sources、/books/{id}/...：书籍全生命周期操作
  */
 import { api, type ApiRequestOptions } from './client';
 import type {
-  BookRecord, Catalog, CourseRecord, CurriculumRun, DomainSystem, ExploreAdoptResult, ExploreLaunchResult, ExploreRun,
-  ExploreLaunchMode, ExploreRunSummary, KnowledgeDetail, KnowledgeRecord, SourceRecord,
+  BookRecord, Catalog, CourseRecord, DomainSystem, ExploreApplyResult, ExploreLaunchMode,
+  ExploreSessionRecord, KnowledgeDetail, KnowledgeRecord, SourceRecord,
 } from '../stores';
 
 /** 内置目录 id（冻结目录 math-qe，QED-Tracker catalog.py） */
@@ -25,7 +25,7 @@ export interface ListKnowledgeParams {
   status?: string;
 }
 
-/** GET /api/v1/knowledge：知识行列表（rejected/superseded 由上游数据层彻底隐藏） */
+/** GET /api/v1/knowledge：教程列表（rejected/superseded 由上游数据层彻底隐藏） */
 export async function listKnowledge(
   params?: ListKnowledgeParams,
   opts?: ApiRequestOptions,
@@ -67,6 +67,38 @@ export function deleteDomain(domainId: string, opts?: ApiRequestOptions): Promis
   return api.del<void>(`/domains/${domainId}`, opts);
 }
 
+export interface ExploreDomainBody {
+  mode?: string;
+  ref_text?: string;
+  ref_doc_path?: string;
+}
+
+/** POST /api/v1/domains/{id}/explore：启动领域探索（REQ-067 B2；202 异步任务） */
+export function exploreDomain(domainId: string, body?: ExploreDomainBody, opts?: ApiRequestOptions): Promise<{ task_id?: string }> {
+  return api.post(`/domains/${domainId}/explore`, body ?? {}, opts);
+}
+
+export interface ConfirmDomainNameBody {
+  decision: 'accept' | 'custom' | 'retain';
+  name?: string;
+}
+
+/** POST /api/v1/domains/{id}/confirm-name：确认领域名称（REQ-067 B7） */
+export function confirmDomainName(domainId: string, body: ConfirmDomainNameBody, opts?: ApiRequestOptions): Promise<void> {
+  return api.post(`/domains/${domainId}/confirm-name`, body, opts);
+}
+
+export interface ImportDomainResult {
+  domain_id: string;
+  courses_created: number;
+  courses_updated: number;
+}
+
+/** POST /api/v1/domains/import：手动领域 JSON 导入（REQ-067 B3，QED-050） */
+export function importDomain(domainData: Record<string, unknown>, opts?: ApiRequestOptions): Promise<ImportDomainResult> {
+  return api.post<ImportDomainResult>('/domains/import', { domain: domainData }, opts);
+}
+
 export interface CreateCourseBody {
   name: string;
   stage?: string;
@@ -90,12 +122,12 @@ export function updateCourse(courseId: string, body: UpdateCourseBody, opts?: Ap
   return api.patch<CourseRecord>(`/courses/${courseId}`, body, opts);
 }
 
-/** DELETE /api/v1/courses/{id}:删除课程（存在知识行时上游 409 保护） */
+/** DELETE /api/v1/courses/{id}:删除课程（存在教程时上游 409 保护） */
 export function deleteCourse(courseId: string, opts?: ApiRequestOptions): Promise<void> {
   return api.del<void>(`/courses/${courseId}`, opts);
 }
 
-/** GET /api/v1/knowledge/{id}：知识行详情（含所辖书行 books） */
+/** GET /api/v1/knowledge/{id}：教程详情（含所辖书籍 books） */
 export async function getKnowledge(knowledgeId: string, opts?: ApiRequestOptions): Promise<KnowledgeDetail> {
   return api.get<KnowledgeDetail>(`/knowledge/${knowledgeId}`, opts);
 }
@@ -112,17 +144,17 @@ export function confirmKnowledge(knowledgeId: string, body: ConfirmKnowledgeBody
   return api.post<KnowledgeRecord>(`/knowledge/${knowledgeId}/confirm`, body, opts);
 }
 
-/** POST /api/v1/knowledge/{id}/complete：confirmed→completed（所辖书行全部 verified 聚合） */
+/** POST /api/v1/knowledge/{id}/complete：confirmed→completed（所辖书籍全部 verified 聚合） */
 export function completeKnowledge(knowledgeId: string, opts?: ApiRequestOptions): Promise<KnowledgeRecord> {
   return api.post<KnowledgeRecord>(`/knowledge/${knowledgeId}/complete`, undefined, opts);
 }
 
-/** POST /api/v1/knowledge/{id}/reject：知识行否定（reason 必填 422） */
+/** POST /api/v1/knowledge/{id}/reject：教程否定（reason 必填 422） */
 export function rejectKnowledge(knowledgeId: string, reason: string, opts?: ApiRequestOptions): Promise<KnowledgeRecord> {
   return api.post<KnowledgeRecord>(`/knowledge/${knowledgeId}/reject`, { reason }, opts);
 }
 
-/** POST /api/v1/knowledge/{id}/supersede：知识行过时（reason 必填 422） */
+/** POST /api/v1/knowledge/{id}/supersede：教程过时（reason 必填 422） */
 export function supersedeKnowledge(knowledgeId: string, reason: string, opts?: ApiRequestOptions): Promise<KnowledgeRecord> {
   return api.post<KnowledgeRecord>(`/knowledge/${knowledgeId}/supersede`, { reason }, opts);
 }
@@ -141,12 +173,12 @@ export interface CreateBookBody {
   original_url?: string;
 }
 
-/** POST /api/v1/books：新建书行候选（knowledge_id + title 必填 422） */
+/** POST /api/v1/books：新建书籍候选（knowledge_id + title 必填 422） */
 export function createBook(body: CreateBookBody, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>('/books', body, opts);
 }
 
-/** GET /api/v1/books/{id}/sources：书行渠道尝试列表 */
+/** GET /api/v1/books/{id}/sources：书籍渠道尝试列表 */
 export function listBookSources(bookId: string, opts?: ApiRequestOptions): Promise<SourceRecord[]> {
   return api.get<SourceRecord[]>(`/books/${bookId}/sources`, opts);
 }
@@ -196,73 +228,63 @@ export function verifyBook(bookId: string, opts?: ApiRequestOptions): Promise<Bo
   return api.post<BookRecord>(`/books/${bookId}/verify`, undefined, opts);
 }
 
-/** POST /api/v1/books/{id}/reject：书行否定（reason 必填 422；note 可选） */
+/** POST /api/v1/books/{id}/reject：书籍否定（reason 必填 422；note 可选） */
 export function rejectBook(bookId: string, reason: string, note?: string, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>(`/books/${bookId}/reject`, { reason, ...(note ? { note } : {}) }, opts);
 }
 
-/** POST /api/v1/books/{id}/supersede：书行过时（reason 必填 422） */
+/** POST /api/v1/books/{id}/supersede：书籍过时（reason 必填 422） */
 export function supersedeBook(bookId: string, reason: string, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>(`/books/${bookId}/supersede`, { reason }, opts);
 }
 
 
-// --- 探索端点封装（exploration-api 冻结契约 §1~§7，2026-08-23；8901 未就绪时由 store mock 层承接） ---
+// --- 探索会话端点封装（PLAN-022 B3/F1，2026-08-28；旧 explore-runs 契约已被 8901 migration 0013 废弃） ---
 
-/** POST /api/v1/courses/{course_id}/explore：发起课程层探索（§1） */
-export function launchCourseExplore(
-  courseId: string,
-  body: { mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string },
+/** POST /api/v1/explore-sessions 请求体（target=domain 需 domain_name；target=course 需 course_id） */
+export interface CreateExploreSessionBody {
+  target: 'domain' | 'course';
+  mode: ExploreLaunchMode;
+  domain_name?: string;
+  /** 重探时携带（已有领域 id，会话据此回写 exploration_stage） */
+  domain_id?: string;
+  course_id?: string;
+  ref_text?: string;
+  ref_doc_path?: string;
+}
+
+/** POST /api/v1/explore-sessions：发起探索会话（202 + session_id，后台线程执行 8901 dry-run 管线） */
+export function createExploreSession(
+  body: CreateExploreSessionBody,
   opts?: ApiRequestOptions,
-): Promise<ExploreLaunchResult> {
-  return api.post<ExploreLaunchResult>(`/courses/${courseId}/explore`, body, opts);
+): Promise<ExploreSessionRecord> {
+  return api.post<ExploreSessionRecord>('/explore-sessions', body, opts);
 }
 
-/** GET /api/v1/explore-runs/{run_id}：运行详情（轮询，§2） */
-export function fetchExploreRun(runId: string, opts?: ApiRequestOptions): Promise<ExploreRun> {
-  return api.get<ExploreRun>(`/explore-runs/${runId}`, opts);
+/** GET /api/v1/explore-sessions/{id}：轮询会话（running/waiting_name_confirm/ready/failed） */
+export function fetchExploreSession(sessionId: string, opts?: ApiRequestOptions): Promise<ExploreSessionRecord> {
+  return api.get<ExploreSessionRecord>(`/explore-sessions/${sessionId}`, opts);
 }
 
-/** POST /api/v1/explore-runs/{run_id}/adopt：采纳所选（§3） */
-export function adoptExploreRun(runId: string, selected: string[], opts?: ApiRequestOptions): Promise<ExploreAdoptResult> {
-  return api.post<ExploreAdoptResult>(`/explore-runs/${runId}/adopt`, { selected }, opts);
-}
-
-/** POST /api/v1/explore-runs/{run_id}/discard：放弃本次（§4，幂等） */
-export function discardExploreRun(runId: string, opts?: ApiRequestOptions): Promise<ExploreRun> {
-  return api.post<ExploreRun>(`/explore-runs/${runId}/discard`, undefined, opts);
-}
-
-/** GET /api/v1/courses/{course_id}/explore-runs：探索历史（§5，limit+offset 分页） */
-export function listCourseExploreRuns(
-  courseId: string,
-  paging?: { limit?: number; offset?: number },
+/** POST /api/v1/explore-sessions/{id}/confirm-name：名称确认（waiting_name_confirm → 重跑管线） */
+export function confirmExploreSessionName(
+  sessionId: string,
+  nameOverride: string,
   opts?: ApiRequestOptions,
-): Promise<ExploreRunSummary[]> {
-  return api.get<ExploreRunSummary[]>(`/courses/${courseId}/explore-runs`, {
-    ...opts,
-    params: paging ? { limit: paging.limit?.toString(), offset: paging.offset?.toString() } : undefined,
-  });
+): Promise<ExploreSessionRecord> {
+  return api.post<ExploreSessionRecord>(`/explore-sessions/${sessionId}/confirm-name`, { name_override: nameOverride }, opts);
 }
 
-/** POST /api/v1/curriculum-explore：发起新建领域探索（§6，domain_name 必填） */
-export function launchCurriculumExplore(
-  body: { domain_name: string; mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string },
+/** POST /api/v1/explore-sessions/{id}/apply：应用所选（领域=课程对象清单；课程=tutorial 套清单） */
+export function applyExploreSession(
+  sessionId: string,
+  selected: unknown[],
   opts?: ApiRequestOptions,
-): Promise<ExploreLaunchResult> {
-  return api.post<ExploreLaunchResult>('/curriculum-explore', body, opts);
+): Promise<ExploreApplyResult> {
+  return api.post<ExploreApplyResult>(`/explore-sessions/${sessionId}/apply`, { selected }, opts);
 }
 
-/** GET /api/v1/curriculum-runs/{run_id}：领域探索详情（§7.1） */
-export function fetchCurriculumRun(runId: string, opts?: ApiRequestOptions): Promise<CurriculumRun> {
-  return api.get<CurriculumRun>(`/curriculum-runs/${runId}`, opts);
-}
-
-/** POST /api/v1/curriculum-runs/{run_id}/apply：应用所选变更（§7.2，冲突拒绝标记 conflicts） */
-export function applyCurriculumRun(
-  runId: string,
-  selected: string[],
-  opts?: ApiRequestOptions,
-): Promise<{ applied: { change_id: string; entity: string; target_id: string }[]; conflicts: { change_id: string; reason: string }[]; run: CurriculumRun }> {
-  return api.post(`/curriculum-runs/${runId}/apply`, { selected }, opts);
+/** DELETE /api/v1/explore-sessions/{id}：放弃会话（exploration_stage 回退未开始） */
+export function deleteExploreSession(sessionId: string, opts?: ApiRequestOptions): Promise<{ ok: boolean }> {
+  return api.del<{ ok: boolean }>(`/explore-sessions/${sessionId}`, opts);
 }

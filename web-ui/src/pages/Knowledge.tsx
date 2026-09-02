@@ -65,6 +65,7 @@ function KnowledgeStructure({ courseId }: { courseId: string }) {
  */
 export default function Knowledge() {
   const catalogTargets = useKnowledgeStore((s) => s.catalogTargets);
+  const courseMetaMap = useKnowledgeStore((s) => s.courseMetaMap);
   const loading = useKnowledgeStore((s) => s.loading);
   const error = useKnowledgeStore((s) => s.error);
   const selectedCourseId = useKnowledgeStore((s) => s.selectedCourseId);
@@ -76,7 +77,7 @@ export default function Knowledge() {
     void fetchAll();
   }, [fetchAll]);
 
-  const graph = useMemo(() => buildCourseGraph(catalogTargets), [catalogTargets]);
+  const graph = useMemo(() => buildCourseGraph(catalogTargets, courseMetaMap), [catalogTargets, courseMetaMap]);
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>

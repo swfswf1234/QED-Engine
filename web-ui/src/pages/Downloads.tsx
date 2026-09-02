@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, App, Button, Form, Input, Layout, Modal, Select, Space, Switch, Tag, Tooltip, Typography,
+  Alert, App, Button, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography,
 } from 'antd';
 import { ReloadOutlined, CloudServerOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
 import DownloadsTree from '../components/DownloadsTree';
@@ -10,6 +10,7 @@ import {
   confirmKnowledge, completeKnowledge, rejectKnowledge, supersedeKnowledge,
   createBook, decideBook, startBook, failBook, retryBook, verifyBook,
   rejectBook, supersedeBook, registerBook, listBookSources, addBookSource,
+  exploreDomain, confirmDomainName,
 } from '../api/tracker';
 import { STAGE_OPTIONS, bookInStage, sortBooks, tutorialLabel, useDownloadsStore } from '../stores/downloads';
 import { useExploreUiStore } from '../stores/explore';
@@ -18,7 +19,7 @@ import '../downloads.css';
 
 const { Title, Text } = Typography;
 
-// --- 知识行状态/角色中文映射（五层模型；状态筛选已收敛为书行阶段，见 store STAGE_OPTIONS） ---
+// --- 教程状态/角色中文映射（五层模型；状态筛选已收敛为书行阶段，见 store STAGE_OPTIONS） ---
 
 const KNOWLEDGE_STATUS: Record<string, { label: string; color: string }> = {
   draft: { label: '探索中', color: 'default' },
@@ -178,7 +179,7 @@ function KnowledgeConfirmModal({ knowledge, onCancel, onSubmit }: {
   const ref = knowledge?.textbook_ref ?? {};
   return (
     <Modal
-      title={`确认知识行：${knowledge ? tutorialLabel(knowledge) : ''}`}
+      title={`确认教程：${knowledge ? tutorialLabel(knowledge) : ''}`}
       open={knowledge !== null}
       onCancel={onCancel}
       destroyOnClose
@@ -427,7 +428,7 @@ function BookCard({ book, onAction, onDetail, onRegister }: {
   );
 }
 
-// --- 教程行区（知识行 + 书行卡片横排 + 操作闭环 4d） ---
+// --- 教程行区（教程 + 书行卡片横排 + 操作闭环 4d） ---
 
 function KnowledgeSection({ knowledge, detail, run }: {
   knowledge: KnowledgeRecord;
@@ -484,7 +485,7 @@ function KnowledgeSection({ knowledge, detail, run }: {
           <>
             <Button
               size="small" type="primary" ghost
-              onClick={() => run(completeKnowledge(knowledge.knowledge_id), '知识行已完成', knowledge.knowledge_id)}
+              onClick={() => run(completeKnowledge(knowledge.knowledge_id), '教程已完成', knowledge.knowledge_id)}
             >
               完成
             </Button>
@@ -509,13 +510,13 @@ function KnowledgeSection({ knowledge, detail, run }: {
       {intro && <div className="dl-knowledge-intro">{intro}</div>}
 
       {detail === undefined ? (
-        <div className="dl-books-empty">书行详情加载失败（该知识行数据不可达）</div>
+        <div className="dl-books-empty">书行详情加载失败（该教程数据不可达）</div>
       ) : shownBooks.length === 0 ? (
         <div className="dl-books-empty">
           {knowledge.status === 'draft'
-            ? '暂无书行。确认知识行后将按决定引用自动生成候选册。'
+            ? '暂无书行。确认教程后将按决定引用自动生成候选册。'
             : refEmpty
-              ? '暂无书行（该知识行无决定引用，无法自动生成）。'
+              ? '暂无书行（该教程无决定引用，无法自动生成）。'
               : '暂无书行。点上方「按决定引用补建书行」登记候选册。'}
         </div>
       ) : (
@@ -538,7 +539,7 @@ function KnowledgeSection({ knowledge, detail, run }: {
         </div>
       )}
 
-      {/* 知识行确认 */}
+      {/* 教程确认 */}
       <KnowledgeConfirmModal
         knowledge={confirmOpen ? knowledge : null}
         onCancel={() => setConfirmOpen(false)}
@@ -556,17 +557,17 @@ function KnowledgeSection({ knowledge, detail, run }: {
           // 确认即自动生成（2026-08-25 用户裁决）：定稿成功后按决定引用建候选册
           run(
             confirmKnowledge(knowledge.knowledge_id, body).then(() => genBooksFromRefs()),
-            '知识行已确认，书行候选已按决定引用生成',
+            '教程已确认，书行候选已按决定引用生成',
             knowledge.knowledge_id,
           );
           setConfirmOpen(false);
         }}
       />
 
-      {/* 知识行 reject / supersede */}
+      {/* 教程 reject / supersede */}
       <ReasonModal
         open={knReasonOpen}
-        title={`${knReasonAction === 'reject' ? '否定' : '标记过时'}知识行：${tutorialLabel(knowledge)}`}
+        title={`${knReasonAction === 'reject' ? '否定' : '标记过时'}教程：${tutorialLabel(knowledge)}`}
         withNote={false}
         onCancel={() => setKnReasonOpen(false)}
         onSubmit={(reason) => {
@@ -574,7 +575,7 @@ function KnowledgeSection({ knowledge, detail, run }: {
             knReasonAction === 'reject'
               ? rejectKnowledge(knowledge.knowledge_id, reason)
               : supersedeKnowledge(knowledge.knowledge_id, reason),
-            '知识行操作成功',
+            '教程操作成功',
             knowledge.knowledge_id,
           );
           setKnReasonOpen(false);
@@ -633,13 +634,47 @@ function bookActionPromise(action: 'decide' | 'start' | 'fail' | 'retry' | 'veri
 // --- 页面 ---
 
 /**
- * 领域信息卡（2026-08-24 REQ-059）：选中领域时展示在内容区顶部
- * - 领域名/描述/阶段/课程数 + 探索按钮状态机：
- *   idle 可点「探索」/ running 置灰「探索进行中」/ ready「查看探索结果」可点 / applied 终态置灰
+ * 领域信息卡（2026-08-24 REQ-059；2026-08-28 F4 探索状态改读共享表）
+ * - 领域名/描述/阶段/课程数 + 探索按钮状态机（PLAN-022 F4：exploration_stage 事实源，
+ *   经 GET /courses 透出；runStatus 仅作会话进行中的瞬时补充）：
+ *   探索中 置灰 / 已生成=待确认 / 已完成=可重探 / 未开始(或缺失)按课程数退化初始/重探
  */
 function DomainInfoCard({ domain }: { domain: DomainSystem }) {
   const runStatus = useExploreUiStore((s) => s.domainRunStatus[domain.domain_id]);
-  const openFlow = useExploreUiStore((s) => s.openFlow);
+  const { message } = App.useApp();
+
+  const effectiveStatus = useMemo(() => {
+    if (runStatus === 'running') return 'running' as const;
+    const stage = domain.exploration_stage ?? '';
+    if (stage === '探索中') return 'running' as const;
+    if (stage === '已生成') return 'pending' as const;
+    if (stage === '已完成') return 'completed' as const;
+    if (stage === '失败') return 'failed' as const;
+    return domain.courses.length === 0 ? ('initial' as const) : ('reexplore' as const);
+  }, [runStatus, domain.exploration_stage, domain.courses.length]);
+
+  const handleExplore = useCallback(async () => {
+    try {
+      await exploreDomain(domain.domain_id);
+      message.success('领域探索已启动');
+    } catch (err) {
+      message.error(describeError(err));
+    }
+  }, [domain.domain_id, message]);
+
+  const handleConfirmName = useCallback(async (decision: 'accept' | 'retain') => {
+    try {
+      await confirmDomainName(domain.domain_id, { decision });
+      message.success('名称已确认，探索继续');
+    } catch (err) {
+      message.error(describeError(err));
+    }
+  }, [domain.domain_id, message]);
+
+  // REQ-067 B7：名称确认 UI
+  const pendingConfirm = effectiveStatus === 'pending' && domain.explore_pending?.kind === 'name_confirm';
+  const pendingFailed = effectiveStatus === 'failed' && domain.explore_pending?.kind === 'failed';
+
   return (
     <div className="dl-domain-card" data-testid="domain-info-card">
       <div className="dl-domain-head">
@@ -647,30 +682,54 @@ function DomainInfoCard({ domain }: { domain: DomainSystem }) {
         <Tag>{domain.courses.length} 门课程</Tag>
         {(domain.stages ?? []).map((s) => <Tag key={s} color="blue">{s}</Tag>)}
         <span style={{ marginLeft: 'auto' }}>
-          {runStatus === 'running' ? (
+          {effectiveStatus === 'running' ? (
             <Button size="small" disabled icon={<SearchOutlined />}>探索进行中…</Button>
-          ) : runStatus === 'ready' ? (
-            <Button
-              size="small" type="primary" ghost icon={<SearchOutlined />}
-              onClick={() => openFlow({ variant: 'curriculum', domainId: domain.domain_id, domainName: domain.name })}
-            >
-              查看探索结果
-            </Button>
-          ) : runStatus === 'applied' ? (
-            <Tooltip title="本次探索结果已应用；可再次发起重探">
-              <Button size="small" disabled icon={<SearchOutlined />}>已应用</Button>
+          ) : pendingFailed ? (
+            <Tooltip title={domain.explore_pending?.kind === 'failed' ? domain.explore_pending.error : ''}>
+              <Button size="small" danger icon={<SearchOutlined />} onClick={handleExplore}>
+                探索失败（重试）
+              </Button>
             </Tooltip>
-          ) : (
-            <Button
-              size="small" type="primary" ghost icon={<SearchOutlined />}
-              onClick={() => openFlow({ variant: 'curriculum', domainId: domain.domain_id, domainName: domain.name })}
-            >
-              {domain.courses.length === 0 ? '探索课程体系（初始）' : '探索课程体系（重探）'}
+          ) : effectiveStatus === 'initial' || effectiveStatus === 'reexplore' || effectiveStatus === 'completed' ? (
+            <Button size="small" type="primary" ghost icon={<SearchOutlined />} onClick={handleExplore}>
+              {effectiveStatus === 'initial' ? '领域探索（自动）' : '重新探索'}
             </Button>
-          )}
+          ) : null}
         </span>
       </div>
       {domain.description && <div className="dl-domain-desc">{domain.description}</div>}
+
+      {/* REQ-067 B7：名称确认区域 */}
+      {pendingConfirm && domain.explore_pending?.kind === 'name_confirm' && (
+        <Alert
+          type="warning" showIcon style={{ marginTop: 8 }}
+          message="领域名称需要确认"
+          description={
+            <Space direction="vertical" size={4}>
+              <span>原名：<strong>{domain.name}</strong> → 建议名：<strong>{domain.explore_pending.name_check.suggested_name}</strong></span>
+              <span style={{ fontSize: 12, color: '#999' }}>{domain.explore_pending.name_check.reason}</span>
+              <Space size={8}>
+                <Button size="small" type="primary" onClick={() => handleConfirmName('accept')}>采纳建议</Button>
+                <Button size="small" onClick={() => handleConfirmName('retain')}>保留原名</Button>
+              </Space>
+            </Space>
+          }
+        />
+      )}
+
+      {/* REQ-067 B8：失败提示 */}
+      {pendingFailed && domain.explore_pending?.kind === 'failed' && (
+        <Alert
+          type="error" showIcon style={{ marginTop: 8 }}
+          message="探索失败"
+          description={
+            <Space direction="vertical" size={4}>
+              <span>{domain.explore_pending.error}</span>
+              <Button size="small" danger onClick={handleExplore}>重试</Button>
+            </Space>
+          }
+        />
+      )}
     </div>
   );
 }
@@ -681,16 +740,29 @@ function RightPanel() {
   const selected = useDownloadsStore((s) => s.selected);
   const knowledge = useDownloadsStore((s) => s.knowledge);
   const details = useDownloadsStore((s) => s.details);
+  const domains = useDownloadsStore((s) => s.domains);
   const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
   const { byId } = useCourseIndex();
   const { message } = App.useApp();
 
-  // 选中领域（信息卡数据源）；课程层探索入口已收敛到左树右键菜单
-  const domains = useDownloadsStore((s) => s.domains);
+  const flowTarget = useExploreUiStore((s) => s.flowTarget);
   const selectedDomain = useMemo(() => {
-    if (selected?.kind !== 'domain') return null;
-    return domains.find((d) => d.domain_id === selected.id) ?? null;
-  }, [selected, domains]);
+    if (selected?.kind === 'domain') {
+      return domains.find((d) => d.domain_id === selected.id) ?? null;
+    }
+    // 选择课程时，通过 byId 获取对应的领域
+    if (selected?.kind === 'course') {
+      const courseInfo = byId.get(selected.id);
+      if (courseInfo) {
+        return domains.find((d) => d.domain_id === courseInfo.domainId) ?? null;
+      }
+    }
+    // 2026-08-26：右键菜单 openFlow 不设 selected → 用 flowTarget 兜底，否则 DomainInfoCard 不渲染
+    if (flowTarget?.variant === 'curriculum') {
+      return domains.find((d) => d.domain_id === flowTarget.domainId) ?? null;
+    }
+    return null;
+  }, [selected, domains, flowTarget, byId]);
 
   const run = useCallback(async (p: Promise<unknown>, successText: string, knowledgeId: string) => {
     try {
@@ -702,6 +774,7 @@ function RightPanel() {
     }
   }, [refreshDetail]);
 
+  // 注意：knowledge 已按 course_id 分组，保持原有顺序
   const filtered = useMemo(
     () =>
       knowledge.filter((k) => {
@@ -718,6 +791,17 @@ function RightPanel() {
     [knowledge, filters, details],
   );
 
+  // 按课程分组的教程列表（场景3/4展示用）
+  const groupedByCourse = useMemo(() => {
+    const groups = new Map<string, typeof filtered>();
+    for (const k of filtered) {
+      const existing = groups.get(k.course_id) ?? [];
+      existing.push(k);
+      groups.set(k.course_id, existing);
+    }
+    return groups;
+  }, [filtered]);
+
   const selectedLabel =
     selected?.kind === 'domain'
       ? `领域：${domains.find((d) => d.domain_id === selected.id)?.name ?? selected.id}`
@@ -725,10 +809,19 @@ function RightPanel() {
         ? `课程：${byId.get(selected.id)?.name ?? selected.id}`
         : selected?.kind === 'tutorial'
           ? `教程：${knowledge.find((k) => selected.key.endsWith(`kn:${k.knowledge_id}`))?.name ?? selected.key}`
-          : '未选中';
+          : domains.length === 0 ? '未创建领域' : '未选中';
 
   // 课程头（2026-08-25 #3）：选中课程时置顶展示一次——课程名一行 + 课程介绍（note）一行
   const selectedCourse = selected?.kind === 'course' ? byId.get(selected.id) ?? null : null;
+
+  // 场景1：无领域或未选中（必须先选领域）
+  const isEmptyState = domains.length === 0 || (selected === null && !selectedDomain);
+
+  // 场景2：选中领域但无课程
+  const hasDomainNoCourses = selectedDomain && selectedDomain.courses.length === 0;
+
+  // 场景3/4：有数据且选中了领域
+  const hasDataWithDomain = !isEmptyState && !hasDomainNoCourses && selectedDomain;
 
   return (
     <div className="dl-right">
@@ -738,26 +831,77 @@ function RightPanel() {
       <div className="dl-summary">
         <Space direction="vertical" size={4}>
           <Text strong>当前选择：{selectedLabel}</Text>
-          <Text type="secondary">筛选结果：{filtered.length} 条知识行（rejected/superseded 由数据层隐藏）</Text>
+          <Text type="secondary">筛选结果：{filtered.length} 个教程（已排除否定/过时项）</Text>
         </Space>
       </div>
       <div className="dl-content">
-        {selectedDomain && <DomainInfoCard domain={selectedDomain} />}
-        {selectedCourse && filtered.length > 0 && (
-          <div className="dl-course-head">
-            <div className="dl-course-head-name">{selectedCourse.name}</div>
-            {selectedCourse.note && <div className="dl-course-head-note">{selectedCourse.note}</div>}
-          </div>
-        )}
-        {filtered.length === 0 ? (
+        {/* 场景1：无领域或未选中 */}
+        {isEmptyState && (
           <div className="dl-placeholder">
             <CloudServerOutlined style={{ fontSize: 40, color: '#bbb' }} />
-            <Text type="secondary">{knowledge.length === 0 ? '暂无知识行数据（8901 离线或未启动）' : '无匹配筛选的知识行'}</Text>
+            <Text type="secondary">
+              {domains.length === 0
+                ? '暂无领域数据，请先在左侧创建领域'
+                : '请先选择领域查看内容'}
+            </Text>
           </div>
-        ) : (
-          filtered.map((k) => (
-            <KnowledgeSection key={k.knowledge_id} knowledge={k} detail={details[k.knowledge_id]} run={run} />
-          ))
+        )}
+
+        {/* 场景2：选中领域但无课程 */}
+        {hasDomainNoCourses && (
+          <>
+            <DomainInfoCard domain={selectedDomain!} />
+            <div className="dl-empty-course-hint">
+              <Text type="secondary">该领域暂无课程。可通过探索课程体系创建，或手动导入已整理的课程数据。</Text>
+            </div>
+          </>
+        )}
+
+        {/* 场景3：选中领域有课程 / 场景4：选中课程 */}
+        {hasDataWithDomain && (
+          <>
+            {/* 领域信息卡（选中领域时展示） */}
+            {selectedDomain && <DomainInfoCard domain={selectedDomain} />}
+
+            {/* 课程头（选中课程时置顶展示） */}
+            {selectedCourse && (
+              <div className="dl-course-head">
+                <div className="dl-course-head-name">{selectedCourse.name}</div>
+                {selectedCourse.note && <div className="dl-course-head-note">{selectedCourse.note}</div>}
+              </div>
+            )}
+
+            {/* 按课程分组展示教程 */}
+            {filtered.length === 0 ? (
+              <div className="dl-placeholder">
+                <CloudServerOutlined style={{ fontSize: 40, color: '#bbb' }} />
+                <Text type="secondary">
+                  {knowledge.length === 0 ? '暂无教程数据（8901 离线或未启动）' : '无匹配筛选的教程'}
+                </Text>
+              </div>
+            ) : (
+              Array.from(groupedByCourse.entries()).map(([courseId, tutorials]) => {
+                const course = byId.get(courseId);
+                // 场景5：课程级隐藏（如果该课程下所有教程都被筛选隐藏，则不显示）
+                if (tutorials.length === 0) return null;
+                return (
+                  <div key={courseId} className="dl-course-group">
+                    {/* 课程头（选中领域时展示） */}
+                    {!selectedCourse && course && (
+                      <div className="dl-course-head">
+                        <div className="dl-course-head-name">{course.name}</div>
+                        {course.note && <div className="dl-course-head-note">{course.note}</div>}
+                      </div>
+                    )}
+                    {/* 教程列表 */}
+                    {tutorials.map((k) => (
+                      <KnowledgeSection key={k.knowledge_id} knowledge={k} detail={details[k.knowledge_id]} run={run} />
+                    ))}
+                  </div>
+                );
+              })
+            )}
+          </>
         )}
       </div>
     </div>
@@ -767,7 +911,7 @@ function RightPanel() {
 /**
  * 文档下载管理（`#/admin/downloads`，五层模型 + 2026-08-24 REQ-059 交互改版）
  * - 左树 v2（领域→课程→教程，真实体系；右键菜单管理/探索）+ 右侧筛选栏
- *   + 知识行区（书行卡片横排）+ 领域信息卡（探索按钮状态机）
+ *   + 教程区（书行卡片横排）+ 领域信息卡（探索按钮状态机）
  * - 探索全弹窗流：ExploreFlowModal 挂载于页内（发起→轮询→结果→应用/采纳）
  * - 独立降级：8900 不可达 → 整体横幅；课程体系 / knowledge 各自失败 → 树区/汇总提示
  */
@@ -776,6 +920,8 @@ export default function Downloads() {
   const error = useDownloadsStore((s) => s.error);
   const knowledgeError = useDownloadsStore((s) => s.knowledgeError);
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  const startPolling = useDownloadsStore((s) => s.startPolling);
+  const stopPolling = useDownloadsStore((s) => s.stopPolling);
   const flowTarget = useExploreUiStore((s) => s.flowTarget);
   const closeFlow = useExploreUiStore((s) => s.closeFlow);
 
@@ -783,37 +929,46 @@ export default function Downloads() {
     void fetchAll();
   }, [fetchAll]);
 
+  // REQ-067 B8：挂载时启动 exploration_stage 轮询，卸载时停止
+  useEffect(() => {
+    startPolling();
+    return () => { stopPolling(); };
+  }, [startPolling, stopPolling]);
+
   return (
-    <Layout.Content style={{ padding: 32, maxWidth: 1500, width: '94%', margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+    <div className="dl-page">
+      {/* 标题栏（固定） */}
+      <div className="dl-header">
         <Title level={2} style={{ margin: 0 }}>文档下载管理</Title>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchAll()}>
           刷新
         </Button>
       </div>
 
+      {/* 错误横幅（固定在筛选栏上方） */}
       {error && (
-          <Alert
-            type="error" showIcon style={{ marginBottom: 16 }}
-            message="文档下载管理数据获取失败"
-            description={`${error}。请确认 8900 管理服务已启动后点「刷新」。`}
-          />
-        )}
-        {!error && knowledgeError && (
-          <Alert
-            type="warning" showIcon style={{ marginBottom: 16 }}
-            message="知识行数据不可达"
-            description={`${describeError(knowledgeError)}。8901 离线时展示降级，不阻塞树目录。`}
-          />
-        )}
+        <Alert
+          type="error" showIcon style={{ marginBottom: 12 }}
+          message="文档下载管理数据获取失败"
+          description={`${error}。请确认 8900 管理服务已启动后点「刷新」。`}
+        />
+      )}
+      {!error && knowledgeError && (
+        <Alert
+          type="warning" showIcon style={{ marginBottom: 12 }}
+          message="教程数据不可达"
+          description={`${describeError(knowledgeError)}。8901 离线时展示降级，不阻塞树目录。`}
+        />
+      )}
 
-        <div className="dl-layout">
-          <DownloadsTree />
-          <RightPanel />
-        </div>
+      {/* 内容区（左右分栏，独立滚动） */}
+      <div className="dl-layout">
+        <DownloadsTree />
+        <RightPanel />
+      </div>
 
-        {/* 探索全弹窗流（左树右键 / 领域信息卡按钮共用入口） */}
-        <ExploreFlowModal target={flowTarget} onClose={closeFlow} />
-    </Layout.Content>
+      {/* 探索全弹窗流（左树右键 / 领域信息卡按钮共用入口） */}
+      <ExploreFlowModal target={flowTarget} onClose={closeFlow} />
+    </div>
   );
 }

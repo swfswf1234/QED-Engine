@@ -8,8 +8,12 @@ import type { ExploreProposal } from '../stores';
 
 const { Text } = Typography;
 
-function versionBadge(version: { edition?: string; publisher?: string; year?: number | null } | null | undefined): string {
+/** 版本徽标文案（tutorials@v1 的 version 可能为对象或纯字符串，均容错） */
+function versionBadge(
+  version: { edition?: string; publisher?: string; year?: number | null } | string | null | undefined,
+): string {
   if (!version) return '';
+  if (typeof version === 'string') return version;
   return [version.edition, version.publisher, version.year].filter(Boolean).join(' · ');
 }
 

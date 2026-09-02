@@ -103,7 +103,7 @@ describe('文档下载管理左树构建 v2（真实领域课程体系，2026-08
     const analysis = tree[0].courses[0];
     expect(analysis.id).toBe('01_math_analysis');
     expect(analysis.domainId).toBe('dm_math');
-    // 套号数值升序：套1 → 套2；教程名 = 知识行 name
+    // 套号数值升序：套1 → 套2；教程名 = 教程 name
     expect(analysis.tutorials.map((t) => t.label)).toEqual(['教程1：数学分析原理（Rudin）', '教程2：微积分学教程（菲赫金哥尔茨）']);
     expect(analysis.tutorials[0].items).toEqual([]);
     expect(analysis.tutorials[0].isSet).toBe(true);
@@ -111,7 +111,7 @@ describe('文档下载管理左树构建 v2（真实领域课程体系，2026-08
     expect(tree[0].courses[1].tutorials[0]).toMatchObject({ label: '线性代数延展资料', isSet: false });
   });
 
-  it('教程叶子进度：verified 书行数/总数（来自详情缓存）', () => {
+  it('教程叶子进度：verified 书籍数/总数（来自详情缓存）', () => {
     const systems = [domain({ domain_id: 'd1', name: '高等数学', courses: [course({ course_id: 'c1', name: '数学分析' })] })];
     const k1 = kn({ knowledge_id: 'k1', domain_id: 'd1', course_id: 'c1', set_no: '1', name: '教程1' });
     const b1 = book({ book_id: 'b1', knowledge_id: 'k1', status: 'verified', display_title: 'Rudin 中译' });
@@ -133,20 +133,20 @@ describe('文档下载管理左树构建 v2（真实领域课程体系，2026-08
     expect(t.total).toBe(0);
   });
 
-  it('知识行所属课程不在课程体系中 → 不进树（不再虚构兜底节点）', () => {
-    const k1 = kn({ knowledge_id: 'k1', domain_id: 'ghost', course_id: '99_unknown', name: '孤儿知识行' });
+  it('教程所属课程不在课程体系中 → 不进树（不再虚构兜底节点）', () => {
+    const k1 = kn({ knowledge_id: 'k1', domain_id: 'ghost', course_id: '99_unknown', name: '孤儿教程' });
     const tree = buildTreeNodes([], [k1]);
     expect(tree).toEqual([]);
   });
 
-  it('空课程体系 → 空树（即使有知识行）', () => {
+  it('空课程体系 → 空树（即使有教程）', () => {
     const k1 = kn({ knowledge_id: 'k1', course_id: 'c1', name: 'x' });
     expect(buildTreeNodes([], [k1])).toEqual([]);
     expect(buildTreeNodes([], [])).toEqual([]);
   });
 });
 
-describe('书行排序 sortBooks（中文教材 → 中文习题集 → 其余，组内册数递增）', () => {
+describe('书籍排序 sortBooks（中文教材 → 中文习题集 → 其余，组内册数递增）', () => {
   const knowledgeId = 'k1';
 
   it('中文教材优先、中文习题集次之、英文教材及其他最末', () => {
@@ -155,8 +155,8 @@ describe('书行排序 sortBooks（中文教材 → 中文习题集 → 其余�
     const zhTextbook = book({ book_id: 'b3', knowledge_id: knowledgeId, language: 'zh', kind: 'textbook', title: '数学分析原理' });
     const supplement = book({ book_id: 'b4', knowledge_id: knowledgeId, language: 'zh', kind: 'supplement', title: '配套资料' });
     const sorted = sortBooks([enTextbook, zhExercise, zhTextbook, supplement]);
-    // 组③（英文教材/配套资料）内部按 title 稳定序（zh-Hans-CN 词典序）
-    expect(sorted.map((b) => b.book_id)).toEqual(['b3', 'b2', 'b4', 'b1']);
+    // 组序：①中文教材(b3) → ②中文习题集(b2) → ③英文教材(b1) → ④其余(b4)
+    expect(sorted.map((b) => b.book_id)).toEqual(['b3', 'b2', 'b1', 'b4']);
   });
 
   it('组内按册数递增：第一册<第二册<第三册；单册（空 part）排组首', () => {
@@ -183,7 +183,7 @@ describe('书行排序 sortBooks（中文教材 → 中文习题集 → 其余�
   });
 });
 
-describe('状态筛选 bookInStage（书行生命周期四阶段，2026-08-24 用户裁决）', () => {
+describe('状态筛选 bookInStage（书籍生命周期四阶段，2026-08-24 用户裁决）', () => {
   const knowledgeId = 'k1';
   const mk = (status: string) => book({ book_id: 'b', knowledge_id: knowledgeId, status });
 

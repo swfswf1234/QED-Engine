@@ -77,7 +77,7 @@ function buildCompletionOption(completed: number, total: number): EChartsCoreOpt
  *   （不发请求；启停操作在控制台）
  * - 文档下载进度（/knowledge + /catalogs + 并行 /knowledge/{id}：课程完成度两段饼图
  *   + 教程下载工作量饼图 + 汇总统计：教程数 / 目标书目 / 已下载 / 已验收）
- * - 整体横幅由知识行请求 offline 类错误判定（8900 不可达），见 dashboard store
+ * - 整体横幅由教程请求 offline 类错误判定（8900 不可达），见 dashboard store
  * - 文档解析进度：8902 parse-jobs 数据源后置（离线占位）
  * - 布局：服务在线 → 下载在上、解析在下；独立降级：8901 不可达 → 下载大盘离线提示
  */
@@ -148,7 +148,7 @@ export default function Dashboard() {
               {knowledge.length === 0 && <Text type="secondary">暂无缓存数据，点「刷新」重试。</Text>}
             </Space>
           ) : knowledge.length === 0 ? (
-            <Text type="secondary">暂无知识行数据（/knowledge 为空）。</Text>
+            <Text type="secondary">暂无教程数据（/knowledge 为空）。</Text>
           ) : (
             <>
               <Row gutter={16}>

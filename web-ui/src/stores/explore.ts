@@ -1,20 +1,23 @@
 /**
- * 探索 store（exploration-ui 设计正文 §2/§3/§4；exploration-api 冻结契约消费方）
- * - 课程层：startCourse → 内部轮询（3s，连续 3 次失败本地转 failed 并停表）→ ready
- *   → adopt/discard 终态；历史列表 loadHistory
- * - 领域层：startCurriculum（新建领域）→ applyChanges（applied/partially_applied）
+ * 探索 store（PLAN-022 F2 会话模型重写，2026-08-28；旧 explore-runs 轮询契约已废弃）
+ * - 统一会话：startCourse / startCurriculum → POST /explore-sessions（202 + session_id，
+ *   8900 后台线程执行 8901 dry-run 管线）→ refresh 轮询（3s，连续 3 次失败本地转 failed 停表）
+ *   → ready → apply（领域=应用课程体系 / 课程=采纳教程）或 discard（放弃，stage 回退）
+ * - 名称确认：waiting_name_confirm → confirmName(nameOverride) → 管线重跑
+ * - 持久化：最近一次会话落 localStorage（刷新恢复 + 续轮询）；终态保留供回看
  * - mock 开关：localStorage qed-explore-mock=1 或 VITE_EXPLORE_MOCK=1 时走本地模拟后端
- *   （QED-Tracker 未就绪留白，端点就绪后无需改界面）
  */
 import { create } from 'zustand';
+import { createElement } from 'react';
+import { Button, notification } from 'antd';
 import {
-  launchCourseExplore, fetchExploreRun, adoptExploreRun, discardExploreRun,
-  listCourseExploreRuns, launchCurriculumExplore, fetchCurriculumRun, applyCurriculumRun,
+  applyExploreSession, confirmExploreSessionName, createExploreSession,
+  deleteExploreSession, fetchExploreSession,
 } from '../api/tracker';
-import { describeError } from '../api/client';
+import { ApiError, describeError } from '../api/client';
 import type {
-  CurriculumRun, ExploreAdoptResult, ExploreLaunchMode, ExploreProposal, ExploreRun, ExploreRunSummary,
-  KnowledgeRecord,
+  DomainExploreCourse, DomainExploreReport, ExploreApplyResult, ExploreLaunchMode,
+  ExploreProposal, ExploreSessionRecord,
 } from './index';
 import { MAX_POLL_FAILURES, POLL_INTERVAL_MS } from './exploreRules';
 import { isExploreMockEnabled } from './mockFlag';
@@ -24,14 +27,6 @@ import { useDownloadsStore } from './downloads';
 export { EXPLORE_MAX_TUTORIALS, EXPLORE_MIN_CONFIRMED, POLL_INTERVAL_MS, MAX_POLL_FAILURES } from './exploreRules';
 export { exploreStatusOf, remainingSlots, isCourseLocked } from './exploreRules';
 export { isExploreMockEnabled };
-
-/** 领域探索 apply 响应（skipped=重探时已存在领域的 create_domain 跳过清单，REQ-059） */
-export interface CurriculumApplyResult {
-  applied: { change_id: string; entity: string; target_id: string }[];
-  conflicts: { change_id: string; reason: string }[];
-  skipped?: { change_id: string; reason: string }[];
-  run: CurriculumRun;
-}
 
 export interface ExploreParams {
   mode: ExploreLaunchMode;
@@ -43,42 +38,34 @@ export interface ExploreStore {
   view: 'course' | 'curriculum';
   courseId: string | null;
   domainName: string | null;
-  /** 当前运行（课程层 ExploreRun / 领域层 CurriculumRun） */
-  run: ExploreRun | CurriculumRun | null;
-  history: ExploreRunSummary[];
+  /** 当前会话（统一会话模型，target 区分领域/课程） */
+  session: ExploreSessionRecord | null;
+  /** apply 成功后的本地结果（服务端会话保持 ready，applied 标记由前端持有） */
+  applied: boolean;
+  applyResult: ExploreApplyResult | null;
   error: string | null;
   launching: boolean;
   pollFailures: number;
   startCourse: (courseId: string, params: ExploreParams) => Promise<void>;
-  startCurriculum: (domainName: string, params: ExploreParams) => Promise<void>;
+  startCurriculum: (domainName: string, params: ExploreParams, domainId?: string) => Promise<void>;
   refresh: () => Promise<void>;
-  adopt: (selected: string[]) => Promise<ExploreAdoptResult | null>;
+  confirmName: (nameOverride: string) => Promise<void>;
+  apply: (selected: unknown[]) => Promise<ExploreApplyResult | null>;
   discard: () => Promise<void>;
-  applyChanges: (selected: string[]) => Promise<CurriculumApplyResult | null>;
-  loadHistory: (courseId?: string) => Promise<void>;
-  /** 按 run_id 恢复查看历史运行（课程层；历史下拉入口） */
-  openRun: (runId: string) => Promise<void>;
-  /** 持久化恢复后续轮询（未终态 run 存在时重启定时器） */
-  ensurePolling: () => void;
   reset: () => void;
+  ensurePolling: () => void;
 }
 
-/**
- * 探索流入口（2026-08-24 REQ-059 全弹窗流）：
- * - course：课程层探索（左树课程右键「探索教程」）
- * - curriculum：既有领域课程体系探索/重探（右面板按钮 + 领域右键「探索」；
- *   添加领域为纯手工表单，不再经探索流）
- */
 export type ExploreFlowTarget =
   | { variant: 'course'; courseId: string; courseName?: string }
   | { variant: 'curriculum'; domainId: string; domainName: string };
 
-/** 右面板探索按钮状态机（会话内）：running 置灰 / ready「查看探索结果」 / applied 终态置灰 */
-export type DomainRunStatus = 'running' | 'ready' | 'applied';
+/** 领域探索按钮临时态（仅 running；pending/completed 由 DomainInfoCard 按 exploration_stage 实时计算，F4） */
+export type DomainRunStatus = 'running';
 
 interface ExploreUiStore {
   flowTarget: ExploreFlowTarget | null;
-  /** 领域 id → 会话内探索状态（页面刷新后清零；服务端运行经幂等启动自然恢复） */
+  /** 领域 id → 探索状态（会话进行中标记，持久化到 localStorage；stage 事实源在共享表） */
   domainRunStatus: Record<string, DomainRunStatus>;
   openFlow: (target: ExploreFlowTarget) => void;
   closeFlow: () => void;
@@ -87,7 +74,7 @@ interface ExploreUiStore {
 
 export const useExploreUiStore = create<ExploreUiStore>((set) => ({
   flowTarget: null,
-  domainRunStatus: {},
+  domainRunStatus: restoreDomainRunStatus(),
   openFlow: (target) => set({ flowTarget: target }),
   closeFlow: () => set({ flowTarget: null }),
   setDomainRunStatus: (domainId, status) =>
@@ -95,6 +82,7 @@ export const useExploreUiStore = create<ExploreUiStore>((set) => ({
       const next = { ...st.domainRunStatus };
       if (status === null) delete next[domainId];
       else next[domainId] = status;
+      persistDomainRunStatus(next);
       return { domainRunStatus: next };
     }),
 }));
@@ -102,27 +90,51 @@ export const useExploreUiStore = create<ExploreUiStore>((set) => ({
 // 轮询定时器（模块级，不入 state 以免引用不可序列化告警）
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-// 运行态持久化（2026-08-24 用户反馈：页面刷新即丢探索结果）：只存最近一条 run，
-// 终态也保留供回看；新发起自动覆盖，reset 清除。
+// 会话持久化（刷新恢复 + 续轮询；终态保留供回看，新发起自动覆盖）
 const RUN_STATE_KEY = 'qed-explore-run';
 
-function persistRun(run: ExploreRun | CurriculumRun | null): void {
+function persistSession(session: ExploreSessionRecord | null): void {
   try {
-    if (run) localStorage.setItem(RUN_STATE_KEY, JSON.stringify(run));
+    if (session) localStorage.setItem(RUN_STATE_KEY, JSON.stringify(session));
     else localStorage.removeItem(RUN_STATE_KEY);
   } catch {
     /* localStorage 不可用：静默降级为会话内行为 */
   }
 }
 
-/** 页面加载时恢复最近一次探索运行（含终态回看与 running 续轮询） */
-export function restorePersistedRun(): ExploreRun | CurriculumRun | null {
+/** 页面加载时恢复最近一次探索会话（含终态回看与 running 续轮询） */
+export function restorePersistedSession(): ExploreSessionRecord | null {
   try {
     const raw = localStorage.getItem(RUN_STATE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as ExploreRun | CurriculumRun;
+    return JSON.parse(raw) as ExploreSessionRecord;
   } catch {
     return null;
+  }
+}
+
+// 领域探索按钮状态机持久化（会话进行中标记；stage 事实在共享表）
+const DOMAIN_RUN_STATUS_KEY = 'qed-explore-domain-status';
+
+function persistDomainRunStatus(status: Record<string, DomainRunStatus>): void {
+  try {
+    if (Object.keys(status).length > 0) {
+      localStorage.setItem(DOMAIN_RUN_STATUS_KEY, JSON.stringify(status));
+    } else {
+      localStorage.removeItem(DOMAIN_RUN_STATUS_KEY);
+    }
+  } catch {
+    /* localStorage 不可用：静默降级 */
+  }
+}
+
+function restoreDomainRunStatus(): Record<string, DomainRunStatus> {
+  try {
+    const raw = localStorage.getItem(DOMAIN_RUN_STATUS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, DomainRunStatus>;
+  } catch {
+    return {};
   }
 }
 
@@ -133,23 +145,30 @@ function stopPolling(): void {
   }
 }
 
-const TERMINAL_STATUSES = new Set(['ready', 'adopted', 'discarded', 'failed', 'applied', 'partially_applied']);
+const TERMINAL_STATUSES = new Set(['ready', 'failed', 'waiting_name_confirm']);
+
+/** session.report 收敛为领域报告（target=domain 时） */
+export function asDomainReport(session: ExploreSessionRecord | null): DomainExploreReport | null {
+  return session?.report && 'domain' in session.report ? session.report : null;
+}
+
+/** session.report 收敛为课程报告（target=course 时） */
+export function asCourseTutorials(session: ExploreSessionRecord | null): ExploreProposal[] {
+  return session?.report && 'tutorials' in session.report ? session.report.tutorials : [];
+}
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-/**
- * mock 模式专用：把采纳结果以 draft 教程行注入下载树（仅内存演示，刷新即消失；
- * 真实模式走 8901 adopt 落库后经 fetchAll 刷新）——2026-08-23 用户裁决方案 A
- */
+/** mock 模式专用：把采纳结果以 draft 教程行注入下载树（仅内存演示，刷新即消失） */
 function injectMockAdoption(
   courseId: string,
   adopted: { knowledge_id: string; set_name: string }[],
   proposals: ExploreProposal[],
 ): void {
   const ds = useDownloadsStore.getState();
-  const rows: KnowledgeRecord[] = adopted.map((a) => {
+  const rows = adopted.map((a) => {
     const p = proposals.find((x) => x.set_name === a.set_name);
     return {
       knowledge_id: a.knowledge_id,
@@ -176,19 +195,20 @@ function injectMockAdoption(
   useDownloadsStore.setState({ knowledge: [...ds.knowledge, ...rows], details });
 }
 
-/** mock 模式专用：领域探索应用后把新课程注入下载树领域体系（仅内存演示；create_domain 落新领域分组） */
+/** mock 模式专用：领域探索应用后把新课程注入下载树领域体系（仅内存演示） */
 function injectMockCurriculum(
   domainName: string,
-  changes: { action: string; target_id: string; payload: Record<string, unknown> }[],
+  courses: DomainExploreCourse[],
 ): void {
   const ds = useDownloadsStore.getState();
-  const added = changes
-    .filter((c) => c.action === 'create_course')
-    .map((c) => ({
-      course_id: c.target_id,
-      name: String(c.payload?.name ?? c.target_id),
-      aliases: [], stage: '', prerequisites: [], note: '',
-    }));
+  const added = courses.map((c) => ({
+    course_id: `mock-c-${c.slug}`,
+    name: c.name,
+    aliases: c.aliases ?? [],
+    stage: '',
+    prerequisites: c.prerequisites ?? [],
+    note: c.summary ?? '',
+  }));
   if (added.length === 0) return;
   const idx = ds.domains.findIndex((d) => d.name === domainName);
   if (idx >= 0) {
@@ -211,9 +231,10 @@ export const useExploreStore = create<ExploreStore>((set, get) => ({
   view: 'course',
   courseId: null,
   domainName: null,
-  // 2026-08-24：页面刷新后恢复最近一次探索运行（running 由弹窗打开时续轮询）
-  run: restorePersistedRun(),
-  history: [],
+  // 页面刷新后恢复最近一次探索会话（running 由弹窗打开时续轮询）
+  session: restorePersistedSession(),
+  applied: false,
+  applyResult: null,
   error: null,
   launching: false,
   pollFailures: 0,
@@ -221,58 +242,57 @@ export const useExploreStore = create<ExploreStore>((set, get) => ({
   reset: () => {
     stopPolling();
     set({
-      view: 'course', courseId: null, domainName: null, run: null, history: [],
-      error: null, launching: false, pollFailures: 0,
+      view: 'course', courseId: null, domainName: null, session: null,
+      applied: false, applyResult: null, error: null, launching: false, pollFailures: 0,
     });
     exploreMockBackend._resetRegistry();
   },
 
   startCourse: async (courseId, params) => {
-    // 同课程已有未终态运行：不重复发起，续看/续轮询
-    const cur0 = get().run;
-    if (cur0?.scope === 'course' && cur0.course_id === courseId && !TERMINAL_STATUSES.has(cur0.status)) {
+    // 同课程已有未终态会话：不重复发起，续看/续轮询
+    const cur0 = get().session;
+    if (cur0?.target === 'course' && cur0.course_id === courseId && !TERMINAL_STATUSES.has(cur0.status)) {
       get().ensurePolling();
       return;
     }
     stopPolling();
-    set({ view: 'course', courseId, run: null, error: null, launching: true, pollFailures: 0 });
+    set({
+      view: 'course', courseId, domainName: null, applied: false, applyResult: null,
+      error: null, launching: true, pollFailures: 0,
+    });
     try {
-      const launched = isExploreMockEnabled()
-        ? exploreMockBackend.launchCourse(courseId, params)
-        : await launchCourseExplore(courseId, params);
-      const run: ExploreRun = {
-        run_id: launched.run_id, scope: 'course', course_id: courseId,
-        status: 'running', params,
-        proposals: [], adopted_proposal_ids: [], error: null,
-        created_at: nowIso(), updated_at: nowIso(),
-      };
-      set({ run, launching: false });
+      const session = isExploreMockEnabled()
+        ? exploreMockBackend.createSession({ target: 'course', course_id: courseId, ...params })
+        : await createExploreSession({ target: 'course', course_id: courseId, ...params });
+      set({ session, launching: false });
       pollTimer = setInterval(() => void get().refresh(), POLL_INTERVAL_MS);
     } catch (err) {
       set({ error: describeError(err), launching: false });
     }
   },
 
-  startCurriculum: async (domainName, params) => {
-    // 同领域已有未终态运行：不重复发起（避免 ready 后连点叠加新运行）
-    const cur0 = get().run;
-    if (cur0?.scope === 'curriculum' && cur0.params.domain_name === domainName && !TERMINAL_STATUSES.has(cur0.status)) {
+  startCurriculum: async (domainName, params, domainId?) => {
+    // 同领域已有未终态会话：不重复发起（避免 ready 后连点叠加新会话）
+    const cur0 = get().session;
+    if (cur0?.target === 'domain' && cur0.domain_name === domainName && !TERMINAL_STATUSES.has(cur0.status)) {
       get().ensurePolling();
       return;
     }
     stopPolling();
-    set({ view: 'curriculum', domainName, run: null, error: null, launching: true, pollFailures: 0 });
+    set({
+      view: 'curriculum', domainName, courseId: null, applied: false, applyResult: null,
+      error: null, launching: true, pollFailures: 0,
+    });
     try {
-      const launched = isExploreMockEnabled()
-        ? exploreMockBackend.launchCurriculum(domainName, params)
-        : await launchCurriculumExplore({ domain_name: domainName, ...params });
-      const run: CurriculumRun = {
-        run_id: launched.run_id, scope: 'curriculum', status: 'running',
-        params: { domain_name: domainName, ...params },
-        proposals: [], adopted_proposal_ids: [], conflicts: [], error: null,
-        created_at: nowIso(), updated_at: nowIso(),
-      };
-      set({ run, launching: false });
+      const session = isExploreMockEnabled()
+        ? exploreMockBackend.createSession({ target: 'domain', domain_name: domainName, ...params })
+        : await createExploreSession({ target: 'domain', domain_name: domainName, domain_id: domainId, ...params });
+      set({ session, launching: false });
+      // 发起即标记领域按钮「探索进行中」（stage=探索中由 8900 写共享表）
+      if (domainId) {
+        const { setDomainRunStatus } = useExploreUiStore.getState();
+        setDomainRunStatus(domainId, 'running');
+      }
       pollTimer = setInterval(() => void get().refresh(), POLL_INTERVAL_MS);
     } catch (err) {
       set({ error: describeError(err), launching: false });
@@ -280,23 +300,68 @@ export const useExploreStore = create<ExploreStore>((set, get) => ({
   },
 
   refresh: async () => {
-    const current = get().run;
+    const current = get().session;
     if (!current || TERMINAL_STATUSES.has(current.status)) return;
     try {
-      const next = current.scope === 'course'
-        ? await (isExploreMockEnabled() ? Promise.resolve(exploreMockBackend.fetchRun(current.run_id)) : fetchExploreRun(current.run_id))
-        : await (isExploreMockEnabled() ? Promise.resolve(exploreMockBackend.fetchCurriculum(current.run_id)) : fetchCurriculumRun(current.run_id));
-      set({ run: next, pollFailures: 0, error: null });
-      if (TERMINAL_STATUSES.has(next.status)) stopPolling();
+      const next = isExploreMockEnabled()
+        ? exploreMockBackend.fetchSession(current.session_id)
+        : await fetchExploreSession(current.session_id);
+      set({ session: next, pollFailures: 0, error: null });
+      if (TERMINAL_STATUSES.has(next.status)) {
+        stopPolling();
+        // 弹窗关闭时触发通知：加「查看结果」按钮重新打开弹窗进结果视图
+        const { flowTarget, openFlow } = useExploreUiStore.getState();
+        if (flowTarget === null) {
+          const label = next.target === 'domain' ? next.domain_name : next.course_id;
+          const openResult = (): void => {
+            if (next.target === 'domain') {
+              // 领域：从下载树按名称回查 domainId（新领域 apply 后才会出现在树中）
+              const domId = useDownloadsStore.getState().domains.find((d) => d.name === next.domain_name)?.domain_id
+                ?? next.domain_name;
+              openFlow({ variant: 'curriculum', domainId: domId, domainName: next.domain_name });
+            } else {
+              openFlow({ variant: 'course', courseId: next.course_id });
+            }
+          };
+          const actionBtn = createElement(
+            Button,
+            { size: 'small', type: 'primary', onClick: openResult },
+            next.status === 'failed' ? '查看详情' : '查看结果',
+          );
+          if (next.status === 'failed') {
+            notification.error({
+              message: `「${label}」探索失败`,
+              description: next.error ?? '请稍后重试',
+              btn: actionBtn,
+              duration: 0,
+            });
+          } else {
+            notification.success({
+              message: `「${label}」探索完成`,
+              description: '探索结果已就绪',
+              btn: actionBtn,
+              duration: 5,
+            });
+          }
+        }
+      }
     } catch (err) {
+      // 自愈清障：会话已不存在（404，如 localStorage 残留旧会话且服务端重启丢失）
+      // → 清持久化 + 置空，弹窗回落到发起表单态（不再卡在旧结果/无限轮询）
+      if (err instanceof ApiError && err.status === 404) {
+        stopPolling();
+        persistSession(null);
+        set({ session: null, error: null, pollFailures: 0 });
+        return;
+      }
       const failures = get().pollFailures + 1;
       if (failures >= MAX_POLL_FAILURES) {
-        // 连续失败上限：本地转 failed（保留 run_id 供恢复查询），停止轮询
+        // 连续失败上限：本地转 failed（保留 session_id 供恢复查询），停止轮询
         stopPolling();
         set({
           pollFailures: failures,
-          error: `探索轮询连续 ${MAX_POLL_FAILURES} 次失败已停止（run_id=${current.run_id} 已保留，可重试或稍后恢复查询）`,
-          run: { ...current, status: 'failed' } as ExploreRun | CurriculumRun,
+          error: `探索轮询连续 ${MAX_POLL_FAILURES} 次失败已停止（session_id=${current.session_id} 已保留，可重试或稍后恢复查询）`,
+          session: { ...current, status: 'failed', error: current.error ?? '轮询连续失败' },
         });
       } else {
         set({ pollFailures: failures });
@@ -304,18 +369,48 @@ export const useExploreStore = create<ExploreStore>((set, get) => ({
     }
   },
 
-  adopt: async (selected) => {
-    const current = get().run;
-    if (!current || current.scope !== 'course' || current.status !== 'ready') return null;
+  confirmName: async (nameOverride) => {
+    const current = get().session;
+    if (!current || current.status !== 'waiting_name_confirm') return;
+    try {
+      const next = isExploreMockEnabled()
+        ? exploreMockBackend.confirmName(current.session_id, nameOverride)
+        : await confirmExploreSessionName(current.session_id, nameOverride);
+      set({ session: next, error: null, pollFailures: 0 });
+      pollTimer = setInterval(() => void get().refresh(), POLL_INTERVAL_MS);
+    } catch (err) {
+      set({ error: describeError(err) });
+    }
+  },
+
+  apply: async (selected) => {
+    const current = get().session;
+    if (!current || current.status !== 'ready') return null;
     try {
       const result = isExploreMockEnabled()
-        ? exploreMockBackend.adopt(current.run_id, selected)
-        : await adoptExploreRun(current.run_id, selected);
-      set({ run: result.run });
+        ? exploreMockBackend.applySession(current.session_id, selected)
+        : await applyExploreSession(current.session_id, selected);
       stopPolling();
-      // mock 模式：本地注入草稿教程，令「采纳 → 文档下载管理可见」闭环可预览（方案 A）
+      // mock 模式：本地注入草稿教程/新课程，令「应用 → 文档下载管理可见」闭环可预览
       if (isExploreMockEnabled()) {
-        injectMockAdoption(current.course_id, result.adopted, current.proposals);
+        if (current.target === 'course') {
+          injectMockAdoption(
+            current.course_id,
+            result.applied.map((a, i) => ({
+              knowledge_id: a.knowledge_id ?? `mock_kn_${i}`,
+              set_name: a.set_name ?? `套${i + 1}`,
+            })),
+            asCourseTutorials(current),
+          );
+        } else {
+          const report = asDomainReport(current);
+          injectMockCurriculum(current.domain_name, report?.courses ?? []);
+        }
+      }
+      set({ applied: true, applyResult: result });
+      // 真实模式：apply 落库后刷新下载树（新课程/新教程可见）
+      if (!isExploreMockEnabled()) {
+        void useDownloadsStore.getState().fetchAll();
       }
       return result;
     } catch (err) {
@@ -325,77 +420,36 @@ export const useExploreStore = create<ExploreStore>((set, get) => ({
   },
 
   discard: async () => {
-    const current = get().run;
-    if (!current || current.scope !== 'course' || current.status === 'discarded') return;
-    try {
-      const run = isExploreMockEnabled()
-        ? exploreMockBackend.discard(current.run_id)
-        : await discardExploreRun(current.run_id);
-      set({ run });
-      stopPolling();
-    } catch (err) {
-      set({ error: describeError(err) });
-    }
-  },
-
-  applyChanges: async (selected) => {
-    const current = get().run;
-    if (!current || current.scope !== 'curriculum' || current.status !== 'ready') return null;
-    try {
-      let result: CurriculumApplyResult;
-      if (isExploreMockEnabled()) {
-        result = exploreMockBackend.applyCurriculum(current.run_id, selected);
-      } else {
-        result = await applyCurriculumRun(current.run_id, selected);
-      }
-      set({ run: result.run });
-      stopPolling();
-      // mock 模式：把新课程注入下载树领域体系（仅内存演示）
-      if (isExploreMockEnabled()) {
-        injectMockCurriculum(current.params.domain_name, current.proposals.filter((c) => selected.includes(c.change_id)));
-      }
-      return result;
-    } catch (err) {
-      set({ error: describeError(err) });
-      return null;
-    }
-  },
-
-  loadHistory: async (courseId) => {
-    const target = courseId ?? get().courseId;
-    if (!target) return;
-    try {
-      const history = isExploreMockEnabled()
-        ? exploreMockBackend.listRuns(target)
-        : await listCourseExploreRuns(target, { limit: 20 });
-      set({ history });
-    } catch (err) {
-      set({ error: describeError(err) });
-    }
-  },
-
-  openRun: async (runId) => {
+    const current = get().session;
+    if (!current) return;
     stopPolling();
     try {
-      const run = isExploreMockEnabled()
-        ? exploreMockBackend.fetchRun(runId)
-        : await fetchExploreRun(runId);
-      set({ view: 'course', courseId: run.course_id, run, pollFailures: 0 });
+      if (!isExploreMockEnabled()) {
+        await deleteExploreSession(current.session_id);
+      } else {
+        exploreMockBackend.deleteSession(current.session_id);
+      }
     } catch (err) {
-      set({ error: describeError(err) });
+      // 404（会话已过期清理）：视为放弃成功
+      if (!(err instanceof ApiError && err.status === 404)) {
+        set({ error: describeError(err) });
+        return;
+      }
     }
+    persistSession(null);
+    set({ session: null, applied: false, applyResult: null, error: null });
   },
 
-  /** 恢复场景续轮询：run 来自 localStorage 且未终态时重启定时器（弹窗打开时调用） */
+  /** 恢复场景续轮询：session 来自 localStorage 且未终态时重启定时器（弹窗打开时调用） */
   ensurePolling: () => {
-    const cur = get().run;
+    const cur = get().session;
     if (!cur || TERMINAL_STATUSES.has(cur.status)) return;
     stopPolling();
     pollTimer = setInterval(() => void get().refresh(), POLL_INTERVAL_MS);
   },
 }));
 
-// 任一 run 变更即落盘（2026-08-24：刷新/重开页面可恢复最近一次探索结果）
+// 任一会话变更即落盘（刷新/重开页面可恢复最近一次探索结果）
 useExploreStore.subscribe((st) => {
-  persistRun(st.run);
+  persistSession(st.session);
 });

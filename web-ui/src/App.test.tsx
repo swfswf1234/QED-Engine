@@ -52,11 +52,11 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     expect(container.querySelector('h2')?.textContent).toBe('学习中心 · 知识结构浏览');
   });
 
-  it('主界面「课程学习」卡跳转 #/knowledge', async () => {
+  it('主界面「知识探索」卡跳转 #/knowledge', async () => {
     window.location.hash = '#/';
     const user = userEvent.setup();
     renderApp();
-    await user.click(screen.getByText('课程学习'));
+    await user.click(screen.getByText('知识探索'));
     expect(await screen.findByRole('heading', { name: '学习中心 · 知识结构浏览' })).toBeInTheDocument();
   });
 });

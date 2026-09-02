@@ -178,13 +178,13 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     const st = useDownloadsStore.getState();
     expect(st.selected).toEqual({ kind: 'domain', id: 'dm1' });
     expect(st.filters).toEqual({ domain: 'dm1', course: '', stage: '' });
-    expect(await screen.findByText('筛选结果：3 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
+    expect(await screen.findByText('筛选结果：3 个教程（已排除否定/过时项）')).toBeInTheDocument();
     // 领域信息卡：名称 + 描述 + 探索按钮（idle 可点）
     const card = await screen.findByTestId('domain-info-card');
     expect(within(card).getByText('高等数学')).toBeInTheDocument();
     expect(within(card).getByText('本科数学核心领域')).toBeInTheDocument();
     expect(within(card).getByText('2 门课程')).toBeInTheDocument();
-    const exploreBtn = within(card).getByRole('button', { name: /探索课程体系/ });
+    const exploreBtn = within(card).getByRole('button', { name: /重新探索|领域探索/ });
     expect(exploreBtn).not.toBeDisabled();
   });
 
@@ -200,10 +200,10 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     const st = useDownloadsStore.getState();
     expect(st.selected).toEqual({ kind: 'course', id: '01_math_analysis' });
     expect(st.filters).toEqual({ domain: 'dm1', course: '01_math_analysis', stage: '' });
-    expect(await screen.findByText('筛选结果：2 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
+    expect(await screen.findByText('筛选结果：2 个教程（已排除否定/过时项）')).toBeInTheDocument();
   });
 
-  it('筛选栏三栏（领域/课程/状态）：状态=书行阶段，与树选择叠加 AND', async () => {
+  it('筛选栏三栏（领域/课程/状态）：状态=书籍阶段，与树选择叠加 AND', async () => {
     mockApi({
       '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
@@ -222,11 +222,11 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     await waitFor(() => {
       expect(useDownloadsStore.getState().filters.stage).toBe('completed');
     });
-    // 仅 k1（Rudin 教程，含 verified 书行）保留
-    expect(await screen.findByText('筛选结果：1 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
+    // 仅 k1（Rudin 教程，含 verified 书籍）保留
+    expect(await screen.findByText('筛选结果：1 个教程（已排除否定/过时项）')).toBeInTheDocument();
   });
 
-  it('状态筛选（待验证）：仅保留含 downloaded 书行的知识行（k3），其余隐藏、左树保留', async () => {
+  it('状态筛选（待验证）：仅保留含 downloaded 书籍的教程（k3），其余隐藏、左树保留', async () => {
     mockApi({
       '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
@@ -242,8 +242,8 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     await waitFor(() => {
       expect(useDownloadsStore.getState().filters.stage).toBe('await_verify');
     });
-    // 仅 k3（线性代数教程，含 downloaded 书行）保留；k1（已验收）与空书行 k2 隐藏
-    expect(await screen.findByText('筛选结果：1 条知识行（rejected/superseded 由数据层隐藏）')).toBeInTheDocument();
+    // 仅 k3（线性代数教程，含 downloaded 书籍）保留；k1（已验收）与空书籍 k2 隐藏
+    expect(await screen.findByText('筛选结果：1 个教程（已排除否定/过时项）')).toBeInTheDocument();
     const content = document.querySelector('.dl-content') as HTMLElement;
     expect(within(content).queryByText('Rudin 教程')).not.toBeInTheDocument();
     expect(within(content).queryByText('候选教程')).not.toBeInTheDocument();
@@ -253,7 +253,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     expect(within(tree).getByText('候选教程')).toBeInTheDocument();
   });
 
-  it('书行卡去 kind 标签：只保留 状态 + roles 标签', async () => {
+  it('书籍卡去 kind 标签：只保留 状态 + roles 标签', async () => {
     mockApi({
       '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
@@ -268,7 +268,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     expect(within(card).getByText('已验证')).toBeInTheDocument();
   });
 
-  it('8901 不可达（/knowledge 503）→ 知识行降级提示，课程体系树正常', async () => {
+  it('8901 不可达（/knowledge 503）→ 教程降级提示，课程体系树正常', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/courses')) {
         return Promise.resolve(
@@ -283,7 +283,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       return Promise.reject(new TypeError(`no route: ${url}`));
     });
     renderDownloads();
-    expect(await screen.findByText('知识行数据不可达')).toBeInTheDocument();
+    expect(await screen.findByText('教程数据不可达')).toBeInTheDocument();
     const tree = screen.getByRole('tree');
     expect(within(tree).getByText('高等数学')).toBeInTheDocument();
     expect(within(tree).getByText('数学分析')).toBeInTheDocument();
@@ -320,7 +320,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     expect(notes.length).toBe(1);
   });
 
-  it('确认知识行 → 自动按决定引用生成两册候选书行（2026-08-25 #4 改造）', async () => {
+  it('确认教程 → 自动按决定引用生成两册候选书籍（2026-08-25 #4 改造）', async () => {
     const kdraft = kn({
       knowledge_id: 'k9', course_id: '01_math_analysis', set_no: '', name: '待确认教程',
       status: 'draft',
@@ -351,7 +351,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     });
   });
 
-  it('confirmed 无书行且有决定引用 → 显示「按决定引用补建书行」兜底并可生成', async () => {
+  it('confirmed 无书籍且有决定引用 → 显示「按决定引用补建书籍」兜底并可生成', async () => {
     const kconf = kn({
       knowledge_id: 'k8', course_id: '01_math_analysis', set_no: '', name: '已定稿教程',
       status: 'confirmed',
@@ -371,10 +371,66 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     renderDownloads();
     const tree = await screen.findByRole('tree');
     fireEvent.click(within(tree).getByText('数学分析'));
-    const btn = await screen.findByRole('button', { name: '按决定引用补建书行' });
+    const btn = await screen.findByRole('button', { name: '按决定引用补建书籍' });
     fireEvent.click(btn);
     await waitFor(() => {
       expect(booksCalls).toBe(1);
     });
+  });
+
+  it('进入页面默认选中第一个领域：selected + filters.domain 自动设置', async () => {
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
+    renderDownloads();
+    await waitFor(() => {
+      expect(useDownloadsStore.getState().loading).toBe(false);
+    });
+    const st = useDownloadsStore.getState();
+    expect(st.selected).toEqual({ kind: 'domain', id: 'dm1' });
+    expect(st.filters.domain).toBe('dm1');
+    expect(st.filters.course).toBe('');
+    expect(st.filters.stage).toBe('');
+    // 右侧展示领域信息卡
+    expect(await screen.findByTestId('domain-info-card')).toBeInTheDocument();
+  });
+
+  it('已有 selected 时 fetchAll 不覆盖：保留原选中', async () => {
+    useDownloadsStore.setState({
+      selected: { kind: 'course', id: '01_math_analysis' },
+      filters: { domain: 'dm1', course: '01_math_analysis', stage: '' },
+    });
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
+    renderDownloads();
+    await waitFor(() => {
+      expect(useDownloadsStore.getState().loading).toBe(false);
+    });
+    const st = useDownloadsStore.getState();
+    expect(st.selected).toEqual({ kind: 'course', id: '01_math_analysis' });
+    expect(st.filters.domain).toBe('dm1');
+  });
+
+  it('空课程体系时 fetchAll 不自动选中：selected 保持 null', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/courses')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      if (url.includes('/knowledge')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.reject(new TypeError(`no route: ${url}`));
+    });
+    renderDownloads();
+    await waitFor(() => {
+      expect(useDownloadsStore.getState().loading).toBe(false);
+    });
+    const st = useDownloadsStore.getState();
+    expect(st.selected).toBeNull();
   });
 });

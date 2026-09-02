@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourseGraph } from './knowledge';
 import { layoutBubbles, BUBBLE_R, LAYER_H } from '../components/CourseGraph';
-import { COURSE_PREREQUISITES, COURSE_STAGE, COURSE_ORDER, STAGE_ORDER } from './courseMeta';
-import type { CatalogTarget } from './index';
+import { stageKey, STAGE_ORDER } from './courseMeta';
+import type { CatalogTarget, CourseRecord } from './index';
 
 function target(courseId: string, courseName: string): CatalogTarget {
   return {
@@ -11,43 +11,102 @@ function target(courseId: string, courseName: string): CatalogTarget {
   };
 }
 
-/** 13 门课（对齐 catalog math-qe） */
-const TARGETS: CatalogTarget[] = COURSE_ORDER.map((cid, i) => target(cid, `课${i}`));
+/** 模拟 CourseRecord（来自 GET /courses，qed_course 表） */
+function mockCourseRecord(courseId: string, stage: string, prerequisites: string[]): CourseRecord {
+  return {
+    course_id: courseId,
+    name: courseId,
+    aliases: [],
+    stage,
+    prerequisites,
+  };
+}
 
-describe('课程依赖常量完整性（对齐 courses/math.json）', () => {
-  it('COURSE_STAGE 覆盖 catalog 13 门课且 stage 合法', () => {
-    for (const cid of COURSE_ORDER) {
-      expect(COURSE_STAGE[cid], cid).toBeDefined();
-      expect(STAGE_ORDER).toContain(COURSE_STAGE[cid]);
-    }
+// --- stageKey 映射测试 ---
+
+describe('stageKey 中文→英文映射', () => {
+  it('四个标准阶段名正确映射', () => {
+    expect(stageKey('本科基础')).toBe('basic');
+    expect(stageKey('本科进阶')).toBe('advanced');
+    expect(stageKey('研究生基础')).toBe('graduate');
+    expect(stageKey('QE冲刺')).toBe('qe');
   });
 
-  it('COURSE_PREREQUISITES 覆盖全部课程且依赖在 catalog 内闭合', () => {
-    for (const cid of COURSE_ORDER) {
-      expect(COURSE_PREREQUISITES[cid], cid).toBeDefined();
-      for (const pre of COURSE_PREREQUISITES[cid]) {
-        expect(COURSE_ORDER, `${cid} 先修 ${pre}`).toContain(pre);
-      }
-    }
+  it('兼容变体（含空格、小写）', () => {
+    expect(stageKey('QE 冲刺')).toBe('qe');
+    expect(stageKey('basic')).toBe('basic');
+    expect(stageKey('graduate')).toBe('graduate');
+  });
+
+  it('未知阶段名兜底 graduate', () => {
+    expect(stageKey('博士基础')).toBe('graduate');
+    expect(stageKey('')).toBe('graduate');
   });
 });
 
-describe('课程图构建 buildCourseGraph', () => {
-  it('13 门课程按 COURSE_ORDER 排序，依赖边只含 catalog 内课程', () => {
-    const graph = buildCourseGraph(TARGETS);
-    expect(graph.courses.map((c) => c.id)).toEqual(COURSE_ORDER);
+// --- 课程图构建（API 驱动） ---
+
+/** 构建模拟 courseMetaMap */
+function buildCourseMetaMap(): Map<string, CourseRecord> {
+  const map = new Map<string, CourseRecord>();
+  const entries: [string, string, string[]][] = [
+    ['01_math_analysis', '本科基础', []],
+    ['02_linear_algebra', '本科基础', []],
+    ['03_topology', '本科基础', ['01_math_analysis', '02_linear_algebra']],
+    ['04_real_analysis', '研究生基础', ['03_topology']],
+    ['05_complex_analysis', '研究生基础', ['03_topology']],
+    ['06_functional_analysis', '研究生基础', ['04_real_analysis', '05_complex_analysis']],
+    ['07_ode', '本科进阶', ['01_math_analysis']],
+    ['08_pde', '研究生基础', ['01_math_analysis', '07_ode']],
+    ['09_abstract_algebra', '研究生基础', ['02_linear_algebra']],
+    ['10_qe_prep', 'QE冲刺', [
+      '01_math_analysis', '03_topology', '04_real_analysis', '05_complex_analysis',
+      '06_functional_analysis', '07_ode', '08_pde', '09_abstract_algebra',
+      '11_probability', '13_high_dim_prob',
+    ]],
+    ['11_probability', '研究生基础', ['04_real_analysis']],
+    ['12_stochastic_processes', '研究生基础', ['11_probability']],
+    ['13_high_dim_prob', '研究生基础', ['11_probability']],
+  ];
+  for (const [id, stage, prereqs] of entries) {
+    map.set(id, mockCourseRecord(id, stage, prereqs));
+  }
+  return map;
+}
+
+// 期望排序：按 stage 分层（basic → advanced → graduate → qe），同层按 id 字典序
+const EXPECTED_ORDER = [
+  '01_math_analysis', '02_linear_algebra', '03_topology',   // basic
+  '07_ode',                                                   // advanced
+  '04_real_analysis', '05_complex_analysis', '06_functional_analysis',
+  '08_pde', '09_abstract_algebra', '11_probability',
+  '12_stochastic_processes', '13_high_dim_prob',              // graduate
+  '10_qe_prep',                                                // qe
+];
+
+describe('课程图构建 buildCourseGraph（API 驱动）', () => {
+  it('13 门课程按 stage 分层排序，依赖边只含 catalog 内课程', () => {
+    const metaMap = buildCourseMetaMap();
+    const targets = EXPECTED_ORDER.map((cid, i) => target(cid, `课${i}`));
+    const graph = buildCourseGraph(targets, metaMap);
+
+    expect(graph.courses.map((c) => c.id)).toEqual(EXPECTED_ORDER);
     expect(graph.courses).toHaveLength(13);
+
     // 边数 = 各课先修数之和（QE 冲刺 10 门先修）
-    const expected = Object.values(COURSE_PREREQUISITES).reduce((n, pre) => n + pre.length, 0);
-    expect(graph.edges).toHaveLength(expected);
+    const expectedEdges = [...metaMap.values()].reduce((n, c) => n + c.prerequisites.length, 0);
+    expect(graph.edges).toHaveLength(expectedEdges);
     for (const e of graph.edges) {
-      expect(COURSE_ORDER).toContain(e.from);
-      expect(COURSE_ORDER).toContain(e.to);
+      expect(EXPECTED_ORDER).toContain(e.from);
+      expect(EXPECTED_ORDER).toContain(e.to);
     }
   });
 
   it('课程依赖方向正确：03 点集拓扑 先修 01/02', () => {
-    const graph = buildCourseGraph(TARGETS);
+    const metaMap = buildCourseMetaMap();
+    const targets = EXPECTED_ORDER.map((cid, i) => target(cid, `课${i}`));
+    const graph = buildCourseGraph(targets, metaMap);
+
     const topology = graph.courses.find((c) => c.id === '03_topology')!;
     expect(topology.prerequisites).toEqual(['01_math_analysis', '02_linear_algebra']);
     expect(graph.edges.filter((e) => e.to === '03_topology').map((e) => e.from).sort())
@@ -57,11 +116,21 @@ describe('课程图构建 buildCourseGraph', () => {
   it('catalog 为空 → 空课程图', () => {
     expect(buildCourseGraph([])).toEqual({ courses: [], edges: [] });
   });
+
+  it('无 courseMetaMap 时 stage 兜底 graduate、先修为空', () => {
+    const targets = [target('01_math_analysis', '数学分析')];
+    const graph = buildCourseGraph(targets);
+    expect(graph.courses).toHaveLength(1);
+    expect(graph.courses[0].stage).toBe('graduate');
+    expect(graph.courses[0].prerequisites).toEqual([]);
+  });
 });
 
 describe('泡泡布局 layoutBubbles', () => {
   it('按 stage 四层排布：层序号递增，层内 x 递增', () => {
-    const graph = buildCourseGraph(TARGETS);
+    const metaMap = buildCourseMetaMap();
+    const targets = EXPECTED_ORDER.map((cid, i) => target(cid, `课${i}`));
+    const graph = buildCourseGraph(targets, metaMap);
     const pos = layoutBubbles(graph);
     const byId = new Map(pos.map((p) => [p.course.id, p]));
     // 01 本科基础 y < 07 本科进阶 y < 04 研究生基础 y < 10 QE y

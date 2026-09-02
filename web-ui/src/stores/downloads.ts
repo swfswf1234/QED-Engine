@@ -1,22 +1,26 @@
 /**
  * 文档下载管理 store v2（2026-08-24 REQ-059 交互改版：左树真实领域课程体系）
  * - 数据源：/courses（GET，QED-Tracker 领域课程体系，math-qe 冻结目录退出 UI）
- *   + /knowledge（知识行列表）+ 并行拉取 /knowledge/{id} 详情（逐行独立降级）
+ *   + /knowledge（教程列表）+ 并行拉取 /knowledge/{id} 详情（逐行独立降级）
  * - 独立降级：8900 不可达 → 整体错误；课程体系 / knowledge 各自失败互不拖累；
- *   详情拉取失败仅该知识行书行缺失（树/状态不受影响）
+ *   详情拉取失败仅该教程书籍缺失（树/状态不受影响）
  * - 树构建（buildTreeNodes 纯函数）：领域（真实 domain_id）→ 课程 → 教程叶子
  *   （label + 验收进度 verified/total；kind=tutorial 套节点 isSet=true，
- *   kind=other_material 单条目教程）；知识行所属课程不在体系中时不进树
- * - 书行展示顺序 sortBooks：中文教材 → 中文习题集 → 其余；组内册数递增
+ *   kind=other_material 单条目教程）；教程所属课程不在体系中时不进树
+ * - 书籍展示顺序 sortBooks：中文教材 → 中文习题集 → 其余；组内册数递增
  * - 状态筛选 bookInStage：待确认=candidate / 下载=decided+downloading+failed /
  *   待验证=downloaded / 已完成=verified（2026-08-24 用户裁决三栏收敛）
  * - 树宽拖拽：280–640px，localStorage 记忆（DOWNLOADS_TREE_WIDTH_KEY）
  */
 import { create } from 'zustand';
+import { message } from 'antd';
 import {
   listCourseSystem, listKnowledge, getKnowledge,
 } from '../api/tracker';
 import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
+
+/** 轮询定时器引用（模块级，zustand store 不存储非序列化值） */
+let _pollingTimer: ReturnType<typeof setInterval> | null = null;
 
 /** 树宽 localStorage 键 */
 export const DOWNLOADS_TREE_WIDTH_KEY = 'qed-downloads-tree-w';
@@ -24,7 +28,7 @@ export const TREE_WIDTH_MIN = 280;
 export const TREE_WIDTH_MAX = 640;
 export const TREE_WIDTH_DEFAULT = 400;
 
-/** 教程节点 label：知识行 name 优先（QED-Tracker 侧统一命名），空则「教程N」兜底 */
+/** 教程节点 label：name 优先（QED-Tracker 侧统一命名），空则「教程N」兜底 */
 export function tutorialLabel(k: KnowledgeRecord): string {
   const name = String(k.name ?? '').trim();
   if (name) return name;
@@ -33,9 +37,9 @@ export function tutorialLabel(k: KnowledgeRecord): string {
   return k.knowledge_id;
 }
 
-// --- 状态筛选（书行生命周期四阶段，2026-08-24 用户裁决：筛选收敛为 领域/课程/状态 三栏） ---
+// --- 状态筛选（书籍生命周期四阶段，2026-08-24 用户裁决：筛选收敛为 领域/课程/状态 三栏） ---
 
-/** 状态筛选选项（书行阶段；decided/downloading/failed 归「下载」，failed 可在此重试） */
+/** 状态筛选选项（书籍阶段；decided/downloading/failed 归「下载」，failed 可在此重试） */
 export const STAGE_OPTIONS = [
   { value: 'confirm', label: '待确认' },
   { value: 'download', label: '下载' },
@@ -43,7 +47,7 @@ export const STAGE_OPTIONS = [
   { value: 'completed', label: '已完成' },
 ] as const;
 
-/** 书行是否属于某阶段；stage=''（全部）不过滤 */
+/** 书籍是否属于某阶段；stage=''（全部）不过滤 */
 export function bookInStage(b: BookRecord, stage: string): boolean {
   switch (stage) {
     case 'confirm': return b.status === 'candidate';
@@ -54,7 +58,7 @@ export function bookInStage(b: BookRecord, stage: string): boolean {
   }
 }
 
-// --- 书行排序（ARCH-015 D3 用户裁决） ---
+// --- 书籍排序（ARCH-015 D3 用户裁决） ---
 
 /** 册号数值：第一~五册=1~5、上/中/下册=1/2/3、单册（空）=0（组首）、答案册=99（组尾） */
 export function partNumber(part: string): number {
@@ -71,16 +75,17 @@ export function partNumber(part: string): number {
 }
 
 /**
- * 书行排序（纯函数，不修改入参）：
- * 组序 ①中文教材(zh+textbook) → ②中文习题集(zh+exercise) → ③其余(英文教材/配套资料等)；
+ * 书籍排序（纯函数，不修改入参）：
+ * 组序 ①中文教材(zh+textbook) → ②中文习题集(zh+exercise) → ③英文教材(en+textbook) → ④其余；
  * 组内册数递增（partNumber），同册数按 title 稳定序。
  */
 export function sortBooks(books: BookRecord[]): BookRecord[] {
   const group = (b: BookRecord): number => {
-    const zh = (b.language ?? '') === 'zh';
-    if (zh && b.kind === 'textbook') return 0;
-    if (zh && b.kind === 'exercise') return 1;
-    return 2;
+    const lang = (b.language ?? '').toLowerCase();
+    if (lang === 'zh' && b.kind === 'textbook') return 0;   // 中文教材
+    if (lang === 'zh' && b.kind === 'exercise') return 1;   // 中文习题集
+    if (lang === 'en' && b.kind === 'textbook') return 2;   // 英文教材
+    return 3;                                                // 其余
   };
   return [...books].sort((a, b) => {
     const ga = group(a);
@@ -98,16 +103,16 @@ export function sortBooks(books: BookRecord[]): BookRecord[] {
 export interface TutorialNode {
   /** 教程 key（选中用）：courseId::kn:<knowledge_id> */
   key: string;
-  /** 教程显示名：知识行 name / 教程N / knowledge_id */
+  /** 教程显示名：教程 name / 教程N / knowledge_id */
   label: string;
   knowledge: KnowledgeRecord;
-  /** 所辖书行（来自详情缓存，可能为空/加载失败） */
+  /** 所辖书籍（来自详情缓存，可能为空/加载失败） */
   items: BookRecord[];
   /** 是否套节点（kind=tutorial）；other_material 单条目教程为叶子 */
   isSet: boolean;
-  /** 已验收书行数（status=verified） */
+  /** 已验收书籍数（status=verified） */
   verified: number;
-  /** 书行总数 */
+  /** 书籍总数 */
   total: number;
 }
 
@@ -128,7 +133,7 @@ export interface DomainNode {
   courses: CourseNode[];
 }
 
-/** 知识行 → 教程叶子节点（kind=tutorial 按 set_no 数值升序，其余按 name） */
+/** 教程 → 教程叶子节点（kind=tutorial 按 set_no 数值升序，其余按 name） */
 function buildTutorials(courseId: string, knowledge: KnowledgeRecord[], details: Record<string, KnowledgeDetail>): TutorialNode[] {
   const nodes: TutorialNode[] = knowledge.map((k) => {
     const items = details[k.knowledge_id]?.books ?? [];
@@ -158,7 +163,8 @@ function buildTutorials(courseId: string, knowledge: KnowledgeRecord[], details:
 /**
  * 构建左树（纯函数，v2）：领域 → 课程 → 教程
  * - 数据源为 GET /courses 的领域课程体系（服务端已按 sort_order 排序），顺序保持返回序
- * - 教程按 course_id 归组挂到对应课程；知识行所属课程不在体系中时不进树（不虚构兜底节点）
+ * - 课程按 sort_order 排序（服务端保证），前端无需额外排序
+ * - 教程按 course_id 归组挂到对应课程；教程所属课程不在体系中时不进树（不虚构兜底节点）
  * - 无课程体系返回空数组
  */
 export function buildTreeNodes(
@@ -199,7 +205,7 @@ export interface DownloadsStore {
   /** 领域课程体系（GET /courses 原样，v2 左树数据源） */
   domains: DomainSystem[];
   knowledge: KnowledgeRecord[];
-  /** 详情缓存（knowledge_id → 含 books），拉取失败的知识行无条目 */
+  /** 详情缓存（knowledge_id → 含 books），拉取失败的教程无条目 */
   details: Record<string, KnowledgeDetail>;
   loading: boolean;
   /** 整体错误（8900 不可达） */
@@ -208,7 +214,7 @@ export interface DownloadsStore {
   systemError: string | null;
   /** knowledge 独立错误 */
   knowledgeError: string | null;
-  /** 筛选栏三栏（2026-08-24 收敛）：领域/课程 + 状态=书行阶段（stage，空=全部）；
+  /** 筛选栏三栏（2026-08-24 收敛）：领域/课程 + 状态=书籍阶段（stage，空=全部）；
    *  与树选择单向联动：树 → 筛选；domain 存 domain_id */
   filters: { domain: string; course: string; stage: string };
   selected: NodeSelection | null;
@@ -217,8 +223,12 @@ export interface DownloadsStore {
   selectNode: (sel: NodeSelection) => void;
   setTreeWidth: (width: number) => void;
   fetchAll: () => Promise<void>;
-  /** 局部刷新单个知识行详情（操作成功后调用） */
+  /** 局部刷新单个教程详情（操作成功后调用） */
   refreshDetail: (knowledgeId: string) => Promise<void>;
+  /** REQ-067 B8：启动 exploration_stage 轮询（5s 间隔） */
+  startPolling: () => void;
+  /** 停止轮询 */
+  stopPolling: () => void;
 }
 
 function readTreeWidth(): number {
@@ -244,7 +254,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
   treeWidth: readTreeWidth(),
 
   setFilter: (key, value) => {
-    // 领域/课程互斥：选领域清课程；选课程保留领域；状态（书行阶段）独立叠加
+    // 领域/课程互斥：选领域清课程；选课程保留领域；状态（书籍阶段）独立叠加
     const f = get().filters;
     const filters: DownloadsStore['filters'] = { ...f };
     if (key === 'domain') {
@@ -291,7 +301,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       .then((k) => [k, null] as const)
       .catch((err) => [null, err] as const);
 
-    // 并行拉取每行详情（含 books），逐行独立降级：失败仅该行书行缺失
+    // 并行拉取每行详情（含 books），逐行独立降级：失败仅该行书籍缺失
     let details: Record<string, KnowledgeDetail> = {};
     if (list && list.length > 0) {
       const settled = await Promise.allSettled(list.map((k) => getKnowledge(k.knowledge_id)));
@@ -301,13 +311,23 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       });
     }
 
+    const newDomains = system ?? get().domains;
+    const currentSelected = get().selected;
+    const newSelected = currentSelected === null && newDomains.length > 0
+      ? { kind: 'domain' as const, id: newDomains[0].domain_id }
+      : currentSelected;
+
     set({
-      domains: system ?? get().domains,
+      domains: newDomains,
       knowledge: list ?? get().knowledge,
       details,
       systemError: sysErr ? messageOf(sysErr) : null,
       knowledgeError: knErr ? messageOf(knErr) : null,
-      error: sysErr && knErr ? '8900 数据获取失败（课程体系与知识行均不可达）' : null,
+      error: sysErr && knErr ? '8900 数据获取失败（课程体系与教程均不可达）' : null,
+      selected: newSelected,
+      ...(newSelected && newSelected !== currentSelected && newSelected.kind === 'domain' ? {
+        filters: { domain: newSelected.id, course: '', stage: get().filters.stage },
+      } : {}),
     });
     set({ loading: false });
   },
@@ -320,6 +340,53 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       set({ details: { ...get().details, [knowledgeId]: detail } });
     } else if (err) {
       set({ knowledgeError: messageOf(err) });
+    }
+  },
+
+  // --- REQ-067 B8：exploration_stage 轮询（5s 间隔） ---
+  startPolling: () => {
+    const { stopPolling } = get();
+    stopPolling(); // 先清除旧轮询
+    const timer = setInterval(async () => {
+      const currentDomains = get().domains;
+      if (currentDomains.length === 0) return;
+      try {
+        const latest = await listCourseSystem();
+        // 检查是否有领域从探索中变为终态
+        let changed = false;
+        for (const fresh of latest) {
+          const old = currentDomains.find((d) => d.domain_id === fresh.domain_id);
+          if (old && old.exploration_stage === '探索中' && fresh.exploration_stage !== '探索中') {
+            changed = true;
+            // 终态通知
+            if (fresh.exploration_stage === '已完成') {
+              message.success(`领域「${fresh.name}」探索完成`);
+            } else if (fresh.exploration_stage === '已生成') {
+              message.info(`领域「${fresh.name}」探索完成，需确认名称`);
+            } else if (fresh.exploration_stage === '失败') {
+              message.warning(`领域「${fresh.name}」探索失败，可重试`);
+            }
+          }
+        }
+        // 更新 domains（保持教程不变，仅刷新课程体系）
+        if (changed) {
+          set({ domains: latest });
+        } else {
+          // 即使未触发通知，也更新 explore_pending 等字段
+          set({ domains: latest });
+        }
+      } catch {
+        // 轮询失败静默忽略（fetchAll 会处理离线状态）
+      }
+    }, 5000);
+    // 存储 timer 到一个外部变量（zustand store 无法直接存储非序列化值）
+    _pollingTimer = timer;
+  },
+
+  stopPolling: () => {
+    if (_pollingTimer !== null) {
+      clearInterval(_pollingTimer);
+      _pollingTimer = null;
     }
   },
 }));

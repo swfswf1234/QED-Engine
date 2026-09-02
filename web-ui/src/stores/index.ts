@@ -138,7 +138,7 @@ export interface LlmCallsQuery {
 
 // --- 五层契约类型（8900 数据域·QED-Tracker 适配，QED-031 知识层次模型） ---
 
-/** 知识行（qt_knowledge /knowledge：一套教程或一组延展资料归类） */
+/** 教程（qt_knowledge /knowledge：一套教程或一组延展资料归类） */
 export interface KnowledgeRecord {
   knowledge_id: string;
   domain_id: string;
@@ -160,7 +160,7 @@ export interface KnowledgeRecord {
   [key: string]: unknown;
 }
 
-/** 书行（qt_books /books/{id}...：一册/一卷/一个快照，候选→决定→下载→验证全生命周期） */
+/** 书籍（qt_books /books/{id}...：一册/一卷/一个快照，候选→决定→下载→验证全生命周期） */
 export interface BookRecord {
   book_id: string;
   knowledge_id: string;
@@ -205,7 +205,7 @@ export interface SourceRecord {
   [key: string]: unknown;
 }
 
-/** 知识行详情（GET /knowledge/{id}）：知识行 + 所辖书行列表 */
+/** 教程详情（GET /knowledge/{id}）：教程 + 所辖书籍列表 */
 export type KnowledgeDetail = KnowledgeRecord & { books: BookRecord[] };
 
 /** 课程目标（/catalogs/{catalog_id} → targets） */
@@ -243,6 +243,8 @@ export interface CourseRecord {
   prerequisites: string[];
   related_targets?: string[];
   note?: string;
+  /** 探索状态（PLAN-022 F4：未开始/已生成/探索中/已完成） */
+  exploration_stage?: string;
 }
 
 /** 领域课程体系行（GET /courses：领域 + 嵌套课程；服务端已按 sort_order 排序） */
@@ -251,106 +253,111 @@ export interface DomainSystem {
   name: string;
   description?: string;
   stages?: string[];
+  /** 探索状态（PLAN-022 F4：未开始/已生成/探索中/已完成/失败；QED-Tracker GET /courses 透出） */
+  exploration_stage?: string;
+  /** 探索中间状态（REQ-067 B7/B8：名称确认/失败信息，QED-Tracker 写入） */
+  explore_pending?: {
+    kind: 'name_confirm';
+    name_check: { suggested_name: string; valid: boolean; reason: string };
+  } | {
+    kind: 'failed';
+    error: string;
+  } | null;
+  /** 领域层级（探索产物，domain@v2） */
+  level?: string;
+  classic_tracks?: unknown[];
+  path_results?: unknown;
   courses: CourseRecord[];
 }
 
-// --- 探索契约类型（exploration-api 冻结契约 §1~§7，2026-08-23） ---
+// --- 探索会话契约类型（PLAN-022 B3/F1，2026-08-28；旧 explore-runs 契约已废弃） ---
 
 /** 探索发起方式：direct 直接开始 / text 粘贴参考文本 / doc 指定文本文档路径 */
 export type ExploreLaunchMode = 'direct' | 'text' | 'doc';
 
-/** 推荐套（Proposal，字段与 qt_knowledge textbook_ref/exercise_ref/intro 对齐） */
+/** 推荐套（Proposal，字段与 qt_knowledge textbook_ref/exercise_ref/intro 对齐；tutorials@v1 输出） */
 export interface ExploreProposal {
   proposal_id: string;
+  set_no?: string;
   set_name: string;
   textbook: {
     title: string;
     authors?: string[];
-    version?: { edition?: string; publisher?: string; year?: number | null } | null;
+    version?: { edition?: string; publisher?: string; year?: number | null } | string | null;
     intro?: string;
   };
   exercise?: {
     title: string;
-    version?: { edition?: string; publisher?: string; year?: number | null } | null;
+    version?: { edition?: string; publisher?: string; year?: number | null } | string | null;
     intro?: string;
   } | null;
+  reason?: string;
+}
+
+/** 领域探索报告课程行（8901 DomainPipeline courses@v4 + path@v4 合并输出） */
+export interface DomainExploreCourse {
+  slug: string;
+  name: string;
+  aliases?: string[];
+  track?: string;
+  summary?: string;
+  tier?: number;
+  prerequisites?: string[];
+}
+
+/** 领域探索报告（target=domain 的 session.report） */
+export interface DomainExploreReport {
+  domain: {
+    final_name: string;
+    description: string;
+    level: string;
+    classic_tracks: { name: string; description?: string }[];
+    entry_requirements: unknown;
+  };
+  courses: DomainExploreCourse[];
+  path: { notes: string; edges: { from: string; to: string }[]; graph_td: string };
+}
+
+/** 课程探索报告（target=course 的 session.report，CoursePipeline tutorials@v1） */
+export interface CourseExploreReport {
+  course: { course_id: string; name: string; [key: string]: unknown };
+  tutorials: ExploreProposal[];
+}
+
+/** 名称校验结果（领域管线 P12，waiting_name_confirm 时随会话返回） */
+export interface ExploreNameCheck {
+  valid: boolean;
   reason: string;
+  suggested_name: string;
 }
 
-/** 课程层探索运行（GET /explore-runs/{run_id}） */
-export interface ExploreRun {
-  run_id: string;
-  scope: 'course';
+/** 探索会话（8900 /explore-sessions 会话模型，D3：内存态 + 后台线程 + 轮询） */
+export interface ExploreSessionRecord {
+  session_id: string;
+  target: 'domain' | 'course';
+  status: 'running' | 'waiting_name_confirm' | 'ready' | 'failed';
+  domain_name: string;
+  domain_id: string;
   course_id: string;
-  status: 'running' | 'ready' | 'adopted' | 'discarded' | 'failed';
-  params: { mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string };
-  proposals: ExploreProposal[];
-  adopted_proposal_ids: string[];
-  error: { code: string; message: string } | null;
-  created_at: string;
-  updated_at: string;
+  mode: ExploreLaunchMode;
+  report: DomainExploreReport | CourseExploreReport | null;
+  name_check: ExploreNameCheck | null;
+  error: string | null;
+  /** 管线进度（step/template_id/duration_ms，ready 时透出） */
+  steps: { step: string; template_id: string; duration_ms: number }[];
 }
 
-/** POST /courses/{id}/explore 响应 */
-export interface ExploreLaunchResult {
-  run_id: string;
-  task_id: string;
-  status: 'running';
-  /** 幂等去重命中时 true（同对象已有 running 运行，返回既有 run） */
-  deduplicated?: boolean;
-}
-
-/** POST /explore-runs/{id}/adopt 响应 */
-export interface ExploreAdoptResult {
-  adopted: { knowledge_id: string; set_name: string }[];
-  remaining_slots: number;
-  run: ExploreRun;
-}
-
-/** 探索历史摘要（GET /courses/{id}/explore-runs 行） */
-export interface ExploreRunSummary {
-  run_id: string;
-  scope: 'course';
-  course_id: string;
-  status: ExploreRun['status'];
-  created_at: string;
-  updated_at: string;
-  proposal_count: number;
-  adopted_count: number;
-}
-
-/** 领域探索变更项（curriculum-runs proposals 行；字段名与后端 _explore_run_view 对齐） */
-export interface CurriculumChange {
-  change_id: string;
-  action: 'create_domain' | 'create_course' | 'update_course' | 'delete_course';
-  entity: 'domain' | 'course';
-  target_id: string;
-  payload: Record<string, unknown>;
-  reason: string;
-}
-
-/** 新建领域探索运行（GET /curriculum-runs/{run_id}） */
-export interface CurriculumRun {
-  run_id: string;
-  scope: 'curriculum';
-  status: 'running' | 'ready' | 'applied' | 'partially_applied' | 'discarded' | 'failed';
-  params: { domain_name: string; mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string };
-  /** 服务端键为 proposals（2026-08-24 修复：原误作 changes 致弹窗空列表） */
-  proposals: CurriculumChange[];
-  adopted_proposal_ids: string[];
-  conflicts: { change_id: string; reason: string }[];
-  /** 重探时已存在领域的 create_domain 跳过清单（REQ-059，apply 后随行记录） */
-  skipped: { change_id: string; reason: string }[];
-  error: { code: string; message: string } | null;
-  created_at: string;
-  updated_at: string;
+/** 探索会话 apply 响应（领域=applied 实体清单；课程=created 教程清单；conflicts 统一结构） */
+export interface ExploreApplyResult {
+  applied: { entity?: string; target_id?: string; name?: string; knowledge_id?: string; set_name?: string }[];
+  conflicts: { name?: string; reason: string }[];
 }
 
 // --- 服务控制 store（Console 填充） ---
 // Phase 2：/services 轮询 + 启停操作 + 过渡态收敛
 
 // --- 文档下载管理 store（Downloads 填充） ---
-// Phase 4：左树（领域→课程→教程[知识行]）展开/折叠、树宽、筛选（领域/课程/状态）、选择联动
+// Phase 4：左树（领域→课程→教程[教程]）展开/折叠、树宽、筛选（领域/课程/状态）、选择联动
 
 // --- 仪表盘 store（Dashboard 填充） ---
 // Phase 3：五层聚合数据（/knowledge + /books 详情）+ 服务健康摘要

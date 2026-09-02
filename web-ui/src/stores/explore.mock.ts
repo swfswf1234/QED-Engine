@@ -1,23 +1,23 @@
 /**
- * 探索本地模拟后端（QED-Tracker 未就绪留白，exploration-ui 工作项 6）
- * - 与真实端点同形：launch/fetch/adopt/discard/list/curriculum 全套
- * - 启动后 READY_AFTER_MS 自动转 ready 并给出固定推荐 fixtures；
+ * 探索本地模拟后端（PLAN-022 F5 会话模型重写，2026-08-28；旧 explore-runs mock 已废弃）
+ * - 与真实端点同形：createSession/fetchSession/confirmName/applySession/deleteSession
+ * - 启动后 MOCK_READY_AFTER_MS 自动转 ready 并给出固定 fixtures（领域报告/教程推荐）；
  *   零网络依赖，供界面先行自测与演示（localStorage qed-explore-mock=1 开启）
  */
 import type {
-  CurriculumChange, CurriculumRun, ExploreAdoptResult, ExploreLaunchMode,
-  ExploreLaunchResult, ExploreProposal, ExploreRun, ExploreRunSummary,
+  CourseExploreReport, DomainExploreReport, ExploreApplyResult, ExploreLaunchMode,
+  ExploreProposal, ExploreSessionRecord,
 } from './index';
-import { EXPLORE_MAX_TUTORIALS } from './exploreRules';
 
 /** 启动后到 ready 的模拟耗时（< 一个轮询周期，保证一次轮询即见结果） */
 export const MOCK_READY_AFTER_MS = 2000;
 
-/** 模拟推荐套（对齐 Proposal 契约结构） */
+/** 模拟推荐套（对齐 ExploreProposal 契约结构，tutorials@v1 同形） */
 function mockProposals(courseId: string): ExploreProposal[] {
   return [
     {
       proposal_id: 'mpp_1',
+      set_no: '1',
       set_name: '套一',
       textbook: {
         title: 'Principles of Mathematical Analysis',
@@ -34,6 +34,7 @@ function mockProposals(courseId: string): ExploreProposal[] {
     },
     {
       proposal_id: 'mpp_2',
+      set_no: '2',
       set_name: '套二',
       textbook: {
         title: '数学分析原理',
@@ -50,6 +51,7 @@ function mockProposals(courseId: string): ExploreProposal[] {
     },
     {
       proposal_id: 'mpp_3',
+      set_no: '3',
       set_name: '套三',
       textbook: {
         title: 'Understanding Analysis',
@@ -63,176 +65,121 @@ function mockProposals(courseId: string): ExploreProposal[] {
   ].map((p) => ({ ...p, textbook: { ...p.textbook, title: `${p.textbook.title}（${courseId}）` } }));
 }
 
-/** 模拟领域探索变更（对齐「高等数学探索.txt」：分析/代数/概率三方向） */
-function mockChanges(domainName: string): CurriculumChange[] {
-  return [
-    {
-      change_id: 'mch_0',
-      action: 'create_domain',
-      entity: 'domain',
-      target_id: 'mock_domain',
-      payload: { name: domainName, description: `由探索提议的新领域：${domainName}` },
-      reason: '领域/范围/备注 参考文档指向新建领域',
-    },
-    {
-      change_id: 'mch_1',
-      action: 'create_course',
-      entity: 'course',
-      target_id: '01_math_analysis',
-      payload: { name: '数学分析', stage: '大一~大二', sort_order: 1, note: '分析方向主线课' },
-      reason: '范围文档：从基础的数学分析开始，按学习顺序梳理',
-    },
-    {
-      change_id: 'mch_2',
-      action: 'create_course',
-      entity: 'course',
-      target_id: '02_linear_algebra',
-      payload: { name: '高等代数', stage: '大一~大二', sort_order: 2, note: '代数方向主线课' },
-      reason: '范围文档：代数方向基础课',
-    },
-    {
-      change_id: 'mch_3',
-      action: 'create_course',
-      entity: 'course',
-      target_id: '00_probability',
-      payload: { name: '概率论与数理统计', stage: '大二~大三', sort_order: 3, note: '概率方向主线课' },
-      reason: '范围文档：概率方向基础课，附课程介绍',
-    },
+/** 模拟领域探索报告（对齐 DomainPipeline 输出：domain/courses/path 三段） */
+function mockDomainReport(domainName: string): DomainExploreReport {
+  const courses = [
+    { slug: 'math_analysis', name: '数学分析', aliases: [], track: '分析', summary: '分析方向主线课', tier: 1, prerequisites: [] },
+    { slug: 'linear_algebra', name: '高等代数', aliases: [], track: '代数', summary: '代数方向基础课', tier: 1, prerequisites: [] },
+    { slug: 'probability', name: '概率论与数理统计', aliases: [], track: '概率', summary: '概率方向基础课', tier: 2, prerequisites: ['math_analysis'] },
   ];
+  return {
+    domain: {
+      final_name: domainName,
+      description: `由探索提议的领域：${domainName}`,
+      level: 'bachelor',
+      classic_tracks: [
+        { name: '分析', description: '数学分析 → 实分析 → 复分析' },
+        { name: '代数', description: '高等代数 → 抽象代数' },
+        { name: '概率', description: '概率论 → 随机过程' },
+      ],
+      entry_requirements: [],
+    },
+    courses,
+    path: {
+      notes: '先修数学分析与高等代数，再进入概率方向。',
+      edges: [{ from: 'math_analysis', to: 'probability' }],
+      graph_td: 'graph TD; math_analysis-->probability;',
+    },
+  };
 }
 
 interface MockEntry {
-  kind: 'course' | 'curriculum';
   createdAt: number;
-  courseId?: string;
-  domainName?: string;
-  mode: ExploreLaunchMode;
-  refText?: string;
-  refDocPath?: string;
-  status: string;
-  adoptedIds: string[];
+  body: { target: 'domain' | 'course'; mode: ExploreLaunchMode; domain_name?: string; course_id?: string };
+  /** applied 后置 true（终态语义由前端 applied 标记持有） */
+  applied: boolean;
 }
 
 const registry = new Map<string, MockEntry>();
 let seq = 0;
 
-function baseFields(e: MockEntry, runId: string) {
-  return {
-    run_id: runId,
-    params: { mode: e.mode, ...(e.refText ? { ref_text: e.refText } : {}), ...(e.refDocPath ? { ref_doc_path: e.refDocPath } : {}) },
-    error: null,
-    created_at: new Date(e.createdAt).toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-}
-
 function readyAfter(entry: MockEntry): boolean {
   return Date.now() - entry.createdAt >= MOCK_READY_AFTER_MS;
 }
 
+function toRecord(id: string, e: MockEntry): ExploreSessionRecord {
+  const ready = readyAfter(e);
+  const status: ExploreSessionRecord['status'] = ready ? 'ready' : 'running';
+  const report = ready
+    ? (e.body.target === 'domain'
+      ? mockDomainReport(e.body.domain_name ?? '未命名领域')
+      : ({ course: { course_id: e.body.course_id ?? '' }, tutorials: mockProposals(e.body.course_id ?? '') } as CourseExploreReport))
+    : null;
+  return {
+    session_id: id,
+    target: e.body.target,
+    status,
+    domain_name: e.body.domain_name ?? '',
+    domain_id: '',
+    course_id: e.body.course_id ?? '',
+    mode: e.body.mode,
+    report,
+    name_check: null,
+    error: null,
+    steps: ready ? [{ step: e.body.target === 'domain' ? 'path' : 'tutorials', template_id: 'mock', duration_ms: 1 }] : [],
+  };
+}
+
 export const exploreMockBackend = {
-  launchCourse(courseId: string, body: { mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string }): ExploreLaunchResult {
-    const runId = `mock_exp_${++seq}`;
-    registry.set(runId, {
-      kind: 'course', createdAt: Date.now(), courseId,
-      mode: body.mode, refText: body.ref_text, refDocPath: body.ref_doc_path,
-      status: 'running', adoptedIds: [],
-    });
-    return { run_id: runId, task_id: `mock_tk_${seq}`, status: 'running' };
+  /** POST /explore-sessions 同形：返回完整会话记录（status=running） */
+  createSession(body: { target: 'domain' | 'course'; mode: ExploreLaunchMode; domain_name?: string; course_id?: string; ref_text?: string; ref_doc_path?: string }): ExploreSessionRecord {
+    const id = `mock_es_${++seq}`;
+    registry.set(id, { createdAt: Date.now(), body, applied: false });
+    return { ...toRecord(id, registry.get(id)!), report: null, steps: [] };
   },
 
-  fetchRun(runId: string): ExploreRun {
-    const e = registry.get(runId)!;
-    if (e.status !== 'running') {
-      // 终态：原样返回（adopted 保留已采纳集合）
+  /** GET /explore-sessions/{id} 同形 */
+  fetchSession(sessionId: string): ExploreSessionRecord {
+    const e = registry.get(sessionId);
+    if (!e) throw new Error(`会话不存在：${sessionId}`);
+    return toRecord(sessionId, e);
+  },
+
+  /** POST /explore-sessions/{id}/confirm-name 同形：mock 无名称校验，直接转 ready */
+  confirmName(sessionId: string, nameOverride: string): ExploreSessionRecord {
+    const e = registry.get(sessionId)!;
+    if (e.body.target === 'domain') e.body.domain_name = nameOverride;
+    // 直接置 ready（跳过等待窗口）
+    e.createdAt = Date.now() - MOCK_READY_AFTER_MS;
+    return toRecord(sessionId, e);
+  },
+
+  /** POST /explore-sessions/{id}/apply 同形 */
+  applySession(sessionId: string, selected: unknown[]): ExploreApplyResult {
+    const e = registry.get(sessionId)!;
+    e.applied = true;
+    if (e.body.target === 'domain') {
       return {
-        ...baseFields(e, runId), scope: 'course', course_id: e.courseId!, status: e.status as ExploreRun['status'],
-        proposals: e.status === 'discarded' ? [] : mockProposals(e.courseId!),
-        adopted_proposal_ids: e.adoptedIds,
+        applied: (selected as { name: string }[]).map((c, i) => ({
+          entity: i === 0 ? 'domain' : 'course',
+          target_id: `mock-c-${c.name}`,
+          name: c.name,
+        })),
+        conflicts: [],
       };
     }
-    if (!readyAfter(e)) {
-      return { ...baseFields(e, runId), scope: 'course', course_id: e.courseId!, status: 'running', proposals: [], adopted_proposal_ids: [] };
-    }
-    return { ...baseFields(e, runId), scope: 'course', course_id: e.courseId!, status: 'ready', proposals: mockProposals(e.courseId!), adopted_proposal_ids: [] };
-  },
-
-  adopt(runId: string, selected: string[]): ExploreAdoptResult {
-    const e = registry.get(runId)!;
-    e.status = 'adopted';
-    e.adoptedIds = [...selected];
     return {
-      adopted: selected.map((_pid, i) => ({ knowledge_id: `mock_kn_${seq}_${i}`, set_name: `套${i + 1}` })),
-      remaining_slots: Math.max(0, EXPLORE_MAX_TUTORIALS - selected.length),
-      run: exploreMockBackend.fetchRun(runId),
-    };
-  },
-
-  discard(runId: string): ExploreRun {
-    const e = registry.get(runId)!;
-    e.status = 'discarded';
-    return exploreMockBackend.fetchRun(runId);
-  },
-
-  listRuns(courseId: string): ExploreRunSummary[] {
-    const out: ExploreRunSummary[] = [];
-    for (const [runId, e] of registry.entries()) {
-      if (e.kind === 'course' && e.courseId === courseId) {
-        const proposals = e.status === 'ready' || e.status === 'adopted' ? mockProposals(courseId) : [];
-        out.push({
-          run_id: runId, scope: 'course', course_id: courseId,
-          status: e.status as ExploreRunSummary['status'],
-          created_at: new Date(e.createdAt).toISOString(), updated_at: new Date().toISOString(),
-          proposal_count: proposals.length, adopted_count: e.adoptedIds.length,
-        });
-      }
-    }
-    return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
-  },
-
-  launchCurriculum(domainName: string, body: { mode: ExploreLaunchMode; ref_text?: string; ref_doc_path?: string }): ExploreLaunchResult {
-    const runId = `mock_cur_${++seq}`;
-    registry.set(runId, {
-      kind: 'curriculum', createdAt: Date.now(), domainName,
-      mode: body.mode, refText: body.ref_text, refDocPath: body.ref_doc_path,
-      status: 'running', adoptedIds: [],
-    });
-    return { run_id: runId, task_id: `mock_tk_${seq}`, status: 'running' };
-  },
-
-  fetchCurriculum(runId: string): CurriculumRun {
-    const e = registry.get(runId)!;
-    const common = { ...baseFields(e, runId), scope: 'curriculum' as const, adopted_proposal_ids: e.adoptedIds, conflicts: [], skipped: [], error: null };
-    if (e.status !== 'running') {
-      return {
-        ...common, status: e.status as CurriculumRun['status'],
-        params: { ...common.params, domain_name: e.domainName! },
-        proposals: mockChanges(e.domainName!),
-      } as CurriculumRun;
-    }
-    if (!readyAfter(e)) {
-      return {
-        ...common, status: 'running',
-        params: { ...common.params, domain_name: e.domainName! }, proposals: [],
-      } as CurriculumRun;
-    }
-    return {
-      ...common, status: 'ready',
-      params: { ...common.params, domain_name: e.domainName! }, proposals: mockChanges(e.domainName!),
-    } as CurriculumRun;
-  },
-
-  applyCurriculum(runId: string, selected: string[]): { applied: { change_id: string; entity: string; target_id: string }[]; conflicts: { change_id: string; reason: string }[]; skipped?: { change_id: string; reason: string }[]; run: CurriculumRun } {
-    const e = registry.get(runId)!;
-    e.status = 'applied';
-    e.adoptedIds = [...selected];
-    const changes = mockChanges(e.domainName!).filter((c) => selected.includes(c.change_id));
-    return {
-      applied: changes.map((c) => ({ change_id: c.change_id, entity: c.entity, target_id: c.target_id })),
+      applied: (selected as ExploreProposal[]).map((p, i) => ({
+        knowledge_id: `mock_kn_${seq}_${i}`,
+        set_name: p.set_name,
+      })),
       conflicts: [],
-      skipped: [],
-      run: exploreMockBackend.fetchCurriculum(runId),
     };
+  },
+
+  /** DELETE /explore-sessions/{id} 同形 */
+  deleteSession(sessionId: string): void {
+    registry.delete(sessionId);
   },
 
   /** 测试辅助：清空注册表 */

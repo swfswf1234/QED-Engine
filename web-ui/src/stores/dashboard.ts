@@ -1,8 +1,8 @@
 /**
  * 仪表盘 store（Phase 3 + 五层化，QED-031）
- * - 五层聚合：/knowledge 一次拉取知识行列表 + 并行拉取 /knowledge/{id} 详情（含书行）
+ * - 五层聚合：/knowledge 一次拉取教程列表 + 并行拉取 /knowledge/{id} 详情（含书籍）
  * - 服务在线卡（2026-08-24 恢复·轻量版）不在此拉取 /services：只读消费共享 runtime store
- *   （AdminLayout 进入管理台已统一拉取）；整体错误横幅改由知识行请求的错误类别判定
+ *   （AdminLayout 进入管理台已统一拉取）；整体错误横幅改由教程请求的错误类别判定
  *   （offline 类 = 8900 不可达）
  * - 独立降级：8901 不可达 → 文档下载进度卡离线提示；8900 不可达 → 整体横幅
  */
@@ -20,11 +20,11 @@ export interface BookSummary {
   downloaded: number;
   verified: number;
   remaining: number;
-  /** 教程数 = kind=tutorial 的知识行数（用户裁决 2026-08-17：知识行总数→教程数） */
+  /** 教程数 = kind=tutorial 的教程数（用户裁决 2026-08-17：教程总数→教程数） */
   tutorials: number;
 }
 
-/** 书行汇总：跨知识行聚合书行下载/验收进度与教程数（books 来自详情缓存） */
+/** 书籍汇总：跨教程聚合书籍下载/验收进度与教程数（books 来自详情缓存） */
 export function buildBookSummary(details: Record<string, KnowledgeDetail>): BookSummary {
   const books = Object.values(details).flatMap((d) => d.books ?? []);
   const total = books.length;
@@ -45,9 +45,9 @@ function isDownloaded(b: BookRecord): boolean {
 }
 
 /**
- * 文档下载进度饼图（按课程）：每个课程（course_id）一块扇区，值 = 该书行的已下载书行数
+ * 文档下载进度饼图（按课程）：每个课程（course_id）一块扇区，值 = 该书籍的已下载书籍数
  * （downloaded+verified）——看各课程的下载工作量分布（用户裁决 2026-08-17）。
- * 课程名取该课程下任一知识行 course_id（数据层无课程中文名时用 course_id 展示）。
+ * 课程名取该课程下任一教程 course_id（数据层无课程中文名时用 course_id 展示）。
  */
 export function buildCourseDownloadPie(details: Record<string, KnowledgeDetail>): DownloadSlice[] {
   const byCourse = new Map<string, number>();
@@ -61,9 +61,9 @@ export function buildCourseDownloadPie(details: Record<string, KnowledgeDetail>)
 }
 
 /**
- * 文档下载进度饼图（按教程）：每个教程（知识行）一块扇区，值 = 该书行的已下载书行数
+ * 文档下载进度饼图（按教程）：每个教程（教程）一块扇区，值 = 该书籍的已下载书籍数
  * （downloaded+verified）——看各教程的下载工作量分布（用户裁决 2026-08-17）。
- * 教程名取知识行 name；name 为空时回退 knowledge_id。
+ * 教程名取教程 name；name 为空时回退 knowledge_id。
  */
 export function buildKnowledgeDownloadPie(details: Record<string, KnowledgeDetail>): DownloadSlice[] {
   return Object.values(details)
@@ -77,7 +77,7 @@ export function buildKnowledgeDownloadPie(details: Record<string, KnowledgeDetai
 export interface CourseCompletion {
   /** 已探索课程数（分母）= catalog targets 的 course_id 去重数 */
   total: number;
-  /** 完成下载课程数（分子）= 该课程 ≥2 套教程完成验收（书行全部 verified）的课程数 */
+  /** 完成下载课程数（分子）= 该课程 ≥2 套教程完成验收（书籍全部 verified）的课程数 */
   completed: number;
 }
 
@@ -115,7 +115,7 @@ export interface DashboardStore {
   /** catalog targets（课程清单，课程饼图分母来源；独立降级） */
   catalogTargets: CatalogTarget[];
   loading: boolean;
-  /** 整体错误（知识行请求为 offline 类错误 → 8900 不可达；替代原 /services 判定） */
+  /** 整体错误（教程请求为 offline 类错误 → 8900 不可达；替代原 /services 判定） */
   error: string | null;
   /** 数据域独立错误（8901 不可达等） */
   dataError: string | null;
@@ -155,7 +155,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       .then((c) => [c, null] as const)
       .catch((err) => [null, err] as const);
 
-    // 整体横幅判定：知识行请求为 offline 类错误 → 8900 管理服务不可达；
+    // 整体横幅判定：教程请求为 offline 类错误 → 8900 管理服务不可达；
     // http 类（如 8901 经 8900 透传的 503）不算整体离线，仅数据卡降级
     const isOffline = dataErr instanceof ApiError && dataErr.kind === 'offline';
 

@@ -41,14 +41,17 @@ describe('主界面 Home（Phase 1）', () => {
     expect(screen.queryByText(/服务状态|离线/)).not.toBeInTheDocument();
   });
 
-  it('三大入口卡渲染，点击提示建设中', async () => {
+  it('三大入口卡渲染；「知识探索」跳转 #/knowledge，「课程学习」占位提示建设中', async () => {
     const user = userEvent.setup();
     renderHome();
     for (const name of ['知识探索', '课程学习', '课后练习']) {
       expect(screen.getByRole('heading', { name })).toBeInTheDocument();
     }
-    await user.click(screen.getByRole('heading', { name: '知识探索' }));
-    expect(messageSpies.info).toHaveBeenCalledWith('「知识探索」建设中，将在后续轮次开放');
+    // 占位卡：点击提示建设中
+    await user.click(screen.getByRole('heading', { name: '课程学习' }));
+    expect(messageSpies.info).toHaveBeenCalledWith('「课程学习」建设中，将在后续轮次开放');
+    await user.click(screen.getByRole('heading', { name: '课后练习' }));
+    expect(messageSpies.info).toHaveBeenCalledWith('「课后练习」建设中，将在后续轮次开放');
   });
 
   it('使用手册按钮打开弹窗，展示全部 HELP_SECTIONS 章节', async () => {

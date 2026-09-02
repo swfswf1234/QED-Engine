@@ -12,20 +12,20 @@ import { HELP_SECTIONS } from '../help/sections';
 
 const { Title, Paragraph, Text } = Typography;
 
-/** 三大学习入口（课程学习已开放 → #/knowledge；其余占位卡：入口可见、点击提示建设中） */
+/** 三大学习入口（知识探索已开放 → #/knowledge；其余占位卡：入口可见、点击提示建设中） */
 const ENTRANCES = [
   {
     key: 'explore',
     icon: <BookOutlined style={{ fontSize: 32, color: '#1677ff' }} />,
     title: '知识探索',
-    desc: '知识图谱：按知识节点逐步深入，建立完整认知链路。',
+    desc: '学习路线图：领域 → 课程依赖 → 知识点路径，建立完整认知链路。',
+    href: '/knowledge',
   },
   {
     key: 'course',
     icon: <ReadOutlined style={{ fontSize: 32, color: '#1677ff' }} />,
     title: '课程学习',
-    desc: '领域 → 课程依赖 → 知识点梳理，按序推进学习。',
-    href: '/knowledge',
+    desc: '书籍顺序学习与聊天答疑，按知识节点逐步推进。',
   },
   {
     key: 'quiz',

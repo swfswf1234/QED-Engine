@@ -43,6 +43,19 @@ describe('学习中心·知识结构浏览 Knowledge（原型）', () => {
       if (url.includes('/catalogs')) {
         return Promise.resolve(new Response(JSON.stringify(catalogFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       }
+      if (url.includes('/courses')) {
+        // 返回含 stage/prerequisites 的课程数据
+        return Promise.resolve(new Response(JSON.stringify([
+          {
+            domain_id: 'math', name: '高等数学', stages: ['本科基础', '研究生基础'],
+            courses: [
+              { course_id: '01_math_analysis', name: '数学分析', stage: '本科基础', prerequisites: [] },
+              { course_id: '02_linear_algebra', name: '线性代数', stage: '本科基础', prerequisites: [] },
+              { course_id: '03_topology', name: '点集拓扑', stage: '本科基础', prerequisites: ['01_math_analysis', '02_linear_algebra'] },
+            ],
+          },
+        ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
       return Promise.reject(new TypeError(`no route: ${url}`));
     });
     renderKnowledge();

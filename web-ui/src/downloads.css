@@ -1,9 +1,39 @@
-/* 文档下载管理（Phase 4a：左树 + 右侧面板） */
+/* 文档下载管理（Phase 4a：左树 + 右侧面板；REQ-067 Fixed 布局） */
 
+/* 页面固定容器（REQ-067：标题栏/筛选栏固定，内容区独立滚动） */
+.dl-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 16px 32px;
+  max-width: 1500px;
+  width: 94%;
+  margin: 0 auto;
+}
+
+/* 标题栏（固定） */
+.dl-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+/* 筛选栏（固定） */
+.dl-filter-section {
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+
+/* 内容区容器（flex:1 填充剩余高度，内部左右分栏） */
 .dl-layout {
+  flex: 1;
   display: flex;
   align-items: stretch;
   gap: 0;
+  min-height: 0; /* 防止 flex 子项溢出 */
+  overflow: hidden; /* 内容区不溢出 */
 }
 
 /* ---- 左树 ---- */
@@ -16,11 +46,14 @@
   padding: 12px 8px 12px 4px;
   overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* 填满父容器高度 */
 }
 
 .dl-tree {
-  height: calc(100vh - 300px);
-  min-height: 360px;
+  flex: 1;
+  min-height: 0; /* 允许 flex 子项收缩 */
   overflow-y: auto;
   padding-right: 6px;
   font-size: 13px;
@@ -155,9 +188,11 @@
   margin-left: 16px;
   display: flex;
   flex-direction: column;
+  overflow: hidden; /* 右侧面板不溢出 */
 }
 
 .dl-filter-bar {
+  flex-shrink: 0; /* 筛选栏固定 */
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -165,6 +200,7 @@
 }
 
 .dl-summary {
+  flex-shrink: 0; /* 汇总行固定 */
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -174,17 +210,17 @@
 
 .dl-content {
   flex: 1;
-  min-height: 400px;
+  min-height: 0; /* 允许 flex 子项收缩 */
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   margin-top: 12px;
-  overflow: auto;
+  overflow-y: auto; /* 内容区独立滚动 */
 }
 
 .dl-placeholder {
   height: 100%;
-  min-height: 360px;
+  min-height: 200px; /* 缩小最小高度，让布局更紧凑 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -215,10 +251,17 @@
   margin-bottom: 12px;
 }
 
+/* 课程名称样式（大写+空隙+居中） */
 .dl-course-head-name {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   color: #1f1f1f;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .dl-course-head-note {
@@ -227,6 +270,23 @@
   margin-top: 4px;
   white-space: pre-wrap;
   word-break: break-word;
+  text-align: left;
+}
+
+/* 课程分组容器 */
+.dl-course-group {
+  margin-bottom: 16px;
+}
+
+/* 无课程时的空态提示 */
+.dl-empty-course-hint {
+  padding: 20px;
+  text-align: center;
+}
+
+.dl-empty-course-hint .ant-typography {
+  display: block;
+  margin-bottom: 12px;
 }
 
 .dl-knowledge-head {
@@ -320,7 +380,14 @@
   background: #fafafa;
 }
 .dl-domain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dl-domain-name { font-weight: 600; font-size: 15px; }
+/* 领域名称样式（与课程名称统一，REQ-067） */
+.dl-domain-name {
+  font-weight: 700;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #1f1f1f;
+}
 .dl-domain-desc { color: #8c8c8c; font-size: 12px; margin-top: 4px; white-space: pre-wrap; }
 
 /* 确认页 */

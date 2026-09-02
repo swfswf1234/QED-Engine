@@ -61,7 +61,7 @@ function detail(k: KnowledgeRecord, books: BookRecord[]): KnowledgeDetail {
 }
 
 describe('仪表盘聚合（纯函数，五层模型）', () => {
-  it('书行汇总：聚合详情缓存 books 的 total/downloaded/verified/remaining/tutorials', () => {
+  it('书籍汇总：聚合详情缓存 books 的 total/downloaded/verified/remaining/tutorials', () => {
     const k1 = kn({ knowledge_id: 'k1', course_id: 'math' });
     const k2 = kn({ knowledge_id: 'k2', course_id: 'math', kind: 'other_material' });
     const details: Record<string, KnowledgeDetail> = {
@@ -77,7 +77,7 @@ describe('仪表盘聚合（纯函数，五层模型）', () => {
     expect(sum).toEqual({ total: 3, downloaded: 2, verified: 1, remaining: 2, tutorials: 1 });
   });
 
-  it('书行汇总：无详情缓存 → 全零', () => {
+  it('书籍汇总：无详情缓存 → 全零', () => {
     expect(buildBookSummary({})).toEqual({ total: 0, downloaded: 0, verified: 0, remaining: 0, tutorials: 0 });
   });
 
@@ -88,7 +88,7 @@ describe('仪表盘聚合（纯函数，五层模型）', () => {
       { course_id: 'analysis', name: '实分析' },
       { course_id: 'algebra', name: '代数' },
     ] as unknown as CatalogTarget[];
-    // math 下两套教程全部 verified → 完成；analysis 仅一套 verified → 未完成；algebra 无知识行
+    // math 下两套教程全部 verified → 完成；analysis 仅一套 verified → 未完成；algebra 无教程
     const t1 = kn({ knowledge_id: 't1', course_id: 'math', kind: 'tutorial' });
     const t2 = kn({ knowledge_id: 't2', course_id: 'math', kind: 'tutorial' });
     const a1 = kn({ knowledge_id: 'a1', course_id: 'analysis', kind: 'tutorial' });
@@ -100,7 +100,7 @@ describe('仪表盘聚合（纯函数，五层模型）', () => {
     expect(buildCourseCompletion(catalogTargets, details)).toEqual({ total: 3, completed: 1 });
   });
 
-  it('课程下载完成度：教程书行未全验收 / 不足 2 套 → 不计完成', () => {
+  it('课程下载完成度：教程书籍未全验收 / 不足 2 套 → 不计完成', () => {
     const catalogTargets = [
       { course_id: 'math', name: '数学分析' },
       { course_id: 'analysis', name: '实分析' },
@@ -125,7 +125,7 @@ describe('仪表盘聚合（纯函数，五层模型）', () => {
     expect(buildCourseCompletion([], {})).toEqual({ total: 0, completed: 0 });
   });
 
-  it('下载进度饼图（按教程）：每教程一块，值=已下载书行数；name 回退 knowledge_id', () => {
+  it('下载进度饼图（按教程）：每教程一块，值=已下载书籍数；name 回退 knowledge_id', () => {
     const k1 = kn({ knowledge_id: 'k1', course_id: 'math', name: '数学分析 套一' });
     const k2 = kn({ knowledge_id: 'k2', course_id: 'math' });
     const details: Record<string, KnowledgeDetail> = {

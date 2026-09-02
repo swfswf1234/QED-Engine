@@ -16,6 +16,7 @@ import type { MenuProps } from 'antd';
 import { ApiError, describeError } from '../api/client';
 import {
   createCourse, createDomain, deleteCourse, deleteDomain, updateCourse, updateDomain,
+  exploreDomain, importDomain,
 } from '../api/tracker';
 import type { CourseNode, DomainNode, TutorialNode } from '../stores/downloads';
 import { buildTreeNodes, useDownloadsStore, TREE_WIDTH_MIN, TREE_WIDTH_MAX } from '../stores/downloads';
@@ -41,7 +42,7 @@ function friendlyError(err: unknown): string {
 
 /**
  * 教程叶子：只展示 name + 验收进度（verified/total 已验收），不可点击、不可展开。
- * 书行明细只在右侧栏查看（ARCH-015）。
+ * 书籍明细只在右侧栏查看（ARCH-015）。
  */
 function TutorialLeaf({ node }: { node: TutorialNode }) {
   return (
@@ -71,22 +72,27 @@ function CourseBranch({ course, onMenuAction }: {
   const [expanded, setExpanded] = useState(false);
   const isSelected = selected?.kind === 'course' && selected.id === course.id;
 
-  // 探索状态（≤4/≥2 规则）：完成按知识行 status=completed 计，与书行验收解耦
+  // 探索状态（F4：优先读共享表 exploration_stage；缺失时回退 ≤4/≥2 计算规则）：
+  // stage 映射——已完成=ready(绿) / 已生成=insufficient(黄) / 其余=none(灰)
   const tutorialCount = course.tutorials.length;
   const completedCount = course.tutorials.filter((t) => t.knowledge.status === 'completed').length;
-  const status = exploreStatusOf(tutorialCount, completedCount);
-  const locked = isCourseLocked(tutorialCount, completedCount);
-
   const courseRecord: CourseRecord | undefined = useMemo(
     () => domains.flatMap((d) => d.courses).find((c) => c.course_id === course.id),
     [domains, course.id],
   );
+  const stage = courseRecord?.exploration_stage ?? '';
+  const status = stage === '已完成'
+    ? ('ready' as const)
+    : stage === '已生成'
+      ? ('insufficient' as const)
+      : exploreStatusOf(tutorialCount, completedCount);
+  const locked = isCourseLocked(tutorialCount, completedCount);
 
   const confirmDelete = () => {
     modal.confirm({
       title: `删除课程「${course.name}」？`,
       content: tutorialCount > 0
-        ? `该课程下还有 ${tutorialCount} 个教程知识行，上游将拒绝删除（409 保护）。请先处理知识行。`
+        ? `该课程下还有 ${tutorialCount} 个教程，上游将拒绝删除（409 保护）。请先处理教程。`
         : '删除后不可恢复。',
       okText: '删除',
       okButtonProps: { danger: true },
@@ -299,7 +305,6 @@ export default function DownloadsTree() {
   const systemError = useDownloadsStore((s) => s.systemError);
   const knowledgeError = useDownloadsStore((s) => s.knowledgeError);
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
-  const openFlow = useExploreUiStore((s) => s.openFlow);
   const { message, modal } = App.useApp();
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -307,6 +312,7 @@ export default function DownloadsTree() {
   const [addDomainOpen, setAddDomainOpen] = useState(false);
   const [addForm] = Form.useForm();
   const dragging = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleDomain = (domainId: string) => {
     setCollapsed((prev) => {
@@ -339,19 +345,72 @@ export default function DownloadsTree() {
     });
   };
 
+  /** REQ-067 B3：导入领域知识 — 文件选择 → JSON 校验 → POST /domains/import */
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // 重置 input 以便重复选择同名文件
+    e.target.value = '';
+    try {
+      const text = await file.text();
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        message.error('JSON 解析失败，请检查文件格式');
+        return;
+      }
+      // 基本校验：domain / name / courses 字段
+      if (!data.domain || typeof data.domain !== 'string') {
+        message.error('缺少 domain 字段（slug，如 "computer-science"）');
+        return;
+      }
+      if (!data.name || typeof data.name !== 'string') {
+        message.error('缺少 name 字段（领域名称）');
+        return;
+      }
+      if (!Array.isArray(data.courses) || data.courses.length === 0) {
+        message.error('缺少 courses 数组（需至少一门课程）');
+        return;
+      }
+      const result = await importDomain(data);
+      message.success(`导入成功：${result.courses_created} 门新建，${result.courses_updated} 门更新`);
+      void fetchAll();
+    } catch (err) {
+      message.error(describeError(err));
+    }
+  };
+
   const domainMenu = (d: DomainSystem): MenuProps => ({
     items: [
-      { key: 'add-course', label: '新增课程' },
+      // REQ-067 B9：已完成态禁用探索/导入
+      { key: 'explore', label: '领域探索（自动）',
+        disabled: d.exploration_stage === '已完成' },
+      { key: 'import', label: '导入领域知识',
+        disabled: d.exploration_stage === '已完成' },
       { key: 'edit', label: '修改领域' },
-      { key: 'explore', label: d.courses.length === 0 ? '探索课程体系（初始）' : '探索课程体系（重探）' },
+      { key: 'add-course', label: '新增课程',
+        disabled: d.exploration_stage !== '已完成' && d.exploration_stage !== '已生成' },
       { type: 'divider' },
       { key: 'delete', label: '删除领域', danger: true },
     ],
     onClick: ({ key }) => {
-      if (key === 'add-course') setFormAction({ kind: 'add-course', domain: d });
+      if (key === 'explore') {
+        // REQ-067 B2：直接触发领域探索，不走弹窗
+        void (async () => {
+          try {
+            await exploreDomain(d.domain_id);
+            message.success('领域探索已启动');
+          } catch (err) {
+            message.error(describeError(err));
+          }
+        })();
+      } else if (key === 'import') {
+        // REQ-067 B3：导入领域知识 → 打开文件选择器
+        fileInputRef.current?.click();
+      } else if (key === 'add-course') setFormAction({ kind: 'add-course', domain: d });
       else if (key === 'edit') setFormAction({ kind: 'edit-domain', domain: d });
       else if (key === 'delete') confirmDeleteDomain(d);
-      else if (key === 'explore') openFlow({ variant: 'curriculum', domainId: d.domain_id, domainName: d.name });
     },
   });
 
@@ -482,6 +541,14 @@ export default function DownloadsTree() {
 
       {/* 右键菜单表单（新增课程 / 修改领域 / 修改课程） */}
       <TreeFormModal action={formAction} onClose={() => setFormAction(null)} />
+      {/* REQ-067 B3：导入领域知识文件选择器（隐藏） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleImportFile}
+      />
       <div
         className="dl-tree-resizer"
         title="拖拽调整宽度"

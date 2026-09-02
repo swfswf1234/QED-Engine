@@ -107,15 +107,17 @@ describe('树节点探索入口与状态色 v2', () => {
     expect(useExploreUiStore.getState().flowTarget).toMatchObject({ variant: 'course' });
   });
 
-  it('领域右键菜单含 新增课程/修改领域/探索课程体系/删除领域；探索 → 领域层流目标', async () => {
+  it('领域右键菜单含 领域探索/导入领域知识/修改领域/新增课程/删除领域；探索 → 直接调 exploreDomain', async () => {
     seed(domainFixture([]), []);
     renderTree();
     fireEvent.contextMenu(screen.getByText('高等数学'));
-    expect(await screen.findByText('新增课程')).toBeInTheDocument();
+    expect(await screen.findByText('领域探索（自动）')).toBeInTheDocument();
+    expect(screen.getByText('导入领域知识')).toBeInTheDocument();
     expect(screen.getByText('修改领域')).toBeInTheDocument();
     expect(screen.getByText('删除领域')).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/探索课程体系/));
-    expect(useExploreUiStore.getState().flowTarget).toMatchObject({ variant: 'curriculum', domainId: 'dm1', domainName: '高等数学' });
+    // REQ-067 B2：点击领域探索直接调 API，不设 flowTarget
+    fireEvent.click(screen.getByText('领域探索（自动）'));
+    expect(useExploreUiStore.getState().flowTarget).toBeNull();
   });
 
   it('树底「添加领域」打开纯表单弹窗（只采集名称+描述，无阶段字段；不置探索流目标）', async () => {
@@ -128,7 +130,7 @@ describe('树节点探索入口与状态色 v2', () => {
     expect(useExploreUiStore.getState().flowTarget).toBeNull();
   });
 
-  it('书行计数不影响完成判定（完成按知识行 status=completed 计）', () => {
+  it('书籍计数不影响完成判定（完成按教程 status=completed 计）', () => {
     const k1 = kn({ knowledge_id: 'k1', course_id: 'c1', status: 'draft' });
     useDownloadsStore.setState({
       domains: domainFixture([course('c1', '课程一')]),
@@ -151,6 +153,19 @@ describe('树节点探索入口与状态色 v2', () => {
     expect(screen.queryByText('新增课程')).toBeNull();
     expect(screen.queryByText('修改领域')).toBeNull();
     expect(screen.queryByText('删除领域')).toBeNull();
-    expect(screen.queryByText(/探索课程体系/)).toBeNull();
+    expect(screen.queryByText(/领域探索|导入领域知识/)).toBeNull();
+  });
+
+  it('新增课程菜单项：探索中/未开始/失败时禁用，已完成/已生成时可用', async () => {
+    // 探索中 → 禁用
+    const exploring = [{ ...domainFixture([])[0], domain_id: 'dm_exp', exploration_stage: '探索中' }] as DomainSystem[];
+    seed(exploring, []);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    await new Promise((r) => setTimeout(r, 50));
+    let items = await screen.findAllByRole('menuitem');
+    let addBtn = items.find((el) => el.textContent === '新增课程');
+    expect(addBtn).toBeDefined();
+    expect(addBtn!).toHaveAttribute('aria-disabled', 'true');
   });
 });
