@@ -8,19 +8,23 @@
  * - hover 🔍 取消（课程探索走右键菜单）；色点三态保留
  * - 手工维护端点未上线（8901 404）时报错降级提示，不阻塞浏览
  */
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { CaretRightFilled, HolderOutlined, PlusOutlined } from '@ant-design/icons';
-import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Tooltip } from 'antd';
+import { CaretRightFilled, HolderOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { ApiError, describeError } from '../api/client';
 import {
   createCourse, createDomain, deleteCourse, deleteDomain, updateCourse, updateDomain,
-  exploreDomain, importDomain,
+  importDomain, importCourseKnowledge,
 } from '../api/tracker';
+import {
+  startDomainExplore,
+  startCourseExplore,
+} from '../api/explore-helpers';
 import type { CourseNode, DomainNode, TutorialNode } from '../stores/downloads';
 import { buildTreeNodes, useDownloadsStore, TREE_WIDTH_MIN, TREE_WIDTH_MAX } from '../stores/downloads';
-import { exploreStatusOf, isCourseLocked, useExploreUiStore } from '../stores/explore';
+import { exploreStatusOf } from '../stores/explore';
 import type { CourseRecord, DomainSystem } from '../stores';
 
 /** 右键菜单触发的表单动作 */
@@ -60,14 +64,14 @@ function TutorialLeaf({ node }: { node: TutorialNode }) {
 }
 
 /** 课程分支：可折叠显示教程叶子；点击名称 → 选中 + 联动筛选；右键菜单（v2 取消 hover 🔍） */
-function CourseBranch({ course, onMenuAction }: {
+function CourseBranch({ course, onMenuAction, onImportKnowledge }: {
   course: CourseNode;
   onMenuAction: (action: TreeFormAction) => void;
+  onImportKnowledge: (courseId: string) => void;
 }) {
   const selectNode = useDownloadsStore((s) => s.selectNode);
   const selected = useDownloadsStore((s) => s.selected);
   const domains = useDownloadsStore((s) => s.domains);
-  const openFlow = useExploreUiStore((s) => s.openFlow);
   const { message, modal } = App.useApp();
   const [expanded, setExpanded] = useState(false);
   const isSelected = selected?.kind === 'course' && selected.id === course.id;
@@ -86,7 +90,6 @@ function CourseBranch({ course, onMenuAction }: {
     : stage === '已生成'
       ? ('insufficient' as const)
       : exploreStatusOf(tutorialCount, completedCount);
-  const locked = isCourseLocked(tutorialCount, completedCount);
 
   const confirmDelete = () => {
     modal.confirm({
@@ -112,8 +115,11 @@ function CourseBranch({ course, onMenuAction }: {
 
   const menu: MenuProps = {
     items: [
-      { key: 'edit', label: '修改课程' },
-      { key: 'explore', label: tutorialCount >= 4 ? `探索教程（已达上限 ${tutorialCount}/4）` : locked ? '探索教程（已完成 ≥2 套，锁定）' : '探索教程' },
+      { key: 'edit', label: '编辑课程' },
+      { key: 'explore', label: '探索课程',
+        disabled: courseRecord?.exploration_stage === '已完成' },
+      { key: 'import', label: '导入课程知识',
+        disabled: courseRecord?.exploration_stage === '已完成' },
       { type: 'divider' },
       { key: 'delete', label: '删除课程', danger: true },
     ],
@@ -123,15 +129,13 @@ function CourseBranch({ course, onMenuAction }: {
       } else if (key === 'delete') {
         confirmDelete();
       } else if (key === 'explore') {
-        if (locked) {
-          message.warning(
-            tutorialCount >= 4
-              ? `该课程已有 ${tutorialCount} 个教程，达到上限 4`
-              : `已完成 ${completedCount} 套审核（≥2），停止自动加入新教程`,
-          );
-          return;
+        // 无弹窗直触：立即调用探索接口
+        if (courseRecord?.exploration_stage !== '已完成') {
+          void startCourseExplore(course.id);
         }
-        openFlow({ variant: 'course', courseId: course.id, courseName: course.name });
+      } else if (key === 'import') {
+        // 导入课程知识：选择 JSON 文件
+        onImportKnowledge(course.id);
       }
     },
   };
@@ -185,6 +189,8 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
   const [form] = Form.useForm();
   const { message } = App.useApp();
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  const domains = useDownloadsStore((s) => s.domains);
+  const initializedRef = useRef(false);
 
   const title =
     action?.kind === 'add-course' ? `新增课程（${action.domain.name}）`
@@ -192,34 +198,92 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
         : action?.kind === 'edit-course' ? `修改课程（${action.course.name}）`
           : '';
 
+  // 获取当前领域数据（用于edit-course）
+  const currentDomain = action?.kind === 'edit-course' 
+    ? domains.find(d => d.courses.some(c => c.course_id === action.course.course_id))
+    : null;
+
   const initialValues = action?.kind === 'add-course'
     ? {}
     : action?.kind === 'edit-domain'
-      ? { description: action.domain.description ?? '' }
+      ? {
+          description: action.domain.description ?? '',
+          level: action.domain.level ?? '',
+          stages: action.domain.stages?.join(', ') ?? '',
+          classic_tracks: action.domain.classic_tracks ?? [],
+          scope: action.domain.scope ?? '',
+        }
       : action?.kind === 'edit-course'
-        ? { stage: action.course.stage ?? '', note: action.course.note ?? '' }
+        ? {
+            description: action.course.description ?? '',
+            stage: action.course.stage ?? '',
+            track: action.course.track ?? '',
+            sort_order: action.course.sort_order,
+            aliases: action.course.aliases?.join(', ') ?? '',
+            prerequisites: action.course.prerequisites?.join(', ') ?? '',
+          }
         : {};
+
+  useEffect(() => {
+    if (action) {
+      if (!initializedRef.current) {
+        form.resetFields();
+        form.setFieldsValue(initialValues);
+        initializedRef.current = true;
+      }
+    } else {
+      initializedRef.current = false;
+    }
+  }, [action, form, initialValues]);
   const submit = async (values: Record<string, unknown>) => {
     try {
       if (action?.kind === 'add-course') {
+        // 解析逗号分隔的字符串为数组
+        const aliases = values.aliases ? String(values.aliases).split(',').map(s => s.trim()).filter(Boolean) : undefined;
+        const prerequisites = values.prerequisites ? String(values.prerequisites).split(',').map(s => s.trim()).filter(Boolean) : undefined;
+        
         await createCourse(action.domain.domain_id, {
           name: String(values.name).trim(),
+          description: String(values.description ?? ''),
           stage: String(values.stage ?? ''),
+          track: String(values.track ?? ''),
+          sort_order: values.sort_order !== undefined ? Number(values.sort_order) : undefined,
+          aliases,
+          prerequisites,
           note: String(values.note ?? ''),
         });
         message.success('课程已创建');
       } else if (action?.kind === 'edit-domain') {
+        // 解析逗号分隔的字符串为数组
+        const stages = values.stages ? String(values.stages).split(',').map(s => s.trim()).filter(Boolean) : undefined;
+        
         await updateDomain(action.domain.domain_id, {
           description: String(values.description ?? ''),
+          level: String(values.level ?? ''),
+          stages,
+          classic_tracks: Array.isArray(values.classic_tracks)
+            ? values.classic_tracks
+                .filter((t: { name?: string }) => t.name?.trim())
+                .map((t: { name: string; summary?: string; kind?: string }) => ({
+                  name: t.name.trim(),
+                  summary: (t.summary || '').trim(),
+                  kind: t.kind || 'main',
+                }))
+            : undefined,
+          scope: String(values.scope ?? ''),
         });
         message.success('领域已更新');
       } else if (action?.kind === 'edit-course') {
         const body: Record<string, unknown> = {
+          description: String(values.description ?? ''),
           stage: String(values.stage ?? ''),
-          note: String(values.note ?? ''),
+          track: String(values.track ?? ''),
         };
         // sort_order 留空 = 不变（undefined 不入请求体）
         if (values.sort_order !== undefined && values.sort_order !== null) body.sort_order = Number(values.sort_order);
+        // 解析逗号分隔的字符串为数组
+        if (values.aliases) body.aliases = String(values.aliases).split(',').map(s => s.trim()).filter(Boolean);
+        if (values.prerequisites) body.prerequisites = String(values.prerequisites).split(',').map(s => s.trim()).filter(Boolean);
         await updateCourse(action.course.course_id, body);
         message.success('课程已更新');
       }
@@ -237,6 +301,7 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
       open={action !== null}
       onCancel={onClose}
       destroyOnHidden
+      width={960}
       okText="保存"
       cancelText="取消"
       onOk={() => form.validateFields().then((v) => submit(v)).catch(() => { /* 校验失败：表单内联提示 */ })}
@@ -247,8 +312,23 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item name="name" label="课程名（必填；创建后不可改）" rules={[{ required: true, message: '请填写课程名' }]}>
               <Input placeholder="如：复变函数" />
             </Form.Item>
-            <Form.Item name="stage" label="阶段（可选）">
-              <Input placeholder="如：本科一年级" />
+            <Form.Item name="description" label="描述（必填）" rules={[{ required: true, message: '请填写课程描述' }]}>
+              <Input.TextArea rows={3} placeholder="课程介绍" />
+            </Form.Item>
+            <Form.Item name="stage" label="阶段（必填）" rules={[{ required: true, message: '请选择阶段' }]}>
+              <Input placeholder="如：基础" />
+            </Form.Item>
+            <Form.Item name="track" label="学术方向">
+              <Input placeholder="如：分析学" />
+            </Form.Item>
+            <Form.Item name="aliases" label="别名（可选，逗号分隔）">
+              <Input placeholder="如：复变,复变函数论" />
+            </Form.Item>
+            <Form.Item name="prerequisites" label="前置课程（可选，逗号分隔）">
+              <Input placeholder="如：微积分,线性代数" />
+            </Form.Item>
+            <Form.Item name="sort_order" label="排序">
+              <InputNumber min={0} max={9999} style={{ width: '100%' }} placeholder="如：3" />
             </Form.Item>
             <Form.Item name="note" label="备注（可选）">
               <Input.TextArea rows={2} />
@@ -263,6 +343,52 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item name="description" label="描述">
               <Input.TextArea rows={3} placeholder="领域定位说明" />
             </Form.Item>
+            <Form.Item name="level" label="探索范围">
+              <Input placeholder="如：本科" />
+            </Form.Item>
+            <Form.Item name="stages" label="学习阶段">
+              <Input placeholder="如：基础,主干,分支,前沿" />
+            </Form.Item>
+            <Form.Item name="scope" label="学科知识">
+              <Input.TextArea rows={2} placeholder="学科知识（当前可置空）" />
+            </Form.Item>
+            <Form.Item label="课程方向（classic tracks）">
+              <Form.List name="classic_tracks">
+                {(fields, { add, remove }) => (
+                  <div>
+                    {fields.map((field) => (
+                      <div key={field.key} style={{
+                        display: 'flex', gap: 8, marginBottom: 8,
+                        padding: '8px 12px', background: '#fafafa', borderRadius: 6,
+                        alignItems: 'flex-start',
+                      }}>
+                        <Form.Item {...field} name={[field.name, 'name']} noStyle
+                          rules={[{ required: true, message: '方向名称必填' }]}>
+                          <Input placeholder="方向名称" style={{ width: 160 }} />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'summary']} noStyle>
+                          <Input.TextArea rows={2} placeholder="方向描述（可选）" style={{ flex: 1 }} />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'kind']} noStyle>
+                          <Select style={{ width: 100 }} options={[
+                            { value: 'main', label: '主干' },
+                            { value: 'branch', label: '分支' },
+                          ]} />
+                        </Form.Item>
+                        <MinusCircleOutlined
+                          style={{ marginTop: 8, color: '#999' }}
+                          onClick={() => remove(field.name)}
+                        />
+                      </div>
+                    ))}
+                    <Button type="dashed" onClick={() => add({ name: '', summary: '', kind: 'main' })} block
+                      icon={<PlusOutlined />}>
+                      添加课程方向
+                    </Button>
+                  </div>
+                )}
+              </Form.List>
+            </Form.Item>
           </>
         )}
         {(action?.kind === 'edit-course') && (
@@ -270,8 +396,34 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item label="课程名">
               <Input value={action.course.name} disabled />
             </Form.Item>
-            <Form.Item name="stage" label="阶段（可选）">
-              <Input placeholder="如：本科一年级" />
+            <Form.Item name="description" label="描述（必填）" rules={[{ required: true, message: '请填写课程描述' }]}>
+              <Input.TextArea rows={3} placeholder="课程介绍" />
+            </Form.Item>
+            <Form.Item name="stage" label="阶段（必填）" rules={[{ required: true, message: '请选择阶段' }]}>
+              <Select placeholder="请选择阶段">
+                {currentDomain?.stages?.map(stage => (
+                  <Select.Option key={stage} value={stage}>{stage}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="track" label="学术方向">
+              <Select placeholder="请选择学术方向">
+                {currentDomain?.classic_tracks?.map(track => (
+                  <Select.Option key={track.name} value={track.name}>{track.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="aliases" label="别名（可选，逗号分隔）">
+              <Input placeholder="如：复变,复变函数论" />
+            </Form.Item>
+            <Form.Item name="prerequisites" label="前置课程（可选）">
+              <Select mode="multiple" placeholder="请选择前置课程">
+                {currentDomain?.courses
+                  ?.filter(c => c.course_id !== action.course.course_id)
+                  .map(course => (
+                    <Select.Option key={course.course_id} value={course.name}>{course.name}</Select.Option>
+                  ))}
+              </Select>
             </Form.Item>
             <Form.Item name="sort_order" label="排序（同领域内展示顺序，留空保持不变）">
               <InputNumber min={0} max={9999} style={{ width: '100%' }} placeholder="如：3" />
@@ -313,6 +465,14 @@ export default function DownloadsTree() {
   const [addForm] = Form.useForm();
   const dragging = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importTargetRef = useRef<string | null>(null);
+  const courseFileInputRef = useRef<HTMLInputElement>(null);
+  const courseImportTargetRef = useRef<string | null>(null);
+
+  const handleCourseImportKnowledge = useCallback((courseId: string) => {
+    courseImportTargetRef.current = courseId;
+    courseFileInputRef.current?.click();
+  }, []);
 
   const toggleDomain = (domainId: string) => {
     setCollapsed((prev) => {
@@ -360,7 +520,7 @@ export default function DownloadsTree() {
         message.error('JSON 解析失败，请检查文件格式');
         return;
       }
-      // 基本校验：domain / name / courses 字段
+      // 基本校验：domain / name / description / stages / courses 字段
       if (!data.domain || typeof data.domain !== 'string') {
         message.error('缺少 domain 字段（slug，如 "computer-science"）');
         return;
@@ -369,12 +529,51 @@ export default function DownloadsTree() {
         message.error('缺少 name 字段（领域名称）');
         return;
       }
+      if (!data.description || typeof data.description !== 'string') {
+        message.error('缺少 description 字段（领域描述）');
+        return;
+      }
+      if (!Array.isArray(data.stages) || data.stages.length === 0) {
+        message.error('缺少 stages 字段（学习阶段数组）');
+        return;
+      }
       if (!Array.isArray(data.courses) || data.courses.length === 0) {
         message.error('缺少 courses 数组（需至少一门课程）');
         return;
       }
-      const result = await importDomain(data);
+      const result = await importDomain(data, importTargetRef.current || undefined);
+      importTargetRef.current = null;
       message.success(`导入成功：${result.courses_created} 门新建，${result.courses_updated} 门更新`);
+      void fetchAll();
+    } catch (err) {
+      message.error(describeError(err));
+    }
+  };
+
+  /** 课程知识导入 — 文件选择 → JSON 校验 → POST /courses/{courseId}/knowledge */
+  const handleImportCourseFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const text = await file.text();
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        message.error('JSON 解析失败，请检查文件格式');
+        return;
+      }
+      // 基本校验：tutorials 数组
+      if (!Array.isArray(data.tutorials) || data.tutorials.length === 0) {
+        message.error('缺少 tutorials 数组（需至少一篇教程）');
+        return;
+      }
+      const courseId = courseImportTargetRef.current;
+      if (!courseId) return;
+      const result = await importCourseKnowledge(courseId, data);
+      courseImportTargetRef.current = null;
+      message.success(`导入成功：${result.tutorials_created ?? 0} 篇教程已导入`);
       void fetchAll();
     } catch (err) {
       message.error(describeError(err));
@@ -383,43 +582,52 @@ export default function DownloadsTree() {
 
   const domainMenu = (d: DomainSystem): MenuProps => ({
     items: [
-      // REQ-067 B9：已完成态禁用探索/导入
-      { key: 'explore', label: '领域探索（自动）',
+      { key: 'edit', label: '编辑领域知识' },
+      { key: 'explore', label: '探索领域知识',
         disabled: d.exploration_stage === '已完成' },
       { key: 'import', label: '导入领域知识',
         disabled: d.exploration_stage === '已完成' },
-      { key: 'edit', label: '修改领域' },
-      { key: 'add-course', label: '新增课程',
-        disabled: d.exploration_stage !== '已完成' && d.exploration_stage !== '已生成' },
+      { key: 'add-course', label: '添加课程',
+        disabled: d.exploration_stage === '未开始' || d.exploration_stage === '已生成' },
       { type: 'divider' },
       { key: 'delete', label: '删除领域', danger: true },
     ],
     onClick: ({ key }) => {
       if (key === 'explore') {
-        // REQ-067 B2：直接触发领域探索，不走弹窗
-        void (async () => {
-          try {
-            await exploreDomain(d.domain_id);
-            message.success('领域探索已启动');
-          } catch (err) {
-            message.error(describeError(err));
-          }
-        })();
+        // 无弹窗直触：立即调用探索接口
+        if (d.exploration_stage === '未开始' || d.exploration_stage === '待确认') {
+          void startDomainExplore(d.domain_id);
+        }
       } else if (key === 'import') {
-        // REQ-067 B3：导入领域知识 → 打开文件选择器
+        // 导入领域知识：选择 JSON 文件
+        importTargetRef.current = d.domain_id;
         fileInputRef.current?.click();
-      } else if (key === 'add-course') setFormAction({ kind: 'add-course', domain: d });
-      else if (key === 'edit') setFormAction({ kind: 'edit-domain', domain: d });
-      else if (key === 'delete') confirmDeleteDomain(d);
+      } else if (key === 'add-course') {
+        setFormAction({ kind: 'add-course', domain: d });
+      } else if (key === 'edit') {
+        setFormAction({ kind: 'edit-domain', domain: d });
+      } else if (key === 'delete') {
+        confirmDeleteDomain(d);
+      }
     },
   });
 
   // 添加领域（纯手工表单，POST /domains；只采集名称+描述，阶段由探索流产生）
-  const submitAddDomain = async (values: { name: string; description?: string }) => {
+  const submitAddDomain = async (values: { 
+    name: string; 
+    description: string;
+    level: string;
+    stages: string;
+    scope: string;
+  }) => {
     try {
       await createDomain({
         name: values.name.trim(),
-        description: values.description ?? '',
+        description: values.description,
+        level: values.level,
+        stages: values.stages.split(',').map(s => s.trim()).filter(Boolean),
+        classic_tracks: [],
+        scope: values.scope,
       });
       message.success('领域已创建');
       setAddDomainOpen(false);
@@ -490,7 +698,7 @@ export default function DownloadsTree() {
                         <div className="dl-tree-empty">暂无课程（可右键新增或对该领域探索）</div>
                       ) : (
                         domain.courses.map((c) => (
-                          <CourseBranch key={c.id} course={c} onMenuAction={setFormAction} />
+                          <CourseBranch key={c.id} course={c} onMenuAction={setFormAction} onImportKnowledge={handleCourseImportKnowledge} />
                         ))
                       )}
                     </div>
@@ -522,16 +730,35 @@ export default function DownloadsTree() {
         open={addDomainOpen}
         onCancel={() => setAddDomainOpen(false)}
         destroyOnHidden
+        width={960}
         okText="创建"
         cancelText="取消"
         onOk={() => addForm.validateFields().then((v) => submitAddDomain(v)).catch(() => { /* 校验失败：表单内联提示 */ })}
       >
-        <Form form={addForm} layout="vertical">
+        <Form
+          form={addForm}
+          layout="vertical"
+          initialValues={{
+            description: '这是一个新的学科领域，等待探索完善。',
+            level: '本科',
+            stages: '基础,主干,分支,前沿',
+            scope: '',
+          }}
+        >
           <Form.Item name="name" label="领域名（必填；创建后不可改）" rules={[{ required: true, message: '请填写领域名' }]}>
             <Input placeholder="如：高等数学" />
           </Form.Item>
           <Form.Item name="description" label="描述（可选）">
-            <Input.TextArea rows={3} placeholder="领域定位说明" />
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="level" label="探索范围（可选）">
+            <Input />
+          </Form.Item>
+          <Form.Item name="stages" label="学习阶段（可选，逗号分隔）">
+            <Input />
+          </Form.Item>
+          <Form.Item name="scope" label="学科知识（可选）">
+            <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
         <div style={{ color: '#999', fontSize: 12 }}>
@@ -548,6 +775,14 @@ export default function DownloadsTree() {
         accept=".json"
         style={{ display: 'none' }}
         onChange={handleImportFile}
+      />
+      {/* 课程知识导入文件选择器（隐藏） */}
+      <input
+        ref={courseFileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleImportCourseFile}
       />
       <div
         className="dl-tree-resizer"

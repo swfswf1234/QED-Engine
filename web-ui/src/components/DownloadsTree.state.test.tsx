@@ -5,7 +5,7 @@
  * - 测试右侧按钮状态机
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ConfigProvider, App as AntApp } from 'antd';
 import DownloadsTree from './DownloadsTree';
 import { theme } from '../theme';
