@@ -45,6 +45,9 @@ export interface CreateDomainBody {
   name: string;
   description?: string;
   stages?: string[];
+  level?: string;
+  classic_tracks?: Array<{ name: string; summary?: string; kind?: string }>;
+  scope?: string;
 }
 
 /** POST /api/v1/domains：手工新建领域（REQ-059 §8 请求项；8901 未实现前由 UI 降级提示） */
@@ -53,8 +56,14 @@ export function createDomain(body: CreateDomainBody, opts?: ApiRequestOptions): 
 }
 
 export interface UpdateDomainBody {
+  name?: string;
   description?: string;
   stages?: string[];
+  level?: string;
+  classic_tracks?: Array<{ name: string; summary?: string; kind?: string }>;
+  scope?: string;
+  exploration_stage?: string;
+  explore_pending?: Record<string, unknown> | '__CLEAR__' | null;
 }
 
 /** PATCH /api/v1/domains/{id}：修改领域描述/阶段（名称锁定不可改） */
@@ -67,27 +76,6 @@ export function deleteDomain(domainId: string, opts?: ApiRequestOptions): Promis
   return api.del<void>(`/domains/${domainId}`, opts);
 }
 
-export interface ExploreDomainBody {
-  mode?: string;
-  ref_text?: string;
-  ref_doc_path?: string;
-}
-
-/** POST /api/v1/domains/{id}/explore：启动领域探索（REQ-067 B2；202 异步任务） */
-export function exploreDomain(domainId: string, body?: ExploreDomainBody, opts?: ApiRequestOptions): Promise<{ task_id?: string }> {
-  return api.post(`/domains/${domainId}/explore`, body ?? {}, opts);
-}
-
-export interface ConfirmDomainNameBody {
-  decision: 'accept' | 'custom' | 'retain';
-  name?: string;
-}
-
-/** POST /api/v1/domains/{id}/confirm-name：确认领域名称（REQ-067 B7） */
-export function confirmDomainName(domainId: string, body: ConfirmDomainNameBody, opts?: ApiRequestOptions): Promise<void> {
-  return api.post(`/domains/${domainId}/confirm-name`, body, opts);
-}
-
 export interface ImportDomainResult {
   domain_id: string;
   courses_created: number;
@@ -95,14 +83,18 @@ export interface ImportDomainResult {
 }
 
 /** POST /api/v1/domains/import：手动领域 JSON 导入（REQ-067 B3，QED-050） */
-export function importDomain(domainData: Record<string, unknown>, opts?: ApiRequestOptions): Promise<ImportDomainResult> {
-  return api.post<ImportDomainResult>('/domains/import', { domain: domainData }, opts);
+export function importDomain(domainData: Record<string, unknown>, targetDomainId?: string, opts?: ApiRequestOptions): Promise<ImportDomainResult> {
+  return api.post<ImportDomainResult>('/domains/import', { domain: domainData, target_domain_id: targetDomainId }, opts);
 }
 
 export interface CreateCourseBody {
   name: string;
+  description?: string;
   stage?: string;
+  track?: string;
   sort_order?: number;
+  aliases?: string[];
+  prerequisites?: string[];
   note?: string;
 }
 
@@ -112,8 +104,13 @@ export function createCourse(domainId: string, body: CreateCourseBody, opts?: Ap
 }
 
 export interface UpdateCourseBody {
+  description?: string;
   stage?: string;
+  track?: string;
   sort_order?: number;
+  aliases?: string[];
+  prerequisites?: string[];
+  exploration_stage?: string;
   note?: string;
 }
 
@@ -159,6 +156,11 @@ export function supersedeKnowledge(knowledgeId: string, reason: string, opts?: A
   return api.post<KnowledgeRecord>(`/knowledge/${knowledgeId}/supersede`, { reason }, opts);
 }
 
+/** POST /api/v1/courses/{id}/knowledge：导入课程知识（tutorials JSON） */
+export function importCourseKnowledge(courseId: string, data: Record<string, unknown>, opts?: ApiRequestOptions): Promise<{ tutorials_created: number }> {
+  return api.post<{ tutorials_created: number }>(`/courses/${courseId}/knowledge`, data, opts);
+}
+
 export interface CreateBookBody {
   knowledge_id: string;
   kind?: string;
@@ -201,6 +203,21 @@ export function addBookSource(bookId: string, body: AddBookSourceBody, opts?: Ap
 /** POST /api/v1/books/{id}/register：人工下载登记（candidate→downloaded，relative_path 必填） */
 export function registerBook(bookId: string, relativePath: string, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>(`/books/${bookId}/register`, { relative_path: relativePath }, opts);
+}
+
+/** POST /api/v1/books/{id}/fetch：自动下载书籍（触发下载任务） */
+export function fetchBook(bookId: string, opts?: ApiRequestOptions): Promise<{ task_id?: string }> {
+  return api.post<{ task_id?: string }>(`/books/${bookId}/fetch`, undefined, opts);
+}
+
+/** POST /api/v1/knowledge/{id}/fetch：批量下载教程所辖书籍（触发下载任务） */
+export function fetchKnowledgeBooks(knowledgeId: string, opts?: ApiRequestOptions): Promise<{ task_id?: string }> {
+  return api.post<{ task_id?: string }>(`/knowledge/${knowledgeId}/fetch`, undefined, opts);
+}
+
+/** POST /api/v1/books/{id}/import：导入书籍 PDF（手动导入） */
+export function importBookPdf(bookId: string, opts?: ApiRequestOptions): Promise<{ task_id?: string }> {
+  return api.post<{ task_id?: string }>(`/books/${bookId}/import`, undefined, opts);
 }
 
 /** POST /api/v1/books/{id}/decide：候选→决定 */
@@ -287,4 +304,51 @@ export function applyExploreSession(
 /** DELETE /api/v1/explore-sessions/{id}：放弃会话（exploration_stage 回退未开始） */
 export function deleteExploreSession(sessionId: string, opts?: ApiRequestOptions): Promise<{ ok: boolean }> {
   return api.del<{ ok: boolean }>(`/explore-sessions/${sessionId}`, opts);
+}
+
+
+// --- 领域探索 API（5态模型） ---
+
+/** POST /api/v1/domains/{domainId}/explore-knowledge：生成领域知识（未开始→已生成） */
+export function exploreDomainKnowledge(
+  domainId: string,
+  body: { mode?: string; ref_text?: string; ref_doc_path?: string } = {},
+  opts?: ApiRequestOptions,
+): Promise<{ session_id: string; status: string; message: string }> {
+  return api.post(`/domains/${domainId}/explore-knowledge`, body, opts);
+}
+
+/** POST /api/v1/domains/{domainId}/confirm-domain：领域信息确认（已生成→探索中） */
+export function confirmDomainInfo(
+  domainId: string,
+  body: { mode?: string; ref_text?: string; ref_doc_path?: string } = {},
+  opts?: ApiRequestOptions,
+): Promise<{ session_id: string; status: string; message: string }> {
+  return api.post(`/domains/${domainId}/confirm-domain`, body, opts);
+}
+
+/** POST /api/v1/domains/{domainId}/confirm-knowledge：课程知识确认（待确认→已完成） */
+export function confirmCourseKnowledge(
+  domainId: string,
+  sessionId: string,
+  opts?: ApiRequestOptions,
+): Promise<{ ok: boolean; exploration_stage: string; message: string }> {
+  return api.post(`/domains/${domainId}/confirm-knowledge`, { session_id: sessionId }, opts);
+}
+
+/** POST /api/v1/courses/{courseId}/explore-knowledge：生成课程知识（未开始→探索中） */
+export function exploreCourseKnowledge(
+  courseId: string,
+  body: { mode?: string; ref_text?: string; ref_doc_path?: string } = {},
+  opts?: ApiRequestOptions,
+): Promise<{ session_id: string; status: string; message: string }> {
+  return api.post(`/courses/${courseId}/explore-knowledge`, body, opts);
+}
+
+/** GET /api/v1/domains/{domainId}/explore-status：获取领域探索状态 */
+export function getDomainExploreStatus(
+  domainId: string,
+  opts?: ApiRequestOptions,
+): Promise<{ domain_id: string; exploration_stage: string; session_id?: string; progress?: number }> {
+  return api.get(`/domains/${domainId}/explore-status`, opts);
 }
