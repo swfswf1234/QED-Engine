@@ -471,3 +471,45 @@
   border-top: 1px solid #e5e7eb;
   background: #fafbfe;
 }
+
+/* DomainCard 样式 */
+.dl-domain-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.dl-domain-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.dl-domain-card-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dl-domain-card-stage {
+  font-size: 12px;
+  color: #666;
+}
+
+.dl-domain-card-info {
+  margin-bottom: 16px;
+}
+
+.dl-domain-card-info p {
+  margin: 4px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.dl-domain-card-action {
+  border-top: 1px solid #f0f0f0;
+  padding-top: 12px;
+}
