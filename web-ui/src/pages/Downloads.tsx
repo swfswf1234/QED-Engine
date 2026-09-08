@@ -1,8 +1,8 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert, App, Button, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, Typography,
+  Alert, App, Button, Form, Input, Modal, Select, Space, Switch, Tag, Typography,
 } from 'antd';
-import { ReloadOutlined, CloudServerOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
+import { ReloadOutlined, CloudServerOutlined, EyeOutlined } from '@ant-design/icons';
 import DownloadsTree from '../components/DownloadsTree';
 import ExploreFlowModal from '../components/ExploreFlowModal';
 import DomainConfirmModal from '../components/DomainConfirmModal';
@@ -636,144 +636,8 @@ function bookActionPromise(action: 'decide' | 'start' | 'fail' | 'retry' | 'veri
 
 // --- 页面 ---
 
-/**
- * 领域信息卡（2026-08-24 REQ-059；2026-08-28 F4 探索状态改读共享表）
- * - 领域名/描述/阶段/课程数 + 按钮状态机（exploration_stage 事实源，经 GET /courses 透出；
- *   runStatus 仅作会话进行中的瞬时补充；PLAN-028 2026-09-02 确认流拆分）：
- *   探索中 置灰 / 未开始+无课程=领域信息确认 / 已生成+有课程（或待确认）=课程信息确认 /
- *   已生成+无课程=可探索（降级置灰） / 已完成=可重探
- */
-function DomainInfoCard({ domain, onConfirm, onCourseConfirm }: {
-  domain: DomainSystem;
-  onConfirm: (d: DomainSystem) => void;
-  onCourseConfirm: (d: DomainSystem) => void;
-}) {
-  const runStatus = useExploreUiStore((s) => s.domainRunStatus[domain.domain_id]);
-  const openFlow = useExploreUiStore((s) => s.openFlow);
-  const isDegraded = useDownloadsStore((s) => s.isDegraded);
-
-  const effectiveStatus = useMemo(() => {
-    if (runStatus === 'running') return 'running' as const;
-    const stage = domain.exploration_stage ?? '';
-    if (stage === '探索中') return 'running' as const;
-    if (stage === '已完成') return 'completed' as const;
-    if (stage === '失败') return 'failed' as const;
-    // 未开始 + 无课程 → 需要领域信息确认（创建领域强制先确认信息）
-    if ((stage === '未开始' || stage === '' || stage == null) && domain.courses.length === 0) {
-      return 'domain_confirm' as const;
-    }
-    if (stage === '待确认') return 'course_confirm' as const; // 导入降级置位
-    if (stage === '已生成') {
-      // 探索结果待确认（8901 流）保留 pending 语义；导入课程 → 课程信息确认
-      if (domain.explore_pending?.kind === 'review_results') return 'pending' as const;
-      if (domain.explore_pending?.kind === 'import_courses') {
-        // 导入课程：名称变更时先确认名称，否则直接课程确认
-        if (domain.explore_pending.name_changed) return 'import_name_confirm' as const;
-        return 'course_confirm' as const;
-      }
-      if (domain.courses.length > 0) return 'course_confirm' as const;
-      return 'pending' as const; // 已生成 + 无课程 → 下一步探索（降级置灰，可右键导入）
-    }
-    return 'reexplore' as const;
-  }, [runStatus, domain.exploration_stage, domain.courses.length, domain.explore_pending]);
-
-  const handleExplore = useCallback(() => {
-    openFlow({ variant: 'domain', domainId: domain.domain_id, domainName: domain.name });
-  }, [domain.domain_id, domain.name, openFlow]);
-
-  // REQ-067 B7：名称确认 UI（降级模式下不显示，因为 8901 不可用）
-  const pendingFailed = effectiveStatus === 'failed' && domain.explore_pending?.kind === 'failed';
-
-  return (
-    <div className="dl-domain-card" data-testid="domain-info-card">
-      <div className="dl-domain-head">
-        <span className="dl-domain-name">{domain.name}</span>
-        <Tag>{domain.courses.length} 门课程</Tag>
-        <span style={{ marginLeft: 'auto' }}>
-          {effectiveStatus === 'running' ? (
-            <Button size="small" disabled icon={<SearchOutlined />}>探索进行中…</Button>
-          ) : pendingFailed ? (
-            <Tooltip title={domain.explore_pending?.kind === 'failed' ? domain.explore_pending.error : ''}>
-              <Button size="small" danger icon={<SearchOutlined />} onClick={handleExplore}
-                disabled={isDegraded}>
-                探索失败（重试）
-              </Button>
-            </Tooltip>
-          ) : effectiveStatus === 'domain_confirm' ? (
-            <Button size="small" type="primary" icon={<SearchOutlined />}
-              onClick={() => onConfirm(domain)}>
-              领域信息确认
-            </Button>
-          ) : effectiveStatus === 'import_name_confirm' ? (
-            <Button size="small" type="primary" icon={<SearchOutlined />}
-              onClick={() => onConfirm(domain)}>
-              领域信息确认
-            </Button>
-          ) : effectiveStatus === 'course_confirm' ? (
-            <Button size="small" type="primary" icon={<SearchOutlined />}
-              onClick={() => onCourseConfirm(domain)}>
-              课程信息确认
-            </Button>
-          ) : effectiveStatus === 'pending' ? (
-            <Button size="small" type="primary" ghost icon={<SearchOutlined />}
-              disabled={isDegraded} onClick={handleExplore}>
-              探索领域知识
-            </Button>
-          ) : effectiveStatus === 'reexplore' || effectiveStatus === 'completed' ? (
-            <Button size="small" type="primary" ghost icon={<SearchOutlined />}
-              disabled={isDegraded} onClick={handleExplore}>
-              重新探索
-            </Button>
-          ) : null}
-        </span>
-      </div>
-      {domain.description && <div className="dl-domain-desc">{domain.description}</div>}
-
-      {/* 领域探索结果预览（review_results） */}
-      {effectiveStatus === 'pending' && domain.explore_pending?.kind === 'review_results' && (
-        <div style={{ marginTop: 8 }}>
-          <Alert
-            type="info" showIcon
-            message="探索结果待确认"
-            description={
-              <Space direction="vertical" size={8}>
-                {domain.explore_pending.domain_report?.description && (
-                  <div><strong>描述：</strong>{domain.explore_pending.domain_report.description}</div>
-                )}
-                {domain.explore_pending.domain_report?.classic_tracks?.length > 0 && (
-                  <div><strong>方向：</strong>{domain.explore_pending.domain_report.classic_tracks.map((t) => t.name).join('、')}</div>
-                )}
-                {domain.explore_pending.courses?.length > 0 && (
-                  <div><strong>课程：</strong>{domain.explore_pending.courses.length} 门（{domain.explore_pending.courses.map((c) => c.name).join('、')}）</div>
-                )}
-              </Space>
-            }
-          />
-        </div>
-      )}
-
-      {/* REQ-067 B8：失败提示 */}
-      {pendingFailed && domain.explore_pending?.kind === 'failed' && (
-        <Alert
-          type="error" showIcon style={{ marginTop: 8 }}
-          message="探索失败"
-          description={
-            <Space direction="vertical" size={4}>
-              <span>{domain.explore_pending.error}</span>
-              <Button size="small" danger onClick={handleExplore}>重试</Button>
-            </Space>
-          }
-        />
-      )}
-    </div>
-  );
-}
-
 /** 右侧面板（4b 卡片区 + 4c/4d 操作闭环 + 领域探索按钮状态机） */
-function RightPanel({ onConfirmDomain, onConfirmCourse }: {
-  onConfirmDomain: (d: DomainSystem) => void;
-  onConfirmCourse: (d: DomainSystem) => void;
-}) {
+function RightPanel() {
   const filters = useDownloadsStore((s) => s.filters);
   const selected = useDownloadsStore((s) => s.selected);
   const knowledge = useDownloadsStore((s) => s.knowledge);
@@ -896,7 +760,6 @@ function RightPanel({ onConfirmDomain, onConfirmCourse }: {
                 onConfirmKnowledge={confirmCourseKnowledge}
               />
             )}
-            <DomainInfoCard domain={selectedDomain!} onConfirm={onConfirmDomain} onCourseConfirm={onConfirmCourse} />
             <div className="dl-empty-course-hint">
               <Text type="secondary">该领域暂无课程。可通过探索课程体系创建，或手动导入已整理的课程数据。</Text>
             </div>
@@ -915,7 +778,6 @@ function RightPanel({ onConfirmDomain, onConfirmCourse }: {
                 onConfirmKnowledge={confirmCourseKnowledge}
               />
             )}
-            {selectedDomain && <DomainInfoCard domain={selectedDomain} onConfirm={onConfirmDomain} onCourseConfirm={onConfirmCourse} />}
 
             {/* 课程头（选中课程时置顶展示） */}
             {selectedCourse && (
@@ -1020,7 +882,7 @@ export default function Downloads() {
       {/* 内容区（左右分栏，独立滚动） */}
       <div className="dl-layout">
         <DownloadsTree />
-        <RightPanel onConfirmDomain={setConfirmDomain} onConfirmCourse={setConfirmCourse} />
+        <RightPanel />
       </div>
 
       {/* 探索全弹窗流（左树右键 / 领域信息卡按钮共用入口） */}
