@@ -1,19 +1,21 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, App, Button, Form, Input, Modal, Select, Space, Switch, Tag, Typography,
+  Alert, App, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography,
 } from 'antd';
-import { ReloadOutlined, CloudServerOutlined, EyeOutlined } from '@ant-design/icons';
+import { ReloadOutlined, CloudServerOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import DownloadsTree from '../components/DownloadsTree';
 import ExploreFlowModal from '../components/ExploreFlowModal';
 import DomainConfirmModal from '../components/DomainConfirmModal';
 import CourseConfirmModal from '../components/CourseConfirmModal';
+import CourseKnowledgeConfirmModal from '../components/CourseKnowledgeConfirmModal';
 import { describeError } from '../api/client';
 import DomainCard from '../components/DomainCard';
-import { startDomainExplore, confirmDomainInfo, confirmCourseKnowledge } from '../api/explore-helpers';
+import { startDomainExplore } from '../api/explore-helpers';
 import {
-  confirmKnowledge, completeKnowledge, rejectKnowledge, supersedeKnowledge,
-  createBook, decideBook, startBook, failBook, retryBook, verifyBook,
-  rejectBook, supersedeBook, registerBook, listBookSources, addBookSource,
+  createBook, rejectBook, registerBook, importBookPdf,
+  listBookSources, fetchBook,
+  exploreCourseKnowledge, verifyBook,
+  updateCourse,
 } from '../api/tracker';
 import { STAGE_OPTIONS, bookInStage, sortBooks, tutorialLabel, useDownloadsStore } from '../stores/downloads';
 import { useExploreUiStore } from '../stores/explore';
@@ -71,8 +73,13 @@ function versionText(v: Record<string, unknown> | null | undefined): string {
   return [edition, year].filter(Boolean).join(' · ');
 }
 
+/** 组合书名+卷标识，生成展示标题（title + part，part 非空时用空格连接） */
+function bookDisplayName(book: { title: string; part?: string }): string {
+  return [book.title, book.part].filter(Boolean).join(' ');
+}
+
 /** 全部课程扁平视图（真实领域体系；FilterBar / 右面板名称回显共用） */
-function useCourseIndex(): { byId: Map<string, CourseRecord & { domainId: string; domainName: string }>; domains: DomainSystem[] } {
+export function useCourseIndex(): { byId: Map<string, CourseRecord & { domainId: string; domainName: string }>; domains: DomainSystem[] } {
   const domains = useDownloadsStore((s) => s.domains);
   return useMemo(() => {
     const byId = new Map<string, CourseRecord & { domainId: string; domainName: string }>();
@@ -97,18 +104,10 @@ function FilterBar() {
     return [...ids].sort().map((cid) => ({ value: cid, label: byId.get(cid)?.name ?? cid }));
   }, [byId, knowledge]);
 
-  // 领域筛选项：真实体系领域优先，知识行残留域兜底（数据一致性边缘）
+  // 领域筛选项：真实体系领域优先（qt_knowledge 无 domain_id，仅展示课程体系领域）
   const domainOptions = useMemo(() => {
-    const options = domains.map((d) => ({ value: d.domain_id, label: d.name }));
-    const known = new Set(domains.map((d) => d.domain_id));
-    for (const k of knowledge) {
-      if (!known.has(k.domain_id)) {
-        known.add(k.domain_id);
-        options.push({ value: k.domain_id, label: k.domain_id });
-      }
-    }
-    return options;
-  }, [domains, knowledge]);
+    return domains.map((d) => ({ value: d.domain_id, label: d.name }));
+  }, [domains]);
 
   return (
     <Space size={8} wrap>
@@ -167,103 +166,449 @@ function ReasonModal({ open, title, withNote, onCancel, onSubmit }: {
   );
 }
 
-/** 知识行确认弹窗（draft→confirmed：决定引用 + 简介） */
-function KnowledgeConfirmModal({ knowledge, onCancel, onSubmit }: {
-  knowledge: KnowledgeRecord | null;
-  onCancel: () => void;
-  onSubmit: (values: {
-    textbook_ref?: Record<string, unknown>;
-    exercise_ref?: Record<string, unknown>;
-    textbook_intro?: string;
-    exercise_intro?: string;
-  }) => void;
+/** 知识行确认弹窗与人工登记弹窗已随 2026-09-08 教程行精简移除：
+    教程确认属「教程确认轮」（下一轮），人工导入并入教程详情书目操作（TutorialDetailModal）。 */
+
+// --- 课程编辑弹窗（统一窗口：打开即编辑表单，不切换查看/编辑模式） ---
+
+export function CourseDetailModal({ course, onClose }: {
+  course: (CourseRecord & { domainId?: string; domainName?: string }) | null;
+  onClose: () => void;
 }) {
+  const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
-  const ref = knowledge?.textbook_ref ?? {};
+  const { message } = App.useApp();
+  const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  const domains = useDownloadsStore((s) => s.domains);
+
+  // 打开即填充表单（hooks 必须在 early return 之前）
+  useEffect(() => {
+    if (!course) return;
+    form.setFieldsValue({
+      description: course.description ?? '',
+      stage: course.stage ?? '',
+      track: course.track ?? '',
+      aliases: course.aliases?.join(', ') ?? '',
+      prerequisites: course.prerequisites?.join(', ') ?? '',
+    });
+  }, [course, form]);
+
+  if (!course) return null;
+
+  // 获取当前领域数据（用于 stage/track 选项）
+  const currentDomain = domains.find(d => d.courses.some(c => c.course_id === course.course_id));
+
+  const handleSave = async (values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        description: String(values.description ?? ''),
+        stage: String(values.stage ?? ''),
+        track: String(values.track ?? ''),
+      };
+      if (values.aliases) body.aliases = String(values.aliases).split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (values.prerequisites) body.prerequisites = String(values.prerequisites).split(',').map((s: string) => s.trim()).filter(Boolean);
+      await updateCourse(course.course_id, body);
+      message.success('课程已更新');
+      await fetchAll();
+      onClose();
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal
-      title={`确认教程：${knowledge ? tutorialLabel(knowledge) : ''}`}
-      open={knowledge !== null}
-      onCancel={onCancel}
-      destroyOnClose
-      onOk={() =>
-        form.validateFields().then((v: { tb_title?: string; ex_title?: string; textbook_intro?: string; exercise_intro?: string }) => {
-          // 2026-08-24 用户裁决：版本字段取消；书名预填（后端 adopt 落库推荐值后自动带出，中文优先）
-          // 修复：此前表单平铺字段从未映射为嵌套 ref，决定引用实际未被提交过
-          const tb = v.tb_title?.trim() ? { title: v.tb_title.trim() } : undefined;
-          const ex = v.ex_title?.trim() ? { title: v.ex_title.trim() } : undefined;
-          onSubmit({
-            ...(tb ? { textbook_ref: tb } : {}),
-            ...(ex ? { exercise_ref: ex } : {}),
-            textbook_intro: v.textbook_intro ?? '',
-            exercise_intro: v.exercise_intro ?? '',
-          });
-        })
-      }
+      title={`修改课程 · ${course.name}`}
+      open onCancel={onClose} width={640}
+      footer={null}
+      destroyOnHidden
     >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          tb_title: (ref.title as string) ?? '',
-          ex_title: (knowledge?.exercise_ref?.title as string) ?? '',
-          textbook_intro: knowledge?.textbook_intro ?? '',
-          exercise_intro: knowledge?.exercise_intro ?? '',
+      <Form form={form} layout="vertical" onFinish={(v) => void handleSave(v)}>
+        <Form.Item label="课程名">
+          <Input value={course.name} disabled />
+        </Form.Item>
+        <Form.Item name="description" label="课程描述" rules={[{ required: true, message: '请填写课程描述' }]}>
+          <Input.TextArea rows={3} placeholder="课程介绍" />
+        </Form.Item>
+        <Form.Item name="stage" label="学习阶段" rules={[{ required: true, message: '请选择阶段' }]}>
+          <Select placeholder="请选择阶段">
+            {currentDomain?.stages?.map(stage => (
+              <Select.Option key={stage} value={stage}>{stage}</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        <Form.Item name="track" label="学术方向">
+          <Select placeholder="请选择学术方向">
+            {currentDomain?.classic_tracks?.map(track => (
+              <Select.Option key={track.name} value={track.name}>{track.name}</Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        <Form.Item name="aliases" label="别名（可选，逗号分隔）">
+          <Input placeholder="如：复变,复变函数论" />
+        </Form.Item>
+        <Form.Item name="prerequisites" label="依赖课程（可选）">
+          <Input placeholder="如：微积分,线性代数" />
+        </Form.Item>
+        <Form.Item>
+          <Space>
+            <Button type="primary" htmlType="submit" loading={saving}>保存</Button>
+            <Button onClick={onClose}>取消</Button>
+          </Space>
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
+
+// --- 课程状态栏（右面板课程头旁，与领域信息卡对齐） ---
+
+function CourseStatusBar({ course, onConfirm }: {
+  course: CourseRecord;
+  onConfirm: () => void;
+}) {
+  const [exploring, setExploring] = useState(false);
+  const { message } = App.useApp();
+  const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  
+  // 如果课程有教程，显示"已导入"状态
+  const hasKnowledge = course.knowledge && course.knowledge.length > 0;
+  const courseStage = course.exploration_stage || (hasKnowledge ? '已导入' : '未开始');
+
+  const handleStartExplore = async () => {
+    setExploring(true);
+    try {
+      const result = await exploreCourseKnowledge(course.course_id);
+      message.success(result.message);
+      // §6.5 禁止乐观更新：操作后 fetchAll 以服务端返回为准
+      await fetchAll();
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setExploring(false);
+    }
+  };
+
+  // 5 态状态机（未开始/探索中/待确认/已完成/失败），与后端 exploration_stage 对齐
+  const getButtonState = () => {
+    switch (courseStage) {
+      case '未开始':
+        return {
+          label: '开始探索',
+          disabled: false,
+          loading: exploring,
+          onClick: handleStartExplore,
+          type: 'primary' as const,
+        };
+      case '探索中':
+        return {
+          label: '探索中…',
+          disabled: true,
+          loading: true,
+          type: 'default' as const,
+        };
+      case '待确认':
+        return {
+          label: '确认领域信息',
+          disabled: false,
+          loading: false,
+          onClick: onConfirm,
+          type: 'primary' as const,
+        };
+      case '已导入':
+        return {
+          label: '查看教程',
+          disabled: false,
+          loading: false,
+          onClick: onConfirm,
+          type: 'default' as const,
+        };
+      case '已完成':
+        return {
+          label: '探索完成',
+          disabled: true,
+          loading: false,
+          type: 'default' as const,
+        };
+      case '失败':
+        return {
+          label: '重试探索',
+          disabled: false,
+          loading: false,
+          onClick: handleStartExplore,
+          type: 'primary' as const,
+          danger: true,
+        };
+      default:
+        return {
+          label: '开始探索',
+          disabled: false,
+          loading: false,
+          onClick: handleStartExplore,
+          type: 'primary' as const,
+        };
+    }
+  };
+
+  const buttonState = getButtonState();
+
+  return (
+    <Button
+      type={buttonState.type}
+      danger={buttonState.danger}
+      disabled={buttonState.disabled}
+      loading={buttonState.loading}
+      onClick={buttonState.onClick}
+      size="small"
+    >
+      {buttonState.label}
+    </Button>
+  );
+}
+
+// --- 教程详情弹窗（用户裁决 2026-09-08 项 3：信息展示 + 书目操作集 导入/新增/下载/否决） ---
+// 教程信息修改依赖 PATCH /knowledge——8901 未实现（已移交）：入口禁用 + 提示
+
+function TutorialDetailModal({ knowledge, detail, run, onClose }: {
+  knowledge: KnowledgeRecord;
+  detail: KnowledgeDetail | undefined;
+  run: (p: Promise<unknown>, successText: string, knowledgeId: string) => void;
+  onClose: () => void;
+}) {
+  const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm] = Form.useForm();
+  const [importBook, setImportBook] = useState<BookRecord | null>(null);
+  const [importForm] = Form.useForm();
+  const [rejectBook_, setRejectBook_] = useState<BookRecord | null>(null);
+  const [detailBook, setDetailBook] = useState<BookRecord | null>(null);
+  const { message } = App.useApp();
+  const books = useMemo(() => sortBooks(detail?.books ?? []), [detail]);
+
+  return (
+    <Modal
+      title={`教程详情 · ${tutorialLabel(knowledge)}`}
+      open onCancel={onClose} footer={null} width={860}
+    >
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag>{KNOWLEDGE_KIND_LABELS[knowledge.kind] ?? knowledge.kind}</Tag>
+          <Tag color={KNOWLEDGE_STATUS[knowledge.status]?.color}>
+            {KNOWLEDGE_STATUS[knowledge.status]?.label ?? knowledge.status}
+          </Tag>
+          <Tooltip title="QED-Tracker 未实现教程信息修改（已移交）">
+            <Button size="small" disabled icon={<EyeOutlined />}>修改信息</Button>
+          </Tooltip>
+        </Space>
+        {knowledge.intro && <div className="dl-knowledge-intro">{knowledge.intro}</div>}
+
+        <div>
+          <Space wrap style={{ marginBottom: 8 }}>
+            <Text strong>书目（{books.length}）</Text>
+            <Button size="small" type="primary" ghost icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
+              新增书目
+            </Button>
+          </Space>
+          {detail === undefined ? (
+            <div className="dl-books-empty">书行详情加载失败（该教程数据不可达）</div>
+          ) : books.length === 0 ? (
+            <div className="dl-books-empty">该教程暂无书目（可点「新增书目」手工登记）</div>
+          ) : (
+            <Table
+              size="small"
+              rowKey="book_id"
+              dataSource={books}
+              pagination={false}
+              columns={[
+                {
+                  title: '书名',
+                  render: (_: unknown, b: BookRecord) => {
+                    const displayName = bookDisplayName(b);
+                    return <span title={displayName}>{displayName}</span>;
+                  },
+                },
+                {
+                  title: '作者',
+                  width: 150,
+                  render: (_: unknown, b: BookRecord) => (b.authors?.length > 0 ? b.authors.join(' / ') : '—'),
+                },
+                { title: '语言', dataIndex: 'language', width: 56, render: (l: string) => l || '—' },
+                {
+                  title: '状态',
+                  width: 76,
+                  render: (_: unknown, b: BookRecord) => (
+                    <Tag color={BOOK_STATUS[b.status]?.color} style={{ marginRight: 0 }}>
+                      {BOOK_STATUS[b.status]?.label ?? b.status}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: '操作',
+                  width: 190,
+                  render: (_: unknown, b: BookRecord) => (
+                    <Space size={0}>
+                      {['candidate', 'decided', 'failed'].includes(b.status) && (
+                        <Button size="small" type="link" style={{ padding: 0 }}
+                          onClick={() => run(fetchBook(b.book_id), '下载任务已提交', knowledge.knowledge_id)}
+                        >
+                          下载
+                        </Button>
+                      )}
+                      {['candidate', 'decided'].includes(b.status) && (
+                        <Button size="small" type="link" style={{ padding: 0 }}
+                          onClick={() => { setImportBook(b); importForm.resetFields(); }}
+                        >
+                          导入
+                        </Button>
+                      )}
+                      {['candidate', 'decided', 'downloaded'].includes(b.status) && (
+                        <Button size="small" type="link" danger style={{ padding: 0 }}
+                          onClick={() => setRejectBook_(b)}
+                        >
+                          否决
+                        </Button>
+                      )}
+                      <Button size="small" type="link" style={{ padding: 0 }}
+                        onClick={() => setDetailBook(b)}
+                      >
+                        详情
+                      </Button>
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </div>
+      </Space>
+
+      {/* 新增书目（POST /books 书库化创建）：book_id + 书名必填；归属由教程 refs 承载 */}
+      <Modal
+        title={`新增书目 · ${tutorialLabel(knowledge)}`}
+        open={addOpen} onCancel={() => setAddOpen(false)} width={480}
+        destroyOnHidden
+        onOk={async () => {
+          const values = await addForm.validateFields();
+          try {
+            await createBook({
+              book_id: values.book_id.trim(),
+              title: values.title.trim(),
+              roles: [values.kind],
+              domain_id: knowledge.domain_id,
+              authors: String(values.authors ?? '').split(/[,，、]/).map((s) => s.trim()).filter(Boolean)
+                .map((name) => ({ name, role: 'author' })),
+            });
+            message.success('书目行已创建');
+            setAddOpen(false);
+          } catch (err) {
+            message.error(describeError(err));
+          }
         }}
+        okText="创建" cancelText="取消"
       >
-        <Text type="secondary">定稿后进入已定稿状态，可继续组织书行下载。书名/简介默认取探索推荐（可修订）。</Text>
-        <Form.Item name="tb_title" label="教材决定引用 · 书名" style={{ marginTop: 12 }}>
-          <Input placeholder="如：数学分析（中文优先）" />
-        </Form.Item>
-        <Form.Item name="ex_title" label="习题集决定引用 · 书名">
-          <Input placeholder="如：数学分析习题集（中文优先）" />
-        </Form.Item>
-        <Form.Item name="textbook_intro" label="教材简介">
-          <Input.TextArea rows={2} placeholder="指引检索（LLM 预填 + 人工审）" />
-        </Form.Item>
-        <Form.Item name="exercise_intro" label="习题集简介">
-          <Input.TextArea rows={2} />
-        </Form.Item>
-      </Form>
+        <Form form={addForm} layout="vertical" initialValues={{ kind: 'textbook' }}>
+          <Form.Item
+            label="书目编号" name="book_id"
+            rules={[
+              { required: true, message: '请输入书目编号（如 01ma-b05）' },
+              { pattern: /^[a-z][a-z0-9_]*-b\d{2,}$/, message: '格式应为 {缩写}-b{编号}，如 01ma-b05' },
+            ]}
+            extra="须与教程书目引用中的编号一致才会显示在本教程下；引用中已删书籍的编号可直接重建"
+          >
+            <Input placeholder="如 01ma-b05" autoComplete="off" />
+          </Form.Item>
+          <Form.Item label="书名" name="title" rules={[{ required: true, message: '请输入书名' }]}>
+            <Input placeholder="书名（含卷册可写全）" />
+          </Form.Item>
+          <Form.Item label="类型" name="kind">
+            <Select options={Object.entries(BOOK_KIND_LABELS).map(([value, label]) => ({ value, label }))} />
+          </Form.Item>
+          <Form.Item label="作者（逗号分隔）" name="authors">
+            <Input placeholder="如：W. Rudin, 赵慈庚" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 人工导入书目文件：数据根内相对路径 → 原地登记；绝对路径 → 导入落盘（8901 D3） */}
+      <Modal
+        title={`导入书目文件 · ${importBook?.display_title ?? ''}`}
+        open={importBook !== null} onCancel={() => setImportBook(null)} width={520}
+        destroyOnHidden
+        onOk={async () => {
+          if (!importBook) return;
+          const p = String(importForm.getFieldValue('path') ?? '').trim();
+          if (!p) { message.warning('请填写文件路径'); return; }
+          const isAbsolute = /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
+          run(
+            isAbsolute ? importBookPdf(importBook.book_id, p) : registerBook(importBook.book_id, p),
+            isAbsolute ? '导入任务已提交' : '书目文件已登记',
+            knowledge.knowledge_id,
+          );
+          setImportBook(null);
+        }}
+        okText="导入" cancelText="取消"
+      >
+        <Form form={importForm} layout="vertical">
+          <Form.Item
+            label="文件路径"
+            name="path"
+            rules={[{ required: true, message: '请填写文件路径' }]}
+            extra="数据根内相对路径（如 tmp/参考书籍/数学分析/xx.pdf）原地登记；Windows 绝对路径则导入并落盘"
+          >
+            <Input placeholder="tmp/参考书籍/数学分析/01-demidovich_吉米多维奇数学分析习题集_2010.pdf" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 书目否决（reason 必填） */}
+      <ReasonModal
+        open={rejectBook_ !== null}
+        title={`否决书目：${rejectBook_?.display_title ?? ''}`}
+        withNote
+        onCancel={() => setRejectBook_(null)}
+        onSubmit={(reason, note) => {
+          if (rejectBook_) {
+            run(rejectBook(rejectBook_.book_id, reason, note), '书目已否决', knowledge.knowledge_id);
+            setRejectBook_(null);
+          }
+        }}
+      />
+
+      {/* 书目详情（只读全貌，用户裁决 2026-09-08 项 4） */}
+      <BookDetailModal
+        book={detailBook}
+        onClose={() => setDetailBook(null)}
+        onMutated={() => void refreshDetail(knowledge.knowledge_id)}
+      />
     </Modal>
   );
 }
 
-/** 登记下载弹窗（人工下载 → register） */
-function RegisterModal({ book, onCancel, onSubmit }: {
+// --- 书行详情弹窗（用户裁决 2026-09-08 项 4：展示 + 渠道尝试记录） ---
+
+function BookDetailModal({ book, onClose, onMutated }: {
   book: BookRecord | null;
-  onCancel: () => void;
-  onSubmit: (relativePath: string) => void;
+  onClose: () => void;
+  onMutated: () => void;
 }) {
-  const [form] = Form.useForm();
-  return (
-    <Modal
-      title={`人工下载登记：${book?.display_title ?? ''}`}
-      open={book !== null}
-      onCancel={onCancel}
-      destroyOnClose
-      onOk={() => form.validateFields().then((v) => onSubmit(v.relative_path))}
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item
-          name="relative_path" label="数据根内相对路径（必填，PDF 校验在 8901 侧）"
-          rules={[{ required: true, message: '请填写数据根内相对路径' }]}
-        >
-          <Input placeholder="如：raw/books/math-qe/01_math_analysis/v1.pdf" />
-        </Form.Item>
-      </Form>
-    </Modal>
-  );
-}
-
-// --- 书行详情弹窗（4c：书行信息 + 渠道尝试列表 + 添加渠道） ---
-
-function BookDetailModal({ book, onClose }: { book: BookRecord | null; onClose: () => void }) {
+  const [current, setCurrent] = useState<BookRecord | null>(book);
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form] = Form.useForm();
-  const { message } = App.useApp();
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rejectingBook, setRejectingBook] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectNote, setRejectNote] = useState('');
+  const [operatingSource, setOperatingSource] = useState<string | null>(null);
+
+  // book prop 变化时同步本地「当前书」（组件在 book=null 时已挂载，靠此 effect 同步）
+  useEffect(() => {
+    setCurrent(book);
+  }, [book]);
 
   const loadSources = useCallback(async (bookId: string) => {
     setLoading(true);
@@ -279,113 +624,213 @@ function BookDetailModal({ book, onClose }: { book: BookRecord | null; onClose: 
     if (book) void loadSources(book.book_id);
   }, [book, loadSources]);
 
-  if (!book) return null;
-  const v = { edition: book.edition, year: book.year };
+  const { message } = App.useApp();
+
+  const handleVerifyBook = async () => {
+    if (!current) return;
+    setOperatingSource('verify');
+    try {
+      await verifyBook(current.book_id);
+      message.success('验证完成，书籍已标记为已验证');
+      onMutated();
+      onClose();
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setOperatingSource(null);
+    }
+  };
+
+  const handleRejectBook = async () => {
+    if (!current) return;
+    if (!rejectReason) {
+      message.warning('请输入否定原因');
+      return;
+    }
+    setOperatingSource('reject');
+    try {
+      await rejectBook(current.book_id, rejectReason, rejectNote || undefined);
+      message.success('已否定书籍');
+      onMutated();
+      setRejectingBook(false);
+      setRejectReason('');
+      setRejectNote('');
+      onClose();
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setOperatingSource(null);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !current) return;
+    
+    // 获取文件的绝对路径（Electron 环境）
+    const filePath = (file as unknown as { path?: string }).path;
+    if (!filePath) {
+      message.error('无法获取文件路径，请确保在 Electron 环境中运行');
+      return;
+    }
+    
+    setImporting(true);
+    try {
+      const updated = await importBookPdf(current.book_id, filePath);
+      setCurrent(updated);
+      onMutated();
+      message.success('导入成功');
+      void loadSources(current.book_id);
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setImporting(false);
+      // 清空 input 以便重复选择同一文件
+      e.target.value = '';
+    }
+  };
+
+  if (!book || !current) return null;
+  const displayName = bookDisplayName(current);
   return (
     <Modal
-      title={book.display_title}
-      open onCancel={onClose} footer={null} width={720}
+      title={displayName}
+      open onCancel={onClose}
+      footer={null}
+      width={720}
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <div>
           <Space wrap style={{ marginBottom: 8 }}>
-            <Tag color={BOOK_STATUS[book.status]?.color}>{BOOK_STATUS[book.status]?.label ?? book.status}</Tag>
-            <Tag>{book.kind && BOOK_KIND_LABELS[book.kind] ? BOOK_KIND_LABELS[book.kind] : book.kind}</Tag>
-            <Tag>{roleLabel(book.roles)}</Tag>
+            <Tag color={BOOK_STATUS[current.status]?.color}>{BOOK_STATUS[current.status]?.label ?? current.status}</Tag>
+            <Tag>{current.kind && BOOK_KIND_LABELS[current.kind] ? BOOK_KIND_LABELS[current.kind] : current.kind}</Tag>
+            <Tag>{roleLabel(current.roles)}</Tag>
           </Space>
           <div className="dl-book-meta">
-            {book.authors?.length > 0 && <div>作者：{book.authors.join(' / ')}</div>}
-            {versionText(v) && <div>版本：{versionText(v)}</div>}
-            {book.language && <div>语言：{book.language}</div>}
-            {book.page_count != null && <div>页数：{book.page_count}</div>}
-            {book.sha256 && <div>sha256：<Text code>{book.sha256}</Text></div>}
-            {book.relative_path && <div>数据根路径：{book.relative_path}</div>}
-            {book.absolute_path && <div>绝对路径：{book.absolute_path}</div>}
-            {book.reject_reason && <div>否定原因：{book.reject_reason}</div>}
-            {book.review_note && <div>审理备注：{book.review_note}</div>}
-            {book.original_url && <div>原始来源：<a href={book.original_url} target="_blank" rel="noreferrer">{book.original_url}</a></div>}
+            {current.edition && <div>版本：{current.edition}</div>}
+            {current.authors?.length > 0 && <div>作者：{current.authors.map(a => a.name).join(' / ')}</div>}
+            {current.roles?.length > 0 && <div>角色：{current.roles.join(' / ')}</div>}
+            {current.language && <div>语言：{current.language}</div>}
+            {current.page_count != null && <div>页数：{current.page_count}</div>}
+            {current.absolute_path && <div>绝对路径：{current.absolute_path}</div>}
+            <div>状态：{BOOK_STATUS[current.status]?.label ?? current.status}</div>
           </div>
         </div>
 
         <div>
-          <Text strong>渠道尝试（{sources.length}）</Text>
-          <Button size="small" style={{ marginLeft: 8 }} onClick={() => void loadSources(book.book_id)} loading={loading}>
-            刷新
-          </Button>
+          <Space>
+            <Text strong>渠道尝试（{sources.length}）</Text>
+            <Button size="small" onClick={() => void loadSources(current.book_id)} loading={loading}>
+              刷新
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              loading={importing}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              添加
+            </Button>
+          </Space>
           {sourcesError && <div className="dl-book-meta" style={{ color: '#cf1322' }}>{sourcesError}</div>}
           {sources.length === 0 && !sourcesError && <div className="dl-books-empty">暂无渠道尝试记录</div>}
           {sources.map((s) => (
-            <div key={s.source_id} className="dl-book-meta" style={{ marginTop: 4 }}>
-              <Space size={6}>
-                <Tag color={s.ok ? 'green' : 'default'}>{s.ok ? '成功' : '失败'}</Tag>
-                <span>{SOURCE_CHANNEL_OPTIONS.find((c) => c.value === s.channel)?.label ?? s.channel}</span>
-                {s.page_url && <a href={s.page_url} target="_blank" rel="noreferrer">页面</a>}
-                {s.download_url && <a href={s.download_url} target="_blank" rel="noreferrer">下载链接</a>}
-                {s.note && <span>（{s.note}）</span>}
-              </Space>
+            <div
+              key={s.source_id}
+              className="dl-book-meta"
+              style={{
+                marginTop: 4,
+                padding: '4px 8px',
+                borderRadius: 4,
+              }}
+            >
+              <div style={{ marginBottom: 4 }}>
+                <Space size={6}>
+                  <Tag color={s.ok ? 'green' : 'default'}>{s.ok ? '成功' : '失败'}</Tag>
+                  <span>{SOURCE_CHANNEL_OPTIONS.find((c) => c.value === s.channel)?.label ?? s.channel}</span>
+                  {s.page_url && <a href={s.page_url} target="_blank" rel="noreferrer">页面</a>}
+                  {s.download_url && <a href={s.download_url} target="_blank" rel="noreferrer">下载链接</a>}
+                </Space>
+              </div>
+              {s.note && (
+                <div style={{ color: s.ok ? 'inherit' : '#cf1322', fontSize: 12 }}>
+                  {s.note}
+                </div>
+              )}
             </div>
           ))}
         </div>
-
-        <div>
-          <Text strong>添加渠道尝试</Text>
-          <Form
-            form={form}
-            layout="vertical"
-            style={{ marginTop: 8 }}
-            initialValues={{ channel: 'manual', ok: false }}
-            onFinish={async (values) => {
-              try {
-                await addBookSource(book.book_id, {
-                  channel: values.channel,
-                  page_url: values.page_url ?? '',
-                  download_url: values.download_url ?? '',
-                  file_keywords: values.file_keywords ?? '',
-                  ok: values.ok === true,
-                  note: values.note ?? '',
-                });
-                message.success('渠道尝试已登记');
-                form.resetFields();
-                void loadSources(book.book_id);
-              } catch (err) {
-                message.error(describeError(err));
-              }
-            }}
+        <Space style={{ marginTop: 16 }}>
+          {current.status === 'downloaded' && (
+            <Button
+              type="primary"
+              loading={operatingSource === 'verify'}
+              onClick={() => void handleVerifyBook()}
+            >
+              验证完毕
+            </Button>
+          )}
+          <Button
+            danger
+            loading={operatingSource === 'reject'}
+            onClick={() => setRejectingBook(true)}
           >
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Space wrap>
-                <Form.Item name="channel" noStyle>
-                  <Select style={{ width: 140 }} options={SOURCE_CHANNEL_OPTIONS} aria-label="渠道" />
-                </Form.Item>
-                <Form.Item name="ok" valuePropName="checked" noStyle>
-                  <Switch checkedChildren="成功" unCheckedChildren="失败" aria-label="成败" />
-                </Form.Item>
-              </Space>
-              <Form.Item name="page_url" noStyle><Input placeholder="页面地址 page_url" /></Form.Item>
-              <Form.Item name="download_url" noStyle><Input placeholder="下载地址 download_url" /></Form.Item>
-              <Form.Item name="file_keywords" noStyle><Input placeholder="检索关键词 file_keywords" /></Form.Item>
-              <Form.Item name="note" noStyle><Input placeholder="备注 note" /></Form.Item>
-              <Button type="primary" size="small" htmlType="submit">登记渠道</Button>
-            </Space>
-          </Form>
-        </div>
+            否定
+          </Button>
+        </Space>
       </Space>
+      <Modal
+        title="否定书籍"
+        open={rejectingBook}
+        onOk={() => void handleRejectBook()}
+        onCancel={() => {
+          setRejectingBook(false);
+          setRejectReason('');
+          setRejectNote('');
+        }}
+        confirmLoading={operatingSource === 'reject'}
+      >
+        <Form layout="vertical">
+          <Form.Item label="否定原因">
+            <Input.TextArea
+              rows={2}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="请输入否定原因（必填）"
+            />
+          </Form.Item>
+          <Form.Item label="备注">
+            <Input.TextArea
+              rows={2}
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              placeholder="可选备注"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf"
+        style={{ display: 'none' }}
+        onChange={(e) => void handleFileSelect(e)}
+      />
     </Modal>
   );
 }
 
-// --- 书行卡片（4b） ---
+// --- 书行卡片（用户裁决 2026-09-08 项 4：纯展示——名称/作者/语言等 + 只读详情，无操作按钮） ---
 
-function BookCard({ book, onAction, onDetail, onRegister }: {
+function BookCard({ book, onDetail }: {
   book: BookRecord;
-  onAction: (action: 'decide' | 'start' | 'fail' | 'retry' | 'verify' | 'reject' | 'supersede') => void;
   onDetail: (book: BookRecord) => void;
-  onRegister: (book: BookRecord) => void;
 }) {
   const v = { edition: book.edition, year: book.year };
+  const displayName = bookDisplayName(book);
   return (
     <div className="dl-book-card">
-      <div className="dl-book-title" title={book.display_title}>{book.display_title}</div>
+      <div className="dl-book-title" title={displayName}>{displayName}</div>
       <div>
         <Space wrap size={4}>
           <Tag color={BOOK_STATUS[book.status]?.color} style={{ marginRight: 0 }}>
@@ -396,248 +841,89 @@ function BookCard({ book, onAction, onDetail, onRegister }: {
       </div>
       <div className="dl-book-meta">
         {book.authors?.length > 0 && <div>{book.authors.join(' / ')}</div>}
+        {book.language && <div>语言：{book.language}</div>}
         {versionText(v) && <div>{versionText(v)}</div>}
         {book.page_count != null && <div>页数：{book.page_count}</div>}
-        {book.reject_reason && <div>否定原因：{book.reject_reason}</div>}
       </div>
       <div className="dl-book-actions">
-        {book.status === 'candidate' && (
-          <>
-            <Button size="small" type="primary" ghost onClick={() => onAction('decide')}>决定</Button>
-            <Button size="small" onClick={() => onRegister(book)}>登记下载</Button>
-          </>
-        )}
-        {book.status === 'decided' && (
-          <Button size="small" type="primary" ghost onClick={() => onAction('start')}>开始下载</Button>
-        )}
-        {book.status === 'downloading' && (
-          <Button size="small" onClick={() => onAction('fail')}>标记失败</Button>
-        )}
-        {book.status === 'failed' && (
-          <Button size="small" type="primary" ghost onClick={() => onAction('retry')}>重试</Button>
-        )}
-        {book.status === 'downloaded' && (
-          <Button size="small" type="primary" ghost onClick={() => onAction('verify')}>验收</Button>
-        )}
-        {(book.status === 'candidate' || book.status === 'decided' || book.status === 'downloaded') && (
-          <>
-            <Button size="small" onClick={() => onAction('reject')}>否定</Button>
-            <Button size="small" onClick={() => onAction('supersede')}>过时</Button>
-          </>
-        )}
         <Button size="small" icon={<EyeOutlined />} onClick={() => onDetail(book)}>详情</Button>
       </div>
     </div>
   );
 }
 
-// --- 教程行区（教程 + 书行卡片横排 + 操作闭环 4d） ---
+// --- 教程行区（用户裁决 2026-09-08 项 2/3：名称/状态/进度 + 删除(移交)/详情/自动下载 + 纯展示书目卡） ---
 
 function KnowledgeSection({ knowledge, detail, run }: {
   knowledge: KnowledgeRecord;
   detail: KnowledgeDetail | undefined;
   run: (p: Promise<unknown>, successText: string, knowledgeId: string) => void;
 }) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [knReasonOpen, setKnReasonOpen] = useState(false);
-  const [knReasonAction, setKnReasonAction] = useState<'reject' | 'supersede'>('reject');
-  const [registerTarget, setRegisterTarget] = useState<BookRecord | null>(null);
   const [detailBook, setDetailBook] = useState<BookRecord | null>(null);
-  const [bookReason, setBookReason] = useState<{ action: 'reject' | 'supersede'; book: BookRecord } | null>(null);
-
-  /** 按决定引用生成候选书行（教材 kind=textbook / 习题集 kind=exercise）；返回生成数 */
-  const genBooksFromRefs = async (): Promise<number> => {
-    const tbTitle = String(knowledge.textbook_ref?.title ?? '').trim();
-    const exTitle = String(knowledge.exercise_ref?.title ?? '').trim();
-    let n = 0;
-    if (tbTitle) {
-      await createBook({ knowledge_id: knowledge.knowledge_id, title: tbTitle, kind: 'textbook', roles: ['textbook'], part: '', authors: [] });
-      n += 1;
-    }
-    if (exTitle) {
-      await createBook({ knowledge_id: knowledge.knowledge_id, title: exTitle, kind: 'exercise', roles: ['exercise'], part: '', authors: [] });
-      n += 1;
-    }
-    return n;
-  };
+  const [tutorialDetailOpen, setTutorialDetailOpen] = useState(false);
 
   const books = sortBooks(detail?.books ?? []);
+  // 进度（项 2）：下载完成数/总本数（排除已否决/过时；downloaded+verified 计完成）
+  const liveBooks = books.filter((b) => b.status !== 'rejected' && b.status !== 'superseded');
+  const downloadedCount = liveBooks.filter((b) => b.status === 'downloaded' || b.status === 'verified').length;
   const stage = useDownloadsStore((s) => s.filters.stage);
-  const shownBooks = stage ? books.filter((b) => bookInStage(b, stage)) : books;
+  const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
+  const shownBooks = stage ? liveBooks.filter((b) => bookInStage(b, stage)) : liveBooks;
   const st = KNOWLEDGE_STATUS[knowledge.status] ?? { label: knowledge.status, color: 'default' };
-  const intro = knowledge.kind === 'other_material'
-    ? knowledge.materials_intro
-    : [knowledge.textbook_intro && `教材：${knowledge.textbook_intro}`, knowledge.exercise_intro && `习题集：${knowledge.exercise_intro}`]
-      .filter(Boolean).join('\n');
-  const refEmpty = !String(knowledge.textbook_ref?.title ?? '').trim() && !String(knowledge.exercise_ref?.title ?? '').trim();
 
   return (
     <div className="dl-knowledge-section">
       <div className="dl-knowledge-head">
         <span className="dl-knowledge-name">{tutorialLabel(knowledge)}</span>
-        <Tag>{KNOWLEDGE_KIND_LABELS[knowledge.kind] ?? knowledge.kind}</Tag>
-        <Tag color={st.color}>{st.label}</Tag>
-        {knowledge.status === 'draft' && (
-          <>
-            <Button size="small" type="primary" ghost onClick={() => setConfirmOpen(true)}>确认</Button>
-            <Button size="small" onClick={() => { setKnReasonAction('reject'); setKnReasonOpen(true); }}>否定</Button>
-            <Button size="small" onClick={() => { setKnReasonAction('supersede'); setKnReasonOpen(true); }}>过时</Button>
-          </>
+        <Tag color={st.color} style={{ marginRight: 0 }}>{st.label}</Tag>
+        {liveBooks.length > 0 && (
+          <Text type="secondary" style={{ fontSize: 12 }}>下载 {downloadedCount}/{liveBooks.length} 本</Text>
         )}
-        {knowledge.status === 'confirmed' && (
-          <>
-            <Button
-              size="small" type="primary" ghost
-              onClick={() => run(completeKnowledge(knowledge.knowledge_id), '教程已完成', knowledge.knowledge_id)}
-            >
-              完成
-            </Button>
-            <Button size="small" onClick={() => { setKnReasonAction('reject'); setKnReasonOpen(true); }}>否定</Button>
-            <Button size="small" onClick={() => { setKnReasonAction('supersede'); setKnReasonOpen(true); }}>过时</Button>
-          </>
-        )}
-        {knowledge.status === 'completed' && (
-          <Button size="small" onClick={() => { setKnReasonAction('supersede'); setKnReasonOpen(true); }}>过时</Button>
-        )}
-        {/* 兜底（2026-08-25）：确认时自动生成失败或旧数据引用后补——非表单，一键按决定引用创建 */}
-        {knowledge.status === 'confirmed' && shownBooks.length === 0 && !refEmpty && (
-          <Button
-            size="small" type="primary" ghost style={{ marginLeft: 4 }}
-            onClick={() => run(genBooksFromRefs().then((n) => n), `已按决定引用生成书行候选`, knowledge.knowledge_id)}
-          >
-            按决定引用补建书行
-          </Button>
-        )}
+        <span style={{ flex: 1 }} />
+        <Button size="small" icon={<EyeOutlined />} onClick={() => setTutorialDetailOpen(true)}>详情</Button>
       </div>
-
-      {intro && <div className="dl-knowledge-intro">{intro}</div>}
 
       {detail === undefined ? (
         <div className="dl-books-empty">书行详情加载失败（该教程数据不可达）</div>
       ) : shownBooks.length === 0 ? (
-        <div className="dl-books-empty">
-          {knowledge.status === 'draft'
-            ? '暂无书行。确认教程后将按决定引用自动生成候选册。'
-            : refEmpty
-              ? '暂无书行（该教程无决定引用，无法自动生成）。'
-              : '暂无书行。点上方「按决定引用补建书行」登记候选册。'}
-        </div>
+        <div className="dl-books-empty">暂无书目（教程详情内可「新增书目」或下载生成候选册）</div>
       ) : (
         <div className="dl-books-row">
           {shownBooks.map((b) => (
-            <BookCard
-              key={b.book_id}
-              book={b}
-              onAction={(action) => {
-                if (action === 'reject' || action === 'supersede') {
-                  setBookReason({ action, book: b });
-                } else {
-                  run(bookActionPromise(action, b), '书行操作成功', knowledge.knowledge_id);
-                }
-              }}
-              onDetail={setDetailBook}
-              onRegister={setRegisterTarget}
-            />
+            <BookCard key={b.book_id} book={b} onDetail={setDetailBook} />
           ))}
         </div>
       )}
 
-      {/* 教程确认 */}
-      <KnowledgeConfirmModal
-        knowledge={confirmOpen ? knowledge : null}
-        onCancel={() => setConfirmOpen(false)}
-        onSubmit={(values) => {
-          const body: {
-            textbook_ref?: Record<string, unknown>;
-            exercise_ref?: Record<string, unknown>;
-            textbook_intro?: string;
-            exercise_intro?: string;
-          } = {};
-          if (values.textbook_ref) body.textbook_ref = values.textbook_ref;
-          if (values.exercise_ref) body.exercise_ref = values.exercise_ref;
-          if (values.textbook_intro) body.textbook_intro = values.textbook_intro;
-          if (values.exercise_intro) body.exercise_intro = values.exercise_intro;
-          // 确认即自动生成（2026-08-25 用户裁决）：定稿成功后按决定引用建候选册
-          run(
-            confirmKnowledge(knowledge.knowledge_id, body).then(() => genBooksFromRefs()),
-            '教程已确认，书行候选已按决定引用生成',
-            knowledge.knowledge_id,
-          );
-          setConfirmOpen(false);
-        }}
-      />
+      {/* 教程详情（信息展示 + 书目操作集：导入/新增/下载/否决） */}
+      {tutorialDetailOpen && (
+        <TutorialDetailModal
+          knowledge={knowledge}
+          detail={detail}
+          run={run}
+          onClose={() => setTutorialDetailOpen(false)}
+        />
+      )}
 
-      {/* 教程 reject / supersede */}
-      <ReasonModal
-        open={knReasonOpen}
-        title={`${knReasonAction === 'reject' ? '否定' : '标记过时'}教程：${tutorialLabel(knowledge)}`}
-        withNote={false}
-        onCancel={() => setKnReasonOpen(false)}
-        onSubmit={(reason) => {
-          run(
-            knReasonAction === 'reject'
-              ? rejectKnowledge(knowledge.knowledge_id, reason)
-              : supersedeKnowledge(knowledge.knowledge_id, reason),
-            '教程操作成功',
-            knowledge.knowledge_id,
-          );
-          setKnReasonOpen(false);
-        }}
+      {/* 书目详情（只读全貌） */}
+      <BookDetailModal
+        book={detailBook}
+        onClose={() => setDetailBook(null)}
+        onMutated={() => void refreshDetail(knowledge.knowledge_id)}
       />
-
-      {/* 人工下载登记 */}
-      <RegisterModal
-        book={registerTarget}
-        onCancel={() => setRegisterTarget(null)}
-        onSubmit={(path) => {
-          if (registerTarget) {
-            run(registerBook(registerTarget.book_id, path), '人工下载已登记', knowledge.knowledge_id);
-            setRegisterTarget(null);
-          }
-        }}
-      />
-
-      {/* 书行 reject / supersede */}
-      <ReasonModal
-        open={bookReason !== null}
-        title={bookReason ? `${bookReason.action === 'reject' ? '否定' : '标记过时'}：${bookReason.book.display_title}` : ''}
-        withNote={bookReason?.action === 'reject'}
-        onCancel={() => setBookReason(null)}
-        onSubmit={(reason, note) => {
-          if (bookReason) {
-            run(
-              bookReason.action === 'reject'
-                ? rejectBook(bookReason.book.book_id, reason, note)
-                : supersedeBook(bookReason.book.book_id, reason),
-              '书行操作成功',
-              knowledge.knowledge_id,
-            );
-            setBookReason(null);
-          }
-        }}
-      />
-
-      {/* 书行详情 */}
-      <BookDetailModal book={detailBook} onClose={() => setDetailBook(null)} />
     </div>
   );
-}
-
-function bookActionPromise(action: 'decide' | 'start' | 'fail' | 'retry' | 'verify' | 'reject' | 'supersede', book: BookRecord): Promise<unknown> {
-  switch (action) {
-    case 'decide': return decideBook(book.book_id);
-    case 'start': return startBook(book.book_id);
-    case 'fail': return failBook(book.book_id);
-    case 'retry': return retryBook(book.book_id);
-    case 'verify': return verifyBook(book.book_id);
-    default: return Promise.resolve(undefined);
-  }
 }
 
 // --- 页面 ---
 
 /** 右侧面板（4b 卡片区 + 4c/4d 操作闭环 + 领域探索按钮状态机） */
-function RightPanel() {
+function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCourseChange }: {
+  onConfirmDomain: (domain: DomainSystem) => void;
+  onConfirmCourse: (domain: DomainSystem) => void;
+  detailCourse: (CourseRecord & { domainName?: string }) | null;
+  onDetailCourseChange: (course: (CourseRecord & { domainName?: string }) | null) => void;
+}) {
   const filters = useDownloadsStore((s) => s.filters);
   const selected = useDownloadsStore((s) => s.selected);
   const knowledge = useDownloadsStore((s) => s.knowledge);
@@ -646,6 +932,9 @@ function RightPanel() {
   const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
   const { byId } = useCourseIndex();
   const { message } = App.useApp();
+  // 课程详情弹窗由父组件管理
+  // 课程知识确认弹窗
+  const [knowledgeConfirmCourse, setKnowledgeConfirmCourse] = useState<CourseRecord | null>(null);
 
   const flowTarget = useExploreUiStore((s) => s.flowTarget);
   const selectedDomain = useMemo(() => {
@@ -676,12 +965,28 @@ function RightPanel() {
     }
   }, [refreshDetail]);
 
+  const handleCourseConfirm = useCallback(async (courseId: string) => {
+    // 打开课程知识确认弹窗
+    const course = domains.flatMap(d => d.courses).find(c => c.course_id === courseId);
+    if (course) {
+      setKnowledgeConfirmCourse(course);
+    }
+  }, [domains]);
+
+  // 领域筛选：qt_knowledge 无 domain_id 列，通过课程归属反查领域
+  const domainCourseIds = useMemo(() => {
+    if (!filters.domain) return null;
+    const domain = domains.find((d) => d.domain_id === filters.domain);
+    if (!domain) return null;
+    return new Set(domain.courses.map((c) => c.course_id));
+  }, [domains, filters.domain]);
+
   // 注意：knowledge 已按 course_id 分组，保持原有顺序
   const filtered = useMemo(
     () =>
       knowledge.filter((k) => {
-        // 领域筛选存 domain_id（v2 真实体系）
-        if (filters.domain && k.domain_id !== filters.domain) return false;
+        // 领域筛选：通过课程 ID 归属判断（qt_knowledge 无 domain_id）
+        if (domainCourseIds && !domainCourseIds.has(k.course_id)) return false;
         if (filters.course && k.course_id !== filters.course) return false;
         // 状态筛选为书行阶段（2026-08-24 三栏收敛）：无匹配书行的教程行整行隐藏
         if (filters.stage) {
@@ -690,7 +995,7 @@ function RightPanel() {
         }
         return true;
       }),
-    [knowledge, filters, details],
+    [knowledge, filters, details, domainCourseIds],
   );
 
   // 按课程分组的教程列表（场景3/4展示用）
@@ -752,12 +1057,13 @@ function RightPanel() {
         {/* 场景2：选中领域但无课程 */}
         {hasDomainNoCourses && (
           <>
-            {selected?.kind === 'domain' && selectedDomain && (
+            {/* 领域信息卡恒显（PLAN-033 §3：无论筛选/选中层级如何始终渲染） */}
+            {selectedDomain && (
               <DomainCard
                 domain={selectedDomain}
                 onExplore={startDomainExplore}
-                onConfirmDomain={confirmDomainInfo}
-                onConfirmKnowledge={confirmCourseKnowledge}
+                onConfirmDomain={() => onConfirmDomain(selectedDomain)}
+                onConfirmKnowledge={() => onConfirmCourse(selectedDomain)}
               />
             )}
             <div className="dl-empty-course-hint">
@@ -769,21 +1075,37 @@ function RightPanel() {
         {/* 场景3：选中领域有课程 / 场景4：选中课程 */}
         {hasDataWithDomain && (
           <>
-            {/* 领域信息卡（选中领域时展示） */}
-            {selected?.kind === 'domain' && selectedDomain && (
+            {/* 领域信息卡恒显（PLAN-033 §3：无论筛选/选中层级如何始终渲染） */}
+            {selectedDomain && (
               <DomainCard
                 domain={selectedDomain}
                 onExplore={startDomainExplore}
-                onConfirmDomain={confirmDomainInfo}
-                onConfirmKnowledge={confirmCourseKnowledge}
+                onConfirmDomain={() => onConfirmDomain(selectedDomain)}
+                onConfirmKnowledge={() => onConfirmCourse(selectedDomain)}
               />
             )}
 
             {/* 课程头（选中课程时置顶展示） */}
             {selectedCourse && (
               <div className="dl-course-head">
-                <div className="dl-course-head-name">{selectedCourse.name}</div>
-                {selectedCourse.note && <div className="dl-course-head-note">{selectedCourse.note}</div>}
+                <div className="dl-course-head-row">
+                  <div className="dl-course-head-name">
+                    {selectedCourse.name}
+                    <Button
+                      size="small" type="link" icon={<EyeOutlined />}
+                      onClick={() => onDetailCourseChange(selectedCourse)}
+                    >
+                      详情
+                    </Button>
+                  </div>
+                  <div className="dl-course-status-bar">
+                    <CourseStatusBar
+                      course={selectedCourse}
+                      onConfirm={() => void handleCourseConfirm(selectedCourse.course_id)}
+                    />
+                  </div>
+                </div>
+                {selectedCourse.description && <div className="dl-course-head-note">{selectedCourse.description}</div>}
               </div>
             )}
 
@@ -805,8 +1127,24 @@ function RightPanel() {
                     {/* 课程头（选中领域时展示） */}
                     {!selectedCourse && course && (
                       <div className="dl-course-head">
-                        <div className="dl-course-head-name">{course.name}</div>
-                        {course.note && <div className="dl-course-head-note">{course.note}</div>}
+                        <div className="dl-course-head-row">
+                          <div className="dl-course-head-name">
+                            {course.name}
+                            <Button
+                              size="small" type="link" icon={<EyeOutlined />}
+                              onClick={() => onDetailCourseChange(course)}
+                            >
+                              详情
+                            </Button>
+                          </div>
+                          <div className="dl-course-status-bar">
+                            <CourseStatusBar
+                              course={course}
+                              onConfirm={() => void handleCourseConfirm(course.course_id)}
+                            />
+                          </div>
+                        </div>
+                        {course.description && <div className="dl-course-head-note">{course.description}</div>}
                       </div>
                     )}
                     {/* 教程列表 */}
@@ -820,6 +1158,17 @@ function RightPanel() {
           </>
         )}
       </div>
+      {/* 课程编辑弹窗（打开即编辑表单） */}
+      <CourseDetailModal
+        course={detailCourse}
+        onClose={() => onDetailCourseChange(null)}
+      />
+      {/* 课程知识确认弹窗 */}
+      <CourseKnowledgeConfirmModal
+        course={knowledgeConfirmCourse}
+        open={knowledgeConfirmCourse !== null}
+        onClose={() => setKnowledgeConfirmCourse(null)}
+      />
     </div>
   );
 }
@@ -842,6 +1191,21 @@ export default function Downloads() {
   const closeFlow = useExploreUiStore((s) => s.closeFlow);
   const [confirmDomain, setConfirmDomain] = useState<DomainSystem | null>(null);
   const [confirmCourse, setConfirmCourse] = useState<DomainSystem | null>(null);
+  // 左树「编辑课程」→ 统一弹窗（打开即编辑表单）
+  const [editCourse, setEditCourse] = useState<(CourseRecord & { domainName?: string }) | null>(null);
+
+  const handleEditCourseFromTree = useCallback((course: CourseRecord) => {
+    // 从 domains 计算 domainName
+    const { domains } = useDownloadsStore.getState();
+    let domainName: string | undefined;
+    for (const d of domains) {
+      if (d.courses.some(c => c.course_id === course.course_id)) {
+        domainName = d.name;
+        break;
+      }
+    }
+    setEditCourse({ ...course, domainName });
+  }, []);
 
   useEffect(() => {
     void fetchAll();
@@ -881,18 +1245,24 @@ export default function Downloads() {
 
       {/* 内容区（左右分栏，独立滚动） */}
       <div className="dl-layout">
-        <DownloadsTree />
-        <RightPanel />
+        <DownloadsTree onEditCourse={handleEditCourseFromTree} />
+        <RightPanel
+          onConfirmDomain={(d) => setConfirmDomain(d)}
+          onConfirmCourse={(d) => setConfirmCourse(d)}
+          detailCourse={editCourse}
+          onDetailCourseChange={setEditCourse}
+        />
       </div>
 
       {/* 探索全弹窗流（左树右键 / 领域信息卡按钮共用入口） */}
       <ExploreFlowModal target={flowTarget} onClose={closeFlow} />
 
-      {/* 领域信息确认弹窗 */}
+      {/* 领域信息确认弹窗（导入路径确认后进入课程信息确认，PLAN-033 §4） */}
       <DomainConfirmModal
         domain={confirmDomain}
         open={confirmDomain !== null}
         onClose={() => setConfirmDomain(null)}
+        onAfterImport={() => setConfirmCourse(confirmDomain)}
       />
 
       {/* 课程信息确认弹窗 */}

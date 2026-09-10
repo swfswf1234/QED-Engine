@@ -3,8 +3,8 @@
 前端（8903）只连 8900（ADR 0007）：目录、任务、五层语义（教程 qt_knowledge / 书籍
 qt_books / 渠道 qt_sources，QED-031 知识层次模型，取代三表 qt_selections/qt_downloads）
 统一由本模块暴露，内部经 clients/tracker_client.py 适配 8901。路径与 8901 一致
-（api-contracts.md 数据域章节）；三表历史契约见 downloads-three-table-model.md
-（Superseded）。
+（api-contracts.md 数据域章节）；三表历史契约原文已于 2026-09-10 REQ-070 删除，
+可自 Git 历史查阅。
 
 错误映射：8901 返回 4xx（如 409 状态机冲突）→ 同码透传 detail；连接失败/5xx → 503
 + 明确提示（前端据此降级显示，独立性铁律）。reject 缺 reason 由 8900 校验直接 422，
@@ -36,8 +36,14 @@ class KnowledgeConfirmBody(BaseModel):
     exercise_intro: str = ""
 
 
-class KnowledgeRejectBody(BaseModel):
-    reason: str
+class KnowledgeUpdateBody(BaseModel):
+    """教程更新请求体。"""
+    name: str | None = None
+    position: str | None = None
+    intro: str | None = None
+    set_no: str | None = None
+    kind: str | None = None
+    notes: str | None = None
 
 
 class BookCreateBody(BaseModel):
@@ -141,9 +147,14 @@ def _require_reason(reason: str) -> None:
 
 
 class DomainUpdateBody(BaseModel):
+    name: str | None = None
     description: str | None = None
     stages: list[str] | None = None
     exploration_stage: str | None = None  # PLAN-022 B4：探索状态流转（D2）
+    scope: str | None = None
+    level: str | None = None
+    classic_tracks: list | None = None
+    explore_pending: dict | None = None
 
 
 @router.get("/domains")
@@ -156,6 +167,9 @@ class DomainCreateBody(BaseModel):
     name: str
     description: str | None = None
     stages: list[str] | None = None
+    level: str | None = None
+    classic_tracks: list | None = None
+    scope: str | None = None
 
 
 @router.post("/domains")
@@ -167,20 +181,28 @@ def create_domain(body: DomainCreateBody, request: Request):
         name=body.name,
         description=body.description,
         stages=body.stages,
+        level=body.level,
+        classic_tracks=body.classic_tracks,
+        scope=body.scope,
         _manual_maintenance=True,
     )
 
 
 @router.patch("/domains/{domain_id}")
 def update_domain(domain_id: str, body: DomainUpdateBody, request: Request):
-    """修改领域描述/阶段（name 锁死不在请求体，透传 8901）。"""
+    """修改领域描述/阶段/范围/方向/名称/explore_pending（透传 8901）。"""
     return _call(
         request,
         _tracker(request).update_domain,
         domain_id,
+        name=body.name,
         description=body.description,
         stages=body.stages,
         exploration_stage=body.exploration_stage,
+        scope=body.scope,
+        level=body.level,
+        classic_tracks=body.classic_tracks,
+        explore_pending=body.explore_pending,
         _manual_maintenance=True,
     )
 
@@ -191,46 +213,9 @@ def delete_domain(domain_id: str, request: Request):
     return _call(request, _tracker(request).delete_domain, domain_id, _manual_maintenance=True)
 
 
-class DomainExploreBody(BaseModel):
-    mode: str = "direct"
-    ref_text: str | None = None
-    ref_doc_path: str | None = None
-
-
-@router.post("/domains/{domain_id}/explore")
-def explore_domain(domain_id: str, body: DomainExploreBody, request: Request):
-    """启动领域探索（REQ-067 B2；202 异步任务，透传 8901）。"""
-    return _call(
-        request,
-        _tracker(request).explore_domain,
-        domain_id,
-        mode=body.mode,
-        ref_text=body.ref_text or "",
-        ref_doc_path=body.ref_doc_path or "",
-        _manual_maintenance=True,
-    )
-
-
-class DomainConfirmNameBody(BaseModel):
-    decision: str  # accept | custom | retain
-    name: str | None = None
-
-
-@router.post("/domains/{domain_id}/confirm-name")
-def confirm_domain_name(domain_id: str, body: DomainConfirmNameBody, request: Request):
-    """确认领域名称（REQ-067 B7；透传 8901）。"""
-    return _call(
-        request,
-        _tracker(request).confirm_domain_name,
-        domain_id,
-        decision=body.decision,
-        name=body.name or "",
-        _manual_maintenance=True,
-    )
-
-
 class DomainImportBody(BaseModel):
     domain: dict  # manual@v1 全文（QED-050 契约）
+    target_domain_id: str | None = None  # 用户在 UI 选择的目标领域 ID
 
 
 @router.post("/domains/import")
@@ -240,6 +225,18 @@ def import_domain(body: DomainImportBody, request: Request):
         request,
         _tracker(request).import_domain,
         domain_data=body.domain,
+        target_domain_id=body.target_domain_id,
+        _manual_maintenance=True,
+    )
+
+
+@router.post("/domains/{domain_id}/commit-import")
+def commit_import(domain_id: str, request: Request):
+    """手动导入课程：从 domains.json 读取课程写入 qed_course（六步流程步骤 3）。"""
+    return _call(
+        request,
+        _tracker(request).commit_import_courses,
+        domain_id,
         _manual_maintenance=True,
     )
 
@@ -284,11 +281,15 @@ class CourseUpdateBody(BaseModel):
     stage: str | None = None
     sort_order: int | None = None
     note: str | None = None
+    description: str | None = None
+    track: str | None = None
+    aliases: list[str] | None = None
+    prerequisites: list[str] | None = None
 
 
 @router.patch("/courses/{course_id}")
 def update_course(course_id: str, body: CourseUpdateBody, request: Request):
-    """修改课程阶段/排序/备注（name 锁死；仅提交显式字段）。"""
+    """修改课程阶段/排序/备注/描述/方向/别名/先修（name 锁死；仅提交显式字段）。"""
     return _call(
         request,
         _tracker(request).update_course,
@@ -296,6 +297,10 @@ def update_course(course_id: str, body: CourseUpdateBody, request: Request):
         stage=body.stage,
         sort_order=body.sort_order,
         note=body.note,
+        description=body.description,
+        track=body.track,
+        aliases=body.aliases,
+        prerequisites=body.prerequisites,
         _manual_maintenance=True,
     )
 
@@ -304,6 +309,22 @@ def update_course(course_id: str, body: CourseUpdateBody, request: Request):
 def delete_course(course_id: str, request: Request):
     """删除课程（有教程时上游 409 保护；§8 未上线前归一结构化 404）。"""
     return _call(request, _tracker(request).delete_course, course_id, _manual_maintenance=True)
+
+
+class CourseKnowledgeBody(BaseModel):
+    tutorials: list[dict] | None = None
+
+
+@router.post("/courses/{course_id}/knowledge")
+def import_course_knowledge(course_id: str, body: CourseKnowledgeBody, request: Request):
+    """导入课程知识（tutorials JSON）。"""
+    return _call(
+        request,
+        _tracker(request).import_course_knowledge,
+        course_id,
+        body.model_dump(exclude_none=True),
+        _manual_maintenance=True,
+    )
 
 
 # --- 目录 ---
@@ -363,24 +384,26 @@ def confirm_knowledge(knowledge_id: str, body: KnowledgeConfirmBody, request: Re
     )
 
 
-@router.post("/knowledge/{knowledge_id}/complete")
-def complete_knowledge(knowledge_id: str, request: Request) -> dict:
-    """教程 confirmed→completed（所辖书籍全部 verified 聚合触发）。"""
-    return _call(request, _tracker(request).complete_knowledge, knowledge_id)
+@router.patch("/knowledge/{knowledge_id}")
+def update_knowledge(knowledge_id: str, body: KnowledgeUpdateBody, request: Request) -> dict:
+    """更新教程信息（name/position/intro/set_no/kind/notes）。"""
+    return _call(
+        request,
+        _tracker(request).update_knowledge,
+        knowledge_id,
+        name=body.name,
+        position=body.position,
+        intro=body.intro,
+        set_no=body.set_no,
+        kind=body.kind,
+        notes=body.notes,
+    )
 
 
-@router.post("/knowledge/{knowledge_id}/reject")
-def reject_knowledge(knowledge_id: str, body: KnowledgeRejectBody, request: Request) -> dict:
-    """教程否定（reason 必填 422）；rejected 终态彻底隐藏。"""
-    _require_reason(body.reason)
-    return _call(request, _tracker(request).reject_knowledge, knowledge_id, body.reason)
-
-
-@router.post("/knowledge/{knowledge_id}/supersede")
-def supersede_knowledge(knowledge_id: str, body: KnowledgeRejectBody, request: Request) -> dict:
-    """教程过时（reason 必填 422）；旧版本前端不再可见。"""
-    _require_reason(body.reason)
-    return _call(request, _tracker(request).supersede_knowledge, knowledge_id, body.reason)
+@router.delete("/knowledge/{knowledge_id}")
+def delete_knowledge(knowledge_id: str, request: Request) -> dict:
+    """删除教程（级联清理孤立书籍）。"""
+    return _call(request, _tracker(request).delete_knowledge, knowledge_id)
 
 
 # --- 书籍（qt_books，五层模型 QED-031） ---
@@ -439,6 +462,24 @@ def register_book(book_id: str, body: BookRegisterBody, request: Request) -> dic
     if not body.relative_path:
         raise HTTPException(status_code=422, detail="必须提供数据根内相对路径（relative_path）")
     return _call(request, _tracker(request).register_book, book_id, body.relative_path)
+
+
+@router.post("/books/{book_id}/fetch")
+def fetch_book(book_id: str, request: Request) -> dict:
+    """自动下载书籍（触发下载任务）。"""
+    return _call(request, _tracker(request).fetch_book, book_id)
+
+
+@router.post("/knowledge/{knowledge_id}/fetch")
+def fetch_knowledge_books(knowledge_id: str, request: Request) -> dict:
+    """批量下载教程所辖书籍（触发下载任务）。"""
+    return _call(request, _tracker(request).fetch_knowledge_books, knowledge_id)
+
+
+@router.post("/books/{book_id}/import")
+def import_book_pdf(book_id: str, request: Request) -> dict:
+    """导入书籍 PDF（手动导入）。"""
+    return _call(request, _tracker(request).import_book_pdf, book_id)
 
 
 @router.post("/books/{book_id}/decide")

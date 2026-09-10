@@ -1,18 +1,22 @@
 """QED-Tracker 服务客户端（数据域·QED-Tracker 适配层）：qed CLI 与前端工作台经 HTTP 调用 8901。
 
-契约见 docs/design/service-contracts.md 与 QED-Tracker docs/design/database-schema.md
+契约见 docs/design/cross-project-contracts.md 与 QED-Tracker docs/design/database-schema.md
 （五层模型：qed_domain/qed_course 共享 + qt_knowledge/qt_books/qt_sources 私有，QED-031）。
 transport 可注入（测试用 MockTransport）；非 2xx 与连接失败统一抛 TrackerError。
 catalogs 与 register、raw 文件下载为语义 API（8900 数据域）提供能力。
 
-设计关联（DesignRef）：docs/design/service-contracts.md
+设计关联（DesignRef）：docs/design/cross-project-contracts.md
 实现状态：Current
 关联测试：tests/test_tracker_client.py
 """
 
 import time
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from qed_engine.config import Settings
 
 API_PREFIX = "/api/v1"
 
@@ -38,9 +42,11 @@ class TrackerError(RuntimeError):
 class TrackerClient:
     """8901 服务客户端；方法返回解析后的 JSON（dict 或 list）。
 
-    五层端点（QED-031）语义：教程（qt_knowledge）draft→confirmed→completed；
-    书籍（qt_books）candidate→decided→downloading→downloaded→verified，rejected/superseded
-    终态彻底隐藏由上游数据层保证；渠道（qt_sources）一次尝试一条，ok 表达成败。
+    教程（qt_knowledge）两态：draft→confirmed（2026-09-03 裁决）；
+    书籍（qt_books）选用四态：candidate→decided→parallel→retired，下载执行由 qt_sources 承载；
+    渠道（qt_sources）一次尝试一条，ok 表达成败。
+
+    降级支持：当8901不可用时，自动降级到直接查询共享表（qed_domain/qed_course）。
     """
 
     def __init__(
@@ -48,8 +54,10 @@ class TrackerClient:
         base_url: str,
         transport: httpx.BaseTransport | None = None,
         timeout: float = 30.0,
+        settings: "Settings | None" = None,
     ) -> None:
-        self._client = httpx.Client(base_url=base_url.rstrip("/"), transport=transport, timeout=timeout)
+        self._client = httpx.Client(base_url=base_url.rstrip("/"), transport=transport, timeout=timeout, trust_env=False)
+        self._settings = settings
 
     def close(self) -> None:
         self._client.close()
@@ -117,29 +125,18 @@ class TrackerClient:
             body["exercise_intro"] = exercise_intro
         return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/confirm", json=body)
 
-    def complete_knowledge(self, knowledge_id: str) -> dict:
-        """教程 confirmed→completed（所辖书籍全部 verified 后聚合触发）。"""
-        return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/complete")
+    def import_course_knowledge(self, course_id: str, data: dict) -> dict:
+        """导入课程知识（tutorials JSON）。"""
+        return self._request("POST", f"{API_PREFIX}/courses/{course_id}/knowledge", json=data)
 
-    def reject_knowledge(self, knowledge_id: str, reason: str) -> dict:
-        """教程否定（reason 必填留痕）；rejected 终态彻底隐藏。"""
-        if not reason:
-            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/knowledge/{knowledge_id}/reject",
-            json={"reason": reason},
-        )
+    def update_knowledge(self, knowledge_id: str, **kwargs) -> dict:
+        """更新教程信息（name/position/intro/set_no/kind/notes）。"""
+        body = {k: v for k, v in kwargs.items() if v is not None}
+        return self._request("PATCH", f"{API_PREFIX}/knowledge/{knowledge_id}", json=body)
 
-    def supersede_knowledge(self, knowledge_id: str, reason: str) -> dict:
-        """教程过时（被新版本替代，reason 必填）；旧版本前端不再可见。"""
-        if not reason:
-            raise TrackerError("标记过时必须提供原因（reason）")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/knowledge/{knowledge_id}/supersede",
-            json={"reason": reason},
-        )
+    def delete_knowledge(self, knowledge_id: str) -> dict:
+        """删除教程（级联清理孤立书籍）。"""
+        return self._request("DELETE", f"{API_PREFIX}/knowledge/{knowledge_id}")
 
     # --- 书籍（qt_books：一册/一卷/一个快照） ---
 
@@ -165,6 +162,18 @@ class TrackerClient:
             f"{API_PREFIX}/books/{book_id}/register",
             json={"relative_path": relative_path},
         )
+
+    def fetch_book(self, book_id: str) -> dict:
+        """自动下载书籍（触发下载任务）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/fetch")
+
+    def fetch_knowledge_books(self, knowledge_id: str) -> dict:
+        """批量下载教程所辖书籍（触发下载任务）。"""
+        return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/fetch")
+
+    def import_book_pdf(self, book_id: str) -> dict:
+        """导入书籍 PDF（手动导入）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/import")
 
     def decide_book(self, book_id: str) -> dict:
         """候选→决定（人工决定下载）。"""
@@ -278,8 +287,20 @@ class TrackerClient:
         )
 
     def list_domains(self) -> list:
-        """GET /domains：领域列表（树第一层数据源）。"""
-        return self._request("GET", f"{API_PREFIX}/domains")
+        """GET /domains：领域列表（树第一层数据源）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            return self._request("GET", f"{API_PREFIX}/domains")
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接查询共享表：%s", exc)
+                from qed_engine.services.shared_tables import list_domains
+                return list_domains(self._settings)
+            raise
 
     def create_domain(
         self,
@@ -287,73 +308,226 @@ class TrackerClient:
         name: str,
         description: str | None = None,
         stages: list[str] | None = None,
+        level: str | None = None,
+        classic_tracks: list[dict] | None = None,
+        scope: str | None = None,
     ) -> dict:
-        """POST /domains：手工新建领域（§8；domain_id 由上游服务端生成）。"""
-        body: dict = {"name": name}
-        if description is not None:
-            body["description"] = description
-        if stages is not None:
-            body["stages"] = stages
-        return self._request("POST", f"{API_PREFIX}/domains", json=body)
+        """POST /domains：手工新建领域（§8；domain_id 由上游服务端生成）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            body: dict = {"name": name}
+            if description is not None:
+                body["description"] = description
+            if stages is not None:
+                body["stages"] = stages
+            if level is not None:
+                body["level"] = level
+            if classic_tracks is not None:
+                body["classic_tracks"] = classic_tracks
+            if scope is not None:
+                body["scope"] = scope
+            return self._request("POST", f"{API_PREFIX}/domains", json=body)
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接创建领域：%s", exc)
+                from qed_engine.services.shared_tables import STAGE_GENERATED, create_domain
+                result = create_domain(
+                    self._settings,
+                    name=name,
+                    description=description or "",
+                    level=level or "本科",
+                    stages=stages,
+                    classic_tracks=classic_tracks,
+                    scope=scope or "",
+                    exploration_stage=STAGE_GENERATED,
+                )
+                if result is None:
+                    raise TrackerError("领域创建失败（降级模式）") from exc
+                return result
+            raise
 
     def update_domain(
         self,
         domain_id: str,
         *,
+        name: str | None = None,
         description: str | None = None,
         stages: list[str] | None = None,
         exploration_stage: str | None = None,
+        level: str | None = None,
+        classic_tracks: list[dict] | None = None,
+        scope: str | None = None,
+        explore_pending: dict | None = None,
     ) -> dict:
-        """PATCH /domains/{domain_id}：修改领域描述/阶段/exploration_stage（name 不可变）。"""
-        body: dict = {}
-        if description is not None:
-            body["description"] = description
-        if stages is not None:
-            body["stages"] = stages
-        if exploration_stage is not None:
-            body["exploration_stage"] = exploration_stage
-        return self._request("PATCH", f"{API_PREFIX}/domains/{domain_id}", json=body)
+        """PATCH /domains/{domain_id}：修改领域字段。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            body: dict = {}
+            if name is not None:
+                body["name"] = name
+            if description is not None:
+                body["description"] = description
+            if stages is not None:
+                body["stages"] = stages
+            if exploration_stage is not None:
+                body["exploration_stage"] = exploration_stage
+            if level is not None:
+                body["level"] = level
+            if classic_tracks is not None:
+                body["classic_tracks"] = classic_tracks
+            if scope is not None:
+                body["scope"] = scope
+            if explore_pending is not None:
+                body["explore_pending"] = explore_pending
+            return self._request("PATCH", f"{API_PREFIX}/domains/{domain_id}", json=body)
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接更新领域：%s", exc)
+                from qed_engine.services.shared_tables import update_domain
+                result = update_domain(
+                    self._settings,
+                    domain_id,
+                    name=name,
+                    description=description,
+                    stages=stages,
+                    exploration_stage=exploration_stage,
+                    level=level,
+                    classic_tracks=classic_tracks,
+                    scope=scope,
+                    explore_pending=explore_pending,
+                )
+                if result is None:
+                    raise TrackerError("领域更新失败（降级模式）") from exc
+                return result
+            raise
 
     def delete_domain(self, domain_id: str) -> dict | list | None:
-        """DELETE /domains/{domain_id}：删除领域（有课程时上游 409 保护）。"""
-        return self._request("DELETE", f"{API_PREFIX}/domains/{domain_id}")
+        """DELETE /domains/{domain_id}：删除领域（有课程时上游 409 保护）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            return self._request("DELETE", f"{API_PREFIX}/domains/{domain_id}")
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接删除领域：%s", exc)
+                from qed_engine.services.shared_tables import delete_domain
+                success = delete_domain(self._settings, domain_id)
+                if not success:
+                    raise TrackerError("领域删除失败（降级模式，可能有课程）") from exc
+                return None
+            raise
 
-    def explore_domain(
-        self,
-        domain_id: str,
-        *,
-        mode: str = "direct",
-        ref_text: str = "",
-        ref_doc_path: str = "",
-    ) -> dict:
-        """POST /domains/{domain_id}/explore：启动领域探索（202 异步任务，REQ-067 B2）。"""
-        body: dict = {"mode": mode}
-        if ref_text:
-            body["ref_text"] = ref_text
-        if ref_doc_path:
-            body["ref_doc_path"] = ref_doc_path
-        return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/explore", json=body)
+    def import_domain(self, domain_data: dict, target_domain_id: str | None = None) -> dict:
+        """POST /domains/import：手动领域 JSON 导入（REQ-067 B3，QED-050）。
 
-    def confirm_domain_name(
-        self,
-        domain_id: str,
-        *,
-        decision: str,
-        name: str = "",
-    ) -> dict:
-        """POST /domains/{domain_id}/confirm-name：确认领域名称（REQ-067 B7）。"""
-        body: dict = {"decision": decision}
-        if name:
-            body["name"] = name
-        return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/confirm-name", json=body)
+        降级逻辑：8901 不可用时 8900 直写共享表（import_domain_manual：以 target_domain_id
+        为主键查找领域并更新；手动@v1 必需字段缺失转 400；共享库不可写转 503 语义）。
+        """
+        try:
+            return self._request("POST", f"{API_PREFIX}/domains/import",
+                                 json={"domain": domain_data, "target_domain_id": target_domain_id})
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，导入降级直写共享表：%s", exc)
+                from qed_engine.services.shared_tables import import_domain_manual
+                try:
+                    result = import_domain_manual(self._settings, domain_data, target_domain_id=target_domain_id)
+                except ValueError as ve:
+                    raise TrackerError(str(ve), status_code=400, detail=str(ve)) from ve
+                if result is None:
+                    raise TrackerError(
+                        "导入降级失败：共享表不可写（QED_DB_PASSWORD 未配置或数据库不可达）"
+                    ) from exc
+                return result
+            raise
 
-    def import_domain(self, domain_data: dict) -> dict:
-        """POST /domains/import：手动领域 JSON 导入（REQ-067 B3，QED-050）。"""
-        return self._request("POST", f"{API_PREFIX}/domains/import", json={"domain": domain_data})
+    def commit_import_courses(self, domain_id: str) -> dict:
+        """POST /domains/{domain_id}/courses/import：手动导入课程（六步流程步骤 3）。
+
+        透传 8901：读取 raw/{domain_id}/domains.json → 逐条 upsert QedCourse → 待确认。
+        """
+        result = self._request("POST", f"{API_PREFIX}/domains/{domain_id}/courses/import")
+        return {
+            "committed": result.get("courses_created", 0),
+            "updated": result.get("courses_updated", 0),
+        }
+
+    def submit_task(self, task_type: str, payload: dict | None = None) -> dict:
+        """POST /api/v1/tasks/{task_type}：通用异步任务提交（202，返回 task_id）。
+
+        8901 原生任务链入口（domain_explore / domain_explore_courses 等）；任务执行
+        与五态写点由 8901 完成，8900 仅登记 task_id。无降级——任务依赖 8901 管线
+        进程，连接失败时按原错误透出（PLAN-034 §10：探索任务离线不可降级）。
+        """
+        return self._request("POST", f"{API_PREFIX}/tasks/{task_type}", json=payload or {})
+
+    def confirm_domain(self, domain_id: str) -> dict:
+        """POST /domains/{domain_id}/confirm：确认领域（已生成→探索中，手动六步流程步骤 2）。
+
+        8901 原生语义：读 raw/{id}/domains.json → upsert domain → 异步提交
+        courses@v8 任务 → 返回 {task_id, exploration_stage:"探索中"}；
+        courses.json 落盘与「待确认」写点由 8901 任务完成。无降级（任务离线不可跑）。
+        """
+        return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/confirm")
+
+    def apply_domain_results(self, domain_id: str, selected_courses: list[str] | None = None) -> dict:
+        """POST /domains/{id}/apply-results：应用课程名单（待确认→已完成，六步流程步骤 4）。
+
+        selected_courses 省略/为空 = 全部保留；未选课程行由 8901 级联删除。
+        降级逻辑：8901 不可用时直写共享表（已完成 + 清 explore_pending）；
+        课程行由门面桥接先行建行，此处不再补删（离线尽力而为，PLAN-034 §10）。
+        """
+        try:
+            body: dict = {}
+            if selected_courses:
+                body["selected_courses"] = selected_courses
+            return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/apply-results", json=body)
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，apply-results 降级直写共享表：%s", exc)
+                from qed_engine.services.shared_tables import STAGE_COMPLETED, update_domain
+                result = update_domain(
+                    self._settings,
+                    domain_id,
+                    exploration_stage=STAGE_COMPLETED,
+                    explore_pending="__CLEAR__",
+                )
+                if result is None:
+                    raise TrackerError("应用课程名单失败（降级模式）") from exc
+                return result
+            raise
 
     def list_courses_system(self) -> list:
-        """GET /courses：领域课程体系（领域含嵌套课程，左树 v2 数据源）。"""
-        return self._request("GET", f"{API_PREFIX}/courses")
+        """GET /courses：领域课程体系（领域含嵌套课程，左树 v2 数据源）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            return self._request("GET", f"{API_PREFIX}/courses")
+        except TrackerError as exc:
+            # 8901不可用，降级直接查询共享表
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接查询共享表：%s", exc)
+                from qed_engine.services.shared_tables import list_domains_with_courses
+                return list_domains_with_courses(self._settings)
+            raise
 
     def create_course_for_domain(
         self,
@@ -368,23 +542,48 @@ class TrackerClient:
         track: str | None = None,
         prerequisites: list[str] | None = None,
     ) -> dict:
-        """POST /domains/{domain_id}/courses：新增课程（探索 apply 与手工维护共用）。"""
-        body: dict = {"name": name}
-        if stage is not None:
-            body["stage"] = stage
-        if sort_order is not None:
-            body["sort_order"] = sort_order
-        if note is not None:
-            body["note"] = note
-        if description is not None:
-            body["description"] = description
-        if aliases is not None:
-            body["aliases"] = aliases
-        if track is not None:
-            body["track"] = track
-        if prerequisites is not None:
-            body["prerequisites"] = prerequisites
-        return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/courses", json=body)
+        """POST /domains/{domain_id}/courses：新增课程（探索 apply 与手工维护共用）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            body: dict = {"name": name}
+            if stage is not None:
+                body["stage"] = stage
+            if sort_order is not None:
+                body["sort_order"] = sort_order
+            if note is not None:
+                body["note"] = note
+            if description is not None:
+                body["description"] = description
+            if aliases is not None:
+                body["aliases"] = aliases
+            if track is not None:
+                body["track"] = track
+            if prerequisites is not None:
+                body["prerequisites"] = prerequisites
+            return self._request("POST", f"{API_PREFIX}/domains/{domain_id}/courses", json=body)
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接创建课程：%s", exc)
+                from qed_engine.services.shared_tables import create_course
+                result = create_course(
+                    self._settings,
+                    domain_id,
+                    name=name,
+                    description=description or "",
+                    stage=stage or "",
+                    track=track or "",
+                    sort_order=sort_order or 0,
+                    aliases=aliases,
+                    prerequisites=prerequisites,
+                )
+                if result is None:
+                    raise TrackerError("课程创建失败（降级模式）") from exc
+                return result
+            raise
 
     def update_course(
         self,
@@ -393,20 +592,75 @@ class TrackerClient:
         stage: str | None = None,
         sort_order: int | None = None,
         note: str | None = None,
+        description: str | None = None,
+        track: str | None = None,
+        aliases: list[str] | None = None,
+        prerequisites: list[str] | None = None,
+        exploration_stage: str | None = None,
     ) -> dict:
-        """PATCH /courses/{course_id}：修改课程阶段/排序/备注（仅提交显式字段）。"""
-        body: dict = {}
-        if stage is not None:
-            body["stage"] = stage
-        if sort_order is not None:
-            body["sort_order"] = sort_order
-        if note is not None:
-            body["note"] = note
-        return self._request("PATCH", f"{API_PREFIX}/courses/{course_id}", json=body)
+        """PATCH /courses/{course_id}：修改课程阶段/排序/备注（仅提交显式字段）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            body: dict = {}
+            if stage is not None:
+                body["stage"] = stage
+            if sort_order is not None:
+                body["sort_order"] = sort_order
+            if note is not None:
+                body["note"] = note
+            if description is not None:
+                body["description"] = description
+            if track is not None:
+                body["track"] = track
+            if aliases is not None:
+                body["aliases"] = aliases
+            if prerequisites is not None:
+                body["prerequisites"] = prerequisites
+            if exploration_stage is not None:
+                body["exploration_stage"] = exploration_stage
+            return self._request("PATCH", f"{API_PREFIX}/courses/{course_id}", json=body)
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接更新课程：%s", exc)
+                from qed_engine.services.shared_tables import update_course
+                result = update_course(
+                    self._settings,
+                    course_id,
+                    description=description,
+                    stage=stage,
+                    track=track,
+                    sort_order=sort_order,
+                    aliases=aliases,
+                    prerequisites=prerequisites,
+                    exploration_stage=exploration_stage,
+                )
+                if result is None:
+                    raise TrackerError("课程更新失败（降级模式）") from exc
+                return result
+            raise
 
     def delete_course(self, course_id: str) -> dict | list | None:
-        """DELETE /courses/{course_id}：删除课程（有教程时上游 409 保护）。"""
-        return self._request("DELETE", f"{API_PREFIX}/courses/{course_id}")
+        """DELETE /courses/{course_id}：删除课程（有教程时上游 409 保护）。
+        
+        降级逻辑：当8901不可用时，自动降级到直接查询共享表。
+        """
+        try:
+            return self._request("DELETE", f"{API_PREFIX}/courses/{course_id}")
+        except TrackerError as exc:
+            if self._settings:
+                import logging
+                logger = logging.getLogger("qed_engine.tracker")
+                logger.info("8901不可用，降级直接删除课程：%s", exc)
+                from qed_engine.services.shared_tables import delete_course
+                success = delete_course(self._settings, course_id)
+                if not success:
+                    raise TrackerError("课程删除失败（降级模式）") from exc
+                return None
+            raise
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         try:
