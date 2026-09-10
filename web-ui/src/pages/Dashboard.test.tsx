@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
@@ -8,7 +8,7 @@ import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDashboardStore } from '../stores/dashboard';
 import { useRuntimeStore } from '../stores/runtime';
-import type { BookRecord, KnowledgeDetail, KnowledgeRecord, ServiceStatus } from '../stores';
+import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord, ServiceStatus } from '../stores';
 
 // ECharts 依赖 canvas，jsdom 不可用；渲染层由 EChart.test 覆盖，此处以占位验证组装
 vi.mock('../components/EChart', () => ({
@@ -28,9 +28,7 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
     name: partial.name ?? '',
     textbook_ref: null,
     exercise_ref: null,
-    textbook_intro: '',
-    exercise_intro: '',
-    materials_intro: '',
+    intro: '',
     status: 'draft',
     reject_reason: '',
     supersede_reason: '',
@@ -41,31 +39,26 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
   };
 }
 
-function book(partial: Partial<BookRecord> & { book_id: string; knowledge_id: string }): BookRecord {
+function book(partial: Partial<BookRecord> & { book_id: string }): BookRecord {
   return {
-    kind: 'textbook',
-    roles: ['textbook'],
     title: 't',
+    original_title: null,
     part: '',
-    display_title: 't',
-    file_name: '',
     authors: [],
+    publisher: '',
+    edition: '',
+    year: null,
     language: '',
-    version: {},
-    source: null,
-    original_url: '',
-    sha256: null,
-    relative_path: '',
-    absolute_path: '',
-    page_count: null,
+    roles: ['textbook'],
     status: 'candidate',
-    reject_reason: '',
-    supersede_reason: '',
-    review_note: '',
+    retire_reason: '',
+    holding: 'missing',
+    file_path: null,
+    priority: null,
+    notes: null,
+    domain_id: 'math',
     created_at: '',
-    decided_at: null,
-    downloaded_at: null,
-    verified_at: null,
+    updated_at: '',
     ...partial,
   };
 }
@@ -75,18 +68,31 @@ const k2 = kn({ knowledge_id: 'k2', course_id: 'math', status: 'confirmed' });
 const k3 = kn({ knowledge_id: 'k3', course_id: 'analysis', status: 'confirmed' });
 const knowledgeFixture: KnowledgeRecord[] = [k1, k2, k3];
 const detailsFixture: Record<string, KnowledgeDetail> = {
-  k1: { ...k1, books: [book({ book_id: 'b1', knowledge_id: 'k1', status: 'downloaded' })] },
-  k2: { ...k2, books: [book({ book_id: 'b2', knowledge_id: 'k2', status: 'verified' })] },
+  k1: { ...k1, books: [book({ book_id: 'b1', knowledge_id: 'k1', status: 'parallel', holding: 'owned' })] },
+  k2: { ...k2, books: [book({ book_id: 'b2', knowledge_id: 'k2', status: 'decided', holding: 'missing' })] },
   k3: { ...k3, books: [] },
 };
-// catalog targets：math（k1/k2）与 analysis（k3）→ 分母 2 门课程
-const catalogFixture = {
-  id: 'math-qe',
-  targets: [
-    { course_id: 'math', name: '数学分析' },
-    { course_id: 'analysis', name: '实分析' },
-  ],
-};
+
+// 领域课程体系：math 和 analysis 两个领域
+const courseSystemFixture: DomainSystem[] = [
+  {
+    domain_id: 'math',
+    name: '数学',
+    exploration_stage: '已完成',
+    courses: [
+      { course_id: 'math', name: '数学分析', aliases: [], stage: '', prerequisites: [], exploration_stage: '已完成' },
+      { course_id: 'math-adv', name: '高等数学', aliases: [], stage: '', prerequisites: [], exploration_stage: '已完成' },
+    ],
+  },
+  {
+    domain_id: 'analysis',
+    name: '分析学',
+    exploration_stage: '探索中',
+    courses: [
+      { course_id: 'analysis', name: '实分析', aliases: [], stage: '', prerequisites: [], exploration_stage: '已完成' },
+    ],
+  },
+];
 
 /** 路由匹配：URL 包含路由 key；详情路由（更长 key）优先于列表路由；函数值按 URL 动态返回 */
 function mockApi(routes: Record<string, unknown | ((url: string) => unknown)>) {
@@ -121,62 +127,60 @@ const runtimeServices: ServiceStatus[] = [
   { name: 'axiom', label: 'Axiom-Flow 文档解析服务', port: 8902, log_path: '', status: 'online', pid: 9, started_at: '', reason: '' },
 ];
 
-describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
+describe('仪表盘 Dashboard（三行图表重构）', () => {
   beforeEach(() => {
     useDashboardStore.setState({
-      knowledge: [], details: {}, catalogTargets: [], loading: false, error: null, dataError: null, catalogError: null,
+      knowledge: [], details: {}, courseSystem: [], loading: false, error: null, dataError: null, courseError: null,
     });
     useRuntimeStore.setState({ services: runtimeServices });
   });
 
-  it('渲染标题/服务在线速览（共享数据零请求）/课程完成度+教程饼图/解析占位；上下布局', async () => {
+  it('渲染标题/服务在线速览/三行图表/统计数字；上下布局', async () => {
     mockApi({
-      '/catalogs/': catalogFixture,
+      '/courses': courseSystemFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });
     renderDashboard();
     expect(await screen.findByText('仪表盘')).toBeInTheDocument();
-    // 服务在线卡恢复（2026-08-24 二次裁决）：轻量只读展示，数据来自共享 runtime store
-    expect(screen.getByText('服务在线')).toBeInTheDocument();
+    // 服务在线情况卡
+    expect(screen.getByText('服务在线情况')).toBeInTheDocument();
     expect(screen.getByText('QED 管理服务（配置中心）')).toBeInTheDocument();
-    expect(screen.getByText('QED-Tracker 文档下载服务')).toBeInTheDocument();
-    expect(screen.getByText(/离线（未启动）/)).toBeInTheDocument();
-    // 缺 web 条目时兜底显示 8903（withWebServiceFallback）
-    expect(screen.getByText('QED 前端服务')).toBeInTheDocument();
     // 零额外请求契约：渲染过程不发出 /services
     expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('/services'))).toBe(false);
-    // 布局顺序：服务在线 → 文档下载进度 → 文档解析进度
-    const healthCard = screen.getByText('服务在线').closest('.ant-card')!;
+    // 布局顺序：服务在线情况 → 统计数字 → 领域探索进度 → 课程进度 → 文档下载进度
+    const healthCard = screen.getByText('服务在线情况').closest('.ant-card')!;
+    const statsCard = screen.getByText('已探明领域数').closest('.ant-card')!;
+    const domainCard = screen.getByText('领域探索进度');
+    const courseCard = screen.getByText('课程进度');
     const downloadCard = screen.getByText('文档下载进度');
-    const parseCard = screen.getByText('文档解析进度');
-    expect(healthCard.compareDocumentPosition(downloadCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(downloadCard.compareDocumentPosition(parseCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // 双饼图占位 + 统计数字
+    expect(healthCard.compareDocumentPosition(statsCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(statsCard.compareDocumentPosition(domainCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(domainCard.compareDocumentPosition(courseCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(courseCard.compareDocumentPosition(downloadCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 领域探索进度 1 个聚合饼图 + 课程进度 2 个（math/analysis）+ 文档下载进度 2 个 = 5 个
     const charts = screen.getAllByTestId('echart');
-    expect(charts).toHaveLength(2);
-    // 饼图1 课程完成度：分母 2 门（math/analysis）；math 仅 k2 全验收（k1 有 downloaded）→ 完成 0
-    const completionSeries = JSON.parse(charts[0].getAttribute('data-series') ?? '[]');
-    expect(completionSeries[0].data.map((d: { value: number }) => d.value)).toEqual([0, 2]);
-    expect(charts[0].getAttribute('data-title')).toContain('课程下载完成度 0/2');
-    // 饼图2 按教程：k1（b1 已下载）、k2（b2 已下载）→ [1, 1]
-    const knowledgeSeries = JSON.parse(charts[1].getAttribute('data-series') ?? '[]');
-    expect(knowledgeSeries[0].data.map((d: { value: number }) => d.value)).toEqual([1, 1]);
-    // 统计行：教程数 3、目标书目 2、已下载 2（downloaded+verified）、已验收 1
-    const totalStat = screen.getByText('教程数').closest('.ant-statistic')!;
-    expect(within(totalStat as HTMLElement).getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('目标书目')).toBeInTheDocument();
-    expect(screen.getByText('已下载')).toBeInTheDocument();
-    expect(screen.getByText('已验收')).toBeInTheDocument();
-    // 解析占位
-    expect(screen.getByText('解析任务数据源后置')).toBeInTheDocument();
+    expect(charts).toHaveLength(5);
+    // 统计数字
+    expect(screen.getByText('已探明领域数')).toBeInTheDocument();
+    expect(screen.getByText('课程数')).toBeInTheDocument();
+    expect(screen.getByText('书籍卷数')).toBeInTheDocument();
+    expect(screen.getByText('验收书目数')).toBeInTheDocument();
   });
 
-  it('8901 不可达（/knowledge 503）→ 文档下载状况降级提示，无整体横幅；服务在线卡仍展示', async () => {
+  it('8901 不可达（/knowledge 503）→ 数据不可达降级提示，无整体横幅；服务在线卡仍展示', async () => {
+    mockApi({
+      '/courses': courseSystemFixture,
+    });
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/knowledge')) {
         return Promise.resolve(
           new Response(JSON.stringify({ detail: 'QED-Tracker 服务不可达' }), { status: 503, headers: { 'Content-Type': 'application/json' } }),
+        );
+      }
+      if (url.includes('/courses')) {
+        return Promise.resolve(
+          new Response(JSON.stringify(courseSystemFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
         );
       }
       return Promise.reject(new TypeError(`no route: ${url}`));
@@ -185,8 +189,8 @@ describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
     expect(await screen.findByText('QED-Tracker 数据不可达')).toBeInTheDocument();
     // 无整体错误横幅（503 为 http 类错误，不等同 8900 离线）
     expect(screen.queryByText('仪表盘数据获取失败')).not.toBeInTheDocument();
-    // 服务在线卡来自共享 runtime store，不受 8901 影响
-    expect(screen.getByText('服务在线')).toBeInTheDocument();
+    // 服务在线情况卡来自共享 runtime store，不受 8901 影响
+    expect(screen.getByText('服务在线情况')).toBeInTheDocument();
   });
 
   it('8900 不可达 → 整体错误横幅', async () => {
@@ -197,6 +201,7 @@ describe('仪表盘 Dashboard（Phase 3 + 五层化）', () => {
 
   it('刷新按钮触发重新拉取', async () => {
     mockApi({
+      '/courses': courseSystemFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
       '/knowledge': knowledgeFixture,
     });

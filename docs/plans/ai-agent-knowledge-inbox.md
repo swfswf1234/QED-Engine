@@ -55,7 +55,7 @@
 - 反复探索点：`SettingsConfigDict(env_file=".env")` 相对 CWD 解析；脚本启动（cwd=仓库根）
   与手动启动（cwd=backend/）读到不同配置，排查需先意识到「配置随 CWD 漂移」这一可能。
 - 解法：env_file 绝对定位仓库根（`Path(__file__).resolve().parents[2] / ".env"`），
-  已在根仓库实施并修订 configuration-and-secrets.md（2026-08-26 根 .env 唯一事实源裁决）。
+  已在根仓库实施并修订 project-configuration.md（2026-08-26 根 .env 唯一事实源裁决）。
 - 建议归类：环境（已修复，本条留档作模式警示：任何相对路径资源加载都要先问 CWD 是谁）
 - 状态：待评审
 

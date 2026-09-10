@@ -3,7 +3,7 @@
 全部函数接受可注入 httpx.Client（测试用 MockTransport）；网络/HTTP 异常映射为
 RuntimeError（中文原因 + 状态码），由 gateway 层捕获并记录。
 
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 关联测试：tests/test_llm_clients.py
 """

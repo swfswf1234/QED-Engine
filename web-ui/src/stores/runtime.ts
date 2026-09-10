@@ -13,10 +13,15 @@
  */
 import { create } from 'zustand';
 import {
-  listServices, operateService, getDatabaseStatus, monitorGpu, monitorLmstudio, monitorMineru, type ServiceOp,
+  listServices, operateService, getDatabaseStatus, monitorGpu, monitorLmstudio, monitorMineru,
+  fetchModelsConfig, type ServiceOp, type ModelsConfig,
 } from '../api/services';
-import { databaseTest, getKeys, llmTestText, llmTestVision } from '../api/llm';
-import type { DatabaseStatus, GpuStatus, KeysStatus, LmStudioStatus, MineruStatus, ServiceStatus } from './index';
+import {
+  databaseTest, getKeys, llmTestText, llmTestVision, operateModel as operateModelApi,
+} from '../api/llm';
+import type {
+  DatabaseStatus, GpuStatus, KeysStatus, LmStudioStatus, MineruStatus, ModelName, ModelOp, ServiceStatus,
+} from './index';
 
 /** 过渡态收敛轮询参数（对齐后端 TRANSITION_WINDOW=15s） */
 export const POLL_INTERVAL_MS = 1000;
@@ -53,9 +58,22 @@ const WEB_SERVICE: ServiceStatus = {
   reason: '',
 };
 
-/** web 兜底合并 + 端口排序（纯函数）：缺 web 追加兜底、已有真实条目去重，输出恒按端口升序 */
+/** web 兜底合并 + 端口排序（纯函数）：
+ *  - 缺 web → 追加兜底（8900 离线场景）
+ *  - web=offline → 替换为兜底 online（页面能加载即在线，8900 探测不可信）
+ *  - web 非 offline → 保留 8900 真实状态（online/starting/stopping）
+ *  输出恒按端口升序 */
 export function withWebServiceFallback(services: ServiceStatus[]): ServiceStatus[] {
-  const merged = services.some((s) => s.name === 'web') ? services : [...services, WEB_SERVICE];
+  const webEntry = services.find((s) => s.name === 'web');
+  let merged: ServiceStatus[];
+  if (!webEntry) {
+    merged = [...services, WEB_SERVICE];
+  } else if (webEntry.status === 'offline') {
+    // 页面能加载 → 8903 一定在线；8900 的 _probe_http 对 web 不可信，覆盖为 online
+    merged = services.map((s) => (s.name === 'web' ? { ...WEB_SERVICE } : s));
+  } else {
+    merged = services;
+  }
   return [...merged].sort((a, b) => a.port - b.port);
 }
 
@@ -121,6 +139,8 @@ export interface RuntimeStore {
   mineruError: string | null;
   /** 运行模式与厂商（/config/keys；依赖卡模式感知用，null=未加载按 local 语义兜底渲染） */
   keys: KeysStatus | null;
+  /** 模型路由表（/config/models；云端模型名来源，null=未加载） */
+  modelsConfig: ModelsConfig | null;
   /** 操作中（按钮 loading），值为服务名 */
   operating: string | null;
   /** 测试按钮执行中标记（db=MySQL 即时探测 / text=文字 / vision=图像） */
@@ -130,6 +150,8 @@ export interface RuntimeStore {
   fetchGpu: () => Promise<void>;
   /** 启停操作：请求 + 轮询收敛，返回收敛结果（成功/失败/超时），由前端提示 */
   operate: (name: string, op: ServiceOp) => Promise<OperateResult>;
+  /** 本地模型启停/重启（Task 6）：POST /models/{name}/{op}，复用 operate 收敛语义 */
+  operateModel: (name: ModelName, op: ModelOp) => Promise<OperateResult>;
   /** MySQL 即时连接测试（测试按钮） */
   testDatabase: () => Promise<LlmTestOutcome>;
   /** 文字模型测试（测试按钮） */
@@ -151,6 +173,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   mineru: null,
   mineruError: null,
   keys: null,
+  modelsConfig: null,
   operating: null,
   testing: null,
 
@@ -162,7 +185,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     // 六路并行独立拉取：services 失败 → 整体横幅；database/gpu/lmstudio/mineru/keys 失败 → 仅对应字段降级
     const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
       call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
-    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr], [lmstudio, lmstudioErr], [mineru, mineruErr], [keys]] =
+    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr], [lmstudio, lmstudioErr], [mineru, mineruErr], [keys], [modelsConfig]] =
       await Promise.all([
         fetchOne(() => listServices({ timeoutMs: SERVICES_TIMEOUT_MS })),
         fetchOne(() => getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS })),
@@ -170,6 +193,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
         fetchOne(() => monitorLmstudio({ timeoutMs: LMSTUDIO_TIMEOUT_MS })),
         fetchOne(() => monitorMineru({ timeoutMs: MINERU_TIMEOUT_MS })),
         fetchOne(() => getKeys({ timeoutMs: SERVICES_TIMEOUT_MS })),
+        fetchOne(() => fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS })),
       ]);
     const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
     set({
@@ -179,6 +203,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       lmstudio: lmstudio ?? get().lmstudio,
       mineru: mineru ?? get().mineru,
       keys: keys ?? get().keys,
+      modelsConfig: modelsConfig ?? get().modelsConfig,
       error: servicesErr ? reason(servicesErr) : null,
       dbError: dbErr ? reason(dbErr) : null,
       gpuError: gpuErr ? reason(gpuErr) : null,
@@ -260,6 +285,62 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
             op,
             success: false,
             status: 'error',
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      setTimeout(poll, POLL_INTERVAL_MS);
+    });
+  },
+
+  operateModel: async (name, op): Promise<OperateResult> => {
+    const { operating } = get();
+    if (operating) {
+      return { name, op, success: false, status: 'busy', reason: '另一操作进行中，请稍后再试' };
+    }
+    set({ operating: name, error: null });
+    try {
+      await operateModelApi(name, op);
+    } catch (err) {
+      set({ operating: null, loading: false });
+      return {
+        name, op, success: false, status: 'error',
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
+    // 模型收敛：start/restart 目标 = 模型探针可达（qwen→lmstudio / mineru reachable），stop = 不可达
+    const targetReachable = op !== 'stop';
+    const probe = async (): Promise<boolean> => (
+      name === 'qwen' ? monitorLmstudio() : monitorMineru()
+    ).then((s) => (s as { reachable: boolean }).reachable);
+    return new Promise<OperateResult>((resolve) => {
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      const poll = async () => {
+        try {
+          let reachable: boolean;
+          try {
+            reachable = await probe();
+          } catch {
+            reachable = false;
+          }
+          if (reachable === targetReachable) {
+            set({ operating: null, loading: false });
+            resolve({ name, op, success: true, status: op === 'stop' ? 'offline' : 'online' });
+            return;
+          }
+          if (Date.now() < deadline) {
+            setTimeout(poll, POLL_INTERVAL_MS);
+            return;
+          }
+          set({ operating: null, loading: false });
+          resolve({
+            name, op, success: false, status: 'timeout',
+            reason: `收敛超时（${POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
+          });
+        } catch (err) {
+          set({ operating: null, loading: false });
+          resolve({
+            name, op, success: false, status: 'error',
             reason: err instanceof Error ? err.message : String(err),
           });
         }

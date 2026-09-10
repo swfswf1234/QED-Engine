@@ -21,6 +21,29 @@ import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from 
 
 /** 轮询定时器引用（模块级，zustand store 不存储非序列化值） */
 let _pollingTimer: ReturnType<typeof setInterval> | null = null;
+/** 领域进入「探索中」的时刻（超时失效提示用，PLAN-033 §6） */
+const _runningSince = new Map<string, number>();
+/** 已提示过超时的领域（每次悬挂只提示一次） */
+const _staleWarned = new Set<string>();
+/** 探索中超时阈值：超过视为任务可能已失效（8900/8901 重启悬挂） */
+export const RUNNING_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * explore_pending 归一（8901 返回 dict / 共享表直读返回 JSON 字符串）。
+ * 非法值返回 null（调用方按无 pending 处理）。
+ */
+export function parseExplorePending(raw: DomainSystem['explore_pending']): DomainSystem['explore_pending'] {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? (parsed as DomainSystem['explore_pending']) : null;
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+}
 
 /** 树宽 localStorage 键 */
 export const DOWNLOADS_TREE_WIDTH_KEY = 'qed-downloads-tree-w';
@@ -214,6 +237,8 @@ export interface DownloadsStore {
   systemError: string | null;
   /** knowledge 独立错误 */
   knowledgeError: string | null;
+  /** 降级模式：课程体系成功但教程失败（8901不可用） */
+  isDegraded: boolean;
   /** 筛选栏三栏（2026-08-24 收敛）：领域/课程 + 状态=书籍阶段（stage，空=全部）；
    *  与树选择单向联动：树 → 筛选；domain 存 domain_id */
   filters: { domain: string; course: string; stage: string };
@@ -249,6 +274,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
   error: null,
   systemError: null,
   knowledgeError: null,
+  isDegraded: false,
   filters: { domain: '', course: '', stage: '' },
   selected: null,
   treeWidth: readTreeWidth(),
@@ -317,6 +343,9 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       ? { kind: 'domain' as const, id: newDomains[0].domain_id }
       : currentSelected;
 
+    // 检测降级状态：课程体系成功但教程失败（8901不可用）
+    const isDegraded = system !== null && knErr !== null;
+    
     set({
       domains: newDomains,
       knowledge: list ?? get().knowledge,
@@ -325,6 +354,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       knowledgeError: knErr ? messageOf(knErr) : null,
       error: sysErr && knErr ? '8900 数据获取失败（课程体系与教程均不可达）' : null,
       selected: newSelected,
+      isDegraded,
       ...(newSelected && newSelected !== currentSelected && newSelected.kind === 'domain' ? {
         filters: { domain: newSelected.id, course: '', stage: get().filters.stage },
       } : {}),
@@ -343,7 +373,8 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     }
   },
 
-  // --- REQ-067 B8：exploration_stage 轮询（5s 间隔） ---
+  // --- REQ-067 B8 + PLAN-033 §6：exploration_stage 轮询（5s 间隔） ---
+  // explore_pending 变化检测 + 探索中超时失效提示（不做自动回写，刷新/重试承接）
   startPolling: () => {
     const { stopPolling } = get();
     stopPolling(); // 先清除旧轮询
@@ -352,29 +383,47 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       if (currentDomains.length === 0) return;
       try {
         const latest = await listCourseSystem();
-        // 检查是否有领域从探索中变为终态
-        let changed = false;
+        // 检查是否有领域从探索中变为其他态（终态通知按 explore_pending.kind 细分）
         for (const fresh of latest) {
           const old = currentDomains.find((d) => d.domain_id === fresh.domain_id);
           if (old && old.exploration_stage === '探索中' && fresh.exploration_stage !== '探索中') {
-            changed = true;
-            // 终态通知
+            _runningSince.delete(fresh.domain_id);
+            const pending = parseExplorePending(fresh.explore_pending);
             if (fresh.exploration_stage === '已完成') {
               message.success(`领域「${fresh.name}」探索完成`);
-            } else if (fresh.exploration_stage === '已生成') {
-              message.info(`领域「${fresh.name}」探索完成，需确认名称`);
+            } else if (fresh.exploration_stage === '待确认') {
+              if (pending?.kind === 'name_confirmation' || pending?.kind === 'name_confirm') {
+                message.info(`领域「${fresh.name}」探索完成，需确认名称`);
+              } else if (pending?.kind === 'error') {
+                message.warning(`领域「${fresh.name}」探索中断：${pending.error ?? '未知错误'}`);
+              } else {
+                const courseCount = pending?.kind === 'review_results' || pending?.kind === 'import_courses'
+                  ? pending.courses.length
+                  : fresh.courses.length;
+                message.info(`领域「${fresh.name}」课程名单待确认（${courseCount} 门）`);
+              }
             } else if (fresh.exploration_stage === '失败') {
               message.warning(`领域「${fresh.name}」探索失败，可重试`);
             }
           }
         }
-        // 更新 domains（保持教程不变，仅刷新课程体系）
-        if (changed) {
-          set({ domains: latest });
-        } else {
-          // 即使未触发通知，也更新 explore_pending 等字段
-          set({ domains: latest });
+        // 探索中超时失效提示（PLAN-033 §6：8900/8901 重启可能致悬挂，提示人工重试）
+        const now = Date.now();
+        for (const fresh of latest) {
+          if (fresh.exploration_stage === '探索中') {
+            const since = _runningSince.get(fresh.domain_id) ?? now;
+            _runningSince.set(fresh.domain_id, since);
+            if (now - since > RUNNING_STALE_MS && !_staleWarned.has(fresh.domain_id)) {
+              _staleWarned.add(fresh.domain_id);
+              message.warning(`领域「${fresh.name}」长时间处于探索中，任务可能已失效，可重试探索`);
+            }
+          } else {
+            _runningSince.delete(fresh.domain_id);
+            _staleWarned.delete(fresh.domain_id);
+          }
         }
+        // 更新 domains（含 explore_pending 字段，驱动右侧提示条）
+        set({ domains: latest });
       } catch {
         // 轮询失败静默忽略（fetchAll 会处理离线状态）
       }

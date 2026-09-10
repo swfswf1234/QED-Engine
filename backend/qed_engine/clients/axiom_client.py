@@ -52,7 +52,7 @@ class AxiomClient:
         transport: httpx.BaseTransport | None = None,
         timeout: float = 30.0,
     ) -> None:
-        self._client = httpx.Client(base_url=base_url.rstrip("/"), transport=transport, timeout=timeout)
+        self._client = httpx.Client(base_url=base_url.rstrip("/"), transport=transport, timeout=timeout, trust_env=False)
 
     def close(self) -> None:
         self._client.close()

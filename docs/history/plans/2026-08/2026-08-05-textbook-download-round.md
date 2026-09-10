@@ -3,8 +3,8 @@
 状态：Accepted
 任务类型：B
 最后更新：2026-09-01
-关联 ADR：[ADR 0001](../history/adr/v0.1/0001-root-contract-tests.md)、[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)
-关联设计：[服务契约](../design/service-contracts.md)、[dataset 目录约定](../design/dataset-conventions.md)、[统一配置与密钥规范](../design/configuration-and-secrets.md)、[配置中心 API 契约](../architecture/api-contracts.md)；QED-Tracker [服务接口设计](../../QED-Tracker/docs/design/tracker-service.md)（子仓库）
+关联 ADR：[ADR 0001](../../adr/v0.1/0001-root-contract-tests.md)、[ADR 0002](../../adr/v0.1/0002-frontend-and-port-centralization.md)
+关联设计：[服务契约](../../../design/cross-project-contracts.md)、[dataset 目录约定](../../../design/dataset-conventions.md)、[统一配置与密钥规范](../../../design/project-configuration.md)、[配置中心 API 契约](../../../architecture/api-contracts.md)；QED-Tracker [服务接口设计（已归档基线）](../../../../QED-Tracker/docs/history/baselines/2026-08-tracker-service.md)（子仓库，ADR 0008 拆散退役）
 关联 Tracker：`docs/trackers/todo.md`（ARCH-002 及 REQ-001~015；子项目 QED-Tracker QED-008~016、Axiom-Flow ALN-001~007）
 归档判定：全链路联调验收通过后 Completed，Retain 归档至 `history/plans/2026-08/`
 

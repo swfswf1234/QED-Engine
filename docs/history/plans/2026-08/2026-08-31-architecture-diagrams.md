@@ -3,9 +3,9 @@
 状态：Accepted
 最后更新：2026-08-31
 任务类型：D
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)
 关联设计：`../architecture/four-service-architecture.md`、`../architecture/backend-architecture.md`、`../architecture/frontend-architecture.md`
-关联 Tracker：docs/trackers/todo.md
+关联 Tracker：docs/trackers/todo.md（PLAN-029）
 归档判定：用户确认后合并至三份 architecture/ 固定文档，计划壳归档
 
 ## 目标与成功标准

@@ -1,6 +1,6 @@
 """统一配置：读取仓库根 `.env`（绝对定位），集中管理 API_KEY 与厂商/模型选择。
 
-设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/architecture/api-contracts.md
+设计关联（DesignRef）：docs/design/project-configuration.md、docs/architecture/api-contracts.md
 实现状态：Current
 关联测试：tests/test_config.py
 
@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     qed_model: str = ""
     qed_ocr_model: str = ""
     qed_embedding_model: str = "text-embedding-v4"
+    # 统一数据根（ARCH-019：与 QED-Tracker 共用 QED_DATA_ROOT；raw/{domain_id}/ 下
+    # domains.json / courses.json 为共享布局。相对路径锚定仓库根，避免 CWD 漂移）
+    qed_data_root: str = "dataset"
     # 统一数据库（MySQL 8 qed 库，ADR 0003；QED_DB_* 为三项目唯一事实源）
     qed_db_host: str = "127.0.0.1"
     qed_db_port: int = 3306
@@ -74,6 +77,14 @@ class Settings(BaseSettings):
     def resolved_api_key(self) -> str:
         """唯一密钥（API_KEY），空字符串表示未配置。"""
         return self.api_key.get_secret_value()
+
+    @property
+    def data_root_path(self) -> Path:
+        """数据根绝对路径：相对值锚定仓库根（与脚本启动 CWD=仓库根一致）。"""
+        path = Path(self.qed_data_root).expanduser()
+        if not path.is_absolute():
+            path = (ROOT_ENV.parent / path).resolve()
+        return path
 
     @model_validator(mode="after")
     def _validate_provider(self) -> "Settings":

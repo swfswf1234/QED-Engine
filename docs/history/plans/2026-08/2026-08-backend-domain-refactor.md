@@ -5,9 +5,9 @@
 最后更新：2026-08-16
 关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、
 [ADR 0008](../../../history/adr/v0.1/0008-frontend-react-refactor.md)
-关联设计：[后端三域拆分设计](../../../design/backend-domain-split.md)（深化版）、
+关联设计：[后端三域拆分设计](../../../architecture/backend-architecture.md)（深化版）、
 [配置中心 API 契约](../../../architecture/api-contracts.md)（监控与诊断域）、
-[服务控制设计](../../../design/service-control.md)、[配置与密钥](../../../design/configuration-and-secrets.md)
+[服务控制设计](../../../design/service-hosting.md)、[配置与密钥](../../../design/project-configuration.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-012 登记）
 归档判定：三域迁移全绿（与迁移前一致）+ 监控诊断端点真实实测 + 文档同步 → Completed，
 归档至 `history/plans/2026-08/`

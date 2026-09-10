@@ -21,7 +21,7 @@ app.js 已膨胀至约 1684 行、91KB，承载 17 期迭代的全部逻辑（�
    RAG/Agent 调试面板——原生手写维护成本高，成熟组件与可视化生态可显著降低实现风险。
 
 同时后端规划为三域解耦（配置/控制、QED-Tracker 适配、Axiom-Flow 适配，见
-[backend-domain-split.md](../../../design/backend-domain-split.md)），前端独立演进与之配套，
+[backend-domain-split.md](../../../architecture/backend-architecture.md)），前端独立演进与之配套，
 为后续「前端独立 + 后端各域独立」的并行推进做准备（2026-08-16 用户方向裁决）。
 
 ## 决定

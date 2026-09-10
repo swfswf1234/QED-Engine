@@ -1,6 +1,6 @@
 """
 模块职责：LLM 网关（gateway）契约测试：api/local 路由、调用记录字段、失败记录。
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：backend/qed_engine/services/llm/gateway.py
 """

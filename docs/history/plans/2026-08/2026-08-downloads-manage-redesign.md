@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-20
 关联 ADR：无（纯前端展示层，沿用 ADR 0007/0008）
-关联设计：[下载管理界面重构设计](../../../design/downloads-manage-redesign.md)
+关联设计：[下载管理界面重构设计](../../../design/downloads-ui.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-015 登记；REQ-006 承接执行）
 归档判定：用户确认计划（转 Accepted）→ 前端门禁全绿 + 浏览器验收 + QED-Tracker 命名
 回执后 Completed，归档至 `history/plans/2026-08/`

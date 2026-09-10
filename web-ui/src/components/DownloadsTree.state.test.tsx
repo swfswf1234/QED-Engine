@@ -1,8 +1,9 @@
 // web-ui/src/components/DownloadsTree.state.test.tsx
 /**
- * DownloadsTree 状态机测试
- * - 测试领域5态和课程3态的右键菜单禁用逻辑
- * - 测试右侧按钮状态机
+ * DownloadsTree 状态机测试（口径：PLAN-033 §2.3/§2.5 操作×状态×接口统一表）
+ * - 领域五态 + 失败异常态：探索触发=未开始/待确认（重探）/失败（重试）；
+ *   探索中除删除外全部禁用；已生成走「确认领域」（卡片按钮）不重复探索
+ * - 课程三态：探索课程在 探索中/已完成 禁用；导入课程知识在 已完成 禁用
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -13,11 +14,11 @@ import { useDownloadsStore } from '../stores/downloads';
 import type { DomainSystem, KnowledgeDetail, KnowledgeRecord } from '../stores';
 
 function course(courseId: string, name: string, overrides?: Partial<DomainSystem['courses'][0]>) {
-  return { 
-    course_id: courseId, 
-    name, 
-    aliases: [], 
-    stage: '基础', 
+  return {
+    course_id: courseId,
+    name,
+    aliases: [],
+    stage: '基础',
     track: '分析学',
     description: '课程描述',
     prerequisites: [],
@@ -27,21 +28,21 @@ function course(courseId: string, name: string, overrides?: Partial<DomainSystem
 }
 
 function domainFixture(
-  courses: ReturnType<typeof course>[], 
+  courses: ReturnType<typeof course>[],
   explorationStage: string = '未开始',
   classicTracks?: Array<{ name: string; summary?: string; kind?: string }>
 ): DomainSystem[] {
-  return [{ 
-    domain_id: 'dm1', 
-    name: '高等数学', 
-    description: '高等数学领域', 
+  return [{
+    domain_id: 'dm1',
+    name: '高等数学',
+    description: '高等数学领域',
     stages: ['基础', '主干', '分支', '前沿'],
     classic_tracks: classicTracks || [
       { name: '分析学', summary: '数学分析方向', kind: 'main' },
       { name: '代数学', summary: '线性代数方向', kind: 'main' },
     ],
     exploration_stage: explorationStage,
-    courses 
+    courses
   }];
 }
 
@@ -94,98 +95,111 @@ describe('DownloadsTree 状态机', () => {
     });
   });
 
-  describe('领域右键菜单禁用逻辑', () => {
-    it('未开始状态：新增课程禁用，探索/导入可用', async () => {
+  describe('领域右键菜单禁用逻辑（PLAN-033 §2.3）', () => {
+    it('未开始状态：添加课程禁用，探索/导入可用', async () => {
       seed(domainFixture([], '未开始'), []);
       renderTree();
-      
+
       await openDomainContextMenu('高等数学');
-      
-      expectMenuItemDisabled('新增课程', true);
+
+      expectMenuItemDisabled('添加课程', true);
       expectMenuItemDisabled('探索领域知识', false);
       expectMenuItemDisabled('导入领域知识', false);
     });
 
-    it('已生成状态：新增课程可用，探索/导入可用', async () => {
+    it('已生成状态：添加课程禁用，探索禁用（确认领域走卡片按钮），导入可用', async () => {
       seed(domainFixture([], '已生成'), []);
       renderTree();
-      
+
       await openDomainContextMenu('高等数学');
-      
-      expectMenuItemDisabled('新增课程', false);
-      expectMenuItemDisabled('探索领域知识', false);
+
+      expectMenuItemDisabled('添加课程', true);
+      expectMenuItemDisabled('探索领域知识', true);
       expectMenuItemDisabled('导入领域知识', false);
     });
 
-    it('探索中状态：新增课程禁用，探索/导入可用', async () => {
+    it('探索中状态：除删除外全部禁用', async () => {
       seed(domainFixture([], '探索中'), []);
       renderTree();
-      
-      await openDomainContextMenu('高等数学');
-      
-      expectMenuItemDisabled('新增课程', true);
-      expectMenuItemDisabled('探索领域知识', false);
-      expectMenuItemDisabled('导入领域知识', false);
-    });
 
-    it('待确认状态：新增课程禁用，探索/导入可用', async () => {
-      seed(domainFixture([], '待确认'), []);
-      renderTree();
-      
       await openDomainContextMenu('高等数学');
-      
-      expectMenuItemDisabled('新增课程', true);
-      expectMenuItemDisabled('探索领域知识', false);
-      expectMenuItemDisabled('导入领域知识', false);
-    });
 
-    it('已完成状态：探索/导入禁用，新增课程可用', async () => {
-      seed(domainFixture([], '已完成'), []);
-      renderTree();
-      
-      await openDomainContextMenu('高等数学');
-      
+      expectMenuItemDisabled('添加课程', true);
       expectMenuItemDisabled('探索领域知识', true);
       expectMenuItemDisabled('导入领域知识', true);
-      expectMenuItemDisabled('新增课程', false);
+      expectMenuItemDisabled('编辑领域知识', true);
+      expectMenuItemDisabled('删除领域', false);
+    });
+
+    it('待确认状态：探索（重探）/导入/添加课程可用（课程体系已产出，允许人工补充）', async () => {
+      seed(domainFixture([], '待确认'), []);
+      renderTree();
+
+      await openDomainContextMenu('高等数学');
+
+      expectMenuItemDisabled('添加课程', false);
+      expectMenuItemDisabled('探索领域知识', false);
+      expectMenuItemDisabled('导入领域知识', false);
+    });
+
+    it('已完成状态：探索/导入禁用，添加课程可用', async () => {
+      seed(domainFixture([], '已完成'), []);
+      renderTree();
+
+      await openDomainContextMenu('高等数学');
+
+      expectMenuItemDisabled('探索领域知识', true);
+      expectMenuItemDisabled('导入领域知识', true);
+      expectMenuItemDisabled('添加课程', false);
+    });
+
+    it('失败状态：菜单显示「重试探索」且可用，导入可用（失败=异常态可重试）', async () => {
+      seed(domainFixture([], '失败'), []);
+      renderTree();
+
+      await openDomainContextMenu('高等数学');
+
+      expectMenuItemDisabled('重试探索', false);
+      expectMenuItemDisabled('导入领域知识', false);
+      expectMenuItemDisabled('添加课程', false);
     });
   });
 
-  describe('课程右键菜单禁用逻辑', () => {
+  describe('课程右键菜单禁用逻辑（PLAN-033 §2.5）', () => {
     it('未开始状态：探索课程可用', async () => {
       seed(domainFixture([course('c1', '微积分', { exploration_stage: '未开始' })]), []);
       renderTree();
-      
+
       fireEvent.click(screen.getByText('高等数学'));
-      
+
       await openCourseContextMenu('微积分');
-      
+
       expectMenuItemDisabled('探索课程', false);
       expectMenuItemDisabled('导入课程知识', false);
     });
 
-    it('探索中状态：探索课程可用', async () => {
+    it('探索中状态：探索课程禁用，导入课程知识可用', async () => {
       seed(domainFixture([course('c1', '微积分', { exploration_stage: '探索中' })]), []);
       renderTree();
-      
+
       fireEvent.click(screen.getByText('高等数学'));
-      
+
       await openCourseContextMenu('微积分');
-      
-      expectMenuItemDisabled('探索课程', false);
+
+      expectMenuItemDisabled('探索课程', true);
       expectMenuItemDisabled('导入课程知识', false);
     });
 
-    it('已完成状态：探索课程和导入课程知识均可用（锁定仅在点击时检查）', async () => {
+    it('已完成状态：探索课程和导入课程知识均禁用', async () => {
       seed(domainFixture([course('c1', '微积分', { exploration_stage: '已完成' })]), []);
       renderTree();
-      
+
       fireEvent.click(screen.getByText('高等数学'));
-      
+
       await openCourseContextMenu('微积分');
-      
-      expectMenuItemDisabled('探索课程', false);
-      expectMenuItemDisabled('导入课程知识', false);
+
+      expectMenuItemDisabled('探索课程', true);
+      expectMenuItemDisabled('导入课程知识', true);
     });
   });
 });

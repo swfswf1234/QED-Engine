@@ -5,9 +5,9 @@
 
 tracker 子命令为 QED-Tracker 8901 服务的 HTTP 客户端（tasks 轮询；旧 books/resources
 闭环命令已随 QED-030 qt_resources 退役，三表闭环由 8903 前端承担）：
-契约见 docs/design/service-contracts.md。
+契约见 docs/design/cross-project-contracts.md。
 
-设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/design/service-contracts.md
+设计关联（DesignRef）：docs/design/project-configuration.md、docs/design/cross-project-contracts.md
 实现状态：Current
 关联测试：tests/test_cli.py、tests/test_tracker_client.py
 """

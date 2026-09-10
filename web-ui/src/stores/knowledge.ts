@@ -12,7 +12,7 @@ import {
   STAGE_ORDER,
   stageKey,
 } from './courseMeta';
-import type { CatalogTarget, CourseRecord, DomainSystem } from './index';
+import type { CatalogTarget, CourseRecord } from './index';
 import type { CourseStage } from './courseMeta';
 
 // --- 课程图纯函数 ---

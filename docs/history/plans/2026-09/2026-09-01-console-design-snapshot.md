@@ -3,9 +3,9 @@
 状态：In Progress
 最后更新：2026-09-01
 任务类型：D
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-api-only-for-frontend.md)
-关联设计：[前端架构](../architecture/frontend-architecture.md)、[服务控制](../design/service-control.md)、[LLM 网关与模型管理](../design/llm-gateway-and-model-management.md)
-关联 Tracker：docs/trackers/todo.md
+关联 ADR：[ADR 0002](../../adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)
+关联设计：[前端架构](../../../architecture/frontend-architecture.md)、[服务控制](../../../design/service-hosting.md)、[LLM 网关与模型管理](../../../design/llm-gateway.md)
+关联 Tracker：docs/trackers/todo.md（PLAN-030）
 归档判定：用户确认后迁入 design/ 固定文档，计划壳归档
 
 ## 目标与成功标准

@@ -55,7 +55,7 @@ backend/qed_engine/
 - 生命周期脚本：`scripts/qed_engine_service.py`（start/stop/restart/status，
   **`--mode（api 或 local）`**——api 模式走云端 LLM，local 模式启用本地模型资源互斥）。
 - 8900 重启经 `POST /self-restart`（自身不在 /services 启停范围）。
-- LLM 网关与模型管理见 [设计文档](../design/llm-gateway-and-model-management.md)；
+- LLM 网关与模型管理见 [设计文档](../design/llm-gateway.md)；
   资源互斥 `QED_RESOURCE_GUARD` 由 `services/llm/model_manager.py` 实施。
 
 ## 与三项目四服务的关系

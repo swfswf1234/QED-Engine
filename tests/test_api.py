@@ -344,7 +344,7 @@ def test_upstream_conflict_passthrough(monkeypatch):
     assert response.json()["detail"] == "状态机冲突：当前状态 downloading 不允许"
 
 
-# ---------- 五层语义 API（knowledge / books / sources，service-contracts.md 五层模型 QED-031） ----------
+# ---------- 五层语义 API（knowledge / books / sources，cross-project-contracts.md 五层模型 QED-031） ----------
 
 
 def test_knowledge_list_via_semantic_api(monkeypatch):
@@ -395,58 +395,6 @@ def test_knowledge_confirm_via_semantic_api(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "confirmed"
-
-
-def test_knowledge_complete_via_semantic_api(monkeypatch):
-    """POST /knowledge/{id}/complete：聚合完成经 8900。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/knowledge/kn_abc/complete"
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "completed"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/knowledge/kn_abc/complete")
-    assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-
-
-def test_knowledge_reject_forwards_reason(monkeypatch):
-    """POST /knowledge/{id}/reject：reason 必填 + 转发 8901。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/knowledge/kn_abc/reject"
-        assert json.loads(request.read()) == {"reason": "非目标体系"}
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "rejected"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/knowledge/kn_abc/reject", json={"reason": "非目标体系"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
-
-
-def test_knowledge_reject_without_reason_is_422(monkeypatch):
-    """教程 reject 缺 reason：8900 直接 422，不发 8901。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("不应请求 8901")
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/knowledge/kn_abc/reject", json={})
-    assert response.status_code == 422
-
-
-def test_knowledge_supersede_via_semantic_api(monkeypatch):
-    """POST /knowledge/{id}/supersede：过时标记经 8900（reason 转发）。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/knowledge/kn_abc/supersede"
-        assert json.loads(request.read()) == {"reason": "被新版替代"}
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "superseded"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/knowledge/kn_abc/supersede", json={"reason": "被新版替代"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "superseded"
 
 
 def test_book_create_via_semantic_api(monkeypatch):
@@ -671,7 +619,7 @@ def test_five_layer_offline_returns_503(monkeypatch):
     assert "QED-Tracker" in response.json()["detail"]
 
 
-# ---------- 服务域（控制中心 /services：service-control.md 契约） ----------
+# ---------- 服务域（控制中心 /services：service-hosting.md 契约） ----------
 
 
 def test_services_spec_workdirs_and_log_dir_point_to_repo_root():
@@ -1487,3 +1435,70 @@ def test_structured_404_passthrough_not_rewritten(monkeypatch):
     resp = client.delete("/api/v1/domains/d1")
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "DOMAIN_NOT_FOUND"
+
+
+# ---------- 数据域·导入降级（PLAN-028：8901 离线时导入领域知识可用） ----------
+
+
+def _manual_payload() -> dict:
+    return {
+        "domain": "computer-science",
+        "name": "计算机",
+        "description": "计算机科学领域",
+        "stages": ["基础", "主干"],
+        "courses": [{"name": "数据结构"}, {"name": "操作系统"}],
+    }
+
+
+def _degrading_tracker(monkeypatch, handler) -> TrackerClient:
+    """带 settings 的 TrackerClient（降级分支依赖 self._settings 判定）。"""
+    from qed_engine.config import Settings
+
+    monkeypatch.setenv("QED_DB_PASSWORD", "test-password")
+    return TrackerClient(
+        base_url="http://tracker.test",
+        transport=httpx.MockTransport(handler),
+        settings=Settings(),
+    )
+
+
+def test_import_domain_degrades_to_shared_tables(monkeypatch):
+    """POST /domains/import：8901 离线 → 降级 import_domain_manual 直写共享表（PLAN-028）。
+
+    返回与 8901 契约同形 {domain_id, courses_created, courses_updated}；领域置「待确认」
+    由 shared_tables 层完成（此处 mock 验证降级接线与结果透传）。
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    captured: dict = {}
+
+    def fake_import_manual(settings, data, *, target_domain_id=None):
+        captured["data"] = data
+        captured["target_domain_id"] = target_domain_id
+        return {"domain_id": "computer-science", "courses_created": 2, "courses_updated": 0}
+
+    monkeypatch.setattr(
+        "qed_engine.services.shared_tables.import_domain_manual", fake_import_manual
+    )
+    client = _client(monkeypatch, tracker=_degrading_tracker(monkeypatch, handler))
+    response = client.post("/api/v1/domains/import", json={"domain": _manual_payload()})
+    assert response.status_code == 200
+    assert response.json() == {
+        "domain_id": "computer-science",
+        "courses_created": 2,
+        "courses_updated": 0,
+    }
+    assert captured["data"]["name"] == "计算机"
+
+
+def test_import_domain_degrade_invalid_payload_is_400(monkeypatch):
+    """导入降级路径：manual@v1 必需字段缺失 → 400（与 8901 契约一致，不写库）。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, tracker=_degrading_tracker(monkeypatch, handler))
+    bad = _manual_payload()
+    del bad["courses"]
+    response = client.post("/api/v1/domains/import", json={"domain": bad})
+    assert response.status_code == 400

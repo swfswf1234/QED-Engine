@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-30
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后并入 architecture/ 固定文档）
-关联设计：[2026-08-29-req067-downloads-optimization.md](../../../plans/2026-08-29-req067-downloads-optimization.md)（REQ-067 §B3）
+关联设计：[2026-08-29-req067-downloads-optimization.md](2026-08-29-req067-downloads-optimization.md)（REQ-067 §B3）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-026；REQ-067-A）
 归档判定：契约确定后并入 architecture/api-contracts.md，计划壳归档 history/plans/2026-08/
 
@@ -26,7 +26,7 @@
 
 ## 前置条件
 
-- REQ-067 界面优化计划（[PLAN-025](../../../plans/2026-08-29-req067-downloads-optimization.md)）§B3 依赖本契约。
+- REQ-067 界面优化计划（[PLAN-025](2026-08-29-req067-downloads-optimization.md)）§B3 依赖本契约。
 - 参考 JSON 结构与 `QED-Tracker/docs/knowledge/computer-science.json`（领域知识样例）。
 - 前端文件选择器交互已确定（见「前端实现要点」）。
 

@@ -52,3 +52,20 @@ export async function monitorLmstudio(opts?: ApiRequestOptions): Promise<LmStudi
 export async function monitorMineru(opts?: ApiRequestOptions): Promise<MineruStatus> {
   return api.get<MineruStatus>('/monitor/mineru', opts);
 }
+
+export interface ModelRoute {
+  model: string;
+  provider: string;
+  configured: boolean;
+}
+
+export interface ModelsConfig {
+  default: ModelRoute;
+  ocr: ModelRoute;
+  embedding: ModelRoute;
+}
+
+/** GET /api/v1/config/models：模型路由表（云端模型名来源） */
+export async function fetchModelsConfig(opts?: ApiRequestOptions): Promise<ModelsConfig> {
+  return api.get<ModelsConfig>('/config/models', opts);
+}

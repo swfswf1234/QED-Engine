@@ -1,10 +1,10 @@
 """LLM 调用记录：qed_llm_calls 表（qed 库）幂等建表、写入与分页检索。
 
-表归属 QED-Engine 根仓库（llm-gateway-and-model-management.md）；三项目均可写入
+表归属 QED-Engine 根仓库（llm-gateway.md）；三项目均可写入
 （QED-Tracker / Axiom-Flow 的 local 模式直写，约定 service 字段标识自身）。
 数据库不可达时写入降级（记日志返回 None），不阻塞 LLM 调用主流程。
 
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 关联测试：tests/test_llm_call_log.py
 """

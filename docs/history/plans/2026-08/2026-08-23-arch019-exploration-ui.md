@@ -3,9 +3,9 @@
 状态：In Progress
 任务类型：B
 最后更新：2026-08-23
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（本文档承载待评审设计）、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端架构）
-关联设计：[course-acquisition-flow.md](../design/course-acquisition-flow.md)（五阶段流程，本设计更新其阶段 1）、
-[frontend-architecture](../architecture/frontend-architecture.md)、exploration-api 计划（消费契约；已按 Delete 判定移除，事实见 [api-contracts](../architecture/api-contracts.md)）
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（本文档承载待评审设计）、[ADR 0008](../../adr/v0.1/0008-frontend-react-refactor.md)（前端架构）
+关联设计：[course-acquisition-flow.md](../../../design/downloads-flow.md)（五阶段流程，本设计更新其阶段 1）、
+[frontend-architecture](../../../architecture/frontend-architecture.md)、exploration-api 计划（消费契约；已按 Delete 判定移除，事实见 [api-contracts](../../../architecture/api-contracts.md)）
 关联 Tracker：docs/trackers/todo.md（主线 ARCH-019；本计划行 PLAN-020；支线 REQ-053、REQ-054）
 归档判定：Delete 倾向（确定后界面契约并入 web-frontend.md / course-acquisition-flow.md，计划壳删除）
 
@@ -26,7 +26,7 @@
 
 ## 前置条件
 
-exploration-api 计划契约冻结（已移除，事实见 [api-contracts](../architecture/api-contracts.md)）；QED-Tracker 端点就绪前
+exploration-api 计划契约冻结（已移除，事实见 [api-contracts](../../../architecture/api-contracts.md)）；QED-Tracker 端点就绪前
 以 mock 数据开发界面（不阻塞并行）。
 
 ## 设计正文（评审确定后并入 web-frontend.md 与 course-acquisition-flow.md）

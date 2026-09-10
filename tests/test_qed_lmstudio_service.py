@@ -1,7 +1,7 @@
 """
 模块职责：守护 scripts/text-model/qed_lmstudio_service.py（本地文字模型生命周期）契约——
 lms CLI 启停、健康探测（QED_LMSTUDIO_URL / 默认 5001/v1）、子命令结构。
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：scripts/text-model/qed_lmstudio_service.py
 """

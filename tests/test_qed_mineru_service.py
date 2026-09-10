@@ -1,7 +1,7 @@
 """
 模块职责：守护 scripts/image-model/qed_mineru_service.py（本地图像模型 MinerU 生命周期）契约——
 infra-*.ps1 编排调用、健康探测（8002 /api/v1/health）、子命令结构。
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：scripts/image-model/qed_mineru_service.py
 """

@@ -1,7 +1,7 @@
 """QED-Engine 后端 API 入口：三域组装（控制域 control / 数据域·Tracker tracker）。
 
 对外契约见 docs/architecture/api-contracts.md（配置/数据域/服务域/监控诊断）与
-docs/design/service-control.md（/services）；三域组织见 docs/design/backend-domain-split.md。
+docs/design/service-hosting.md（/services）；三域组织见 docs/architecture/backend-architecture.md。
 LLM 供应商可达性与 MySQL 连接为启动自检（ARCH-014：/config/llm-status 端点已删除，
 database 端点只读启动快照）。
 
@@ -57,13 +57,15 @@ def create_app(
     axiom_client: AxiomClient | None = None,
 ) -> FastAPI:
     """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。"""
+    # 配置 qed_engine.services 日志级别：探测失败等诊断信息需要 DEBUG 可见
+    logging.getLogger("qed_engine.services").setLevel(logging.DEBUG)
     resolved = settings or Settings()
 
     app = FastAPI(title="QED-Engine Backend", version=__version__)
     app.state.settings = resolved
     app.state.db_status = _startup_db_check(resolved)
     _startup_llm_check(resolved)
-    app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url)
+    app.state.tracker_client = tracker_client or TrackerClient(base_url=resolved.qed_tracker_url, settings=resolved)
     app.state.axiom_client = axiom_client or AxiomClient(base_url=resolved.qed_axiom_url)
     from qed_engine.services.explore_sessions import ExploreSessionManager
 
@@ -74,6 +76,8 @@ def create_app(
         tracker_client=app.state.tracker_client,
         dry_run_client=tracker_client,
     )
+    # 领域探索原生任务登记表（domain_id → task_id，内存态；8901 侧任务存活不受影响）
+    app.state.domain_explore_tasks = {}
     configure_services(resolved)
     try:
         llm_call_log.ensure_table(resolved)
@@ -104,9 +108,11 @@ def create_app(
     app.include_router(control_router)
     app.include_router(tracker_router)
     app.include_router(axiom_router)
+    from qed_engine.api.domain_explore import router as domain_explore_router
     from qed_engine.api.explore import router as explore_router
 
     app.include_router(explore_router)
+    app.include_router(domain_explore_router)
     return app
 
 

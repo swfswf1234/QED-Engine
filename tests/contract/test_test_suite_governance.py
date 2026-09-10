@@ -52,6 +52,7 @@ def test_root_test_files_are_the_config_center_suite():
         "test_api.py",
         "test_config.py",
         "test_cli.py",
+        "test_domain_explore.py",
         "test_explore_sessions.py",
         "test_llm_call_log.py",
         "test_llm_clients.py",

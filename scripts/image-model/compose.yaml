@@ -20,6 +20,11 @@ services:
       - 8002:8002
     environment:
       MINERU_MODEL_SOURCE: local
+      # 模型目录指向挂载路径（Task 8：模型外迁至仓库 model/mineru/，镜像不再固化模型）
+      MINERU_MODELS_DIR: /root/mineru_models
+    volumes:
+      # 仓库 model/mineru → 容器模型目录（Windows 仓库根经 WSL /mnt/ 路径，由 infra 脚本转换）
+      - ../../model/mineru:/root/mineru_models
     entrypoint: mineru-api
     command:
       --host 0.0.0.0

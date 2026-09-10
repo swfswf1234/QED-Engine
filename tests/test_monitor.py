@@ -30,12 +30,14 @@ def test_gpu_ok_parses_fields():
         "1234, LM Studio, 4096",
     )
     result = monitor.probe_gpu(runner=runner)
+    # PDH 缺省 probe_pdh() 在本测试环境返回空映射 + None 利用率 → 利用率回落 nvidia-smi，source=nvidia-smi
     assert result == {
         "available": True,
         "name": "NVIDIA GeForce RTX 4080",
         "memory_total_mb": 16376,
         "memory_used_mb": 4096,
         "utilization_percent": 65,
+        "utilization_source": "nvidia-smi",
         "processes": [{"pid": 1234, "name": "LM Studio", "memory_mb": 4096, "kind": "model"}],
     }
 
@@ -381,3 +383,146 @@ def test_probe_gpu_attaches_memory_when_provided():
     assert result["sys_memory_total_mb"] == 32768
     assert result["sys_memory_used_mb"] == 15360
     assert result["sys_memory_percent"] == 45
+
+
+# --- Task 1: Windows PDH 计数器（逐进程专用显存 + 利用率）---
+
+def _fake_pdh(mem_out: str = "", util_out: str = ""):
+    """模拟 PDH 探测 runner：按 Get-Counter 路径分发 mem/util 输出。"""
+    def runner(cmd, **kwargs):
+        joined = " ".join(cmd)
+        if "GPU Process Memory" in joined:
+            return mem_out
+        if "GPU Engine" in joined:
+            return util_out
+        raise AssertionError(joined)
+    return runner
+
+
+def test_pdh_process_memory_parses_and_aggregates():
+    """\\GPU Process Memory Dedicated Usage：按 pid 聚合（同 pid 多 luid/phys 取最大，CookedValue 字节转 MB）。"""
+    # CookedValue 为字节（PERF_COUNTER_LARGE_RAWCOUNT），函数内转为 MB（÷1048576）
+    # 使用能被 1048576 整除的字节值以避免浮点误差：316.5 MB=331874304, 1580.5 MB=1657274368
+    out = (
+        "pid_10396_luid_0x00000000_0x00010c6e_phys_0: 331874304\n"
+        "pid_29052_luid_0x00000000_0x00010c6e_phys_0: 1657274368\n"
+        "pid_10396_luid_0x00000000_0x00012c22_phys_0: 0\n"
+    )
+    got = monitor.parse_pdh_process_memory(out)
+    assert got == {10396: 316.5, 29052: 1580.5}
+
+
+def test_pdh_utilization_takes_max_nonzero():
+    """\\GPU Engine Utilization Percentage：取非零 sample 最大值。"""
+    out = (
+        "luid=pid_12084_luid_0x00000000_0x00012bb5_phys_0_eng_9_engtype_3d util=0\n"
+        "luid=pid_29052_luid_0x00000000_0x00010c6e_phys_0_eng_0_engtype_3d util=0.2\n"
+    )
+    got = monitor.parse_pdh_utilization(out)
+    assert got == 0.2
+
+
+def test_probe_pdh_runner_injected():
+    """probe_pdh 注入 runner：解析 mem/util 两路输出（CookedValue 字节转 MB）。"""
+    # 500 MB = 500 * 1024 * 1024 = 524288000.0
+    runner = _fake_pdh("pid_1_luid_0x00000000_0x00010c6e_phys_0: 524288000.0\n",
+                       "luid=pid_1_luid_0x00000000_0x00010c6e_phys_0_eng_0_engtype_3d util=12.0\n")
+    assert monitor.probe_pdh(runner=runner) == {"processes_mb": {1: 500.0}, "utilization_percent": 12.0}
+
+
+def test_probe_pdh_runner_error_degrades():
+    """PDH 探测执行超时：尽力降级（空显存映射 + None 利用率），不抛 5xx。"""
+    def runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, timeout=10)
+    assert monitor.probe_pdh(runner=runner) == {"processes_mb": {}, "utilization_percent": None}
+
+
+def test_probe_pdh_powershell_missing():
+    """PowerShell 不存在（FileNotFoundError）：降级为空映射 + None 利用率。"""
+    def runner(cmd, **kwargs):
+        raise FileNotFoundError
+    assert monitor.probe_pdh(runner=runner) == {"processes_mb": {}, "utilization_percent": None}
+
+
+# --- Task 2: probe_gpu 集成 PDH（进程显存 PDH 值 + 利用率 PDH/利用率来源）---
+
+def test_probe_gpu_integrates_pdh_memory_and_utilization():
+    """probe_gpu 集成 PDH：进程 memory_mb 用 PDH（按 pid 匹配），利用率用 PDH，附 utilization_source。
+
+    WDDM 下 nvidia-smi 逐进程显存为 [N/A]；PDH 分配口径补真实值。利用率切 PDH（任务管理器同源）。
+    """
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 2705, 8",
+        "1234, C:\\Program Files\\LM Studio\\LM Studio.exe, [N/A]\n"
+        "29052, [Insufficient Permissions], [N/A]",
+    )
+    def pdh(**kw):
+        return {"processes_mb": {1234: 207.5, 29052: 1580.5}, "utilization_percent": 0.4}
+    result = monitor.probe_gpu(runner=runner, pdh_fn=pdh)
+    assert result["utilization_percent"] == 0.4
+    assert result["utilization_source"] == "pdh"
+    by_pid = {p["pid"]: p for p in result["processes"]}
+    assert by_pid[1234]["memory_mb"] == 207.5
+    assert by_pid[29052]["memory_mb"] == 1580.5
+    # [Insufficient Permissions] 名补全由 Task 3 处理；此处名称原样保留
+    assert by_pid[29052]["name"] == "[Insufficient Permissions]"
+
+
+def test_probe_gpu_pdh_unavailable_falls_back_to_smi():
+    """PDH 探测不可用（空映射 + None 利用率）：利用率回落 nvidia-smi 值，source=nvidia-smi。
+
+    进程 memory_mb 无法从 PDH 取（空映射）→ 回落 None（WDDM [N/A] 语义）。
+    """
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 2705, 8",
+        "1234, LM Studio, [N/A]",
+    )
+    def pdh(**kw):
+        return {"processes_mb": {}, "utilization_percent": None}
+    result = monitor.probe_gpu(runner=runner, pdh_fn=pdh)
+    assert result["utilization_percent"] == 8
+    assert result["utilization_source"] == "nvidia-smi"
+    assert result["processes"][0]["memory_mb"] is None
+
+
+# --- Task 3: 进程名补全（[Insufficient Permissions] → 真实名）---
+
+def test_resolve_process_name_uses_tasklist():
+    """按 pid 经 tasklist CSV 取真实进程名（WDDM 下 nvidia-smi 显示 [Insufficient Permissions]）。"""
+    tasklist_csv = (
+        '"Image Name","PID","Session Name","Session#","Mem Usage"\n'
+        '"LM Studio.exe","29052","Console","1","1,580,500 K"\n'
+    )
+    def runner(cmd, **kwargs):
+        if "tasklist" in " ".join(cmd).lower():
+            return tasklist_csv
+        raise AssertionError(" ".join(cmd))
+    assert monitor.resolve_process_name(29052, runner=runner) == "LM Studio.exe"
+
+
+def test_resolve_process_name_not_found_returns_none():
+    """tasklist 无该 pid：返回 None。"""
+    def runner(cmd, **kwargs):
+        return '"Image Name","PID","Session Name","Session#","Mem Usage"\n'
+    assert monitor.resolve_process_name(99999, runner=runner) is None
+
+
+def test_resolve_process_name_runner_error_returns_none():
+    """tasklist 执行失败（OSError）：返回 None（不抛异常）。"""
+    def runner(cmd, **kwargs):
+        raise OSError("boom")
+    assert monitor.resolve_process_name(1234, runner=runner) is None
+
+
+def test_probe_gpu_resolves_insufficient_permissions_name():
+    """probe_gpu 对 [Insufficient Permissions] 行按 pid 补全真实名（Task 3 集成）。"""
+    runner = _fake_smi(
+        "NVIDIA GeForce RTX 4080, 16376, 2705, 8",
+        "29052, [Insufficient Permissions], [N/A]",
+    )
+    def name_runner(pid):
+        return "LM Studio.exe" if pid == 29052 else None
+    def pdh(**kw):
+        return {"processes_mb": {29052: 1580.5}, "utilization_percent": 0.4}
+    result = monitor.probe_gpu(runner=runner, pdh_fn=pdh, tasklist_fn=name_runner)
+    assert result["processes"][0]["name"] == "LM Studio.exe"

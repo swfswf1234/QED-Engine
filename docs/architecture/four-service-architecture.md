@@ -58,10 +58,10 @@ flowchart LR
 ## 三中心产品形态
 
 - **学习中心**：前端主界面（`#/`）的最终形态——课程学习（按知识节点推进）+ 知识问答
-  （多 Agent），向用户展示的核心功能（[学习中心设计](../design/learning-center.md)，Draft）。
+  （多 Agent），向用户展示的核心功能（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
 - **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（左树右对照：书目同步、块级判定）。
 - **控制中心**：后台运行控制——8900 对 8901/8902/8903 服务启停托管
-  （[服务控制设计](../design/service-control.md)，Accepted / Implemented；容器化依赖只进规划）。
+  （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented；容器化依赖只进规划）。
 
 ## 独立性铁律
 
@@ -71,7 +71,7 @@ flowchart LR
   （[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)），以 `qt_*`/`af_*` 表命名空间
   隔离、`qed_*` 共享表族例外（[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)）。
 - 跨项目传递只通过：HTTP 接口、共享 dataset 目录、环境变量与表隔离的共享 qed 库（见
-  [统一配置与密钥规范](../design/configuration-and-secrets.md)）。
+  [统一配置与密钥规范](../design/project-configuration.md)）。
 
 ## 跨服务交互
 
@@ -80,6 +80,6 @@ flowchart LR
 - **8900 → 8901/8902（数据域透传）**：8900 提供语义化端点，内部经 clients/ 适配子项目 API；
   8901/8902 契约事实源在各子项目仓库 `docs/architecture/`。
 - **8900 → 8901/8902/8903（服务托管）**：/services 启停托管经生命周期脚本黑盒管理
-  （[服务控制设计](../design/service-control.md)）。
+  （[服务控制设计](../design/service-hosting.md)）。
 - **dataset 数据流**：QED-Tracker 产出原始 PDF（dataset/qed-tracker/raw）→ Axiom-Flow
   产出解析产物（dataset/axiom-flow/parsed）→ 前端消费（经 8900 代理）。

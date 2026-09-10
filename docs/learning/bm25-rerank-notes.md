@@ -2,7 +2,7 @@
 
 个人学习资料，不参与工程治理。
 
-**规划中**（学习中心双目标之技术学习维度 T3，见 [learning-center 设计](../design/learning-center.md)）。
+**规划中**（学习中心双目标之技术学习维度 T3，见 [学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
 学习到再补充正文，预期内容：
 
 ## 学习范围

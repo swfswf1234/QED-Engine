@@ -1,15 +1,16 @@
 """服务控制能力层（控制域）：8900 对 8901/8902 的启停托管、状态探测与自身重启。
 
-前端（8903）只连 8900（ADR 0007）：/services 端点族契约见 docs/design/service-control.md；
+前端（8903）只连 8900（ADR 0007）：/services 端点族契约见 docs/design/service-hosting.md；
 本模块只暴露能力函数（无路由），路由与 HTTP 映射在 api/control.py。状态判定优先 HTTP
 端口探测（3s 超时）；启停为同步轻量操作（Popen 创建/信号发送即返回），状态收敛由前端轮询
 /services 观察（操作后 15s 过渡窗口）。错误以 ServiceError（含 status_code）表达。
 
-设计关联（DesignRef）：docs/design/service-control.md
+设计关联（DesignRef）：docs/design/service-hosting.md
 实现状态：Current
 关联测试：tests/test_api.py、tests/test_self_restart.py
 """
 
+import logging
 import os
 import signal
 import socket
@@ -24,6 +25,8 @@ from pathlib import Path
 import httpx
 
 from qed_engine.config import Settings
+
+LOG = logging.getLogger("qed_engine.services")
 
 PROBE_CONNECT_TIMEOUT = 0.5  # socket 预检：未监听端口快速判定（Windows 防火墙丢包场景）
 PROBE_TIMEOUT = 1.0  # HTTP 确认超时（端口已监听时健康检查）
@@ -43,7 +46,7 @@ SCRIPT_TIMEOUT_SECONDS = 30.0  # 子项目生命周期脚本调用超时（start
 
 @dataclass(frozen=True)
 class ServiceSpec:
-    """启停单元定义（服务注册表，service-control.md）。
+    """启停单元定义（服务注册表，service-hosting.md）。
 
     lifecycle_script：子项目自含生命周期脚本（REQ-017①，QED-Tracker
     `scripts/qed_tracker_service.py`）；存在时 start/stop 黑盒调用脚本，不持有 Popen。
@@ -162,13 +165,18 @@ def _probe_http(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=PROBE_CONNECT_TIMEOUT):
             pass
-    except OSError:
+    except OSError as exc:
+        LOG.debug("_probe_http(%d) socket failed: %s", port, exc)
         return False
     try:
-        with httpx.Client(timeout=PROBE_TIMEOUT) as client:
+        with httpx.Client(timeout=PROBE_TIMEOUT, trust_env=False) as client:
             response = client.get(f"http://127.0.0.1:{port}/api/v1/health")
-        return response.status_code == 200
-    except httpx.HTTPError:
+        if response.status_code != 200:
+            LOG.debug("_probe_http(%d) HTTP %d", port, response.status_code)
+            return False
+        return True
+    except httpx.HTTPError as exc:
+        LOG.debug("_probe_http(%d) httpx error: %s: %s", port, type(exc).__name__, exc)
         return False
 
 

@@ -1,8 +1,8 @@
 # 测试架构与门禁
 
 状态：Current
-最后更新：2026-08-30
-确认状态：已确认
+最后更新：2026-09-02
+确认状态：暂定
 治理对象：测试职责、分层、隔离、替身、门禁与覆盖率证据；治理契约测试的守护面清单、契约头、编写约定与新增流程
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`、`../history/adr/v0.1/0006-engineering-governance-contract.md`
 关联测试：`tests/contract/test_test_suite_governance.py`

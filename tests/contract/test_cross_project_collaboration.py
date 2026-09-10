@@ -28,9 +28,9 @@ def _todo_rows() -> list[dict[str, str]]:
     rows = []
     for line in lines[start + 2:]:
         stripped = line.strip()
-        # 分节标题（### 主线分组）、空行、重复表头与分隔行（每分节独立表格）不是任务行，跳过
+        # 分节标题（### 主线分组 / #### 块级子分组）、空行、重复表头与分隔行（每分节独立表格）不是任务行，跳过
         if not line.startswith("|"):
-            if line.startswith("### ") or not stripped:
+            if line.startswith("###") or not stripped:
                 continue
             break
         if stripped == header or stripped.startswith("| ---"):

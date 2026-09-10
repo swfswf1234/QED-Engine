@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-09-01
 关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审流程设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[course-acquisition-flow.md](../design/course-acquisition-flow.md)、[downloads-three-table-model.md](../design/downloads-three-table-model.md)、QED-Tracker [shared-tables.md](../../QED-Tracker/docs/design/shared-tables.md)（Accepted）、QED-Tracker [2026-08-api-design.md](../../QED-Tracker/docs/plans/2026-08-api-design.md)（Draft）、[api-contracts.md](../architecture/api-contracts.md)、[database-design.md](../architecture/database-design.md)
+关联设计：[downloads-flow.md](../design/downloads-flow.md)（五阶段流程已并入 REQ-070）、、QED-Tracker shared-tables.md（Accepted）、QED-Tracker 2026-08-api-design.md（Draft）、[api-contracts.md](../architecture/api-contracts.md)、[database-design.md](../architecture/database-design.md)
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-022；REQ-064、REQ-065、ARCH-019）
 归档判定：Merge 倾向（开发完成后流程事实并入 docs/design/ 固定文档，计划壳归档 history/plans/）
 
@@ -22,7 +22,7 @@
 > - 降级策略（§降级策略）—— 运维参考
 > - 探索流程时序（§探索流程）—— 架构参考（**注意**：域探索弹窗流已被 PLAN-023 的无弹窗直触取代）
 >
-> §B（8900 侧改造）和 §F（前端侧改造）已被 [REQ-067](./2026-08-29-req067-downloads-optimization.md) 吸收：
+> §B（8900 侧改造）和 §F（前端侧改造）已被 [REQ-067](../history/plans/2026-08/2026-08-29-req067-downloads-optimization.md) 吸收：
 > - B1/B2 旧端点清理 + 新端点 → 已落地（explore/confirm-name/import 路由已实现）
 > - B3 探索会话端点 → REQ-067 B2（REST 驱动，QED-Tracker 接管）
 > - B4 共享表直读写 → REQ-067 B8（exploration_stage 5状态模型）
@@ -437,11 +437,11 @@ qed_llm_calls（探索痕迹，经 prompt_template/task/step 关联）          
 | 用户操作流程设计 | 本目录 `2026-08-27-download-ux-flow.md` | 同轮配套，操作级流程规范（PLAN-023） |
 | 共享表设计 | QED-Tracker `docs/design/shared-tables.md`（Accepted） | 三共享表 DDL/列语义/状态机/写权限 |
 | 8901 API 设计 | QED-Tracker `docs/plans/2026-08-api-design.md`（Draft） | 16 端点五要素 |
-| 课程收集流程 | `docs/design/course-acquisition-flow.md` | 五阶段课程收集设计 |
-| 三表模型 | `docs/design/downloads-three-table-model.md` | 历史三表→五层演进 |
+| 课程收集流程 | `docs/design/downloads-flow.md` | 五阶段课程收集设计（REQ-070 并入） |
+| 三表模型 | Git 历史（原 docs/design/downloads-three-table-model.md，REQ-070 删除） | 历史三表→五层演进 |
 | API 契约 | `docs/architecture/api-contracts.md` | 8900 固定 API 契约（B5 待更新） |
 | 数据库总纲 | `docs/architecture/database-design.md` | 共享库总纲 |
-| 三项目对接规范 | `docs/design/service-contracts.md` | 跨项目契约+独立性铁律 |
+| 三项目对接规范 | `docs/design/cross-project-contracts.md` | 跨项目契约+独立性铁律 |
 
 ## 验证与验收
 
@@ -459,7 +459,7 @@ qed_llm_calls（探索痕迹，经 prompt_template/task/step 关联）          
 ## 关闭与归档
 
 - 关闭条件：改造清单全部完成 + 联调验收通过 + REQ-064/REQ-065 回执闭环；
-- 归档动作：本文档流程事实按归档判定并入 `docs/design/` 固定文档（预计与 course-acquisition-flow.md 合并或独立成篇），计划壳移入 `docs/history/plans/2026-08/`，todo.md Plan 行与 REQ 行同步收口。
+- 归档动作：本文档流程事实按归档判定并入 `docs/design/` 固定文档（已由 REQ-070 并入 downloads-flow.md），计划壳移入 `docs/history/plans/2026-08/`，todo.md Plan 行与 REQ 行同步收口。
 
 ---
 *本文档为流程梳理；API 五要素见 QED-Tracker api-design 与根仓库 api-contracts，DDL 见 shared-tables.md 与 database-design.md。开发顺序：本流程文档评审定稿 → UX 流程文档（PLAN-023）→ 代码改造。*

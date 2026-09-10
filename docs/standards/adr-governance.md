@@ -1,7 +1,7 @@
 # ADR 治理规范
 
 状态：Current
-最后更新：2026-08-30
+最后更新：2026-09-10
 确认状态：已确认
 治理对象：ADR 准入、全局编号、元数据、状态、取代关系与归档路径
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`
@@ -33,8 +33,10 @@ standards 的实质规则时必须新增 ADR。实现细节、操作步骤、实
 - 文件名固定为 `NNNN-lowercase-slug.md`，编号在整个仓库单调递增且进入主分支后永不复用。
 - Proposed 和 Accepted 位于 `docs/adr/`（当前版本）；Rejected 和 Superseded 立即移入
   `history/adr/<version>/`（版本结束前已归档的 ADR 按版本号分目录存放）。
-- 新 ADR 使用当前最大编号加一，并在同一变更登记 `docs/adr/index.md`；并行分支冲突在合入前
-  重新编号。新版本的 ADR 从 0001 重新开始（上一版本全部 ADR 已归档至 `history/`）。
+- 新 ADR 使用当前最大编号加一（**含 `history/adr/` 已归档编号，全局唯一、进入主分支后永不
+  复用**，由 `test_adr_governance.py` 守护），并在同一变更登记 `docs/adr/index.md`；并行分支
+  冲突在合入前重新编号。（勘误 2026-09-10，REQ-069：原「新版本的 ADR 从 0001 重新开始」
+  与全局唯一守护测试矛盾，删除。）
 - `docs/adr/index.md` 是当前版本的 ADR 登记表，声明下一个可用编号。
 
 ### 元数据与状态

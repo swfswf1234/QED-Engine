@@ -13,21 +13,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DESIGN = ROOT / "docs" / "design"
 CURRENT_DOCUMENTS = {
-    "service-contracts.md",
+    "project-configuration.md",
+    "llm-gateway.md",
+    "local-model-management.md",
+    "cross-project-contracts.md",
+    "service-hosting.md",
     "dataset-conventions.md",
-    "configuration-and-secrets.md",
-    "service-control.md",
-    "course-acquisition-flow.md",
-    "learning-center.md",
     "tech-stack.md",
-    "web-frontend.md",
-    "downloads-three-table-model.md",
-    "frontend-react-refactor.md",
-    "backend-domain-split.md",
-    "integration-matrix.md",
-    "downloads-manage-redesign.md",
-    "llm-gateway-and-model-management.md",
-    "exploration.md",
+    "admin-console.md",
+    "admin-dashboard.md",
+    "downloads-ui.md",
+    "downloads-flow.md",
+    "document-chunking-recall.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

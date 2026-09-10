@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-24
 关联 ADR：无
-关联设计：[llm-gateway-and-model-management.md](../../../design/llm-gateway-and-model-management.md)
+关联设计：[llm-gateway-and-model-management.md](../../../design/llm-gateway.md)
 关联 Tracker：docs/trackers/todo.md（REQ-060、PLAN-022）
 归档判定：完成后并入 llm-gateway-and-model-management.md，计划壳归档
 

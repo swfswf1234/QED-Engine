@@ -74,7 +74,7 @@ describe('控制台 Console（Phase 2）', () => {
     useRuntimeStore.setState({
       services: [], dbStatus: null, loading: false, error: null, dbError: null,
       gpu: null, gpuError: null, lmstudio: null, lmstudioError: null, mineru: null, mineruError: null,
-      operating: null,
+      keys: null, modelsConfig: null, testing: null, operating: null,
     });
   });
 
@@ -86,11 +86,17 @@ describe('控制台 Console（Phase 2）', () => {
     messageSpies.error.mockClear();
   });
 
-  it('渲染四服务卡 + 依赖三卡（结构化字段）；副标题全局快照语义、命名去括号、无 LLM 卡', async () => {
-    mockApi(baseRoutes);
+  it('渲染四服务卡 + 基础设施/资源监控区（三区结构）；副标题、命名去括号', async () => {
+    const routes = {
+      ...baseRoutes,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/monitor/lmstudio': { reachable: false, reason: '未启动' },
+      '/monitor/mineru': { reachable: false, reason: '未启动' },
+    };
+    mockApi(routes);
     renderConsole();
-    // 副标题（2026-08-24 用户裁决文案：区块顺序 资源总览→服务管理→组件管理）
-    expect(screen.getByText('QED服务全局俯瞰：资源总览、服务管理、组件管理')).toBeInTheDocument();
+    // 副标题
+    expect(screen.getByText('QED 服务管理 + 资源监控')).toBeInTheDocument();
     // 命名：8900/8903 无括号，8901/8902 沿用后端 label
     expect(await screen.findByText('QED 管理服务')).toBeInTheDocument();
     expect(screen.getByText('QED-Tracker 文档下载服务')).toBeInTheDocument();
@@ -102,11 +108,16 @@ describe('控制台 Console（Phase 2）', () => {
     });
     expect(screen.getAllByText(/端口 8900/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/端口 8903/).length).toBeGreaterThan(0);
-    // 依赖组件三卡：标题简化（MySQL/文字模型/图像模型），LLM 卡不在
-    expect(getDepCard('MySQL')).toBeInTheDocument();
-    expect(getDepCard('文字模型')).toBeInTheDocument();
-    expect(getDepCard('图像模型')).toBeInTheDocument();
-    expect(screen.queryByText(/LLM/)).not.toBeInTheDocument();
+    // 三区节标题：服务管理 / 基础设施 / 资源监控
+    expect(screen.getByText('服务管理')).toBeInTheDocument();
+    expect(screen.getByText('基础设施')).toBeInTheDocument();
+    expect(screen.getByText('资源监控')).toBeInTheDocument();
+    expect(screen.queryByText('服务监控')).not.toBeInTheDocument();
+    expect(screen.queryByText('本地模型')).not.toBeInTheDocument();
+    // 基础设施区：元数据库卡；资源监控区：LLM/OCR 模型卡
+    expect(getDepCard('元数据库')).toBeInTheDocument();
+    expect(getDepCard('LLM 模型')).toBeInTheDocument();
+    expect(getDepCard('OCR 模型')).toBeInTheDocument();
     // 状态与原因
     await waitFor(() => {
       expect(screen.getByText(/离线（未启动）/)).toBeInTheDocument();
@@ -188,7 +199,7 @@ describe('控制台 Console（Phase 2）', () => {
     expect(webButtons.map((b) => b.textContent).join(',')).not.toMatch(/停止/);
   });
 
-  it('8903 web 离线 → 显示启动按钮', async () => {
+  it('8903 web 离线 → 仅重启（2026-09-06 用户裁决：web 无启动，前端不可达时启动无意义）', async () => {
     const webOffline = {
       services: [
         servicesFixture.services[0],
@@ -203,11 +214,10 @@ describe('控制台 Console（Phase 2）', () => {
       expect(screen.getByText('QED 前端服务')).toBeInTheDocument();
     });
     const webCard = screen.getByText('QED 前端服务').closest('.ant-card')!;
-    const startBtn = within(webCard as HTMLElement).getByRole('button', { name: /启动/ });
-    expect(startBtn).toBeInTheDocument();
-    // 离线状态无停止/重启按钮
     const texts = within(webCard as HTMLElement).getAllByRole('button').map((b) => b.textContent).join(',');
-    expect(texts).not.toMatch(/停止|重启/);
+    // web 仅重启：无启动、无停止；离线态重启按钮仍在（重启即重新拉起）
+    expect(texts).not.toMatch(/启动|停止/);
+    expect(texts).toContain('重启');
   });
 
   it('无「重新加载页面」按钮（2026-08-24 裁决：与浏览器刷新等价，删除）；保留「刷新」', async () => {
@@ -225,7 +235,7 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.getByText(/请确认 8900 管理服务已启动/)).toBeInTheDocument();
   });
 
-  it('8900 在线但 database 失败 → 仅 MySQL 卡降级，服务卡正常展示', async () => {
+  it('8900 在线但 database 失败 → 仅元数据库卡降级，服务卡正常展示', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/services')) {
         return Promise.resolve(
@@ -241,9 +251,9 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.getByText('QED-Tracker 文档下载服务')).toBeInTheDocument();
     // 无整体错误横幅
     expect(screen.queryByText('控制台数据获取失败')).not.toBeInTheDocument();
-    // 仅 MySQL 卡降级文案（gpu/lmstudio/mineru 各自降级，不影响该断言）
-    const mysqlCard = getDepCard('MySQL');
-    expect(await within(mysqlCard).findByText('探测失败')).toBeInTheDocument();
+    // 仅元数据库卡降级文案
+    const dbCard = getDepCard('元数据库');
+    expect(await within(dbCard).findByText('探测失败')).toBeInTheDocument();
   });
 
   it('刷新按钮触发重新拉取', async () => {
@@ -318,7 +328,7 @@ describe('控制台 Console（Phase 2）', () => {
     expect(useRuntimeStore.getState().operating).toBeNull();
   });
 
-  it('资源总览卡在四服务卡之前渲染（2026-08-24 区块重排；显卡型号/显存/利用率/系统内存）', async () => {
+  it('三区结构（2026-09-06）：服务管理在前，资源监控（GPU 状态 + 模型卡）殿后', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
@@ -339,31 +349,28 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(routes);
     renderConsole();
-    // 卡片标题：资源总览（精确匹配，避免命中含同词的副标题；旧名与刷新周期字样不再出现）
-    expect(await screen.findByText('资源总览')).toBeInTheDocument();
-    expect(screen.queryByText(/GPU 总览/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/显存构成/)).not.toBeInTheDocument();
-    // 总览条内容：显卡型号 / 显存 used/total / 利用率 / 系统内存 / 模型进程
-    expect(screen.getByText(/4096 \/ 16376/)).toBeInTheDocument();
+    // GPU 状态卡标题
+    expect(await screen.findByText('GPU 状态')).toBeInTheDocument();
+    expect(screen.queryByText(/资源总览/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/服务监控/)).not.toBeInTheDocument();
+    // GB 格式
+    expect(screen.getByText(/4\.0 GB \/ 16\.0 GB/)).toBeInTheDocument();
     expect(screen.getByText(/65%/)).toBeInTheDocument();
-    expect(screen.getByText(/45%/)).toBeInTheDocument();
-    expect(screen.getByText(/模型进程/)).toBeInTheDocument();
-    // 顺序（2026-08-24 用户裁决）：资源总览在最前，四服务卡在后
+    // 顺序：服务管理在前，资源监控其后
     const svcCards = ['QED 管理服务', 'QED-Tracker 文档下载服务', 'Axiom-Flow 文档解析服务', 'QED 前端服务']
       .map((name) => screen.getByText(name).closest('.ant-card')!);
     const gpuCard = screen.getByText(/RTX 4080/).closest('.ant-card')!;
     svcCards.forEach((card) => {
-      expect(card.compareDocumentPosition(gpuCard)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+      expect(card.compareDocumentPosition(gpuCard)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     });
-    // 分节标题（2026-08-24 用户裁决）：「服务管理」隔开资源总览与四服务卡
-    const svcSectionTitle = screen.getByText('服务管理');
-    expect(gpuCard.compareDocumentPosition(svcSectionTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    svcCards.forEach((card) => {
-      expect(svcSectionTitle.compareDocumentPosition(card)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    });
+    // 分节标题：服务管理 / 基础设施 / 资源监控 齐备
+    expect(screen.getByText('服务管理')).toBeInTheDocument();
+    expect(screen.getByText('基础设施')).toBeInTheDocument();
+    expect(screen.getByText('资源监控')).toBeInTheDocument();
+    expect(screen.queryByText('本地模型')).not.toBeInTheDocument();
   });
 
-  it('GPU 显存构成饼图：进程切片 + 系统·图形占用片 + 非模型任务提示（REQ-038）', async () => {
+  it('GPU 全量内存占比饼图：模型占用/其他/空闲 三色切片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
       '/monitor/lmstudio': { reachable: false, reason: '未启动' },
@@ -386,20 +393,23 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(gpuRoutes);
     renderConsole();
-    // 饼图渲染：切片 = LM Studio(3000) + chrome.exe(500) + 系统·图形占用(16376-3500=12876)
+    // 饼图：模型占用(3000) + 其他(500) + 空闲(16376-3500=12876)
     const chart = await screen.findByTestId('echart');
     const series = JSON.parse(chart.getAttribute('data-series') ?? '[]');
     expect(series).toHaveLength(1);
     const sliceNames = (series[0].data as Array<{ name: string; value: number }>).map((d) => d.name);
-    expect(sliceNames).toEqual(['LM Studio', 'chrome.exe', '系统·图形占用']);
-    // 非模型任务清单（逐行，2026-08-24 换行契约）：chrome.exe → 浏览器进程，占比 = 500/16376 ≈ 3%
-    expect(await screen.findByText('非模型任务')).toBeInTheDocument();
-    expect(screen.getByText(/浏览器进程 500 MB（3%）/)).toBeInTheDocument();
-    // <95%：无警告 Alert
+    expect(sliceNames).toEqual(['模型占用', '其他', '空闲']);
+    // 图例
+    expect(screen.getByText('模型占用')).toBeInTheDocument();
+    expect(screen.getByText('其他')).toBeInTheDocument();
+    expect(screen.getByText('空闲')).toBeInTheDocument();
+    // 无进程清单、无警告
+    expect(screen.queryByText('模型进程')).not.toBeInTheDocument();
+    expect(screen.queryByText('非模型任务')).not.toBeInTheDocument();
     expect(screen.queryByText(/已接近满载/)).not.toBeInTheDocument();
   });
 
-  it('显存占用 ≥95% → 卡内常驻警告 Alert 并列出非模型任务；正常占比无 Alert', async () => {
+  it('显存占用 ≥95%：无警告 Alert（已移除进程清单与警告功能）', async () => {
     const gpuRoutes = {
       ...baseRoutes,
       '/monitor/lmstudio': { reachable: false, reason: '未启动' },
@@ -422,12 +432,10 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(gpuRoutes);
     renderConsole();
-    // ≥95%（97%）→ 警告 Alert：占比 + 非模型任务清单（逐行；some_game.exe 非浏览器/系统 → 保留短名）
-    expect(
-      await screen.findByText(/显存占用 97%（9700 \/ 10000 MB），已接近满载/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/检测到非模型任务占用显存/)).toBeInTheDocument();
-    expect(screen.getByText(/some_game\.exe 1200 MB（12%）/)).toBeInTheDocument();
+    await screen.findByTestId('echart');
+    // 无警告 Alert（已移除）
+    expect(screen.queryByText(/已接近满载/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/检测到非模型任务占用显存/)).not.toBeInTheDocument();
   });
 
   it('fetchGpu 独立刷新：仅重拉 /monitor/gpu 并更新 store（60s 定时器数据源）', async () => {
@@ -457,7 +465,7 @@ describe('控制台 Console（Phase 2）', () => {
     expect(useRuntimeStore.getState().gpuError).toBeNull();
   });
 
-  it('WDDM 模式（每进程显存 [N/A]=null）：饼图退化为已用/空闲两片，非模型清单仍可见', async () => {
+  it('WDDM 模式（每进程显存 [N/A]=null）：饼图退化为模型占用/空闲两片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
       '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
@@ -482,31 +490,19 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(gpuRoutes);
     renderConsole();
-    // 饼图退化为 已用/空闲 两片（无任何有效每进程 MB）
+    // 饼图退化为 模型占用/空闲 两片（无任何有效每进程 MB）
     const chart = await screen.findByTestId('echart');
     const series = JSON.parse(chart.getAttribute('data-series') ?? '[]');
     const slices = series[0].data as Array<{ name: string; value: number; itemStyle: { color: string } }>;
-    expect(slices.map((d) => d.name)).toEqual(['已用', '空闲']);
-    // 颜色契约（2026-08-23 用户裁决）：已用=模型蓝、空闲=绿
+    expect(slices.map((d) => d.name)).toEqual(['模型占用', '空闲']);
     expect(slices[0].itemStyle.color).toBe('#5b8ff9');
     expect(slices[1].itemStyle.color).toBe('#52c41a');
-    // 模型进程区在前：短名 + 同名 ×N 聚合；每进程独立一行（2026-08-24 换行契约）
-    expect(await screen.findByText('模型进程')).toBeInTheDocument();
-    expect(screen.getByText(/LM Studio\.exe ×2 占比未知/)).toBeInTheDocument();
-    // 非模型任务区在后：友好分类（chrome→浏览器进程、explorer→Windows 进程）+ 占比未知
-    expect(screen.getByText('非模型任务')).toBeInTheDocument();
-    expect(screen.getByText(/浏览器进程 占比未知/)).toBeInTheDocument();
-    expect(screen.getByText(/Windows 进程 占比未知/)).toBeInTheDocument();
-    expect(screen.queryByText(/chrome\.exe/)).not.toBeInTheDocument();
-    // 排序契约：模型进程区块在非模型任务区块之前（2026-08-23 用户裁决）
-    const modelLabel = screen.getByText('模型进程');
-    const otherLabel = screen.getByText('非模型任务');
-    expect(otherLabel.compareDocumentPosition(modelLabel)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
-    // <95%（28%）：无警告 Alert
-    expect(screen.queryByText(/已接近满载/)).not.toBeInTheDocument();
+    // 无进程清单
+    expect(screen.queryByText('模型进程')).not.toBeInTheDocument();
+    expect(screen.queryByText('非模型任务')).not.toBeInTheDocument();
   });
 
-  it('依赖三卡结构化字段：来源/类型/可达四态/备注；测试动作点亮并更新备注', async () => {
+  it('基础设施（元数据库）+ 模型卡（LLM/OCR）结构化字段：来源/模型/可达/备注；测试动作点亮', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
@@ -520,11 +516,11 @@ describe('控制台 Console（Phase 2）', () => {
     mockApi(routes);
     renderConsole();
     // 三卡齐备
-    expect(await getDepCard('MySQL')).toBeInTheDocument();
-    const mysqlCard = getDepCard('MySQL');
-    const textCard = getDepCard('文字模型');
-    const visionCard = getDepCard('图像模型');
-    // 等三路探测数据落库（避免可达/备注断言落在「探测中…」瞬态）
+    expect(await getDepCard('元数据库')).toBeInTheDocument();
+    const dbCard = getDepCard('元数据库');
+    const textCard = getDepCard('LLM 模型');
+    const visionCard = getDepCard('OCR 模型');
+    // 等三路探测数据落库
     await waitFor(() => {
       const s = useRuntimeStore.getState();
       expect(s.dbStatus).not.toBeNull();
@@ -532,37 +528,33 @@ describe('控制台 Console（Phase 2）', () => {
       expect(s.mineru).not.toBeNull();
     });
     // 字段行·来源：三卡均「本地」
-    expect(within(mysqlCard).getByText('来源')).toBeInTheDocument();
-    expect(within(mysqlCard).getByText('本地')).toBeInTheDocument();
+    expect(within(dbCard).getByText('本地')).toBeInTheDocument();
     expect(within(textCard).getByText('本地')).toBeInTheDocument();
     expect(within(visionCard).getByText('本地')).toBeInTheDocument();
-    // 字段行·类型：LM Studio / MinerU 唯一；MySQL 与标题同文 → 标题+类型共 2 处
-    expect(within(textCard).getByText('LM Studio')).toBeInTheDocument();
+    // 字段行·模型：LLM 显示探测到的模型名或「未加载」；OCR 显示 MinerU
+    expect(within(textCard).getByText('未加载')).toBeInTheDocument();
     expect(within(visionCard).getByText('MinerU')).toBeInTheDocument();
-    expect(within(mysqlCard).getAllByText('MySQL')).toHaveLength(2);
-    // 可达四态（初始探测结果）：可达未验证=在线 · 未验证；不可达=离线
-    expect(within(mysqlCard).getByText('在线 · 未验证')).toBeInTheDocument();
+    // 可达四态
+    expect(within(dbCard).getByText('在线 · 未验证')).toBeInTheDocument();
     expect(within(textCard).getByText('离线')).toBeInTheDocument();
     expect(within(visionCard).getByText('离线')).toBeInTheDocument();
-    // 备注：探测 reason 透出，空 reason 显示 —
-    expect(within(mysqlCard).getByText('—')).toBeInTheDocument();
+    // 备注
+    expect(within(dbCard).getByText('—')).toBeInTheDocument();
     expect(within(textCard).getByText('超时')).toBeInTheDocument();
     expect(within(visionCard).getByText('mineru docker 容器未启动')).toBeInTheDocument();
-    // MySQL 卡「测试」→ POST /database/test → 已验证在线 + 备注更新为响应 detail
+    // 元数据库「测试」→ POST /database/test → 已验证在线
     const callsBefore = mockFetch.mock.calls.length;
-    await userEvent.setup().click(within(mysqlCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
-    expect(await within(mysqlCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
-    expect(within(mysqlCard as HTMLElement).getByText('连接正常')).toBeInTheDocument();
-    expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+    await userEvent.setup().click(within(dbCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
+    expect(await within(dbCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
+    expect(within(dbCard as HTMLElement).getByText('连接正常')).toBeInTheDocument();
     expect(String(mockFetch.mock.calls[callsBefore][0])).toContain('/database/test');
-    // 文字模型卡「测试」→ POST /llm/test/text；LM Studio 探测离线 → 可达保持离线
-    // （探测优先，陈旧守卫），测试结论并入备注（2026-08-24 模式感知语义）
+    // LLM 模型「测试」→ POST /llm/test/text；探测离线 → 可达保持离线
     const callsBeforeText = mockFetch.mock.calls.length;
     await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(textCard as HTMLElement).findByText(/^最近测试通过：模型响应正常$/)).toBeInTheDocument();
     expect(within(textCard as HTMLElement).getByText('离线')).toBeInTheDocument();
     expect(String(mockFetch.mock.calls[callsBeforeText][0])).toContain('/llm/test/text');
-    // 图像模型卡「测试」→ POST /llm/test/vision；MinerU 探测离线同理
+    // OCR 模型「测试」→ POST /llm/test/vision
     const callsBeforeVision = mockFetch.mock.calls.length;
     await userEvent.setup().click(within(visionCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(visionCard as HTMLElement).findByText(/^最近测试通过：识别成功$/)).toBeInTheDocument();
@@ -581,19 +573,17 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('文字模型');
-    // local 模式：类型行仍为 LM Studio
-    expect(await within(textCard as HTMLElement).findByText('LM Studio')).toBeInTheDocument();
+    const textCard = getDepCard('LLM 模型');
     // 初始：可达但未验证，备注空 → —
     expect(await within(textCard as HTMLElement).findByText('在线 · 未验证')).toBeInTheDocument();
-    expect(within(textCard as HTMLElement).getByText('—')).toBeInTheDocument();
+    expect(within(textCard as HTMLElement).getAllByText('—').length).toBeGreaterThanOrEqual(1);
     // 点击测试 → 失败分支：可达=验证失败（红），备注=detail
     await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(textCard as HTMLElement).findByText('验证失败')).toBeInTheDocument();
     expect(within(textCard as HTMLElement).getByText('鉴权失败')).toBeInTheDocument();
   });
 
-  it('api 模式：文字/图像卡类型标注云端厂商，不显示本地探测离线（模式感知，2026-08-24）', async () => {
+  it('api 模式：模型卡显示云端模型名（/config/models），不显示本地探测离线（模式感知，2026-08-24）', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
@@ -601,14 +591,19 @@ describe('控制台 Console（Phase 2）', () => {
       '/monitor/lmstudio': { reachable: false, reason: '未启动' },
       '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
       '/config/keys': { provider: 'qwen', configured: true, mode: 'api' },
+      '/config/models': {
+        default: { model: 'qwen3.8-27b', provider: 'qwen', configured: true },
+        ocr: { model: 'qwen-vl-plus', provider: 'qwen', configured: true },
+        embedding: { model: 'text-embedding-v4', provider: 'qwen', configured: true },
+      },
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('文字模型');
-    const visionCard = getDepCard('图像模型');
-    // 类型行跟随运行模式：云端 · qwen（provider 来自 /config/keys）
-    expect(await within(textCard as HTMLElement).findByText('云端 · qwen')).toBeInTheDocument();
-    expect(await within(visionCard as HTMLElement).findByText('云端 · qwen')).toBeInTheDocument();
+    const textCard = getDepCard('LLM 模型');
+    const visionCard = getDepCard('OCR 模型');
+    // 模型名来自 /config/models
+    expect(await within(textCard as HTMLElement).findByText('qwen3.8-27b')).toBeInTheDocument();
+    expect(await within(visionCard as HTMLElement).findByText('qwen-vl-plus')).toBeInTheDocument();
     // 可达初始：云端 · 未验证（而非本地探测的「离线」）
     expect(within(textCard as HTMLElement).getByText('云端 · 未验证')).toBeInTheDocument();
     expect(within(visionCard as HTMLElement).getByText('云端 · 未验证')).toBeInTheDocument();
@@ -626,7 +621,7 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('文字模型');
+    const textCard = getDepCard('LLM 模型');
     // 测试通过 → 已验证在线
     await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(textCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();

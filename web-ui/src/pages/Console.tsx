@@ -13,12 +13,12 @@ import {
 import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
 import { selfRestart, type ServiceOp } from '../api/services';
-import type { ServiceStatus } from '../stores';
+import type { ModelName, ModelOp, ServiceStatus } from '../stores';
 
 const { Title, Text } = Typography;
 
 /** 操作中文名映射（message 提示用） */
-const OP_LABELS: Record<ServiceOp, string> = {
+const OP_LABELS: Record<ServiceOp | ModelOp, string> = {
   start: '启动',
   stop: '停止',
   restart: '重启',
@@ -51,8 +51,10 @@ function ServiceCard({
   onRestartConfig: () => void;
 }) {
   const isTransition = svc.status === 'starting' || svc.status === 'stopping';
-  const controllable = svc.name !== 'config' && !operating && !isTransition;
+  const controllable = svc.name !== 'config' && svc.name !== 'web' && !operating && !isTransition;
   const canStop = svc.name === 'tracker' || svc.name === 'axiom';
+  /** web 仅重启（2026-09-06 用户裁决）：web 未启动时前端页面不可达，启动无意义；恒仅重启。 */
+  const restartOnly = svc.name === 'config' || svc.name === 'web';
 
   return (
     <Card size="small" title={displayName(svc)}>
@@ -81,8 +83,9 @@ function ServiceCard({
               </Button>
             </>
           )}
-          {svc.name === 'config' && (
-            <Button size="small" icon={<SyncOutlined />} onClick={onRestartConfig}>
+          {restartOnly && (
+            <Button size="small" icon={<SyncOutlined />}
+              onClick={svc.name === 'config' ? onRestartConfig : () => onConfirm('restart')}>
               重启
             </Button>
           )}
@@ -94,7 +97,7 @@ function ServiceCard({
 }
 
 /**
- * 依赖组件卡（MySQL/文字模型/图像模型，2026-08-24 结构化重构 + 模式感知）：
+ * 依赖组件卡（元数据库，2026-08-24 结构化重构 + 模式感知）：
  * - 字段行：来源（静态 prop，本地/云端）/ 类型（服务标识，api 模式模型卡显示云端厂商）/
  *   可达 / 备注（单行省略，悬停看全文）
  * - 可达判定（模式感知，修复「LM Studio 未启动却显示已验证在线」错位 bug）：
@@ -183,6 +186,91 @@ function DependencyCard({
 }
 
 /**
+ * 模型卡（2026-09-06 重构：LLM模型 / OCR模型，显示来源、类型、模型名称、可达、备注）
+ * - local 模式：启动/停止/重启 + 测试
+ * - api 模式：云端厂商（仅测试，无启停）
+ * - 操作经 /models/{name}/{op}（8900 聚合，资源互斥在 model_manager）
+ */
+function ModelCard({
+  label, icon, origin, modelName, cloud, probe, probeError, testing, operating,
+  onTest, onOperate,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  origin: string;
+  modelName: string;
+  cloud: boolean;
+  probe: { reachable: boolean; reason?: string } | null;
+  probeError: string | null;
+  testing: boolean;
+  operating: boolean;
+  onTest: () => Promise<LlmTestOutcome>;
+  onOperate: (op: ModelOp) => void;
+}) {
+  const { message } = App.useApp();
+  const [outcome, setOutcome] = useState<LlmTestOutcome | null>(null);
+
+  const run = async () => {
+    const res = await onTest();
+    setOutcome(res);
+    if (res.ok) message.success(`「${label}」测试通过`);
+    else message.warning(`「${label}」测试失败：${res.detail || '未知原因'}`);
+  };
+
+  /** 可达文案（沿用旧 DependencyCard 语义）：探测优先，离线→离线/探测失败；cloud→云端 */
+  const probeOffline = probeError != null || (probe != null && !probe.reachable);
+  let reach: React.ReactNode;
+  let remark: string;
+  if (cloud) {
+    reach = outcome ? (outcome.ok ? <Text type="success">已验证在线</Text> : <Text type="danger">验证失败</Text>)
+      : <Text type="secondary">云端 · 未验证</Text>;
+    remark = outcome?.detail ?? '—';
+  } else if (probeOffline) {
+    reach = probeError ? <Text type="secondary">探测失败</Text> : <Text type="secondary">离线</Text>;
+    remark = outcome ? (outcome.ok ? `最近测试通过：${outcome.detail}` : `最近测试失败：${outcome.detail}`)
+      : (probeError || probe?.reason || '—');
+  } else if (outcome) {
+    reach = outcome.ok ? <Text type="success">已验证在线</Text> : <Text type="danger">验证失败</Text>;
+    remark = outcome.detail || '—';
+  } else if (!probe) {
+    reach = <Text type="secondary">探测中…</Text>;
+    remark = '—';
+  } else {
+    reach = <Text type="secondary">在线 · 未验证</Text>;
+    remark = probe.reason || '—';
+  }
+
+  return (
+    <Card size="small" title={<Space>{icon}<span>{label}</span></Space>}>
+      <Descriptions size="small" column={1} colon={false}>
+        <Descriptions.Item label="来源">{origin}</Descriptions.Item>
+        <Descriptions.Item label="模型">{modelName}</Descriptions.Item>
+        <Descriptions.Item label="可达">{reach}</Descriptions.Item>
+        <Descriptions.Item label="备注">{remark}</Descriptions.Item>
+      </Descriptions>
+      <Space wrap style={{ marginTop: 8 }}>
+        {!cloud && (
+          <>
+            <Button size="small" type="primary" icon={<PoweroffOutlined />} loading={operating} onClick={() => onOperate('start')}>
+              启动
+            </Button>
+            <Button size="small" icon={<PoweroffOutlined />} loading={operating} onClick={() => onOperate('stop')}>
+              停止
+            </Button>
+            <Button size="small" icon={<SyncOutlined />} loading={operating} onClick={() => onOperate('restart')}>
+              重启
+            </Button>
+          </>
+        )}
+        <Button size="small" loading={testing} onClick={() => void run()}>
+          测试
+        </Button>
+      </Space>
+    </Card>
+  );
+}
+
+/**
  * 控制台（`#/admin`）
  * - 数据源：全局 runtime store（AdminLayout 进入管理台拉取一次，本页挂载补拉保新鲜；
  *   GPU 显存构成 60s 定时刷新）
@@ -190,17 +278,17 @@ function DependencyCard({
  *   页面按钮动作下沉（方案 A，2026-08-24）；「重新加载页面」已删（与浏览器刷新等价）
  * - 四服务卡：8900 恒在线（重启经 /self-restart，成功后自动刷新）/ 8901·8902 启停重启（确认框 +
  *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；web 兜底合并见 runtime store）
- * - 区块顺序（2026-08-24 用户裁决）：资源总览 → 服务管理（节标题）→ 四服务卡 → 依赖组件三卡
- * - 资源总览卡：/monitor/gpu（原「GPU 总览」；组件独立模块 components/GpuOverview）
- * - 依赖组件三卡：本地 MySQL（/config/database）+ 文字模型（/monitor/lmstudio）+ 图像模型
- *   （/monitor/mineru），默认置灰未验证，「测试」按钮即时验证点亮（各失败仅降级本卡）
+ * - 区块顺序：服务管理 → 基础设施 → 资源监控（GPU 状态 + LLM/OCR 模型卡）
+ * - GPU 状态卡：/monitor/gpu（组件独立模块 components/GpuOverview）
+ * - 模型卡：LLM 模型（/monitor/lmstudio）+ OCR 模型（/monitor/mineru），
+ *   默认置灰未验证，「测试」按钮即时验证点亮（各失败仅降级本卡）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
  */
 export default function Console() {
   const {
     services, dbStatus, gpu, gpuError, lmstudio, lmstudioError, mineru, mineruError,
-    keys, loading, error, dbError, operating, testing, fetchAll, fetchGpu, operate,
-    testDatabase, testText, testVision,
+    keys, modelsConfig, loading, error, dbError, operating, testing, fetchAll, fetchGpu, operate,
+    operateModel, testDatabase, testText, testVision,
   } = useRuntimeStore();
   const { message } = App.useApp();
 
@@ -218,10 +306,21 @@ export default function Console() {
 
   const cards = useMemo(() => withWebServiceFallback(services), [services]);
 
-  // 模式感知（2026-08-24）：api 模式下文字/图像模型为云端厂商，类型行标注且不采信本地探测；
+  // 模式感知（2026-08-24）：api 模式下文字/图像模型为云端厂商，不采信本地探测；
   // mode 未加载（null）按 local 语义兜底
   const cloudModels = keys?.mode === 'api';
-  const providerLabel = `云端 · ${keys?.provider ?? '厂商未配置'}`;
+
+  /** 模型操作（/models/{name}/{op}，消息提示；确认框在受控 Modal 复用 ServiceOp 模型） */
+  const onModelOperate = async (name: ModelName, op: ModelOp) => {
+    const result = await operateModel(name, op);
+    const label = name === 'qwen' ? 'Qwen（LM Studio）' : 'MinerU';
+    const opLabel = OP_LABELS[op];
+    if (result.success) {
+      message.success(`「${label}」${opLabel}成功（${result.status}）`);
+    } else {
+      message.warning(`「${label}」${opLabel}未生效：${result.reason ?? '状态未收敛'}`);
+    }
+  };
 
   /** 统一成功/失败提示（2026-08-17 用户裁决：只提示收敛结果；失败统一用 message） */
   const notifyResult = (result: OperateResult) => {
@@ -274,7 +373,7 @@ export default function Console() {
         </Button>
       </div>
       <Text type="secondary" style={{ display: 'block', marginBottom: 16, marginTop: 8 }}>
-        QED服务全局俯瞰：资源总览、服务管理、组件管理
+        QED 服务管理 + 资源监控
       </Text>
 
       {error && (
@@ -285,9 +384,7 @@ export default function Console() {
         />
       )}
 
-      <GpuOverview gpu={gpu} gpuError={gpuError} />
-
-      {/* 分节标题（2026-08-24 用户裁决）：隔开资源总览与服务管理 */}
+      {/* ①服务管理（四服务卡；web仅重启，config仅重启） */}
       <Title level={4} style={{ marginTop: 24 }}>服务管理</Title>
       <Row gutter={[16, 16]}>
         {cards.map((svc) => (
@@ -318,48 +415,61 @@ export default function Console() {
               : '重启会中断当前运行中的任务。'}
         </Modal>
 
-        <Title level={4} style={{ marginTop: 24 }}>依赖组件</Title>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={12} xl={8}>
-            <DependencyCard
-              name="MySQL"
-              icon={<DatabaseOutlined />}
-              origin="本地"
-              svcType="MySQL"
-              cloud={false}
-              probe={dbStatus}
-              probeError={dbError}
-              testing={testing === 'db'}
-              onTest={testDatabase}
-            />
-          </Col>
-          <Col xs={24} md={12} xl={8}>
-            <DependencyCard
-              name="文字模型"
-              icon={<RobotOutlined />}
-              origin={cloudModels ? '云端' : '本地'}
-              svcType={cloudModels ? providerLabel : 'LM Studio'}
-              cloud={cloudModels}
-              probe={lmstudio}
-              probeError={lmstudioError}
-              testing={testing === 'text'}
-              onTest={testText}
-            />
-          </Col>
-          <Col xs={24} md={12} xl={8}>
-            <DependencyCard
-              name="图像模型"
-              icon={<PictureOutlined />}
-              origin={cloudModels ? '云端' : '本地'}
-              svcType={cloudModels ? providerLabel : 'MinerU'}
-              cloud={cloudModels}
-              probe={mineru}
-              probeError={mineruError}
-              testing={testing === 'vision'}
-              onTest={testVision}
-            />
-          </Col>
-        </Row>
+      {/* ②基础设施（元数据库：只读探测 + 测试，本期不做启停） */}
+      <Title level={4} style={{ marginTop: 24 }}>基础设施</Title>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={12} xl={8}>
+          <DependencyCard
+            name="元数据库"
+            icon={<DatabaseOutlined />}
+            origin="本地"
+            svcType="MySQL"
+            cloud={false}
+            probe={dbStatus}
+            probeError={dbError}
+            testing={testing === 'db'}
+            onTest={testDatabase}
+          />
+        </Col>
+      </Row>
+
+      {/* ③资源监控（GPU 状态 + 本地模型） */}
+      <Title level={4} style={{ marginTop: 24 }}>资源监控</Title>
+      <GpuOverview gpu={gpu} gpuError={gpuError} />
+
+      {/* 本地模型（LLM / OCR：启停/重启 + 测试；api 模式仅测试）——紧跟 GPU 状态卡 */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} md={12} xl={8}>
+          <ModelCard
+            label="LLM 模型"
+            icon={<RobotOutlined />}
+            origin={cloudModels ? '云端' : '本地'}
+            modelName={cloudModels ? (modelsConfig?.default?.model ?? '未配置') : (lmstudio?.models?.[0] ?? '未加载')}
+            cloud={cloudModels}
+            probe={lmstudio}
+            probeError={lmstudioError}
+            testing={testing === 'text'}
+            operating={operating === 'qwen'}
+            onTest={testText}
+            onOperate={(op) => void onModelOperate('qwen', op)}
+          />
+        </Col>
+        <Col xs={24} md={12} xl={8}>
+          <ModelCard
+            label="OCR 模型"
+            icon={<PictureOutlined />}
+            origin={cloudModels ? '云端' : '本地'}
+            modelName={cloudModels ? (modelsConfig?.ocr?.model ?? '未配置') : 'MinerU'}
+            cloud={cloudModels}
+            probe={mineru}
+            probeError={mineruError}
+            testing={testing === 'vision'}
+            operating={operating === 'mineru'}
+            onTest={testVision}
+            onOperate={(op) => void onModelOperate('mineru', op)}
+          />
+        </Col>
+      </Row>
     </Layout.Content>
   );
 }

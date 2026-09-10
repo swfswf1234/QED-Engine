@@ -8,6 +8,7 @@ nvidia-smi 命令执行（runner）与 httpx transport 可注入（测试）。
 关联测试：tests/test_monitor.py
 """
 
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -89,12 +90,117 @@ def probe_memory() -> dict:
         return {"available": False, "reason": f"内存探测失败：{type(exc).__name__}"}
 
 
-def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None = None) -> dict:
-    """nvidia-smi 解析：available=false 附中文原因（不存在/无 GPU/解析失败）。"""
+# --- Windows PDH 计数器（Task 1，2026-09-06）---
+# 背景：WDDM 模式下 nvidia-smi 逐进程显存全为 [N/A]（驱动限制），导致控制台「占比未知」。
+# 改用 Windows 性能计数器（任务管理器同源）：\\GPU Process Memory(*)\\Dedicated Usage 取逐进程
+# 专用显存（分配口径），\\GPU Engine(*)\\Utilization Percentage 取真实利用率（WDDM 失真替代）。
+# 本机实测（2026-08-21）：nvidia-smi utilization=8% 失真，GPU Engine 空闲 ≈0.2%；Dedicated Usage
+# 按 pid 给显存（如 LM Studio 后端 pid=1580MB）。两口径（物理驻留 vs 分配）说明见计划文档。
+PDH_MEM_PATH = r"\GPU Process Memory(*)\Dedicated Usage"
+PDH_UTIL_PATH = r"\GPU Engine(*)\Utilization Percentage"
+
+
+def _run_pdh(path: str, runner=None) -> str:
+    """subprocess 调 PowerShell Get-Counter（5.1 参数名 -Counter）取计数样例；失败尽力返回 ""。
+
+    runner 注入约定与 _run_smi 一致：返回输出字符串（真实 subprocess.run 内部取 stdout，
+    测试直接返回伪字符串）。超时/失败返回空串。
+    """
+    run = runner or subprocess.run
+    try:
+        result = run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$c = Get-Counter -Counter '{path}'; "
+             f"$c.CounterSamples | ForEach-Object {{ \"$($_.InstanceName): $([math]::Round($_.CookedValue,1))\" }}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.stdout if isinstance(result, subprocess.CompletedProcess) else result
+    except (FileNotFoundError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return ""
+
+
+def parse_pdh_process_memory(out: str) -> dict[int, float]:
+    """解析 \\GPU Process Memory Dedicated Usage：按 pid 聚合并取同 pid 各 luid/phys 实例最大值。
+
+    CookedValue 单位为字节（Windows PERF_COUNTER_LARGE_RAWCOUNT），本函数转为 MB 输出。
+    输出行形如：`pid_10396_luid_0x00000000_0x00010c6e_phys_0: 331485696.0`（字节，Get-Counter Round 到 1 位）。
+    同 pid 可能有多 luid/phys 实例（如 0x00010c6e 主 GPU 上下文中非零、其它上下文为 0）——取最大。
+    """
+    BYTES_PER_MB = 1024 * 1024
+    per_pid: dict[int, float] = {}
+    for line in out.splitlines():
+        m = re.match(r"\s*pid_(\d+)_luid_.+?_phys_\d+:\s*([\d.]+)", line)
+        if not m:
+            continue
+        pid, raw_bytes = int(m.group(1)), float(m.group(2))
+        per_pid[pid] = max(per_pid.get(pid, 0.0), raw_bytes / BYTES_PER_MB)
+    return per_pid
+
+
+def parse_pdh_utilization(out: str) -> float | None:
+    """解析 \\GPU Engine Utilization Percentage：取非零 sample 最大值（代表 GPU 总体活动）。
+
+    输出行形如：`luid=pid_29052_luid_0x00000000_0x00010c6e_phys_0_eng_0_engtype_3d util=0.2`。
+    引擎分 3d/copy/video 等类型，任务管理器同源口径按物理 GPU 上下文取非零最大值。
+    """
+    vals: list[float] = []
+    for line in out.splitlines():
+        m = re.match(r"\s*luid=pid_\d+_luid_.+?_phys_\d+_eng_\d+_engtype_\w+ util=([\d.]+)", line)
+        if not m:
+            continue
+        vals.append(float(m.group(1)))
+    return max(vals) if vals else None
+
+
+def probe_pdh(runner=None) -> dict:
+    """Windows PDH：逐进程专用显存（分配口径映射）+ GPU 利用率（任务管理器同源）。
+
+    任一探测失败（PowerShell 缺失/超时/解析为空）尽力降级：processes_mb 为空、utilization None；
+    不抛异常，供 probe_gpu 集成时回落 nvidia-smi 口径。
+    """
+    return {
+        "processes_mb": parse_pdh_process_memory(_run_pdh(PDH_MEM_PATH, runner)),
+        "utilization_percent": parse_pdh_utilization(_run_pdh(PDH_UTIL_PATH, runner)),
+    }
+
+
+def resolve_process_name(pid: int, runner=None) -> str | None:
+    """按 pid 经 tasklist CSV 补全进程真实名（Windows）；失败/未找到返回 None。
+
+    背景（Task 3，2026-09-06）：WDDM 下 nvidia-smi 对系统/受限进程显示 `[Insufficient Permissions]`，
+    tasklist 能按 pid 取真实名（如 LM Studio.exe）。runner 可注入（测试）；失败不抛异常。
+    """
+    run = runner or subprocess.run
+    try:
+        result = run(["tasklist", "/FO", "CSV", "/NH", "/FI", f"PID eq {pid}"],
+                     capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    stdout = result.stdout if isinstance(result, subprocess.CompletedProcess) else result
+    for line in stdout.splitlines():
+        parts = line.split('","')
+        if len(parts) >= 2 and parts[1].strip('"') == str(pid):
+            return parts[0].strip('"')
+    return None
+
+
+def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None = None,
+              pdh_fn: Callable[[], dict] | None = None,
+              tasklist_fn: Callable[[int], str | None] | None = None) -> dict:
+    """nvidia-smi 解析 + PDH 集成：available=false 附中文原因（不存在/无 GPU/解析失败）。
+
+    PDH 集成（2026-09-06，Task 2）：进程 memory_mb 用 PDH 分配口径（按 pid 匹配，缺失回落 None），
+    利用率用 PDH（任务管理器同源，WDDM 失真替代），响应带 utilization_source。PDH 不可用时回落
+    nvidia-smi 口径。pdh_fn 可注入（测试）；缺省 probe_pdh。
+    """
     runner = runner or _run_smi
+    pdh_runner = pdh_fn or probe_pdh
     try:
         gpu_out = runner(["nvidia-smi", "--query-gpu=" + GPU_QUERY, "--format=csv,noheader,nounits"])
         proc_out = runner(["nvidia-smi", "--query-compute-apps=" + PROC_QUERY, "--format=csv,noheader,nounits"])
+        pdh_result = pdh_runner()
+        proc_mb = pdh_result.get("processes_mb", {})
+        pdh_util = pdh_result.get("utilization_percent")
     except FileNotFoundError:
         return {"available": False, "reason": "nvidia-smi 不存在（未安装 NVIDIA 驱动）"}
     except OSError as exc:
@@ -122,25 +228,42 @@ def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None
                 pid_num = int(pid)
             except ValueError:
                 continue
+            # Task 3（2026-09-06）：[Insufficient Permissions] 名补全为真实进程名（tasklist 按 pid）。
+            # 补全结果影响后续 append 的 name 与 kind 分类（真实名才能正确归类模型进程）。
+            if pname == "[Insufficient Permissions]":
+                resolved = (tasklist_fn or resolve_process_name)(pid_num)
+                if resolved:
+                    pname = resolved
             # Windows WDDM 模式下 used_memory 常为 [N/A]/[Insufficient Permissions]：
             # 显存数值拿不到，但进程清单与名称可得——保留行（memory_mb=None）供
             # 「非模型任务」清单识别（REQ-038 用户核心诉求），不参与前端 MB 聚合
-            if mem in ("[N/A]", "[Insufficient Permissions]", ""):
+            # PDH 集成（Task 2）：memory_mb 用 PDH 分配口径按 pid 匹配，缺失回落 None
+            pdh_mb = proc_mb.get(pid_num)
+            if pdh_mb is not None:
+                processes.append(
+                    {"pid": pid_num, "name": pname, "memory_mb": pdh_mb, "kind": classify_process(pname)}
+                )
+            elif mem in ("[N/A]", "[Insufficient Permissions]", ""):
                 processes.append(
                     {"pid": pid_num, "name": pname, "memory_mb": None, "kind": classify_process(pname)}
                 )
-                continue
-            processes.append(
-                {"pid": pid_num, "name": pname, "memory_mb": int(float(mem)), "kind": classify_process(pname)}
-            )
+            else:
+                processes.append(
+                    {"pid": pid_num, "name": pname, "memory_mb": int(float(mem)), "kind": classify_process(pname)}
+                )
     except (ValueError, IndexError):
         return {"available": False, "reason": "nvidia-smi 输出解析失败"}
+    # 利用率：PDH 优先（任务管理器同源，WDDM 失真替代）；PDH 不可用回落 nvidia-smi
+    utilization_source = "pdh" if pdh_util is not None else "nvidia-smi"
+    if pdh_util is not None:
+        utilization = pdh_util
     result = {
         "available": True,
         "name": name,
         "memory_total_mb": total_mb,
         "memory_used_mb": used_mb,
         "utilization_percent": utilization,
+        "utilization_source": utilization_source,
         "processes": processes,
     }
     if memory_fn is not None:

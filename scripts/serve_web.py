@@ -5,12 +5,12 @@
 多次造成「改版不可见」。本脚本在响应上强制 Cache-Control: no-store。
 
 额外提供 /api/v1/health 健康探测端点（8900 服务注册表 `web` 单元端口探测目标，
-service-control.md）：静态目录不存在的路径统一回退 GET 处理前先命中 health。
+service-hosting.md）：静态目录不存在的路径统一回退 GET 处理前先命中 health。
 
 用法（qed_web_service.py 生命周期脚本调用的实际服务进程）：
     python scripts/serve_web.py
 
-设计关联（DesignRef）：docs/design/web-frontend.md、docs/design/frontend-react-refactor.md
+设计关联（DesignRef）：docs/architecture/frontend-architecture.md
 实现状态：Current
 """
 

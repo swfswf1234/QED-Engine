@@ -1,6 +1,6 @@
 """
 模块职责：LLM 网关端点契约测试：/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test。
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：backend/qed_engine/api/control.py
 """
@@ -233,3 +233,66 @@ def test_llm_calls_review_not_found(monkeypatch):
     )
     assert resp.status_code == 404
     assert resp.json()["detail"] == "记录不存在"
+
+
+# --- Task 5: /models/{name} 模型端点族 ---
+
+
+def test_models_start_text_local(monkeypatch):
+    """POST /models/qwen/start（local 模式）：model_manager.operate_model 被调用，返回 starting。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    calls = []
+    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/qwen/start")
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "qwen"
+    assert resp.json()["status"] == "starting"
+    assert calls == [("qwen", "start")]
+
+
+def test_models_api_mode_rejects(monkeypatch):
+    """POST /models/qwen/start（api 模式）：409（本地模型仅支持测试）。"""
+    monkeypatch.setenv("QED_API_SELECT", "api")
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/qwen/start")
+    assert resp.status_code == 409
+    assert "api" in resp.json()["detail"]
+
+
+def test_models_unknown_name_404(monkeypatch):
+    """POST /models/unknown/start：404（model_manager 抛 ValueError）。"""
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/unknown/start")
+    assert resp.status_code == 404
+
+
+def test_models_stop_mineru_local(monkeypatch):
+    """POST /models/mineru/stop（local 模式）：返回 stopping。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    calls = []
+    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/mineru/stop")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "stopping"
+    assert calls == [("mineru", "stop")]
+
+
+def test_models_restart_text_local(monkeypatch):
+    """POST /models/qwen/restart（local 模式）：返回 starting。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    calls = []
+    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/qwen/restart")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "starting"
+    assert calls == [("qwen", "restart")]

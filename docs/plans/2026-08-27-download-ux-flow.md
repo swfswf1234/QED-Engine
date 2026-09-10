@@ -2,11 +2,11 @@
 
 状态：In Progress
 任务类型：B
-最后更新：2026-09-01
+最后更新：2026-09-10
 关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)（技术架构参考，PLAN-022 挂靠本文档）、[course-acquisition-flow.md](../design/course-acquisition-flow.md)、[web-frontend.md](../design/web-frontend.md)
+关联设计：[2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)（技术架构参考，PLAN-022 挂靠本文档）、[downloads-flow.md](../design/downloads-flow.md)、[frontend-architecture.md](../architecture/frontend-architecture.md)
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-023；REQ-053、REQ-059、REQ-060、ARCH-019）
-归档判定：Merge 倾向（开发完成后操作契约并入 docs/design/web-frontend.md 或独立 design/ 固定文档，计划壳归档 history/plans/）
+归档判定：Merge 倾向（开发完成后操作契约并入 docs/architecture/frontend-architecture.md 或 design/ 固定文档，计划壳归档 history/plans/）
 
 > **本文档是全流程交互规范的唯一事实源**（2026-09-01 统一）。
 > - 技术链路见挂靠的 PLAN-022（[2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)）。
@@ -103,7 +103,7 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 | 修改领域 | 领域右键 → 修改领域 | — | Modal：描述/阶段列表 | 即时刷新信息卡 | 404 → 刷新树 |
 | 删除领域 | 领域右键 → 删除领域（红） | 领域下无课程（有课程禁用） | 二次确认 Modal | 节点移除 | 409 DOMAIN_NOT_EMPTY → 提示先清空课程 |
 | 新增课程 | 领域右键 → 新增课程 | — | Modal：课程名（必填，不可改）/阶段/排序/备注 | 课程节点出现 | 404 → 刷新 |
-| 修改课程 | 课程右键 → 修改课程 | — | Modal：阶段/排序/备注 | 即时刷新 | 404 → 刷新 |
+| 修改课程 | ① 课程右键 → 修改课程 ② 课程详情按钮 | — | 统一课程编辑 Modal：课程描述/阶段/学术方向/别名/依赖课程 | 即时刷新 | 404 → 刷新 |
 | 删除课程 | 课程右键 → 删除课程（红） | 课程下无教程 | 二次确认 Modal | 节点移除 | 409 COURSE_HAS_KNOWLEDGE → 提示先处理教程 |
 
 #### 3.2 领域探索（探索课程体系）
@@ -158,7 +158,56 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 
 **登记下载 Modal**（人工 PDF 链路）：填写相对路径（`dataset/qed-tracker/raw/` 规范桶）→ 8901 校验文件 → downloaded。
 
-#### 3.6 筛选与浏览
+#### 3.6 课程状态栏（右面板课程头旁）
+
+> 2026-09-10 新增：课程状态栏与领域信息卡对齐，显示在右面板课程头最右边。
+
+**位置**：右面板课程头（`dl-course-head`）右侧，与课程名称同行。
+
+**状态机**（与领域信息卡 §4.2 对齐）：
+
+| 状态 | 判定 | 按钮表现 |
+|---|---|---|
+| initial | exploration_stage=未开始 | 主色「开始探索」按钮 |
+| running | exploration_stage=探索中 | 置灰「探索中…」（不可编辑） |
+| completed | exploration_stage=已完成 | 主色「确认领域信息」按钮（点击打开领域信息确认弹窗） |
+| done | exploration_stage=已完成（已确认） | 置灰「探索完成」 |
+
+**交互流**：
+1. 未开始 → 点击「开始探索」→ 发起课程探索 → 状态变为「探索中」
+2. 探索中 → 等待探索完成 → 状态变为「已完成」
+3. 已完成 → 点击「确认领域信息」→ 打开领域信息确认弹窗 → 确认后状态变为「已完成（已确认）」
+
+#### 3.7 领域信息确认弹窗（课程探索完成后）
+
+> 2026-09-10 新增：课程探索完成后，用户点击「确认领域信息」按钮打开此弹窗。
+
+**弹窗内容**：
+1. **课程信息区**：课程名称（不可编辑）、课程描述（不可编辑）
+2. **教程详情表格**：
+   - 教程名称（可编辑，`PATCH /api/v1/knowledge/{id}`）
+   - position 定位（可编辑，下拉选择：基础/进阶/综合/专题）
+   - 详情按钮（点击查看 intro 描述，可编辑）
+   - 教材、习题集、其他资料（不可编辑，来自探索推荐）
+   - 否定按钮（删除该教程，`DELETE /api/v1/knowledge/{id}`）
+3. **操作按钮**：关闭（取消）、确认（进入已完成阶段）
+
+**前置条件**：
+- 课程 exploration_stage=已完成（已生成探索结果）
+- 8901 在线（需要调用 knowledge 相关 API）
+
+**交互流**：
+1. 用户点击「确认领域信息」→ 打开弹窗
+2. 加载课程详情（`GET /api/v1/courses/{course_id}`）和教程列表（`GET /api/v1/knowledge?course_id={course_id}`）
+3. 用户编辑教程名称、position、intro
+4. 用户可删除不需要的教程（否定按钮）
+5. 点击「确认」→ 调用 `POST /api/v1/courses/{course_id}/confirm` → 课程状态变为「已完成」
+
+**后端依赖**（需 8901 新增）：
+- `PATCH /api/v1/knowledge/{id}`：更新教程（name、position、intro）
+- `DELETE /api/v1/knowledge/{id}`：删除教程
+
+#### 3.8 筛选与浏览
 
 | 操作 | 说明 |
 |---|---|
@@ -191,7 +240,21 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 > 切换为「共享表 exploration_stage 直读」；状态机从 4 态扩展为 5 态（+失败），
 > 探索执行由 QED-Tracker（8901）驱动，8900 纯透传。
 
-#### 4.3 锁定规则（探索）
+#### 4.3 课程状态栏探索按钮状态机（4 态）
+
+> 2026-09-10 新增：与领域信息卡状态机对齐，用于右面板课程头旁的状态栏。
+
+| 状态 | 判定 | 按钮表现 |
+|---|---|---|
+| initial | exploration_stage=未开始 | 主色「开始探索」按钮 |
+| running | exploration_stage=探索中 | 置灰「探索中…」（不可编辑） |
+| completed | exploration_stage=已完成 | 主色「确认领域信息」按钮（点击打开领域信息确认弹窗） |
+| done | exploration_stage=已完成（已确认） | 置灰「探索完成」 |
+
+> 与领域信息卡的区别：课程状态栏无「失败」和「待确认」态，简化为 4 态。
+> 探索执行由 QED-Tracker（8901）驱动，8900 纯透传。
+
+#### 4.4 锁定规则（探索）
 
 | 规则 | 表现 |
 |---|---|
@@ -212,6 +275,9 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 | 应用冲突 | 三态汇总列出冲突项与拒绝原因；已应用项不回滚 | 部分应用允许 |
 | 页面刷新/关闭弹窗 | 轮询中断后自动恢复；未终态会话重进页面续轮询 | 会话由 QED-Tracker（8901）持久化，无 TTL 清理 |
 | mock 模式 | 弹窗顶部黄条「探索 Mock 模式已开启」；真实 8901 不被调用 | 刷新即消失 |
+| 课程状态栏探索失败 | 课程探索失败时，状态栏显示「重试」按钮（danger 样式）；tooltip 显示失败原因 | 探索失败不影响现有教程数据 |
+| 领域信息确认弹窗加载失败 | 弹窗显示错误信息 + 重试按钮；8901 离线时禁用确认按钮并提示 | 无写入 |
+| 教程删除失败 | toast 显示服务端错误详情；教程行保持不变 | 无写入 |
 
 ### 6. 交互规范
 
@@ -222,6 +288,9 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 5. **乐观更新禁用**：树与书籍列表一律以服务端返回为准（操作后 refreshDetail / fetchAll），不做本地乐观变更，避免状态机漂移。
 6. **表单默认值**：探索推荐（教材/习题集名）预填可修订；登记下载路径预填规范桶提示。
 7. **数据一致性**：rejected/superseded 行由数据层统一隐藏；进度文案（x/2、a/b、c/d）动态计算不缓存。
+8. **课程状态栏**：与领域信息卡样式一致，按钮状态根据 `exploration_stage` 实时更新；探索中状态不可编辑。
+9. **领域信息确认弹窗**：课程信息不可编辑，教程详情可编辑；否定按钮直接删除教程（非 rejected 留痕）；确认后课程状态变为「已完成」。
+10. **统一课程编辑弹窗**：两个入口（左树右键、右面板详情按钮）调用同一个弹窗组件；字段精简为：课程描述、学习阶段、学术方向、别名、依赖课程。
 
 ## 验证与验收
 
@@ -236,6 +305,9 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 - [ ] 刷新页面未终态探索会话恢复轮询
 - [ ] mock 模式开关生效且有黄条提示
 - [ ] 探索状态（色点/按钮状态机）从共享表 exploration_stage 读取
+- [ ] 课程状态栏样式与领域信息卡一致，按钮状态根据 exploration_stage 实时更新
+- [ ] 领域信息确认弹窗：课程信息不可编辑，教程详情可编辑，否定按钮直接删除教程
+- [ ] 统一课程编辑弹窗：两个入口调用同一个弹窗组件，字段精简为课程描述/阶段/学术方向/别名/依赖课程
 - [ ] vitest 全绿 + tsc 零错 + build 成功
 
 ## 回滚
@@ -247,7 +319,7 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 ## 关闭与归档
 
 - 关闭条件：§验证与验收 checklist 全部通过 + 用户浏览器验收确认；
-- 归档动作：操作契约按归档判定并入 `docs/design/web-frontend.md`（或独立 design/ 固定文档），计划壳移入 `docs/history/plans/2026-08/`，todo.md Plan 行收口。
+- 归档动作：操作契约按归档判定并入 `docs/architecture/frontend-architecture.md`（或 design/ 固定文档），计划壳移入 `docs/history/plans/2026-08/`，todo.md Plan 行收口。
 
 ---
 *本流程文档为「文档下载管理」开发与验收的交互事实源（全流程交互规范主文档）；技术链路见挂靠的 [2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)（PLAN-022）。*

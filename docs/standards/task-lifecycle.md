@@ -1,8 +1,8 @@
 # 任务生命周期
 
 状态：Current
-最后更新：2026-08-20
-确认状态：已确认
+最后更新：2026-09-10
+确认状态：暂定
 治理对象：任务分类、计划准入、tracker 状态、实施门禁与关闭交付
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_plan_governance.py`、`tests/contract/test_tracker_governance.py`
@@ -95,6 +95,10 @@ GitHub Release、部署、受保护环境变更、正式数据操作等按既有
 - **ID 格式**：`DEFECT-NNN`（三位顺序编号），在 todo.md 中登记。
 - **类型**：todo「类型」列标为 `缺陷`；缺陷与缺陷证据可使用不同 ID 互相引用。
 - **计划**：缺陷修复不单独建立计划，顺主线或支线修复并补回归测试。
+- **设计类小修/bug**：`design/` 文档的小修改与 bug 修复（行为与设计不符、错漏修正）不单项
+  立项，登记[设计类小修与 bug 修复台账](../plans/design-bugfix-log.md)（长期滚动，豁免计划
+  治理，ADR 0012），修复时同步补充对应设计文档；超出小修范围的按 B 类计划处理。变更分级
+  判据见根 `AGENTS.md`「变更分级与边界」。
 - **优先级**：默认低；阻塞主线或影响发布的标高。
 - **关闭**：修复后以回归测试通过为关闭条件，关闭结果标 Achieved，evidence 列写明
   修复提交与回归测试结果。

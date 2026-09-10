@@ -18,8 +18,10 @@ RUN apt-get update && \
 RUN python3 -m pip install -U 'mineru[core]>=3.4.0' --break-system-packages && \
     python3 -m pip cache purge
 
-# Download models and update the configuration file（modelscope 源，国内网络）
-RUN /bin/bash -c "mineru-models-download -s modelscope -m all"
+# NOTE（Task 8，2026-09-06）：模型权重不再固化在镜像内。
+# 原：RUN /bin/bash -c "mineru-models-download -s modelscope -m all"
+# 改为：运行时挂载仓库 model/mineru/（compose.yaml 卷），MINERU_MODEL_SOURCE=local 指向挂载路径。
+# 模型下载用 scripts/image-model/download-models.py。
 
 # Set the entry point to activate the virtual environment and run the command line tool
 ENTRYPOINT ["/bin/bash", "-c", "export MINERU_MODEL_SOURCE=local && exec \"$@\"", "--"]

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import Downloads from './Downloads';
@@ -29,9 +29,7 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
     name: partial.name ?? '',
     textbook_ref: null,
     exercise_ref: null,
-    textbook_intro: '',
-    exercise_intro: '',
-    materials_intro: '',
+    intro: '',
     status: 'draft',
     reject_reason: '',
     supersede_reason: '',
@@ -42,31 +40,26 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
   };
 }
 
-function book(partial: Partial<BookRecord> & { book_id: string; knowledge_id: string }): BookRecord {
+function book(partial: Partial<BookRecord> & { book_id: string }): BookRecord {
   return {
-    kind: 'textbook',
-    roles: ['textbook'],
     title: 't',
+    original_title: null,
     part: '',
-    display_title: 't',
-    file_name: '',
     authors: [],
+    publisher: '',
+    edition: '',
+    year: null,
     language: '',
-    version: {},
-    source: null,
-    original_url: '',
-    sha256: null,
-    relative_path: '',
-    absolute_path: '',
-    page_count: null,
+    roles: ['textbook'],
     status: 'candidate',
-    reject_reason: '',
-    supersede_reason: '',
-    review_note: '',
+    retire_reason: '',
+    holding: 'missing',
+    file_path: null,
+    priority: null,
+    notes: null,
+    domain_id: '',
     created_at: '',
-    decided_at: null,
-    downloaded_at: null,
-    verified_at: null,
+    updated_at: '',
     ...partial,
   };
 }
@@ -78,12 +71,12 @@ const knowledgeFixture: KnowledgeRecord[] = [k1, k2, k3];
 const detailsFixture: Record<string, KnowledgeDetail> = {
   k1: {
     ...k1,
-    books: [book({ book_id: 'b1', knowledge_id: 'k1', display_title: 'Rudin 中译', status: 'verified' })],
+    books: [book({ book_id: 'b1', knowledge_id: 'k1', title: 'Rudin 中译', status: 'verified' })],
   },
   k2: { ...k2, books: [] },
   k3: {
     ...k3,
-    books: [book({ book_id: 'b4', knowledge_id: 'k3', display_title: '线性代数习题册', status: 'downloaded' })],
+    books: [book({ book_id: 'b4', knowledge_id: 'k3', title: '线性代数习题册', status: 'downloaded' })],
   },
 };
 
@@ -183,8 +176,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     const card = await screen.findByTestId('domain-info-card');
     expect(within(card).getByText('高等数学')).toBeInTheDocument();
     expect(within(card).getByText('本科数学核心领域')).toBeInTheDocument();
-    expect(within(card).getByText('2 门课程')).toBeInTheDocument();
-    const exploreBtn = within(card).getByRole('button', { name: /重新探索|领域探索/ });
+    const exploreBtn = within(card).getByRole('button', { name: /开始探索|重新探索|领域探索/ });
     expect(exploreBtn).not.toBeDisabled();
   });
 
@@ -283,7 +275,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       return Promise.reject(new TypeError(`no route: ${url}`));
     });
     renderDownloads();
-    expect(await screen.findByText('教程数据不可达')).toBeInTheDocument();
+    expect(await screen.findByText('降级模式')).toBeInTheDocument();
     const tree = screen.getByRole('tree');
     expect(within(tree).getByText('高等数学')).toBeInTheDocument();
     expect(within(tree).getByText('数学分析')).toBeInTheDocument();
@@ -303,7 +295,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       {
         ...domainsFixture[0],
         courses: domainsFixture[0].courses.map((c) =>
-          c.course_id === '01_math_analysis' ? { ...c, note: '高等数学核心基础课' } : c,
+          c.course_id === '01_math_analysis' ? { ...c, description: '高等数学核心基础课' } : c,
         ),
       },
     ];
@@ -320,62 +312,60 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     expect(notes.length).toBe(1);
   });
 
-  it('确认教程 → 自动按决定引用生成两册候选书籍（2026-08-25 #4 改造）', async () => {
-    const kdraft = kn({
-      knowledge_id: 'k9', course_id: '01_math_analysis', set_no: '', name: '待确认教程',
-      status: 'draft',
-      textbook_ref: { title: '数学分析教程（中文）' },
-      exercise_ref: { title: '数学分析习题集（中文）' },
-    });
-    let booksCalls = 0;
+  it('教程行进度与自动下载（2026-09-08 项 2）：部分下载 → N/M 进度 + 删除禁用（8901 移交）+ 自动下载可用', async () => {
+    const kpart = kn({ knowledge_id: 'k7', course_id: '01_math_analysis', set_no: '', name: '部分下载教程', status: 'confirmed' });
     mockApi({
       '/courses': domainsFixture,
-      '/knowledge/k9': { ...kdraft, books: [] },
+      '/knowledge/k7': { ...kpart, books: [
+        book({ book_id: 'bd1', knowledge_id: 'k7', display_title: '已下载册', status: 'downloaded' }),
+        book({ book_id: 'bc1', knowledge_id: 'k7', display_title: '候选册', status: 'candidate' }),
+      ] },
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
-      '/knowledge': [kdraft],
-      '/confirm': { ok: true, knowledge_id: 'k9', status: 'confirmed' },
-      '/books': () => {
-        booksCalls += 1;
-        return book({ book_id: `bnew${booksCalls}`, knowledge_id: 'k9' });
-      },
+      '/knowledge': [k1, k2, k3, kpart],
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
     fireEvent.click(within(tree).getByText('数学分析'));
-    // 点「确认」打开弹窗（antd 两字按钮渲染为「确 认」）
-    fireEvent.click(await screen.findByRole('button', { name: /确\s*认/ }));
-    // 提交弹窗（书名已从决定引用预填）
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
-    await waitFor(() => {
-      expect(booksCalls).toBe(2);
-    });
+    const section = await screen.findByText('部分下载教程', { selector: '.dl-knowledge-name' })
+      .then((el) => el.closest('.dl-knowledge-section') as HTMLElement);
+    // 进度：1/2 本已下载
+    expect(within(section).getByText('下载 1/2 本')).toBeInTheDocument();
+    // 只保留详情按钮（知识区 + 书卡各一个）
+    const detailButtons = within(section).getAllByRole('button', { name: /详情/ });
+    expect(detailButtons.length).toBeGreaterThanOrEqual(1);
+    // 全部下载的教程（k1：1/1）也只显示详情按钮
+    const k1Section = screen.getByText('Rudin 教程', { selector: '.dl-knowledge-name' })
+      .closest('.dl-knowledge-section') as HTMLElement;
+    const k1DetailButtons = within(k1Section).getAllByRole('button', { name: /详情/ });
+    expect(k1DetailButtons.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('confirmed 无书籍且有决定引用 → 显示「按决定引用补建书籍」兜底并可生成', async () => {
-    const kconf = kn({
-      knowledge_id: 'k8', course_id: '01_math_analysis', set_no: '', name: '已定稿教程',
-      status: 'confirmed',
-      textbook_ref: { title: '数学分析教程（中文）' },
-    });
-    let booksCalls = 0;
+  it('书目纯展示（2026-09-08 项 4）+ 教程详情书目操作集（2026-09-08 项 3）', async () => {
     mockApi({
       '/courses': domainsFixture,
-      '/knowledge/k8': { ...kconf, books: [] },
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
-      '/knowledge': [kconf],
-      '/books': () => {
-        booksCalls += 1;
-        return book({ book_id: `bb${booksCalls}`, knowledge_id: 'k8' });
-      },
+      '/knowledge': knowledgeFixture,
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
     fireEvent.click(within(tree).getByText('数学分析'));
-    const btn = await screen.findByRole('button', { name: '按决定引用补建书籍' });
-    fireEvent.click(btn);
-    await waitFor(() => {
-      expect(booksCalls).toBe(1);
-    });
+    // 书卡只保留「详情」按钮（无决定/验收/否定等生命周期操作）
+    const cardEl = await screen.findByText('Rudin 中译');
+    const card = cardEl.closest('.dl-book-card') as HTMLElement;
+    const cardBtns = within(card).getAllByRole('button').map((b) => b.textContent);
+    expect(cardBtns).toEqual(['详情']);
+    // 打开教程详情弹窗（行头「详情」）
+    const head = cardEl.closest('.dl-knowledge-section') as HTMLElement;
+    // 行头「详情」按钮带 EyeOutlined 图标，可访问名含图标标签，用正则匹配
+    fireEvent.click(within(head.querySelector('.dl-knowledge-head') as HTMLElement).getByRole('button', { name: /详情/ }));
+    const dialog = await screen.findByRole('dialog');
+    // 教程信息修改禁用（8901 无 PATCH /knowledge，已移交）+ 新增书目按钮在场（均可访问名含图标标签）
+    expect(within(dialog).getByRole('button', { name: /修改信息/ })).toHaveAttribute('disabled');
+    expect(within(dialog).getByRole('button', { name: /新增书目/ })).toBeInTheDocument();
+    // 书目表列：书名/作者/语言/状态/操作
+    for (const col of ['书名', '作者', '语言', '状态', '操作']) {
+      expect(within(dialog).getByText(col)).toBeInTheDocument();
+    }
   });
 
   it('进入页面默认选中第一个领域：selected + filters.domain 自动设置', async () => {
@@ -432,5 +422,298 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     });
     const st = useDownloadsStore.getState();
     expect(st.selected).toBeNull();
+  });
+
+  // ---------- 确认流状态机（PLAN-028 2026-09-02 用户指令） ----------
+
+  /** 选中领域并返回领域信息卡（fixture 单领域） */
+  async function openDomainCard(fixture: DomainSystem[]) {
+    mockApi({
+      '/courses': fixture,
+      '/knowledge': [],
+      '/domains': { domain_id: fixture[0].domain_id, name: fixture[0].name },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText(fixture[0].name));
+    return screen.findByTestId('domain-info-card');
+  }
+
+  function patchCalls() {
+    return mockFetch.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+    ) as Array<[string, RequestInit]>;
+  }
+
+  it('领域确认流：已生成+无课程 → 领域信息确认按钮 → 保存并确认 → 内容 PATCH（无 stage 直写）+ confirm-domain 提交', async () => {
+    const card = await openDomainCard([
+      {
+        domain_id: 'dm_new', name: '计算机', description: '计算机科学领域',
+        stages: ['基础'], courses: [], exploration_stage: '已生成',
+      },
+    ]);
+    fireEvent.click(within(card).getByRole('button', { name: /领域信息确认/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('领域信息确认 · 计算机')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /保存并确认/ }));
+    await waitFor(() => {
+      // 前端禁写 exploration_stage（PLAN-033 §2.4）：PATCH 只含内容字段
+      const calls = patchCalls().filter(([url]) => url.includes('/domains/dm_new'));
+      expect(calls).toHaveLength(1);
+      const body = JSON.parse(calls[0][1].body as string);
+      expect(body.exploration_stage).toBeUndefined();
+      expect(body.description).toBe('计算机科学领域');
+      // 状态流转改由门面端点驱动：POST /domains/{id}/confirm-domain
+      const confirms = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/domains/dm_new/confirm-domain')
+          && (init as RequestInit | undefined)?.method === 'POST',
+      );
+      expect(confirms).toHaveLength(1);
+    });
+  });
+
+  it('确认课程流：待确认 → 课程知识确认按钮 → 确认课程名单 → confirm-knowledge 全选提交 + 仅修改过的课程 PATCH', async () => {
+    const card = await openDomainCard([
+      {
+        domain_id: 'dm_imp', name: '计算机', description: '计算机科学领域',
+        stages: ['基础', '主干'], exploration_stage: '待确认',
+        courses: [
+          { course_id: 'cs_ds', name: '数据结构', aliases: [], stage: '基础', prerequisites: [], track: '', description: '原介绍' },
+          { course_id: 'cs_os', name: '操作系统', aliases: [], stage: '主干', prerequisites: [] },
+        ],
+      },
+    ]);
+    fireEvent.click(within(card).getByRole('button', { name: /课程知识确认/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('课程信息确认 · 计算机')).toBeInTheDocument();
+    // 修改第一门课程（数据结构）的介绍；第二门不动（清单异步合成后再改）
+    const descInputs = await within(dialog).findAllByPlaceholderText('课程介绍');
+    fireEvent.change(descInputs[0], {
+      target: { value: '新介绍' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /确认课程名单/ }));
+    await waitFor(() => {
+      // 待确认→已完成由 confirm-knowledge 门面端点收口（全选 → selected 缺省）
+      const confirms = mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes('/domains/dm_imp/confirm-knowledge')
+          && (init as RequestInit | undefined)?.method === 'POST',
+      );
+      expect(confirms).toHaveLength(1);
+      expect(JSON.parse(confirms[0][1].body as string)).toEqual({});
+      const domainPatches = patchCalls().filter(([url]) => url.includes('/domains/dm_imp'));
+      expect(domainPatches).toHaveLength(1);
+      expect(JSON.parse(domainPatches[0][1].body as string).exploration_stage).toBeUndefined();
+      const coursePatches = patchCalls().filter(([url]) => url.includes('/courses/cs_ds'));
+      expect(coursePatches).toHaveLength(1);
+      expect(JSON.parse(coursePatches[0][1].body as string).description).toBe('新介绍');
+    });
+  });
+
+  it('已生成+有课程（导入路径）→ 领域信息确认按钮；已生成+无课程 → 探索领域知识（降级置灰）', async () => {
+    // 已生成 + 有课程 → 领域信息确认
+    const withCourses = await openDomainCard([
+      {
+        domain_id: 'dm_g1', name: '计算机', description: '计算机科学领域',
+        stages: ['基础'], exploration_stage: '已生成',
+        courses: [{ course_id: 'cs_ds', name: '数据结构', aliases: [], stage: '基础', prerequisites: [] }],
+      },
+    ]);
+    expect(within(withCourses).getByRole('button', { name: /领域信息确认/ })).toBeInTheDocument();
+
+    // 已生成 + 无课程 + 8901 离线（knowledge 500）→ 领域信息确认按钮可用
+    cleanup();
+    mockApi({
+      '/courses': [
+        {
+          domain_id: 'dm_g2', name: '计算机', description: '计算机科学领域',
+          stages: ['基础'], courses: [], exploration_stage: '已生成',
+        },
+      ],
+      '/knowledge': new Response(JSON.stringify({ detail: 'offline' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      }),
+      '/domains': { domain_id: 'dm_g2', name: '计算机' },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('计算机'));
+    const card = await screen.findByTestId('domain-info-card');
+    const confirmBtn = within(card).getByRole('button', { name: /领域信息确认/ });
+    expect(confirmBtn).not.toBeDisabled();
+  });
+
+  describe('BookDetailModal 渠道操作', () => {
+    async function openBookDetailModal(bookFixture: BookRecord, sources: unknown[] = []) {
+      const knowledgeWithBook = kn({ knowledge_id: 'k_book', course_id: '01_math_analysis', name: '测试教程', status: 'confirmed' });
+      mockApi({
+        '/courses': domainsFixture,
+        '/knowledge/k_book': { ...knowledgeWithBook, books: [bookFixture] },
+        '/knowledge': [knowledgeWithBook],
+        '/books/': (url: string) => {
+          if (url.includes('/sources')) return sources;
+          if (url.includes('/import')) return { ...bookFixture, status: 'downloaded' };
+          return {};
+        },
+      });
+      renderDownloads();
+      const tree = await screen.findByRole('tree');
+      fireEvent.click(within(tree).getByText('数学分析'));
+      const bookEl = await screen.findByText(bookFixture.title);
+      const bookCard = bookEl.closest('.dl-book-card') as HTMLElement;
+      fireEvent.click(within(bookCard).getByRole('button', { name: /详情/ }));
+      return screen.findByRole('dialog');
+    }
+
+    it('渠道列表：成功渠道显示「成功」标签', async () => {
+      const downloadedBook = book({ book_id: 'b_dl', title: '已下载书', status: 'downloaded' });
+      const dialog = await openBookDetailModal(downloadedBook, [
+        { source_id: 's1', channel: 'libgen_li', ok: true, note: '找到文件' },
+        { source_id: 's2', channel: 'internet_archive', ok: false, note: '未找到' },
+      ]);
+      expect(within(dialog).getByText('已下载书')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      expect(within(dialog).getByText('失败')).toBeInTheDocument();
+      expect(within(dialog).getByText('图书馆链接')).toBeInTheDocument();
+      expect(within(dialog).getByText('互联网档案馆')).toBeInTheDocument();
+      // note 渲染：失败渠道显示失效原因（note 字段），成功/失败渠道 note 颜色区分
+      expect(within(dialog).getByText('找到文件')).toBeInTheDocument();
+      const failNote = within(dialog).getByText('未找到');
+      expect(failNote).toBeInTheDocument();
+      // 失败渠道 note 红色 #cf1322（jsdom 序列化为 rgb），成功渠道 note 继承默认色
+      expect(failNote.style.color).toBe('rgb(207, 19, 34)');
+      expect(within(dialog).getByText('找到文件').style.color).toBe('inherit');
+    });
+
+    it('成功渠道显示验证完毕和否定按钮', async () => {
+      const downloadedBook = book({ book_id: 'b_dl2', title: '待验证书', status: 'downloaded' });
+      const dialog = await openBookDetailModal(downloadedBook, [
+        { source_id: 's1', channel: 'libgen_li', ok: true },
+      ]);
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      expect(within(dialog).getByRole('button', { name: /验证完毕/ })).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /否\s*定/ })).toBeInTheDocument();
+    });
+
+    it('非 downloaded 状态书籍不显示验证完毕按钮', async () => {
+      const candidateBook = book({ book_id: 'b_cand', title: '候选书', status: 'candidate' });
+      const dialog = await openBookDetailModal(candidateBook, [
+        { source_id: 's1', channel: 'manual', ok: true },
+      ]);
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      expect(within(dialog).queryByRole('button', { name: /验证完毕/ })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /否\s*定/ })).toBeInTheDocument();
+    });
+
+    it('点击验证完毕按钮调用验证 API', async () => {
+      const downloadedBook = book({ book_id: 'b_verify', title: '验证书', status: 'downloaded' });
+      const dialog = await openBookDetailModal(downloadedBook, [
+        { source_id: 's1', channel: 'libgen_li', ok: true },
+      ]);
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /验证完毕/ }));
+      await waitFor(() => {
+        const verifyCalls = mockFetch.mock.calls.filter(
+          ([url, init]) => String(url).includes('/books/b_verify/verify')
+            && (init as RequestInit | undefined)?.method === 'POST',
+        );
+        expect(verifyCalls).toHaveLength(1);
+      });
+      // 验证成功后父级刷新：refreshDetail 再次 GET 教程详情（初始渲染已 GET 一次）
+      await waitFor(() => {
+        const detailGets = mockFetch.mock.calls.filter(
+          ([url, init]) => String(url).includes('/knowledge/k_book')
+            && (init as RequestInit | undefined)?.method === 'GET',
+        );
+        expect(detailGets.length).toBeGreaterThan(1);
+      });
+    });
+
+    it('点击否定按钮打开拒绝原因弹窗', async () => {
+      const downloadedBook = book({ book_id: 'b_reject', title: '拒绝书', status: 'downloaded' });
+      const dialog = await openBookDetailModal(downloadedBook, [
+        { source_id: 's1', channel: 'libgen_li', ok: true },
+      ]);
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /否\s*定/ }));
+      const rejectModal = await screen.findByText('否定书籍');
+      expect(rejectModal).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('请输入否定原因（必填）')).toBeInTheDocument();
+    });
+
+    it('否定原因弹窗确认后调用拒绝 API', async () => {
+      const downloadedBook = book({ book_id: 'b_reject2', title: '拒绝书2', status: 'downloaded' });
+      const dialog = await openBookDetailModal(downloadedBook, [
+        { source_id: 's1', channel: 'libgen_li', ok: true },
+      ]);
+      await waitFor(() => {
+        expect(within(dialog).getByText('成功')).toBeInTheDocument();
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /否\s*定/ }));
+      await screen.findByText('否定书籍');
+      fireEvent.change(screen.getByPlaceholderText('请输入否定原因（必填）'), { target: { value: '质量差' } });
+      fireEvent.change(screen.getByPlaceholderText('可选备注'), { target: { value: '扫描不清晰' } });
+      // 确认按钮在否定弹窗的 footer 中
+      const confirmBtn = screen.getByRole('button', { name: /OK|确[定认]/ });
+      fireEvent.click(confirmBtn);
+      await waitFor(() => {
+        const rejectCalls = mockFetch.mock.calls.filter(
+          ([url, init]) => String(url).includes('/books/b_reject2/reject')
+            && (init as RequestInit | undefined)?.method === 'POST',
+        );
+        expect(rejectCalls).toHaveLength(1);
+        const body = JSON.parse(rejectCalls[0][1].body as string);
+        expect(body.reason).toBe('质量差');
+        expect(body.note).toBe('扫描不清晰');
+      });
+    });
+
+    it('点击添加按钮选择本地 PDF 后调用导入 API', async () => {
+      const candidateBook = book({ book_id: 'b_add', title: '导入书', status: 'candidate' });
+      const dialog = await openBookDetailModal(candidateBook);
+      await waitFor(() => {
+        expect(within(dialog).getByText('渠道尝试（0）')).toBeInTheDocument();
+      });
+      // 点击「添加」→ 触发隐藏 file input 的 click
+      fireEvent.click(within(dialog).getByRole('button', { name: /添\s*加/ }));
+      const fileInput = dialog.querySelector('input[type="file"]') as HTMLInputElement | null;
+      expect(fileInput).not.toBeNull();
+      expect(fileInput?.accept).toBe('.pdf');
+      // jsdom 的 File 无 Electron file.path，需手动附加（handleFileSelect 依赖 path 取绝对路径）
+      const file = new File(['pdf-content'], 'book.pdf', { type: 'application/pdf' });
+      Object.defineProperty(file, 'path', { value: '/fake/path/book.pdf' });
+      fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
+      await waitFor(() => {
+        const importCalls = mockFetch.mock.calls.filter(
+          ([url, init]) => String(url).includes('/books/b_add/import')
+            && (init as RequestInit | undefined)?.method === 'POST',
+        );
+        expect(importCalls).toHaveLength(1);
+        const body = JSON.parse(importCalls[0][1].body as string);
+        expect(body.file_path).toBe('/fake/path/book.pdf');
+      });
+      // 导入成功后 current 就地更新为 downloaded → 弹窗内出现「验证完毕」按钮（父级数据未刷也不阻塞）
+      await waitFor(() => {
+        expect(within(dialog).getByRole('button', { name: /验证完毕/ })).toBeInTheDocument();
+      });
+    });
+
+    it('无渠道时显示空态提示', async () => {
+      const bookNoSources = book({ book_id: 'b_empty', title: '无渠道书', status: 'candidate' });
+      const dialog = await openBookDetailModal(bookNoSources, []);
+      await waitFor(() => {
+        expect(within(dialog).getByText('渠道尝试（0）')).toBeInTheDocument();
+      });
+      expect(within(dialog).getByText('暂无渠道尝试记录')).toBeInTheDocument();
+    });
   });
 });

@@ -76,7 +76,7 @@ Invoke-RestMethod http://127.0.0.1:8900/api/v1/config/models
 ```powershell
 # 8900 手动启动（backend/ 目录，QED_env 环境；唯一需手动常驻的服务）
 python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900
-# 8901/8902/8903 经 8900 服务域接口启停（详见 docs/design/service-control.md）
+# 8901/8902/8903 经 8900 服务域接口启停（详见 docs/design/service-hosting.md）
 Invoke-RestMethod -Method Post http://127.0.0.1:8900/api/v1/services/tracker/start
 # 8903 前端独立启停脚本（生命周期脚本，PID + 优雅停止 + 强杀兜底）
 python scripts/qed_web_service.py start --wait   # --wait 等待健康就绪
@@ -98,7 +98,7 @@ python scripts/qed_web_service.py start --wait
 # 主体学习界面 → 右上角「管理后台」→ 控制台 / 仪表盘 / 文档下载管理 / 文档解析进度 / 原始文档对照
 ```
 
-前端信息架构与视觉规范见 [8903 前端契约](docs/design/web-frontend.md)。
+前端信息架构与视觉规范见 [前端架构](docs/architecture/frontend-architecture.md)。
 
 > 四服务启动顺序建议（后端 → 子项目 → 前端）与「前端改版需重建 dist」「端口占用排查」
 > 等常见坑，见 [开发指南 · 启动章节](docs/guides/development.md)。

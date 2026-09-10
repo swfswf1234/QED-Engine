@@ -1,6 +1,6 @@
 """
 模块职责：QED-Tracker 服务客户端（8901）契约测试：方法/路径/请求体、错误响应与任务轮询。
-设计关联（DesignRef）：docs/design/service-contracts.md（五层模型，QED-031）
+设计关联（DesignRef）：docs/design/cross-project-contracts.md（五层模型，QED-031）
 实现状态：Current
 被测代码：backend/qed_engine/clients/tracker_client.py
 """
@@ -206,52 +206,6 @@ def test_confirm_knowledge_omits_empty_fields():
     client = _client(handler)
     client.confirm_knowledge("kn_abc")
     assert seen["body"] == {}
-
-
-def test_knowledge_complete_requests_path():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["path"] = request.url.path
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "completed"})
-
-    client = _client(handler)
-    result = client.complete_knowledge("kn_abc")
-    assert seen["path"] == "/api/v1/knowledge/kn_abc/complete"
-    assert result["status"] == "completed"
-
-
-def test_knowledge_reject_sends_reason():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "rejected"})
-
-    client = _client(handler)
-    client.reject_knowledge("kn_abc", reason="非目标体系")
-    assert seen["body"] == {"reason": "非目标体系"}
-
-
-def test_knowledge_reject_requires_reason():
-    client = _client(_json_handler({}))
-    with pytest.raises(TrackerError):
-        client.reject_knowledge("kn_abc", reason="")
-
-
-def test_knowledge_supersede_sends_reason():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["path"] = request.url.path
-        seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"knowledge_id": "kn_abc", "status": "superseded"})
-
-    client = _client(handler)
-    result = client.supersede_knowledge("kn_abc", reason="被新版替代")
-    assert seen["path"] == "/api/v1/knowledge/kn_abc/supersede"
-    assert seen["body"] == {"reason": "被新版替代"}
-    assert result["status"] == "superseded"
 
 
 # ---------- 书籍客户端（qt_books / qt_sources，五层模型 QED-031） ----------

@@ -351,7 +351,9 @@ export default function ExploreFlowModal({ target, onClose }: {
 
   /** 已有匹配目标的会话 → 直接展示结果视图（关闭再开/后台完成后回看不丢上下文） */
   const matched = useMemo(() => (sessionMatchesTarget(session, target) ? session : null), [session, target]);
-  const variant: 'course' | 'curriculum' = target?.variant ?? 'course';
+  const variant: 'course' | 'domain' | 'curriculum' = target?.variant ?? 'course';
+  /** 'domain' 与 'curriculum' 均为领域层探索，行为一致 */
+  const isDomainLike = variant === 'curriculum' || variant === 'domain';
 
   // 领域层按钮状态机同步：domainRunStatus 只跟踪 running 临时态
   // pending/completed 由 DomainInfoCard 从 exploration_stage 实时计算（F4）
@@ -387,7 +389,7 @@ export default function ExploreFlowModal({ target, onClose }: {
   const onStart = async (values: { mode?: ExploreParams['mode']; ref_text?: string; ref_doc_path?: string }) => {
     // 课程体系层：Radio 定 mode（direct=直接开始+备注；doc=基于文本）+ 字段条件传递
     // 课程层：按填写字段自动判定
-    const mode: ExploreParams['mode'] = variant === 'curriculum'
+    const mode: ExploreParams['mode'] = isDomainLike
       ? (values.mode === 'doc' ? 'doc' : values.ref_text ? 'text' : 'direct')
       : values.ref_doc_path ? 'doc' : values.ref_text ? 'text' : 'direct';
     const params: ExploreParams = {
@@ -395,7 +397,7 @@ export default function ExploreFlowModal({ target, onClose }: {
       ...(mode !== 'direct' ? (mode === 'doc' ? { ref_doc_path: values.ref_doc_path } : { ref_text: values.ref_text }) : {}),
     };
     try {
-      if (variant === 'curriculum' && target?.variant === 'curriculum') {
+      if (target && target.variant !== 'course') {
         await startCurriculum(target.domainName, params, target.domainId);
       } else if (target?.variant === 'course') {
         await startCourse(target.courseId, params);
@@ -405,7 +407,7 @@ export default function ExploreFlowModal({ target, onClose }: {
         message.error(err);
         return;
       }
-      if (variant === 'curriculum' && target?.variant === 'curriculum') {
+      if (target && target.variant !== 'course') {
         setDomainRunStatus(target.domainId, 'running');
       }
       // 点击即后台：发起成功立刻关闭弹窗，完成由右上角通知提示
@@ -418,7 +420,7 @@ export default function ExploreFlowModal({ target, onClose }: {
   const title =
     variant === 'course'
       ? `探索教程 · ${target?.variant === 'course' ? target.courseName ?? target.courseId : ''}`
-      : `课程体系探索 · ${target?.variant === 'curriculum' ? target.domainName : ''}`;
+      : `课程体系探索 · ${(target?.variant === 'curriculum' || target?.variant === 'domain') ? target.domainName : ''}`;
 
   // footer 状态机：发起表单 → [取消|开始探索]；进行中 → [后台运行]；终态 → [关闭]
   let footer;
@@ -458,12 +460,12 @@ export default function ExploreFlowModal({ target, onClose }: {
         )}
         {!matched ? (
           <>
-            {variant === 'curriculum' && (
+            {isDomainLike && (
               <Text type="secondary">
                 基于默认配置探索课程体系，填写备注可定制探索方向。
               </Text>
             )}
-            {variant === 'curriculum' ? (
+            {isDomainLike ? (
               <Form
                 form={form}
                 layout="vertical"

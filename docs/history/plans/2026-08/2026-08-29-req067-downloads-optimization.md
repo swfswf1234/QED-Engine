@@ -1,12 +1,17 @@
 # 文档下载管理界面优化（REQ-067 综合计划）
 
-状态：In Progress
+状态：Completed
 任务类型：B
-最后更新：2026-08-30
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-download-ux-flow.md](2026-08-27-download-ux-flow.md)（PLAN-023）
+关闭结果：Achieved
+最后更新：2026-09-08
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
+关联设计：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（PLAN-023）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-025；REQ-067）
-归档判定：实现完成后归档 history/plans/2026-08/
+归档判定：实现完成后归档 history/plans/2026-08/（已执行 2026-09-08）
+
+> **2026-09-08 关闭（Achieved）**：§A 十项 + §B（B1~B8 经 PLAN-033/034）全量落地，设计事实迁入
+> [design/domain-explore.md](../../../design/downloads-flow.md)；浏览器手动导入轮验收由用户清库后执行，
+> 发现问题以新 DEFECT/REQ 登记。
 
 > 本文档整合原 PLAN-026（布局优化）和 PLAN-027（右边栏展示），作为 REQ-067 的完整设计规范。
 > 2026-08-30 重构：按实现状态分层——§A 已完成/已确认、§B 待开发、§C 待确认/待消解。
@@ -57,10 +62,10 @@
 
 ## 前置条件
 
-- 前置计划：文档下载管理用户操作流程（[PLAN-023](2026-08-27-download-ux-flow.md)）——本计划承接其界面优化续
+- 前置计划：文档下载管理用户操作流程（[PLAN-023](../../../plans/2026-08-27-download-ux-flow.md)）——本计划承接其界面优化续
 - 探索链路新架构已落地（PLAN-022 B1~B5 + F1~F5，2026-08-28 全量执行）
 - 导入领域知识 API 契约待 QED-Tracker 回执（REQ-067-A / PLAN-026），§B3 依赖该回执
-- 开发环境：见 [本地开发环境](../standards/local-dev.md)（机器 wenfu / UUID 2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8）
+- 开发环境：见 [本地开发环境](../../../standards/local-dev.md)（机器 wenfu / UUID 2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8）
 
 ---
 
@@ -217,6 +222,7 @@
 3. 前端校验：`JSON.parse` + 检查 `name`/`courses` 字段存在
 4. 调 QED-Tracker 导入 API（端点契约见 §C3）
 5. 成功后 `fetchAll()` 刷新树
+6. **名称确认**：若导入 `name` 与已有领域 `name` 不同，后端设 `explore_pending = {kind: 'name_confirm', name_check: {suggested_name, valid: true, reason: '导入领域知识提供了新名称'}}`，前端显示「领域名称需要确认」Alert（原名 vs 新名），用户选择「采纳建议」或「保留原名」
 
 **参考 JSON 结构**（`QED-Tracker/docs/knowledge/computer-science.json`）：
 ```json

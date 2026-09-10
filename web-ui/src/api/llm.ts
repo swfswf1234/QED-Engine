@@ -3,7 +3,7 @@
  * 契约来源：backend/qed_engine/api/control.py（llm-gateway-and-model-management）
  */
 import { api, type ApiRequestOptions } from './client';
-import type { CallsResponse, KeysStatus, LlmCallsQuery, LlmTestResult } from '../stores';
+import type { CallsResponse, KeysStatus, LlmCallsQuery, LlmTestResult, ModelActionResponse, ModelName, ModelOp } from '../stores';
 
 /** GET /api/v1/config/keys：供应商配置状态 + 运行模式（不含密钥值；控制台依赖卡模式感知用） */
 export async function getKeys(opts?: ApiRequestOptions): Promise<KeysStatus> {
@@ -45,4 +45,9 @@ export async function reviewCall(
   opts?: ApiRequestOptions,
 ): Promise<{ ok: boolean; call_id: number }> {
   return api.patch<{ ok: boolean; call_id: number }>(`/llm/calls/${callId}/review`, data, opts);
+}
+
+/** POST /api/v1/models/{name}/{op}：本地模型启停（Task 6；api 模式后端 409 透传） */
+export async function operateModel(name: ModelName, op: ModelOp, opts?: ApiRequestOptions): Promise<ModelActionResponse> {
+  return api.post<ModelActionResponse>(`/models/${name}/${op}`, undefined, opts);
 }

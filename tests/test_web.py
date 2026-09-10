@@ -2,8 +2,8 @@
 模块职责：守护 8903 QED-Engine 前端（web-ui React 重构版）与静态服务：
 - serve_web.py 静态服务契约（存在/缓存头/端口与目录/并发/health 端点）
 - web-ui 源码契约（API 基址 8900、零 8901/8902 直连、hash 路由清单、关键端点 token）
-- 旧原生三文件版 web/ 已于 2026-08-17 退役（前端重构切换，frontend-react-refactor.md）。
-设计关联（DesignRef）：docs/design/web-frontend.md
+- 旧原生三文件版 web/ 已于 2026-08-17 退役（前端重构切换，见 docs/architecture/frontend-architecture.md）。
+设计关联（DesignRef）：docs/architecture/frontend-architecture.md
 实现状态：Current
 被测代码：web-ui/src/、scripts/serve_web.py
 """
@@ -96,7 +96,7 @@ def test_api_modules_no_direct_subproject_ports():
             assert url not in content, f"{path.name} 不应出现直连 URL：{url}（ADR 0007）"
 
 
-# --- hash 路由清单（frontend-react-refactor 四界面 + 学习中心） ---
+# --- hash 路由清单（React 重构四界面 + 学习中心） ---
 
 
 def test_hash_routes_declared():
@@ -133,7 +133,7 @@ def test_admin_menu_renamed_parsing():
 def test_api_endpoint_tokens_present():
     """web-ui api 封装应覆盖关键契约端点（8900 数据域/服务域/监控诊断）。
 
-    契约来源：docs/architecture/api-contracts.md、service-control.md。
+    契约来源：docs/architecture/api-contracts.md、service-hosting.md。
     """
     endpoint_tokens = {
         "services.ts": ("/services", "/self-restart", "/config/database"),
@@ -149,12 +149,11 @@ def test_api_endpoint_tokens_present():
 
 
 def test_dashboard_course_completion_semantics():
-    """仪表盘课程完成度口径（用户裁决 2026-08-17）：≥2 套教程完成验收（书籍全部 verified）
-    计为课程完成下载；分母 = catalog targets 课程数。"""
+    """仪表盘课程进度口径（2026-09-07 重构裁决：三行图表 + 统计数字）：课程完成 =
+    exploration_stage 已完成 且 已决定书籍全部 owned（持有验收），见 design/admin-dashboard.md。"""
     src = (SRC / "stores" / "dashboard.ts").read_text(encoding="utf-8")
-    assert "buildCourseCompletion" in src, "dashboard store 应实现 buildCourseCompletion"
-    assert ">= 2" in src or ">=2" in src, "课程完成判定应含 ≥2 套教程"
-    assert "verified" in src, "完成验收判定应基于书籍 verified"
+    assert "buildCourseProgress" in src, "dashboard store 应实现 buildCourseProgress"
+    assert "owned" in src, "完成判定应基于书籍 owned 持有状态"
 
 
 def test_console_message_feedback():

@@ -1,9 +1,10 @@
 /**
  * 文档下载管理左树 v2（2026-08-24 REQ-059 交互改版）
  * - 真实领域课程体系三层层级：领域 → 课程 → 教程叶子（math-qe 冻结目录退出 UI）
- * - 右键菜单（antd Dropdown contextMenu）：
- *   领域 = 新增课程｜修改领域｜探索课程体系｜删除领域(danger)
- *   课程 = 修改课程｜探索教程｜删除课程(danger)
+ * - 右键菜单（antd Dropdown contextMenu，口径见 PLAN-033 §2.3/§2.5 统一表）：
+ *   领域 = 编辑领域知识｜探索领域知识（未开始/待确认重探/失败重试；探索中除删除外禁用）
+ *          ｜导入领域知识｜添加课程｜删除领域(danger)
+ *   课程 = 编辑课程｜探索课程（探索中/已完成禁用）｜导入课程知识｜删除课程(danger)
  * - 树底「＋添加领域」为纯手工表单（POST /domains），与探索流解耦（用户裁决 2026-08-24）
  * - hover 🔍 取消（课程探索走右键菜单）；色点三态保留
  * - 手工维护端点未上线（8901 404）时报错降级提示，不阻塞浏览
@@ -11,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { CaretRightFilled, HolderOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
-import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Tooltip } from 'antd';
+import { App, Button, Dropdown, Form, Input, InputNumber, Modal, Select } from 'antd';
 import type { MenuProps } from 'antd';
 import { ApiError, describeError } from '../api/client';
 import {
@@ -64,10 +65,10 @@ function TutorialLeaf({ node }: { node: TutorialNode }) {
 }
 
 /** 课程分支：可折叠显示教程叶子；点击名称 → 选中 + 联动筛选；右键菜单（v2 取消 hover 🔍） */
-function CourseBranch({ course, onMenuAction, onImportKnowledge }: {
+function CourseBranch({ course, onImportKnowledge, onEditCourse }: {
   course: CourseNode;
-  onMenuAction: (action: TreeFormAction) => void;
   onImportKnowledge: (courseId: string) => void;
+  onEditCourse: (course: CourseRecord) => void;
 }) {
   const selectNode = useDownloadsStore((s) => s.selectNode);
   const selected = useDownloadsStore((s) => s.selected);
@@ -113,24 +114,27 @@ function CourseBranch({ course, onMenuAction, onImportKnowledge }: {
     });
   };
 
+  // 课程层三态菜单口径（PLAN-033 §2.5）：探索课程在 探索中/已完成 禁用，导入课程知识在 已完成 禁用
+  const courseStage = courseRecord?.exploration_stage ?? '';
+  const exploreDisabled = courseStage === '探索中' || courseStage === '已完成';
+
   const menu: MenuProps = {
     items: [
       { key: 'edit', label: '编辑课程' },
-      { key: 'explore', label: '探索课程',
-        disabled: courseRecord?.exploration_stage === '已完成' },
+      { key: 'explore', label: '探索课程', disabled: exploreDisabled },
       { key: 'import', label: '导入课程知识',
-        disabled: courseRecord?.exploration_stage === '已完成' },
+        disabled: courseStage === '已完成' },
       { type: 'divider' },
       { key: 'delete', label: '删除课程', danger: true },
     ],
     onClick: ({ key }) => {
       if (key === 'edit') {
-        if (courseRecord) onMenuAction({ kind: 'edit-course', course: courseRecord });
+        if (courseRecord) onEditCourse(courseRecord);
       } else if (key === 'delete') {
         confirmDelete();
       } else if (key === 'explore') {
         // 无弹窗直触：立即调用探索接口
-        if (courseRecord?.exploration_stage !== '已完成') {
+        if (!exploreDisabled) {
           void startCourseExplore(course.id);
         }
       } else if (key === 'import') {
@@ -185,7 +189,7 @@ function CourseBranch({ course, onMenuAction, onImportKnowledge }: {
 
 // --- 表单弹窗（树内聚：新增课程 / 修改领域 / 修改课程） ---
 
-function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onClose: () => void }) {
+export function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onClose: () => void }) {
   const [form] = Form.useForm();
   const { message } = App.useApp();
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
@@ -218,7 +222,6 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             description: action.course.description ?? '',
             stage: action.course.stage ?? '',
             track: action.course.track ?? '',
-            sort_order: action.course.sort_order,
             aliases: action.course.aliases?.join(', ') ?? '',
             prerequisites: action.course.prerequisites?.join(', ') ?? '',
           }
@@ -279,8 +282,6 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
           stage: String(values.stage ?? ''),
           track: String(values.track ?? ''),
         };
-        // sort_order 留空 = 不变（undefined 不入请求体）
-        if (values.sort_order !== undefined && values.sort_order !== null) body.sort_order = Number(values.sort_order);
         // 解析逗号分隔的字符串为数组
         if (values.aliases) body.aliases = String(values.aliases).split(',').map(s => s.trim()).filter(Boolean);
         if (values.prerequisites) body.prerequisites = String(values.prerequisites).split(',').map(s => s.trim()).filter(Boolean);
@@ -315,11 +316,20 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item name="description" label="描述（必填）" rules={[{ required: true, message: '请填写课程描述' }]}>
               <Input.TextArea rows={3} placeholder="课程介绍" />
             </Form.Item>
-            <Form.Item name="stage" label="阶段（必填）" rules={[{ required: true, message: '请选择阶段' }]}>
-              <Input placeholder="如：基础" />
+            <Form.Item name="stage" label="阶段（必填；选项来自领域学习阶段）" rules={[{ required: true, message: '请选择阶段' }]}>
+              {/* B5（PLAN-033 §4）：选项源改 domain.stages 下拉，对齐 edit-course */}
+              <Select placeholder="请选择阶段">
+                {action.domain.stages?.map((stage) => (
+                  <Select.Option key={stage} value={stage}>{stage}</Select.Option>
+                ))}
+              </Select>
             </Form.Item>
-            <Form.Item name="track" label="学术方向">
-              <Input placeholder="如：分析学" />
+            <Form.Item name="track" label="学术方向（选项来自领域课程方向）">
+              <Select placeholder="请选择学术方向" allowClear>
+                {action.domain.classic_tracks?.map((t) => (
+                  <Select.Option key={t.name} value={t.name}>{t.name}</Select.Option>
+                ))}
+              </Select>
             </Form.Item>
             <Form.Item name="aliases" label="别名（可选，逗号分隔）">
               <Input placeholder="如：复变,复变函数论" />
@@ -396,10 +406,10 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item label="课程名">
               <Input value={action.course.name} disabled />
             </Form.Item>
-            <Form.Item name="description" label="描述（必填）" rules={[{ required: true, message: '请填写课程描述' }]}>
+            <Form.Item name="description" label="课程描述" rules={[{ required: true, message: '请填写课程描述' }]}>
               <Input.TextArea rows={3} placeholder="课程介绍" />
             </Form.Item>
-            <Form.Item name="stage" label="阶段（必填）" rules={[{ required: true, message: '请选择阶段' }]}>
+            <Form.Item name="stage" label="学习阶段" rules={[{ required: true, message: '请选择阶段' }]}>
               <Select placeholder="请选择阶段">
                 {currentDomain?.stages?.map(stage => (
                   <Select.Option key={stage} value={stage}>{stage}</Select.Option>
@@ -416,7 +426,7 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
             <Form.Item name="aliases" label="别名（可选，逗号分隔）">
               <Input placeholder="如：复变,复变函数论" />
             </Form.Item>
-            <Form.Item name="prerequisites" label="前置课程（可选）">
+            <Form.Item name="prerequisites" label="依赖课程（可选）">
               <Select mode="multiple" placeholder="请选择前置课程">
                 {currentDomain?.courses
                   ?.filter(c => c.course_id !== action.course.course_id)
@@ -424,12 +434,6 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
                     <Select.Option key={course.course_id} value={course.name}>{course.name}</Select.Option>
                   ))}
               </Select>
-            </Form.Item>
-            <Form.Item name="sort_order" label="排序（同领域内展示顺序，留空保持不变）">
-              <InputNumber min={0} max={9999} style={{ width: '100%' }} placeholder="如：3" />
-            </Form.Item>
-            <Form.Item name="note" label="备注（可选）">
-              <Input.TextArea rows={2} />
             </Form.Item>
           </>
         )}
@@ -445,7 +449,7 @@ function TreeFormModal({ action, onClose }: { action: TreeFormAction | null; onC
  * - 教程为叶子，只展示名称 + 验收进度，不可点击/展开
  * - 树宽拖拽：右侧手柄（280–640px，localStorage 记忆）
  */
-export default function DownloadsTree() {
+export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course: CourseRecord) => void } = {}) {
   const domains = useDownloadsStore((s) => s.domains);
   const knowledge = useDownloadsStore((s) => s.knowledge);
   const details = useDownloadsStore((s) => s.details);
@@ -580,37 +584,44 @@ export default function DownloadsTree() {
     }
   };
 
-  const domainMenu = (d: DomainSystem): MenuProps => ({
-    items: [
-      { key: 'edit', label: '编辑领域知识' },
-      { key: 'explore', label: '探索领域知识',
-        disabled: d.exploration_stage === '已完成' },
-      { key: 'import', label: '导入领域知识',
-        disabled: d.exploration_stage === '已完成' },
-      { key: 'add-course', label: '添加课程',
-        disabled: d.exploration_stage === '未开始' || d.exploration_stage === '已生成' },
-      { type: 'divider' },
-      { key: 'delete', label: '删除领域', danger: true },
-    ],
-    onClick: ({ key }) => {
-      if (key === 'explore') {
-        // 无弹窗直触：立即调用探索接口
-        if (d.exploration_stage === '未开始' || d.exploration_stage === '待确认') {
-          void startDomainExplore(d.domain_id);
+  // 领域菜单口径（PLAN-033 §2.3 统一表）：探索触发=未开始/待确认（重探）/失败（重试）；
+  // 探索中除删除外全部禁用
+  const domainMenu = (d: DomainSystem): MenuProps => {
+    const stage = d.exploration_stage || '未开始';
+    const running = stage === '探索中';
+    const exploreEnabled = stage === '未开始' || stage === '待确认' || stage === '失败';
+    return {
+      items: [
+        { key: 'edit', label: '编辑领域知识', disabled: running },
+        { key: 'explore', label: stage === '失败' ? '重试探索' : '探索领域知识',
+          disabled: !exploreEnabled },
+        { key: 'import', label: '导入领域知识',
+          disabled: running || stage === '已完成' },
+        { key: 'add-course', label: '添加课程',
+          disabled: running || stage === '未开始' || stage === '已生成' },
+        { type: 'divider' },
+        { key: 'delete', label: '删除领域', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'explore') {
+          // 无弹窗直触：立即调用探索接口（未开始发起 / 待确认重探 / 失败重试）
+          if (exploreEnabled) {
+            void startDomainExplore(d.domain_id);
+          }
+        } else if (key === 'import') {
+          // 导入领域知识：选择 JSON 文件
+          importTargetRef.current = d.domain_id;
+          fileInputRef.current?.click();
+        } else if (key === 'add-course') {
+          setFormAction({ kind: 'add-course', domain: d });
+        } else if (key === 'edit') {
+          setFormAction({ kind: 'edit-domain', domain: d });
+        } else if (key === 'delete') {
+          confirmDeleteDomain(d);
         }
-      } else if (key === 'import') {
-        // 导入领域知识：选择 JSON 文件
-        importTargetRef.current = d.domain_id;
-        fileInputRef.current?.click();
-      } else if (key === 'add-course') {
-        setFormAction({ kind: 'add-course', domain: d });
-      } else if (key === 'edit') {
-        setFormAction({ kind: 'edit-domain', domain: d });
-      } else if (key === 'delete') {
-        confirmDeleteDomain(d);
-      }
-    },
-  });
+      },
+    };
+  };
 
   // 添加领域（纯手工表单，POST /domains；只采集名称+描述，阶段由探索流产生）
   const submitAddDomain = async (values: { 
@@ -683,14 +694,12 @@ export default function DownloadsTree() {
                   >
                     <CaretRightFilled rotate={expanded ? 90 : 0} />
                   </span>
-                  <Tooltip title="右键：新增课程 / 修改 / 探索 / 删除">
-                    <span
-                      className="dl-tree-name"
-                      onClick={() => selectNode({ kind: 'domain', id: domain.domainId })}
-                    >
-                      {domain.name}
-                    </span>
-                  </Tooltip>
+                  <span
+                    className="dl-tree-name"
+                    onClick={() => selectNode({ kind: 'domain', id: domain.domainId })}
+                  >
+                    {domain.name}
+                  </span>
                   <span className="dl-tree-count">{domain.courses.length} 门课程</span>
                   {expanded && (
                     <div className="dl-tree-children">
@@ -698,7 +707,7 @@ export default function DownloadsTree() {
                         <div className="dl-tree-empty">暂无课程（可右键新增或对该领域探索）</div>
                       ) : (
                         domain.courses.map((c) => (
-                          <CourseBranch key={c.id} course={c} onMenuAction={setFormAction} onImportKnowledge={handleCourseImportKnowledge} />
+                          <CourseBranch key={c.id} course={c} onImportKnowledge={handleCourseImportKnowledge} onEditCourse={onEditCourse ?? (() => {})} />
                         ))
                       )}
                     </div>

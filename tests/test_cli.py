@@ -1,6 +1,6 @@
 """
 模块职责：统一 CLI qed 契约测试：config 子命令、tracker 客户端子命令、服务发现地址与尾注提醒。
-设计关联（DesignRef）：docs/design/configuration-and-secrets.md、docs/design/service-contracts.md
+设计关联（DesignRef）：docs/design/project-configuration.md、docs/design/cross-project-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/cli.py、backend/qed_engine/clients/tracker_client.py
 """

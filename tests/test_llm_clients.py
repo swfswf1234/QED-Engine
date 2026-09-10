@@ -1,6 +1,6 @@
 """
 模块职责：LLM 供应商客户端契约测试：多厂商文字/视觉（OpenAI 兼容）、LM Studio、MinerU。
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：backend/qed_engine/services/llm/clients.py
 """

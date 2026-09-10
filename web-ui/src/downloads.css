@@ -248,26 +248,40 @@
 }
 
 .dl-course-head {
-  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
 
-/* 课程名称样式（大写+空隙+居中） */
+/* 课程名称行：名称左 + 状态按钮右（与领域卡 .dl-domain-card-header 对齐） */
+.dl-course-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .dl-course-head-name {
+  flex: 1;
+  text-align: center;
   font-size: 18px;
   font-weight: 700;
   color: #1f1f1f;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  text-align: center;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #f0f0f0;
 }
 
+.dl-course-status-bar {
+  flex-shrink: 0;
+}
+
+/* 课程描述：与领域卡 .dl-domain-card-info p 统一 */
 .dl-course-head-note {
+  margin: 12px 0 0;
+  padding-left: 16px;
+  font-size: 14px;
   color: #666;
-  font-size: 13px;
-  margin-top: 4px;
   white-space: pre-wrap;
   word-break: break-word;
   text-align: left;
@@ -371,24 +385,7 @@
 
 /* v2（2026-08-24 REQ-059）：hover 探索按钮与右侧顶部按钮已移除，样式随之清理 */
 
-/* 领域信息卡（右面板顶部，选中领域时展示；含探索按钮状态机） */
-.dl-domain-card {
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-  background: #fafafa;
-}
-.dl-domain-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* 领域名称样式（与课程名称统一，REQ-067） */
-.dl-domain-name {
-  font-weight: 700;
-  font-size: 16px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #1f1f1f;
-}
-.dl-domain-desc { color: #8c8c8c; font-size: 12px; margin-top: 4px; white-space: pre-wrap; }
+
 
 /* 确认页 */
 .explore-page .explore-head {
@@ -485,7 +482,6 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
 }
 
 .dl-domain-card-header h3 {
@@ -494,22 +490,12 @@
   font-weight: 600;
 }
 
-.dl-domain-card-stage {
-  font-size: 12px;
-  color: #666;
-}
-
 .dl-domain-card-info {
-  margin-bottom: 16px;
+  margin-top: 12px;
 }
 
 .dl-domain-card-info p {
-  margin: 4px 0;
+  margin: 0;
   font-size: 14px;
-  color: #333;
-}
-
-.dl-domain-card-action {
-  border-top: 1px solid #f0f0f0;
-  padding-top: 12px;
+  color: #666;
 }

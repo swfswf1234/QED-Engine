@@ -5,8 +5,8 @@
 最后更新：2026-08-16
 关联 ADR：[ADR 0008](../../../history/adr/v0.1/0008-frontend-react-refactor.md)（框架与工程化选型）、
 [ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0002](../../../history/adr/v0.1/0002-frontend-and-port-centralization.md)
-关联设计：[前端重构设计](../../../design/frontend-react-refactor.md)、
-[配置中心 API 契约](../../../architecture/api-contracts.md)（监控与诊断域登记，实施后置）、[服务控制设计](../../../design/service-control.md)
+关联设计：[前端重构设计](../../../architecture/frontend-architecture.md)、
+[配置中心 API 契约](../../../architecture/api-contracts.md)（监控与诊断域登记，实施后置）、[服务控制设计](../../../design/service-hosting.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-011 登记；REQ-021 大变动同步承接文档）
 归档判定：各 Phase 逐阶段用户验证通过 → 8903 切换完成 + 旧前端退役 + 测试迁移全绿 →
 文档同步后 Completed，归档至 `history/plans/2026-08/`
@@ -15,7 +15,7 @@
 
 - 2026-08-16 用户方向裁决：前端重构为当前最高优先级，**本轮只做前端部分改造**；后端
   三域拆分与监控诊断端点独立成轮，由 [ARCH-012 后端三域拆分轮（backend-domain-refactor）](../../../history/plans/2026-08/2026-08-backend-domain-refactor.md)
-  并行承接（设计文档 [backend-domain-split.md](../../../design/backend-domain-split.md) 深化版）；
+  并行承接（设计文档 [backend-domain-split.md](../../../architecture/backend-architecture.md) 深化版）；
   框架选型 React + AntD 全家桶（ADR 0008）。
 - 设计文档已落盘并通过用户验收（2026-08-16）：frontend-react-refactor.md、
   ../architecture/api-contracts.md（监控域登记）、service-control.md（控制台增强）、ADR 0008、
@@ -46,7 +46,7 @@
 - 测试与文档同步（上节）。
 
 非目标（本轮不做，由 [ARCH-012](../../../history/plans/2026-08/2026-08-backend-domain-refactor.md) 并行承接）：
-- 后端三域拆分（[backend-domain-split.md](../../../design/backend-domain-split.md)）。
+- 后端三域拆分（[backend-domain-split.md](../../../architecture/backend-architecture.md)）。
 - 监控与诊断端点（/logs、/monitor/*、/self-restart，../../../architecture/api-contracts.md 登记保留）。
 - 控制台 GPU/LM Studio/mineru/日志查看展示。
 - Axiom-Flow 适配层、本地 LLM 调用接口（LLM 网关 / prompt 调试，第二轮）。

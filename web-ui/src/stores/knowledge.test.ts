@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourseGraph } from './knowledge';
 import { layoutBubbles, BUBBLE_R, LAYER_H } from '../components/CourseGraph';
-import { stageKey, STAGE_ORDER } from './courseMeta';
+import { stageKey } from './courseMeta';
 import type { CatalogTarget, CourseRecord } from './index';
 
 function target(courseId: string, courseName: string): CatalogTarget {

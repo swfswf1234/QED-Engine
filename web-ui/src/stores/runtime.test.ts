@@ -35,10 +35,16 @@ describe('withWebServiceFallback（web 兜底 + 排序纯函数）', () => {
     expect(merged[3].label).toBe('QED 前端服务');
   });
 
-  it('已有真实 web 条目时去重不重复渲染', () => {
+  it('web 条目 offline 时替换为兜底 online（页面能加载即在线）', () => {
     const merged = withWebServiceFallback([svc('config', 8900, 'online'), svc('web', 8903, 'offline')]);
     expect(merged.filter((s) => s.name === 'web')).toHaveLength(1);
-    expect(merged.find((s) => s.name === 'web')?.status).toBe('offline');
+    expect(merged.find((s) => s.name === 'web')?.status).toBe('online');
+  });
+
+  it('web 条目非 offline 时保留真实状态', () => {
+    const merged = withWebServiceFallback([svc('config', 8900, 'online'), svc('web', 8903, 'online')]);
+    expect(merged.filter((s) => s.name === 'web')).toHaveLength(1);
+    expect(merged.find((s) => s.name === 'web')?.status).toBe('online');
   });
 
   it('乱序输入按端口升序输出', () => {

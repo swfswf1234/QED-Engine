@@ -6,9 +6,9 @@
 关联 ADR：[ADR 0003](../../../history/adr/v0.1/0003-shared-qed-database-independence.md)（qed_* 共享表族修订，工作区已改）、
 [ADR 0009](../../../history/adr/v0.1/0009-shared-qed-tables.md)（qed_* 共享表族）、[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、
 [ADR 0008](../../../history/adr/v0.1/0008-frontend-react-refactor.md)
-关联设计：[backend-domain-split.md](../../../design/backend-domain-split.md)（三域已实施）、
-[../architecture/api-contracts.md](../../../architecture/api-contracts.md)、[service-control.md](../../../design/service-control.md)、
-[service-contracts.md](../../../design/service-contracts.md)、[dataset-conventions.md](../../../design/dataset-conventions.md)、
+关联设计：[backend-domain-split.md](../../../architecture/backend-architecture.md)（三域已实施）、
+[../architecture/api-contracts.md](../../../architecture/api-contracts.md)、[service-control.md](../../../design/service-hosting.md)、
+[service-contracts.md](../../../design/cross-project-contracts.md)、[dataset-conventions.md](../../../design/dataset-conventions.md)、
 [database-design.md](../../../architecture/database-design.md)
 关联 Tracker：`docs/trackers/todo.md`（ARCH-013 登记；QED-031 同步、REQ-032 新登记）
 归档判定：四工作项完成 + 契约门禁全绿 + 用户确认 → Completed，归档至 `history/plans/2026-08/`

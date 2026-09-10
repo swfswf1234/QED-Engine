@@ -6,8 +6,8 @@ LLM 供应商可达性与 MySQL 连接为 8900 **启动自检**（create_app 时
 api/main.py），本模块保留探测函数供启动检查引用；/config/llm-status 端点已删除（ARCH-014）。
 
 设计关联（DesignRef）：docs/architecture/api-contracts.md
-（服务域契约见 docs/design/service-control.md；三域组织见 docs/design/backend-domain-split.md；
-LLM 网关端点契约见 docs/design/llm-gateway-and-model-management.md）
+（服务域契约见 docs/design/service-hosting.md；三域组织见 docs/architecture/backend-architecture.md；
+LLM 网关端点契约见 docs/design/llm-gateway.md）
 实现状态：Current
 关联测试：tests/test_api.py、tests/test_log_viewer.py、tests/test_monitor.py、tests/test_self_restart.py、
 tests/test_llm_endpoints.py
@@ -40,17 +40,18 @@ from qed_engine.api.schemas import (
     ReviewCallResponse,
 )
 from qed_engine.config import Settings
+
+# service_manager 经模块属性访问（DEFECT-001）：_probe_http/_MANAGED/_start/_stop 是
+# 测试注入点，from-import 会绑定旧函数引用导致 patch 失效；动态取模块属性保持可替换性。
+from qed_engine.services import service_manager as sm
 from qed_engine.services.llm import call_log as llm_call_log
 from qed_engine.services.llm import clients as llm_clients
 from qed_engine.services.llm import gateway as llm_gateway
+from qed_engine.services.llm import model_manager as mm
 from qed_engine.services.log_viewer import LogError, read_log
 from qed_engine.services.monitor import probe_gpu, probe_lmstudio, probe_memory, probe_mineru
 from qed_engine.services.service_manager import (
-    _MANAGED,
     ServiceError,
-    _probe_http,
-    _start,
-    _stop,
     get_specs,
     require_service,
     restart_self,
@@ -87,7 +88,7 @@ def _service_call(fn, *args, **kwargs):
 
 @router.get("/services")
 def list_services() -> dict:
-    """三服务状态快照，同步返回（service-control.md 契约）。"""
+    """三服务状态快照，同步返回（service-hosting.md 契约）。"""
     return {"services": [service_status(spec) for spec in get_specs().values()]}
 
 
@@ -99,7 +100,7 @@ def start_service(name: str) -> ActionResponse:
         spec = require_service(name)
         if spec.name == "config":
             raise ServiceError("config（8900 自身）不可经控制中心启停")
-        return ActionResponse(**_start(spec))
+        return ActionResponse(**sm._start(spec))
 
     return _service_call(_run)
 
@@ -112,7 +113,7 @@ def stop_service(name: str) -> ActionResponse:
         spec = require_service(name)
         if spec.name == "config":
             raise ServiceError("config（8900 自身）不可经控制中心启停")
-        return ActionResponse(**_stop(spec))
+        return ActionResponse(**sm._stop(spec))
 
     return _service_call(_run)
 
@@ -132,14 +133,73 @@ def restart_service(name: str) -> ActionResponse:
             raise ServiceError("config（8900 自身）不可经控制中心启停")
 
         if spec.lifecycle_script:
-            if _MANAGED.get(spec.name) is not None or _probe_http(spec.port):
-                _stop(spec)
+            if sm._MANAGED.get(spec.name) is not None or sm._probe_http(spec.port):
+                sm._stop(spec)
         else:
-            if _MANAGED.get(spec.name) is not None:
-                _stop(spec)
-        return ActionResponse(**_start(spec))
+            if sm._MANAGED.get(spec.name) is not None:
+                sm._stop(spec)
+        return ActionResponse(**sm._start(spec))
 
     return _service_call(_run)
+
+
+# --- 本地模型端点族（Task 5，2026-09-06）---
+# 路径用模型名：/models/{qwen|mineru}。api 模式本地模型无启停语义 → 409；未知 name → 404。
+# 状态探测复用 /monitor/lmstudio、/monitor/mineru，不新增状态端点。动作经 model_manager.operate_model
+# （资源互斥含：start/restart 前先停对方，见 model_manager.py）。
+
+
+def _require_local_mode(settings: Settings) -> None:
+    """api 模式下本地模型不支持启停（仅测试）→ 409。"""
+    if settings.qed_api_select != "local":
+        raise HTTPException(status_code=409, detail="当前为 api 模式，本地模型仅支持测试")
+
+
+def _model_action(fn):
+    """执行模型动作并映射 ValueError（未知 name/op）→ 404。"""
+    try:
+        return fn()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/models/{name}/start", response_model=ActionResponse)
+def model_start(name: str, request: Request) -> ActionResponse:
+    """启动本地模型（name=qwen/mineru）；api 模式 409；互斥见 model_manager。"""
+    settings = request.app.state.settings
+
+    def _run():
+        _require_local_mode(settings)
+        mm.operate_model(name, "start", settings)
+        return ActionResponse(name=name, status="starting")
+
+    return _model_action(_run)
+
+
+@router.post("/models/{name}/stop", response_model=ActionResponse)
+def model_stop(name: str, request: Request) -> ActionResponse:
+    """停止本地模型；api 模式 409。"""
+    settings = request.app.state.settings
+
+    def _run():
+        _require_local_mode(settings)
+        mm.operate_model(name, "stop", settings)
+        return ActionResponse(name=name, status="stopping")
+
+    return _model_action(_run)
+
+
+@router.post("/models/{name}/restart", response_model=ActionResponse)
+def model_restart(name: str, request: Request) -> ActionResponse:
+    """重启本地模型（先停后启，互斥见 model_manager）；api 模式 409。"""
+    settings = request.app.state.settings
+
+    def _run():
+        _require_local_mode(settings)
+        mm.operate_model(name, "restart", settings)
+        return ActionResponse(name=name, status="starting")
+
+    return _model_action(_run)
 
 
 @router.get("/health", response_model=HealthResponse)

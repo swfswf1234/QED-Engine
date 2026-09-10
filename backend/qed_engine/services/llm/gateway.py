@@ -5,7 +5,7 @@
 - local 模式：文字 LM Studio（经 model_manager 资源互斥）、视觉 MinerU（同上）。
 调用成功/失败均记录（record_call 降级不抛）；失败返回 reply="" + success=false + error。
 
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 关联测试：tests/test_llm_gateway.py
 """

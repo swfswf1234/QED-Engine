@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-23
+最后更新：2026-09-10
 确认状态：暂定
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
@@ -23,7 +23,7 @@
   不再维护 JSON 状态事实源（`meta/` 退役，存量迁移归档见 [REQ-032](../trackers/todo.md)）。
 
 模型为**统一数据根 + 内容类型顶层**（2026-08-23 ARCH-019 用户评审确定）：三项目经
-`QED_DATA_ROOT`（变量定义见 [configuration-and-secrets.md](configuration-and-secrets.md)）
+`QED_DATA_ROOT`（变量定义见 [project-configuration.md](project-configuration.md)）
 指向同一物理目录，顶层按内容类型组织（`raw/` 原始区、`tmp/` 临时区、`parsed/` 整理后数据
 资料），第二层为领域、第三层为课程。废弃早期"meta/ JSON 状态"、"资源登记双写"与
 "项目子域"（`qed-tracker/`、`axiom-flow/` 子目录）方案。

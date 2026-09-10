@@ -10,6 +10,9 @@
 /dataset/qed-tracker/*
 !/dataset/qed-tracker/.gitkeep
 
+# 本地模型文件（MinerU 权重 / LM Studio GGUF），不入库
+/model
+
 # IDE / 编辑器
 /.idea/
 .vscode/

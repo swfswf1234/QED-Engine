@@ -141,16 +141,15 @@ export interface LlmCallsQuery {
 /** 教程（qt_knowledge /knowledge：一套教程或一组延展资料归类） */
 export interface KnowledgeRecord {
   knowledge_id: string;
-  domain_id: string;
+  /** 8901 qt_knowledge 表无 domain_id，由前端通过课程归属反查 */
+  domain_id?: string;
   course_id: string;
   kind: string; // tutorial=一套教程 / other_material=课程延展资料归类
   set_no: string; // 套标记（1~4=中文套 / en=英文套 / ''=无配套）
   name: string; // 教程名/归类名（如 数学分析 套一）
   textbook_ref: Record<string, unknown> | null; // 教材决定引用 {title, version}
   exercise_ref: Record<string, unknown> | null; // 习题集决定引用 {title, version}
-  textbook_intro: string; // 教材简介（指引检索）
-  exercise_intro: string; // 习题集简介
-  materials_intro: string; // 延展资料归类简介
+  intro: string; // 套级简介（散文，120~350字）
   status: string; // draft / confirmed / completed（rejected/superseded 数据层彻底隐藏）
   reject_reason: string;
   supersede_reason: string;
@@ -160,33 +159,44 @@ export interface KnowledgeRecord {
   [key: string]: unknown;
 }
 
-/** 书籍（qt_books /books/{id}...：一册/一卷/一个快照，候选→决定→下载→验证全生命周期） */
+/** 书籍（qt_books 书库化重构 QED-050-D：域级书库，一册/一本书） */
 export interface BookRecord {
   book_id: string;
-  knowledge_id: string;
-  kind: string; // textbook / exercise / supplement / paper / blog / other
-  roles: string[]; // textbook / exercise / solutions / reference / supplement
-  title: string; // 书名（不含卷）
-  part: string; // 卷标识（'' / 第一册 / 上册）
-  display_title: string; // 展示名 = title+part（可人工覆盖）
-  file_name: string; // 落盘文件名
-  authors: string[];
-  language: string;
-  version: Record<string, unknown>; // {edition, publisher, year, detail}
-  source: Record<string, unknown> | null; // 候选来源/下载方案
-  original_url: string;
-  sha256: string | null;
-  relative_path: string;
-  absolute_path: string;
-  page_count: number | null;
-  status: string; // candidate / decided / downloading / downloaded / verified / failed（rejected/superseded 隐藏）
-  reject_reason: string;
-  supersede_reason: string;
-  review_note: string; // 审理备注
+  title: string;
+  original_title: string | null;  // 外文原版书名（可空）
+  part: string;                    // 卷标识（空串=单卷本；上册/下册；Vol.1/2/3）
+  authors: Array<{ name: string; role: string }>; // [{name, role:"author|translator"}]
+  publisher: string;
+  edition: string;
+  year: number | null;
+  language: string;                // zh / en
+  roles: string[];                 // textbook / exercises / solutions
+  status: string;                  // decided / parallel / candidate / retired
+  retire_reason: string;
+  holding: string;                 // owned / missing
+  file_path: string | null;
+  priority: number | null;
+  notes: string | null;
+  domain_id: string;
   created_at: string;
-  decided_at: string | null;
-  downloaded_at: string | null;
-  verified_at: string | null;
+  updated_at: string;
+  /** 向后兼容旧字段（Downloads 页面暂用，后续迁移） */
+  knowledge_id?: string;
+  kind?: string;
+  display_title?: string;
+  file_name?: string;
+  sha256?: string | null;
+  relative_path?: string;
+  absolute_path?: string;
+  page_count?: number | null;
+  source?: Record<string, unknown> | null;
+  original_url?: string;
+  reject_reason?: string;
+  supersede_reason?: string;
+  review_note?: string;
+  decided_at?: string | null;
+  downloaded_at?: string | null;
+  verified_at?: string | null;
   [key: string]: unknown;
 }
 
@@ -240,6 +250,9 @@ export interface CourseRecord {
   name: string;
   aliases: string[];
   stage: string;
+  track?: string;
+  description?: string;
+  sort_order?: number;
   prerequisites: string[];
   related_targets?: string[];
   note?: string;
@@ -255,18 +268,46 @@ export interface DomainSystem {
   stages?: string[];
   /** 探索状态（PLAN-022 F4：未开始/已生成/探索中/已完成/失败；QED-Tracker GET /courses 透出） */
   exploration_stage?: string;
-  /** 探索中间状态（REQ-067 B7/B8：名称确认/失败信息，QED-Tracker 写入） */
+  /** 探索中间状态（REQ-067 B7/B8 + PLAN-034：名称确认/审阅结果/导入挂起/失败，QED-Tracker 写入） */
   explore_pending?: {
-    kind: 'name_confirm';
+    kind: 'name_confirm' | 'name_confirmation';
     name_check: { suggested_name: string; valid: boolean; reason: string };
   } | {
-    kind: 'failed';
+    kind: 'review_results';
+    courses: Array<{
+      course_id?: string;
+      name: string;
+      track: string;
+      stage: string;
+      summary: string;
+    }>;
+    domain_report: {
+      description: string;
+      stages: string[];
+      classic_tracks: Array<{ name: string; summary: string; kind: string }>;
+    };
+  } | {
+    kind: 'failed' | 'error';
     error: string;
+  } | {
+    kind: 'import_courses';
+    courses: Array<{
+      name: string;
+      description: string;
+      stage: string;
+      track: string;
+      sort_order: number;
+      aliases: string[];
+      prerequisites: string[];
+    }>;
+    name_changed: boolean;
+    imported_name: string;
   } | null;
   /** 领域层级（探索产物，domain@v2） */
   level?: string;
-  classic_tracks?: unknown[];
+  classic_tracks?: Array<{ name: string; summary?: string; kind?: string }>;
   path_results?: unknown;
+  scope?: string;
   courses: CourseRecord[];
 }
 
@@ -361,5 +402,20 @@ export interface ExploreApplyResult {
 
 // --- 仪表盘 store（Dashboard 填充） ---
 // Phase 3：五层聚合数据（/knowledge + /books 详情）+ 服务健康摘要
+
+// --- 模型操作契约类型（Task 6，2026-09-06：/models/{name} 端点族） ---
+
+/** 本地模型名：qwen（LM Studio 文字）/ mineru（MinerU 图像） */
+export type ModelName = 'qwen' | 'mineru';
+
+/** 本地模型操作：start / stop / restart */
+export type ModelOp = 'start' | 'stop' | 'restart';
+
+/** POST /models/{name}/{op} 响应（与 /services 的 ActionResponse 形状一致） */
+export interface ModelActionResponse {
+  name: string;
+  status: string;
+  pid?: number | null;
+}
 
 export {};

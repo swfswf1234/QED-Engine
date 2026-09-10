@@ -170,8 +170,8 @@ def test_domain_session_apply_new_domain(monkeypatch):
     course_calls = [b for m, p, b in seen if m == "POST" and p == "/api/v1/domains/d_cs/courses"]
     assert course_calls[0] == {"name": "数据结构", "stage": "", "sort_order": 1,
                                "description": "s1", "aliases": ["DS"], "track": "t", "prerequisites": []}
-    # 完成态写回
-    assert any(m == "PATCH" and b == {"exploration_stage": "已完成"} for m, p, b in seen)
+    # 完成态写回（PLAN-034 §3 写点矩阵：会话 apply 落「待确认」，终态由 confirm-knowledge 收口）
+    assert any(m == "PATCH" and b == {"exploration_stage": "待确认"} for m, p, b in seen)
 
 
 def test_domain_session_failed(monkeypatch):

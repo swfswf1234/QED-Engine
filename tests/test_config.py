@@ -1,6 +1,6 @@
 """
 模块职责：统一配置读取测试：环境变量、默认值、SecretStr 与空值降级。
-设计关联（DesignRef）：docs/design/configuration-and-secrets.md
+设计关联（DesignRef）：docs/design/project-configuration.md
 实现状态：Current
 被测代码：src/qed_engine/config.py
 """

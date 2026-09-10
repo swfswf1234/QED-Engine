@@ -35,7 +35,7 @@
 
 ## 关联
 
-- 关联设计：[learning-center.md](../../../design/learning-center.md)（学习中心探索）、
-  [course-acquisition-flow.md](../../../design/course-acquisition-flow.md)（课程收集流程）
+- 关联设计：[learning-center.md](../../../plans/2026-09-10-learning-center-current-state.md)（学习中心探索）、
+  [course-acquisition-flow.md](../../../design/downloads-flow.md)（课程收集流程）
 - 关联文档：`README.md`、`AGENTS.md`
 - 关联 ADR：无

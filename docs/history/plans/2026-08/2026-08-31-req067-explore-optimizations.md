@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-31
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)
-关联设计：[2026-08-29-req067-downloads-optimization.md](../../../plans/2026-08-29-req067-downloads-optimization.md)
+关联设计：[2026-08-29-req067-downloads-optimization.md](2026-08-29-req067-downloads-optimization.md)
 关联 Tracker：docs/trackers/todo.md（本计划行 REQ-067 §B 扩展）
 
 > 本文档承接 REQ-067 §B，追加 4 项领域探索交互优化。§B 原有 B1-B8 不变。

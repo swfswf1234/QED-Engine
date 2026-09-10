@@ -1,10 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildBookSummary,
-  buildCourseCompletion,
-  buildKnowledgeDownloadPie,
+  buildDomainProgress,
+  buildCourseProgress,
+  buildBookDownloadProgress,
+  buildDashboardStats,
 } from './dashboard';
-import type { BookRecord, CatalogTarget, KnowledgeDetail, KnowledgeRecord } from './index';
+import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
+
+// --- 辅助工厂函数 ---
+
+function domain(partial: Partial<DomainSystem> & { domain_id: string; name: string }): DomainSystem {
+  return {
+    courses: [],
+    ...partial,
+  } as DomainSystem;
+}
+
+function course(partial: Partial<CourseRecord> & { course_id: string; name: string }): CourseRecord {
+  return {
+    aliases: [],
+    stage: '基础',
+    prerequisites: [],
+    ...partial,
+  } as CourseRecord;
+}
 
 function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_id: string }): KnowledgeRecord {
   return {
@@ -14,9 +33,7 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
     name: '',
     textbook_ref: null,
     exercise_ref: null,
-    textbook_intro: '',
-    exercise_intro: '',
-    materials_intro: '',
+    intro: '',
     status: 'draft',
     reject_reason: '',
     supersede_reason: '',
@@ -27,31 +44,26 @@ function kn(partial: Partial<KnowledgeRecord> & { knowledge_id: string; course_i
   };
 }
 
-function book(partial: Partial<BookRecord> & { book_id: string; knowledge_id: string }): BookRecord {
+function book(partial: Partial<BookRecord> & { book_id: string }): BookRecord {
   return {
-    kind: 'textbook',
-    roles: ['textbook'],
     title: 't',
+    original_title: null,
     part: '',
-    display_title: 't',
-    file_name: '',
     authors: [],
-    language: '',
-    version: {},
-    source: null,
-    original_url: '',
-    sha256: null,
-    relative_path: '',
-    absolute_path: '',
-    page_count: null,
+    publisher: '',
+    edition: '',
+    year: null,
+    language: 'zh',
+    roles: ['textbook'],
     status: 'candidate',
-    reject_reason: '',
-    supersede_reason: '',
-    review_note: '',
+    retire_reason: '',
+    holding: 'missing',
+    file_path: null,
+    priority: null,
+    notes: null,
+    domain_id: 'math',
     created_at: '',
-    decided_at: null,
-    downloaded_at: null,
-    verified_at: null,
+    updated_at: '',
     ...partial,
   };
 }
@@ -60,93 +72,165 @@ function detail(k: KnowledgeRecord, books: BookRecord[]): KnowledgeDetail {
   return { ...k, books };
 }
 
-describe('仪表盘聚合（纯函数，五层模型）', () => {
-  it('书籍汇总：聚合详情缓存 books 的 total/downloaded/verified/remaining/tutorials', () => {
-    const k1 = kn({ knowledge_id: 'k1', course_id: 'math' });
-    const k2 = kn({ knowledge_id: 'k2', course_id: 'math', kind: 'other_material' });
-    const details: Record<string, KnowledgeDetail> = {
-      k1: detail(k1, [
-        book({ book_id: 'b1', knowledge_id: 'k1', status: 'downloaded' }),
-        book({ book_id: 'b2', knowledge_id: 'k1', status: 'verified' }),
-        book({ book_id: 'b3', knowledge_id: 'k1', status: 'failed' }),
-      ]),
-      k2: detail(k2, []),
-    };
-    const sum = buildBookSummary(details);
-    // downloaded 含 verified；remaining = total - verified；tutorials 只计 kind=tutorial
-    expect(sum).toEqual({ total: 3, downloaded: 2, verified: 1, remaining: 2, tutorials: 1 });
+// --- 测试 ---
+
+describe('仪表盘聚合（2026-09-07 重构：三行图表 + 统计数字）', () => {
+  describe('buildDomainProgress', () => {
+    it('按 exploration_stage 聚合为新建/探索中/完成', () => {
+      const cs: DomainSystem[] = [
+        domain({ domain_id: 'math', name: '数学', exploration_stage: '未开始', courses: [] }),
+        domain({ domain_id: 'cs', name: '计算机', exploration_stage: '探索中', courses: [] }),
+        domain({ domain_id: 'phys', name: '物理', exploration_stage: '已完成', courses: [] }),
+      ];
+      const result = buildDomainProgress(cs);
+      expect(result).toEqual([
+        { name: '新建', value: 1 },
+        { name: '探索中', value: 1 },
+        { name: '完成', value: 1 },
+      ]);
+    });
+
+    it('已生成/待确认 归入探索中', () => {
+      const cs: DomainSystem[] = [
+        domain({ domain_id: 'a', name: 'A', exploration_stage: '已生成', courses: [] }),
+        domain({ domain_id: 'b', name: 'B', exploration_stage: '待确认', courses: [] }),
+      ];
+      const result = buildDomainProgress(cs);
+      expect(result).toEqual([{ name: '探索中', value: 2 }]);
+    });
+
+    it('空 courseSystem → 空数组', () => {
+      expect(buildDomainProgress([])).toEqual([]);
+    });
   });
 
-  it('书籍汇总：无详情缓存 → 全零', () => {
-    expect(buildBookSummary({})).toEqual({ total: 0, downloaded: 0, verified: 0, remaining: 0, tutorials: 0 });
+  describe('buildCourseProgress', () => {
+    it('按领域分组，课程按探索状态+书籍持有分类', () => {
+      const cs: DomainSystem[] = [
+        domain({
+          domain_id: 'math',
+          name: '数学',
+          exploration_stage: '已完成',
+          courses: [
+            course({ course_id: 'c1', name: '课程1', exploration_stage: '未开始' }),
+            course({ course_id: 'c2', name: '课程2', exploration_stage: '已完成' }),
+            course({ course_id: 'c3', name: '课程3', exploration_stage: '已完成' }),
+          ],
+        }),
+      ];
+      const details: Record<string, KnowledgeDetail> = {
+        k1: detail(kn({ knowledge_id: 'k1', course_id: 'c2' }), [
+          book({ book_id: 'b1', status: 'decided', holding: 'owned' }),
+        ]),
+        k2: detail(kn({ knowledge_id: 'k2', course_id: 'c3' }), [
+          book({ book_id: 'b2', status: 'decided', holding: 'missing' }),
+          book({ book_id: 'b3', status: 'decided', holding: 'owned' }),
+        ]),
+      };
+      const result = buildCourseProgress(cs, details);
+      expect(result['数学']).toEqual([
+        { name: '探索中', value: 1 },   // c1 未完成探索
+        { name: '下载中', value: 1 },   // c3 已完成 + 部分 owned
+        { name: '完成', value: 1 },     // c2 已完成 + 全部 owned
+      ]);
+    });
+
+    it('无书籍的已完成课程 → 探索完成', () => {
+      const cs: DomainSystem[] = [
+        domain({
+          domain_id: 'a',
+          name: 'A',
+          courses: [course({ course_id: 'c1', name: 'C1', exploration_stage: '已完成' })],
+        }),
+      ];
+      const result = buildCourseProgress(cs, {});
+      expect(result['A']).toEqual([{ name: '探索完成', value: 1 }]);
+    });
+
+    it('空 courseSystem → 空对象', () => {
+      expect(buildCourseProgress([], {})).toEqual({});
+    });
   });
 
-  it('课程下载完成度：分母=catalog 课程数，分子=≥2 套教程全部验收的课程数', () => {
-    const catalogTargets = [
-      { course_id: 'math', name: '数学分析' },
-      { course_id: 'math', name: '数学分析英文' },
-      { course_id: 'analysis', name: '实分析' },
-      { course_id: 'algebra', name: '代数' },
-    ] as unknown as CatalogTarget[];
-    // math 下两套教程全部 verified → 完成；analysis 仅一套 verified → 未完成；algebra 无教程
-    const t1 = kn({ knowledge_id: 't1', course_id: 'math', kind: 'tutorial' });
-    const t2 = kn({ knowledge_id: 't2', course_id: 'math', kind: 'tutorial' });
-    const a1 = kn({ knowledge_id: 'a1', course_id: 'analysis', kind: 'tutorial' });
-    const details: Record<string, KnowledgeDetail> = {
-      t1: detail(t1, [book({ book_id: 'b1', knowledge_id: 't1', status: 'verified' })]),
-      t2: detail(t2, [book({ book_id: 'b2', knowledge_id: 't2', status: 'verified' })]),
-      a1: detail(a1, [book({ book_id: 'b3', knowledge_id: 'a1', status: 'verified' })]),
-    };
-    expect(buildCourseCompletion(catalogTargets, details)).toEqual({ total: 3, completed: 1 });
+  describe('buildBookDownloadProgress', () => {
+    it('按领域分组，书籍按 holding+status 分类', () => {
+      const cs: DomainSystem[] = [
+        domain({
+          domain_id: 'math',
+          name: '数学',
+          courses: [
+            course({ course_id: 'c1', name: 'C1' }),
+            course({ course_id: 'c2', name: 'C2' }),
+          ],
+        }),
+      ];
+      const details: Record<string, KnowledgeDetail> = {
+        k1: detail(kn({ knowledge_id: 'k1', course_id: 'c1' }), [
+          book({ book_id: 'b1', status: 'candidate', holding: 'missing' }),
+          book({ book_id: 'b2', status: 'decided', holding: 'missing' }),
+          book({ book_id: 'b3', status: 'decided', holding: 'owned' }),
+          book({ book_id: 'b4', status: 'parallel', holding: 'owned' }),
+        ]),
+      };
+      const result = buildBookDownloadProgress(cs, details);
+      expect(result['数学']).toEqual([
+        { name: '未开始', value: 1 },   // b1 candidate + missing
+        { name: '下载中', value: 1 },   // b2 decided + missing
+        { name: '待确认', value: 1 },   // b3 decided + owned
+        { name: '完成', value: 1 },     // b4 parallel + owned
+      ]);
+    });
+
+    it('空数据 → 各领域空数组', () => {
+      const cs: DomainSystem[] = [
+        domain({ domain_id: 'a', name: 'A', courses: [] }),
+      ];
+      const result = buildBookDownloadProgress(cs, {});
+      expect(result['A']).toEqual([]);
+    });
   });
 
-  it('课程下载完成度：教程书籍未全验收 / 不足 2 套 → 不计完成', () => {
-    const catalogTargets = [
-      { course_id: 'math', name: '数学分析' },
-      { course_id: 'analysis', name: '实分析' },
-    ] as unknown as CatalogTarget[];
-    const t1 = kn({ knowledge_id: 't1', course_id: 'math', kind: 'tutorial' });
-    const t2 = kn({ knowledge_id: 't2', course_id: 'math', kind: 'tutorial' });
-    const a1 = kn({ knowledge_id: 'a1', course_id: 'analysis', kind: 'tutorial' });
-    const details: Record<string, KnowledgeDetail> = {
-      // math 两套但 t1 未全验收（b1 verified + b2 downloaded）→ math 不算完成
-      t1: detail(t1, [
-        book({ book_id: 'b1', knowledge_id: 't1', status: 'verified' }),
-        book({ book_id: 'b2', knowledge_id: 't1', status: 'downloaded' }),
-      ]),
-      t2: detail(t2, [book({ book_id: 'b3', knowledge_id: 't2', status: 'verified' })]),
-      // analysis 仅一套教程 → 不算完成（需 ≥2 套）
-      a1: detail(a1, [book({ book_id: 'b4', knowledge_id: 'a1', status: 'verified' })]),
-    };
-    expect(buildCourseCompletion(catalogTargets, details)).toEqual({ total: 2, completed: 0 });
-  });
+  describe('buildDashboardStats', () => {
+    it('统计已探明领域数/课程数/书籍卷数/验收书目数', () => {
+      const cs: DomainSystem[] = [
+        domain({
+          domain_id: 'math',
+          name: '数学',
+          exploration_stage: '已完成',
+          courses: [course({ course_id: 'c1', name: 'C1' }), course({ course_id: 'c2', name: 'C2' })],
+        }),
+        domain({
+          domain_id: 'cs',
+          name: '计算机',
+          exploration_stage: '未开始',
+          courses: [course({ course_id: 'c3', name: 'C3' })],
+        }),
+      ];
+      const details: Record<string, KnowledgeDetail> = {
+        k1: detail(kn({ knowledge_id: 'k1', course_id: 'c1' }), [
+          book({ book_id: 'b1', holding: 'owned' }),
+          book({ book_id: 'b2', holding: 'missing' }),
+        ]),
+        k2: detail(kn({ knowledge_id: 'k2', course_id: 'c2' }), [
+          book({ book_id: 'b3', holding: 'owned' }),
+        ]),
+      };
+      const stats = buildDashboardStats(cs, details);
+      expect(stats).toEqual({
+        exploredDomains: 1,    // math 已完成，cs 未开始
+        totalCourses: 3,       // math 2 + cs 1
+        totalBooks: 3,         // b1 + b2 + b3
+        verifiedBooks: 2,      // b1 + b3 holding=owned
+      });
+    });
 
-  it('课程下载完成度：无 catalog → 分母 0；无详情 → 全零', () => {
-    expect(buildCourseCompletion([], {})).toEqual({ total: 0, completed: 0 });
-  });
-
-  it('下载进度饼图（按教程）：每教程一块，值=已下载书籍数；name 回退 knowledge_id', () => {
-    const k1 = kn({ knowledge_id: 'k1', course_id: 'math', name: '数学分析 套一' });
-    const k2 = kn({ knowledge_id: 'k2', course_id: 'math' });
-    const details: Record<string, KnowledgeDetail> = {
-      k1: detail(k1, [
-        book({ book_id: 'b1', knowledge_id: 'k1', status: 'downloaded' }),
-        book({ book_id: 'b2', knowledge_id: 'k1', status: 'verified' }),
-        book({ book_id: 'b3', knowledge_id: 'k1', status: 'candidate' }),
-      ]),
-      k2: detail(k2, [book({ book_id: 'b4', knowledge_id: 'k2', status: 'downloaded' })]),
-    };
-    expect(buildKnowledgeDownloadPie(details)).toEqual([
-      { name: '数学分析 套一', value: 2 },
-      { name: 'k2', value: 1 },
-    ]);
-  });
-
-  it('下载进度饼图（按教程）：无已下载 → 空数组', () => {
-    const k1 = kn({ knowledge_id: 'k1', course_id: 'math' });
-    const details: Record<string, KnowledgeDetail> = {
-      k1: detail(k1, [book({ book_id: 'b1', knowledge_id: 'k1', status: 'candidate' })]),
-    };
-    expect(buildKnowledgeDownloadPie(details)).toEqual([]);
+    it('空数据 → 全零', () => {
+      expect(buildDashboardStats([], {})).toEqual({
+        exploredDomains: 0,
+        totalCourses: 0,
+        totalBooks: 0,
+        verifiedBooks: 0,
+      });
+    });
   });
 });

@@ -19,6 +19,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from qed_engine.clients.tracker_client import TrackerClient, TrackerError
+from qed_engine.services import shared_tables
+from qed_engine.services.shared_tables import STAGE_PENDING
 
 router = APIRouter(prefix="/api/v1", tags=["data"])
 
@@ -318,13 +320,17 @@ class CourseKnowledgeBody(BaseModel):
 @router.post("/courses/{course_id}/knowledge")
 def import_course_knowledge(course_id: str, body: CourseKnowledgeBody, request: Request):
     """导入课程知识（tutorials JSON）。"""
-    return _call(
+    result = _call(
         request,
         _tracker(request).import_course_knowledge,
         course_id,
         body.model_dump(exclude_none=True),
         _manual_maintenance=True,
     )
+    # 导入成功后，将课程状态从"未开始"写为"待确认"（PLAN-035 补齐）
+    settings = request.app.state.settings
+    shared_tables.set_course_stage(settings, None, course_id, STAGE_PENDING, online=False)
+    return result
 
 
 # --- 目录 ---

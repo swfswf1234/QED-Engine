@@ -5,7 +5,7 @@
 保持停止，反之亦然——互斥在模型服务启动时自动完成。
 api 模式（默认）不启动任何本地模型，本模块直接放行。
 
-设计关联（DesignRef）：docs/design/llm-gateway-and-model-management.md
+设计关联（DesignRef）：docs/design/local-model-management.md
 实现状态：In Progress
 关联测试：tests/test_llm_model_manager.py
 """
@@ -92,3 +92,49 @@ def ensure_image_ready(settings: Settings, script_runner=None, log: Callable[[st
     log("start image-model/qed_mineru_service.py")
     if _run_script(IMAGE_SCRIPT, "start", script_runner) != 0:
         log("start image-model/qed_mineru_service.py 失败")
+
+
+# --- operate_model 统一入口（Task 4，2026-09-06）---
+
+# 模型名 → 生命周期脚本：qwen（本地文字 LM Studio）/ mineru（本地图像 MinerU）
+MODEL_SCRIPTS = {
+    "qwen": TEXT_SCRIPT,
+    "mineru": IMAGE_SCRIPT,
+}
+
+
+def operate_model(name: str, op: str, settings: Settings,
+                  script_runner=None, log: Callable[[str], None] | None = None) -> None:
+    """本地模型统一操作入口：start / stop / restart（name∈{qwen,mineru}）。
+
+    start/restart 复用 ensure_text_ready / ensure_image_ready（资源互斥已含，api 模式放行）；
+    stop 直调生命周期脚本。未知 name/op 抛 ValueError（路由层映射 404）。
+    """
+    log = log or (lambda _m: None)
+    if name not in MODEL_SCRIPTS:
+        raise ValueError(f"未知模型：{name}（仅支持 {' / '.join(MODEL_SCRIPTS)}）")
+    if op not in ("start", "stop", "restart"):
+        raise ValueError(f"未知操作：{op}（仅支持 start / stop / restart）")
+
+    if name == "qwen":
+        if op == "start":
+            ensure_text_ready(settings, script_runner=script_runner, log=log)
+        elif op == "stop":
+            log("stop text-model/qed_lmstudio_service.py")
+            _run_script(MODEL_SCRIPTS["qwen"], "stop", script_runner)
+        else:  # restart
+            log("stop text-model/qed_lmstudio_service.py")
+            _run_script(MODEL_SCRIPTS["qwen"], "stop", script_runner)
+            ensure_text_ready(settings, script_runner=script_runner, log=log)
+        return
+
+    # name == "mineru"
+    if op == "start":
+        ensure_image_ready(settings, script_runner=script_runner, log=log)
+    elif op == "stop":
+        log("stop image-model/qed_mineru_service.py")
+        _run_script(MODEL_SCRIPTS["mineru"], "stop", script_runner)
+    else:  # restart
+        log("stop image-model/qed_mineru_service.py")
+        _run_script(MODEL_SCRIPTS["mineru"], "stop", script_runner)
+        ensure_image_ready(settings, script_runner=script_runner, log=log)

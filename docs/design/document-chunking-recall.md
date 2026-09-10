@@ -1,13 +1,13 @@
-# 探索：文档切分与召回（对话式）
+# 文档切分与召回草案（document-chunking-recall）
 
 设计状态：Draft
 实现状态：Not Started
-最后更新：2026-08-18
+最后更新：2026-09-10
 确认状态：暂定
 关联代码：—（仅规划设计，实现待解析管理闭环后单独立轮）
 关联测试：—（规划，无实现）
 关联 ADR：[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）
-关联文档：[learning-center.md](learning-center.md)（知识问答多 Agent 方向）、
+关联文档：[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
 [chunking-notes.md](../learning/chunking-notes.md)（切分策略）、
 [rag-notes.md](../learning/rag-notes.md)（召回链路）、
 [Axiom-Flow af-books-sync 设计]（解析产物与书目基座）
@@ -27,7 +27,7 @@
 - 目的：整理知识——切分与召回的产出（块级知识单元）是后续学习中心课程学习与知识问答
   的知识底座。
 
-与[学习中心](learning-center.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
+与[学习中心](../plans/2026-09-10-learning-center-current-state.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
 （对单书逐块核对、调参、人工确认）；学习中心问答是**用户侧的最终形态**（多 Agent 编排、
 课程级知识链路）。探索先行，问答后置。
 

@@ -28,9 +28,10 @@ from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 from qed_engine.config import Settings
 from qed_engine.services import shared_tables
 from qed_engine.services.shared_tables import (
-    STAGE_COMPLETED,
+    STAGE_FAILED,
     STAGE_GENERATED,
     STAGE_NOT_STARTED,
+    STAGE_PENDING,
     STAGE_RUNNING,
 )
 
@@ -130,6 +131,9 @@ class ExploreSessionManager:
         # 领域会话启动即置「探索中」（已有领域；新领域无行可写，跳过）
         if target == "domain" and domain_id:
             self._write_domain_stage(session, STAGE_RUNNING)
+        elif target == "course" and course_id:
+            # 课程会话启动即置「探索中」（PLAN-035 补齐）
+            self._write_course_stage(session, STAGE_RUNNING)
         thread = threading.Thread(target=self._run_pipeline, args=(session,), daemon=True)
         with self._lock:
             self._threads[session.session_id] = thread
@@ -233,9 +237,22 @@ class ExploreSessionManager:
                 applied.append({"entity": "course", "target_id": row.get("course_id", ""), "name": name})
             except TrackerError as exc:
                 conflicts.append({"name": name, "reason": str(exc.detail)})
-        # 应用完成 → exploration_stage=已完成
+        # 应用完成 → exploration_stage=待确认 + explore_pending=review_results
+        # （终态「已完成」由 confirm-knowledge 统一收口，PLAN-034 §3 写点矩阵）
         if domain_id:
-            self._write_domain_stage(session, STAGE_COMPLETED)
+            self._write_domain_stage(session, STAGE_PENDING)
+            shared_tables.update_domain(
+                self._settings,
+                domain_id,
+                explore_pending={
+                    "kind": "review_results",
+                    "courses": [
+                        {"course_id": str(item.get("target_id", "")), "name": str(item.get("name", ""))}
+                        for item in applied
+                        if item.get("entity") == "course"
+                    ],
+                },
+            )
         session.updated_at = time.monotonic()
         return {"applied": applied, "conflicts": conflicts}
 
@@ -271,7 +288,27 @@ class ExploreSessionManager:
                 session.status = "failed"
                 session.error = str(exc)[:500]
                 session.updated_at = time.monotonic()
+            self._write_failure(session, str(exc)[:500])
             logger.warning("探索会话 %s 失败：%s", session.session_id, exc)
+
+    def _write_failure(self, session: ExploreSession, error: str) -> None:
+        """管线失败落库：失败态 + explore_pending={kind:'failed'}（可重试依据，PLAN-034 §3）。"""
+        try:
+            if session.target == "domain" and session.domain_id:
+                shared_tables.set_domain_stage(
+                    self._settings, self._tracker, session.domain_id, STAGE_FAILED, online=True
+                )
+                shared_tables.update_domain(
+                    self._settings,
+                    session.domain_id,
+                    explore_pending={"kind": "failed", "error": error},
+                )
+            elif session.target == "course" and session.course_id:
+                shared_tables.set_course_stage(
+                    self._settings, self._tracker, session.course_id, STAGE_FAILED, online=True
+                )
+        except Exception as exc:  # noqa: BLE001 - 落库失败不影响会话失败态
+            logger.debug("探索会话 %s 失败态落库跳过：%s", session.session_id, exc)
 
     def _run_domain(self, session: ExploreSession, confirm_override: bool) -> None:
         result = self._dry_run.dry_run_domain_explore(
@@ -307,6 +344,9 @@ class ExploreSessionManager:
         # dry-run 产出待确认 → exploration_stage=已生成（已有领域才可写）
         if session.target == "domain" and session.domain_id:
             self._write_domain_stage(session, STAGE_GENERATED)
+        # 课程探索成功后写入 "待确认" 状态（PLAN-035）
+        elif session.target == "course" and session.course_id:
+            self._write_course_stage(session, STAGE_PENDING)
 
     def _write_domain_stage(self, session: ExploreSession, stage: str) -> None:
         ok = shared_tables.set_domain_stage(
@@ -314,6 +354,14 @@ class ExploreSessionManager:
         )
         if not ok:
             logger.debug("领域 %s stage=%s 直写跳过/失败（会话 %s）", session.domain_id, stage, session.session_id)
+
+    def _write_course_stage(self, session: ExploreSession, stage: str) -> None:
+        """写入课程探索状态（PLAN-035）。"""
+        ok = shared_tables.set_course_stage(
+            self._settings, self._tracker, session.course_id, stage, online=True
+        )
+        if not ok:
+            logger.debug("课程 %s stage=%s 直写跳过/失败（会话 %s）", session.course_id, stage, session.session_id)
 
     def _cleanup_expired(self) -> None:
         now = time.monotonic()

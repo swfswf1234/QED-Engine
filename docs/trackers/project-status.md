@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-31
+最后更新：2026-09-08
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -27,13 +27,13 @@
 ## 三中心定位
 
 - **学习中心**：前端主界面（`#/`）的最终形态——课程学习（按知识节点推进）+ 知识问答
-  （多 Agent），规划中（[学习中心设计](../design/learning-center.md)，Draft）。
+  （多 Agent），规划中（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
   覆盖数学与计算机科学（AI 方向）双核心领域，当前以高等数学起步；资料类型含教材、
   习题集、论文、博客与官方文档，后续随需求扩展。
 - **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（左树右对照：书目同步、
-  块级判定；原「原始文档对照」并入，探索方向见 [exploration.md](../design/exploration.md)）。
+  块级判定；原「原始文档对照」并入，探索方向见 [document-chunking-recall.md](../design/document-chunking-recall.md)）。
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
-  （[服务控制设计](../design/service-control.md)，Accepted / Implemented）；注册表含 config/
+  （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented）；注册表含 config/
   tracker/axiom/**web** 四单元，8900 重启经 /self-restart、8903 前端启停经
   `scripts/qed_web_service.py`（2026-08-17）；容器化依赖（MySQL / 向量库 / MinerU）
   只进规划不展示。
@@ -45,8 +45,10 @@
   QED-026/QED-014 前置被取代）。**数据前置轮已关闭**（2026-08-23）：五表备份+恢复演练、
   存量 PDF 迁移新结构（12 文件 sha256 全比对一致）、五表清空、8901 空态正常、
   `QED_DATA_ROOT` 落地根仓库侧；常驻快照库 `qed_snapshot_20260823` 留存清理前数据；
-  PLAN-019 归档 history/plans/2026-08/，REQ-051/052 入 completed.md。下一步：探索界面与
-  API 契约实现（PLAN-020/021，API 契约有 5 处【待定】需先消解）。
+  PLAN-019 归档 history/plans/2026-08/，REQ-051/052 入 completed.md。
+  **前端改造完成（2026-09-08）**：REQ-067 §A/§B 与共享表优化全量落地（PLAN-025/028/033/034
+  关闭归档），设计事实晋升 [downloads-flow.md](../design/downloads-flow.md)；下一步：用户浏览器
+  手动导入轮验收（清库后）+ 8901 四缺口 REQ-068 移交 QED-Tracker + 块 3 实际验证（三门课闭环）。
 - 已完成：**第一轮主线·文档规范与架构确定轮（ARCH-018，ADR 0010，2026-08-21 关闭）**——
   文档体系重构为「确定文档 / 相对确定 / 实时状态」三层：architecture/ 只放确定文档（总体架构
   four-service-architecture + 服务架构 frontend/backend-architecture + 固定 API 文档
@@ -91,7 +93,7 @@
   **架构轮（ARCH-009，ADR 0007，2026-08-11 冒烟闭环）**：前端唯一入口 8900——目录重整（backend/
   database/tmp/scripts）、数据域语义 API（data.py）、服务域 /services 实装（service_manager.py）、
   前端唯一入口切换（app.js），P0-P5 完成，**真实冒烟闭环（8900/8901 联调：数据域真实数据 + /services 启停托管 start/stop/restart + 409 窗口 + 优雅停止），181 passed + ruff clean**，修复 ROOT 路径错位（parents 层级）与 Popen 失败句柄泄漏，归档待用户验收。
-- 进行中：**联调矩阵与契约冻结编排（2026-08-16 立档，[integration-matrix.md](../design/integration-matrix.md)）**——
+- 进行中：**联调矩阵与契约冻结编排（2026-08-16 立档，[cross-project-contracts.md](../design/cross-project-contracts.md)）**——
   三组并行联调：A 前端↔8900（并行推进中）/ B 8900↔8901（**QED-031 迁移 0006 已冻结**——
   2026-08-17 QED-Tracker 回执：alembic=0006、五表落库（4 知识/12 书籍/16 渠道）、真实冒烟
   通过，REQ-035 前置解除）/ C 8900↔8902（根仓库侧托管/监控已具备；**执行方 = Axiom-Flow v2
@@ -102,7 +104,7 @@
   **左树右对照单视图**（用户裁决 D1~D7）：左树=领域→课程→书目+进度（af_books 冗余课程
   字段，REQ-042），右侧=原页图 + 块级渲染 + 一致/不一致判定（落库 af_block_reviews），
   书目同步（前端触发 POST /books/sync，8900 聚合 8901 verified → 8902）；compare 路由与
-  菜单删除；探索（块级切分校验 → 对话式召回）仅登记方向（[exploration.md](../design/exploration.md)，
+  菜单删除；探索（块级切分校验 → 对话式召回）仅登记方向（[document-chunking-recall.md](../design/document-chunking-recall.md)，
   后置实施）。**根仓库侧完成（2026-08-20）**：8900 sync/review 端点 + 前端重构（vitest
   89 passed + tsc + build + 契约测试 61 passed）；**待 Axiom-Flow V2-013 执行回执后联调验收**。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
@@ -110,7 +112,7 @@
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与
   **学习中心（双目标：知识学习 + AI 技术学习实践场）** 按 roadmap 排队。
 - 2026-08-14（二十二期续）：主界面**学习中心框架**已搭——领域→课程→章节/知识点浏览
-  （数学试点，章节空态等解析产物管线，learning-center.md 更新 Partially Implemented）；
+  （数学试点，章节空态等解析产物管线，学习功能现状文档更新 Partially Implemented）；
   管理后台树加载加固（loadTree 全函数 try/catch + 离线横幅 + 自动重试，杜绝无限转圈/空白）。
 - 待开始：REQ-017 服务化三缺口；REQ-018 人工评审优化（QED-020 已实现待 8901 重启回执）；
   REQ-019 版本核对（跨项目）；REQ-020 榜单数据收集；REQ-022/023 治理契约对齐；

@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TRACKERS = ROOT / "docs" / "trackers"
 PLANS = ROOT / "docs" / "plans"
-TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z])?")
+TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z][A-Z0-9]*)?")
 PLAN_LINK = re.compile(r"^\[(?P<title>[^]]+)]\(\.\./plans/(?P<path>[^)]+\.md)\)$")
 ACTIVE_STATUSES = {"Accepted", "In Progress", "Blocked"}
 
@@ -25,9 +25,10 @@ def _table(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
     rows = []
     for line in lines[start + 2 :]:
         stripped = line.strip()
-        # 分节标题（### 主线分组）、空行、重复表头与分隔行（每分节独立表格）不是任务行，跳过
+        # 分节标题（### 主线分组 / #### 块级子分组）、空行、重复表头与分隔行（每分节独立
+        # 表格）不是任务行，跳过；startswith("###") 同时覆盖 ### 与 #### 两级分节
         if not line.startswith("|"):
-            if line.startswith("### ") or not stripped:
+            if line.startswith("###") or not stripped:
                 continue
             break
         if stripped == header or stripped.startswith("| ---"):
@@ -103,9 +104,9 @@ def test_todo_plan_rows_exactly_mirror_active_plan_bodies():
         assert link.group("path") not in plan_rows
         plan_rows[link.group("path")] = (row, link.group("title"))
 
-    # 长期滚动收件箱（REQ-062）不属计划，不参与 todo Plan 行镜像
-    # （豁免清单与理由见 test_plan_governance.STANDING_DOCS）
-    standing = {"ai-agent-knowledge-inbox.md"}
+    # 长期滚动收件箱（REQ-062）与设计类小修/bug 台账（REQ-069/ADR 0012）不属计划，
+    # 不参与 todo Plan 行镜像（豁免清单与理由见 test_plan_governance.STANDING_DOCS）
+    standing = {"ai-agent-knowledge-inbox.md", "design-bugfix-log.md"}
     plan_files = {
         path.name: path
         for path in PLANS.glob("*.md")

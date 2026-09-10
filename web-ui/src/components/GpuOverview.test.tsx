@@ -1,13 +1,13 @@
 /**
  * GpuOverview 组件单元测试（纯函数 + 渲染冒烟）
- * - buildVramSlices：按进程名聚合切片 / 系统·图形占用兜底 / WDDM 退化（颜色契约）
- * - aggregateProcs / friendlyProcLabel：同名合并 ×N、MB 求和、友好分类与排序
- * - 渲染：标题「资源总览」（2026-08-24 改名裁决）、三态降级文案、进程逐行显示与排序
+ * - buildVramSlices：三聚合切片（模型占用/其他/空闲）/ WDDM 退化（颜色契约）
+ * - formatGb：MB→GB 格式化
+ * - 渲染：标题「GPU 状态」、三态降级文案、全量内存占比饼图
  * 完整交互链路（fetchAll/60s 定时器/启停收敛）由 Console.test.tsx 界面驱动覆盖。
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import GpuOverview, { buildVramSlices, aggregateProcs, friendlyProcLabel } from './GpuOverview';
+import GpuOverview, { buildVramSlices, formatGb } from './GpuOverview';
 import type { GpuStatus } from '../stores';
 
 // ECharts 依赖 canvas，jsdom 不可用；以占位组件透出 option.series 供断言
@@ -30,8 +30,20 @@ const gpuBase: GpuStatus = {
   reason: '',
 };
 
-describe('buildVramSlices（显存构成切片）', () => {
-  it('按进程名聚合 MB：model 蓝系、other 橙红，尾部系统·图形占用兜底', () => {
+describe('formatGb（MB→GB 格式化）', () => {
+  it('正常值保留 1 位小数', () => {
+    expect(formatGb(16376)).toBe('16.0 GB');
+    expect(formatGb(4096)).toBe('4.0 GB');
+    expect(formatGb(512)).toBe('0.5 GB');
+  });
+  it('null/undefined 返回 —', () => {
+    expect(formatGb(null)).toBe('—');
+    expect(formatGb(undefined)).toBe('—');
+  });
+});
+
+describe('buildVramSlices（全量内存占比切片）', () => {
+  it('三聚合切片：按 PDH 比例分配驻留值，模型占用蓝、其他灰、空闲绿', () => {
     const slices = buildVramSlices({
       ...gpuBase,
       processes: [
@@ -40,63 +52,43 @@ describe('buildVramSlices（显存构成切片）', () => {
         { pid: 3, name: 'chrome.exe', memory_mb: 500, kind: 'other' },
       ],
     });
-    expect(slices.map((s) => s.name)).toEqual(['LM Studio.exe', 'chrome.exe', '系统·图形占用']);
-    expect(slices[0].value).toBe(4000);
+    expect(slices.map((s) => s.name)).toEqual(['模型占用', '其他', '空闲']);
+    // 总占用 = memory_used_mb=4096；PDH model=4000, other=500, total=4500
+    // modelMb = 4096 * 4000/4500 ≈ 3641.78
+    expect(slices[0].value).toBeCloseTo(4096 * (4000 / 4500), 0);
     expect(slices[0].color).toBe('#5b8ff9');
-    expect(slices[1].color).toBe('#ffa940');
-    expect(slices[2].value).toBe(16376 - 4000 - 500);
+    // otherMb = 4096 * 500/4500 ≈ 454.22
+    expect(slices[1].value).toBeCloseTo(4096 * (500 / 4500), 0);
+    expect(slices[1].color).toBe('#d9d9d9');
+    // free = 16376 - 4096 = 12280（与信息行一致）
+    expect(slices[2].value).toBe(16376 - 4096);
+    expect(slices[2].color).toBe('#52c41a');
   });
 
-  it('WDDM（每进程 MB 全 null）→ 退化为 已用/空闲 两片（颜色契约：已用蓝/空闲绿）', () => {
+  it('WDDM（每进程 MB 全 null）→ 退化为 模型占用/空闲 两片', () => {
     const slices = buildVramSlices({
       ...gpuBase,
       memory_used_mb: 4635,
       processes: [{ pid: 1, name: 'LM Studio.exe', memory_mb: null, kind: 'model' }],
     });
-    expect(slices.map((s) => s.name)).toEqual(['已用', '空闲']);
+    expect(slices.map((s) => s.name)).toEqual(['模型占用', '空闲']);
     expect(slices[0].color).toBe('#5b8ff9');
     expect(slices[1].color).toBe('#52c41a');
   });
-});
 
-describe('aggregateProcs / friendlyProcLabel（进程清单聚合）', () => {
-  it('同名合并 ×N；MB 取有值之和；全未知 → null', () => {
-    const agg = aggregateProcs(
-      [
-        { pid: 1, name: 'C:\\x\\LM Studio.exe', memory_mb: 100, kind: 'model' },
-        { pid: 2, name: 'C:\\x\\LM Studio.exe', memory_mb: null, kind: 'model' },
-      ],
-      false,
-    );
-    expect(agg).toEqual([{ label: 'LM Studio.exe', count: 2, memoryMb: 100 }]);
-  });
-
-  it('friendly：浏览器/Windows 进程归类且排前，具体程序保留短名排后', () => {
-    const agg = aggregateProcs(
-      [
-        { pid: 1, name: 'cef_server.exe', memory_mb: 10, kind: 'other' },
-        { pid: 2, name: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', memory_mb: 500, kind: 'other' },
-        { pid: 3, name: 'C:\\Windows\\explorer.exe', memory_mb: null, kind: 'other' },
-      ],
-      true,
-    );
-    expect(agg.map((a) => a.label)).toEqual(['浏览器进程', 'Windows 进程', 'cef_server.exe']);
-    expect(agg[0].memoryMb).toBe(500);
-    expect(agg[1].memoryMb).toBeNull();
-  });
-
-  it('friendlyProcLabel：权限受限进程归类；普通程序返回短名', () => {
-    expect(friendlyProcLabel('x', '[Insufficient Permissions]')).toBe('权限受限进程');
-    expect(friendlyProcLabel('C:\\y\\foo.exe', 'foo.exe')).toBe('foo.exe');
+  it('无进程且无 total → 空数组', () => {
+    const slices = buildVramSlices({ available: true });
+    expect(slices).toEqual([]);
   });
 });
 
 describe('GpuOverview 渲染', () => {
-  it('卡片标题为「资源总览」（2026-08-24 改名裁决），旧名与刷新周期字样不再出现', () => {
+  it('卡片标题为「GPU 状态」，旧名不再出现', () => {
     render(<GpuOverview gpu={gpuBase} gpuError={null} />);
-    expect(screen.getByText(/资源总览/)).toBeInTheDocument();
+    expect(screen.getByText(/GPU 状态/)).toBeInTheDocument();
+    expect(screen.queryByText(/资源总览/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/服务监控/)).not.toBeInTheDocument();
     expect(screen.queryByText(/GPU 总览/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/显存构成/)).not.toBeInTheDocument();
   });
 
   it('三态降级：探测失败 / 探测中 / GPU 不可用', () => {
@@ -110,24 +102,27 @@ describe('GpuOverview 渲染', () => {
     expect(screen.getByText(/GPU 不可用（未检测到显卡）/)).toBeInTheDocument();
   });
 
-  it('进程清单逐行显示：模型进程区在前、非模型任务区在后（换行契约）', () => {
+  it('GPU 信息显示 GB 单位 + 饼图图例', () => {
     render(
       <GpuOverview
         gpu={{
           ...gpuBase,
           processes: [
             { pid: 1, name: 'llama-server.exe', memory_mb: 8000, kind: 'model' },
-            { pid: 2, name: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', memory_mb: 500, kind: 'other' },
+            { pid: 2, name: 'chrome.exe', memory_mb: 500, kind: 'other' },
           ],
         }}
         gpuError={null}
       />,
     );
-    const modelLabel = screen.getByText('模型进程');
-    const otherLabel = screen.getByText('非模型任务');
-    expect(otherLabel.compareDocumentPosition(modelLabel)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
-    // 每进程独立一行：8000/16376 ≈ 49%；chrome → 浏览器进程 500 MB ≈ 3%
-    expect(screen.getByText(/llama-server\.exe 8000 MB（49%）/)).toBeInTheDocument();
-    expect(screen.getByText(/浏览器进程 500 MB（3%）/)).toBeInTheDocument();
+    // GB 格式
+    expect(screen.getByText(/4\.0 GB \/ 16\.0 GB/)).toBeInTheDocument();
+    // 图例色块
+    expect(screen.getByText('模型占用')).toBeInTheDocument();
+    expect(screen.getByText('其他')).toBeInTheDocument();
+    expect(screen.getByText('空闲')).toBeInTheDocument();
+    // 无进程清单
+    expect(screen.queryByText('模型进程')).not.toBeInTheDocument();
+    expect(screen.queryByText('非模型任务')).not.toBeInTheDocument();
   });
 });

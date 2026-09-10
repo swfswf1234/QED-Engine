@@ -58,6 +58,7 @@ export interface ExploreStore {
 
 export type ExploreFlowTarget =
   | { variant: 'course'; courseId: string; courseName?: string }
+  | { variant: 'domain'; domainId: string; domainName: string }
   | { variant: 'curriculum'; domainId: string; domainName: string };
 
 /** 领域探索按钮临时态（仅 running；pending/completed 由 DomainInfoCard 按 exploration_stage 实时计算，F4） */
@@ -170,6 +171,10 @@ function injectMockAdoption(
   const ds = useDownloadsStore.getState();
   const rows = adopted.map((a) => {
     const p = proposals.find((x) => x.set_name === a.set_name);
+    const introParts = [
+      p?.textbook.intro && `教材：${p.textbook.intro}`,
+      p?.exercise?.intro && `习题集：${p.exercise.intro}`,
+    ].filter(Boolean);
     return {
       knowledge_id: a.knowledge_id,
       domain_id: 'math',
@@ -179,9 +184,7 @@ function injectMockAdoption(
       name: [a.set_name, p?.textbook.title].filter(Boolean).join('：'),
       textbook_ref: p ? { title: p.textbook.title, ...(p.textbook.version ? { version: p.textbook.version } : {}) } : null,
       exercise_ref: p?.exercise ? { title: p.exercise.title } : null,
-      textbook_intro: p?.textbook.intro ?? '',
-      exercise_intro: p?.exercise?.intro ?? '',
-      materials_intro: '',
+      intro: introParts.join('\n'),
       status: 'draft',
       reject_reason: '',
       supersede_reason: '',
