@@ -60,23 +60,25 @@ export function tutorialLabel(k: KnowledgeRecord): string {
   return k.knowledge_id;
 }
 
-// --- 状态筛选（书籍生命周期四阶段，2026-08-24 用户裁决：筛选收敛为 领域/课程/状态 三栏） ---
+// --- 状态筛选（书籍生命周期五阶段，2026-09-10 用户裁决：筛选收敛为 领域/课程/状态 三栏） ---
 
-/** 状态筛选选项（书籍阶段；decided/downloading/failed 归「下载」，failed 可在此重试） */
+/** 状态筛选选项（书籍阶段；candidate/decided 归「待下载」，downloading 归「下载中」，downloaded 归「待验证」，verified 归「已完成」，failed 归「失败」） */
 export const STAGE_OPTIONS = [
-  { value: 'confirm', label: '待确认' },
-  { value: 'download', label: '下载' },
-  { value: 'await_verify', label: '待验证' },
+  { value: 'to_download', label: '待下载' },
+  { value: 'downloading', label: '下载中' },
+  { value: 'to_verify', label: '待验证' },
   { value: 'completed', label: '已完成' },
+  { value: 'failed', label: '失败' },
 ] as const;
 
 /** 书籍是否属于某阶段；stage=''（全部）不过滤 */
 export function bookInStage(b: BookRecord, stage: string): boolean {
   switch (stage) {
-    case 'confirm': return b.status === 'candidate';
-    case 'download': return b.status === 'decided' || b.status === 'downloading' || b.status === 'failed';
-    case 'await_verify': return b.status === 'downloaded';
+    case 'to_download': return b.status === 'candidate' || b.status === 'decided';
+    case 'downloading': return b.status === 'downloading';
+    case 'to_verify': return b.status === 'downloaded';
     case 'completed': return b.status === 'verified';
+    case 'failed': return b.status === 'failed';
     default: return true;
   }
 }

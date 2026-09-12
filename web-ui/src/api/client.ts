@@ -61,12 +61,18 @@ async function request<T>(path: string, init?: RequestInit, opts?: ApiRequestOpt
     : '';
   const url = `${API_BASE}${path}${query ? `?${query}` : ''}`;
 
+  // FormData 上传：不设置 Content-Type（由浏览器带 multipart boundary）
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (err) {
     if (controller.signal.aborted && !outerSignal?.aborted) {
@@ -111,6 +117,10 @@ export const api = {
   },
   put<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
     return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }, opts);
+  },
+  /** multipart/form-data 上传（文件选择器）：不设 Content-Type；默认超时放宽到 120s。 */
+  postForm<T>(path: string, form: FormData, opts?: ApiRequestOptions): Promise<T> {
+    return request<T>(path, { method: 'POST', body: form }, { timeoutMs: 120000, ...opts });
   },
   patch<T>(path: string, body?: unknown, opts?: ApiRequestOptions): Promise<T> {
     return request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }, opts);

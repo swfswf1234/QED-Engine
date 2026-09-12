@@ -3,9 +3,9 @@
 状态：Draft
 任务类型：A
 最后更新：2026-09-07
-关联计划：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（全流程交互规范 PLAN-023）
+关联计划：[2026-08-27-download-ux-flow.md](../2026-08/2026-08-27-download-ux-flow.md)（全流程交互规范 PLAN-023）
 关联需求：ARCH-019、REQ-067
-归档判定：完成后并入 [2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)，计划壳归档
+归档判定：完成后并入 [2026-08-27-download-ux-flow.md](../2026-08/2026-08-27-download-ux-flow.md)，计划壳归档
 
 > **本文档定义领域与课程的探索状态机交互规范**，是 DownloadsTree.tsx 状态机重构的唯一设计事实源。
 

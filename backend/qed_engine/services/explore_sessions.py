@@ -13,7 +13,7 @@
 LLM 调用审计：管线内每步由 8901 落 qed_llm_calls（经 LLM 网关时 service=qed_tracker），
 本服务不重复记录。
 
-设计关联（DesignRef）：docs/plans/2026-08-27-exploration-download-flow.md
+设计关联（DesignRef）：docs/design/downloads-flow.md
 实现状态：Current
 关联测试：tests/test_explore_sessions.py
 """

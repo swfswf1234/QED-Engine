@@ -2,7 +2,7 @@
 import {
   Alert, App, Button, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography,
 } from 'antd';
-import { ReloadOutlined, CloudServerOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { ReloadOutlined, CloudServerOutlined, EyeOutlined, PlusOutlined, DownOutlined, RightOutlined, UploadOutlined } from '@ant-design/icons';
 import DownloadsTree from '../components/DownloadsTree';
 import ExploreFlowModal from '../components/ExploreFlowModal';
 import DomainConfirmModal from '../components/DomainConfirmModal';
@@ -12,7 +12,7 @@ import { describeError } from '../api/client';
 import DomainCard from '../components/DomainCard';
 import { startDomainExplore } from '../api/explore-helpers';
 import {
-  createBook, rejectBook, registerBook, importBookPdf,
+  createBook, importBookPdf,
   listBookSources, fetchBook,
   exploreCourseKnowledge, verifyBook,
   updateCourse,
@@ -42,11 +42,11 @@ const BOOK_KIND_LABELS: Record<string, string> = {
 };
 
 const BOOK_STATUS: Record<string, { label: string; color: string }> = {
-  candidate: { label: '候选', color: 'default' },
-  decided: { label: '已决定', color: 'blue' },
+  candidate: { label: '待下载', color: 'default' },
+  decided: { label: '待下载', color: 'default' },
   downloading: { label: '下载中', color: 'orange' },
-  downloaded: { label: '已下载', color: 'cyan' },
-  verified: { label: '已验证', color: 'green' },
+  downloaded: { label: '待验证', color: 'cyan' },
+  verified: { label: '已完成', color: 'green' },
   failed: { label: '失败', color: 'red' },
 };
 
@@ -135,36 +135,6 @@ function FilterBar() {
 }
 
 // --- 通用弹窗 ---
-
-/** 原因弹窗（reject / supersede 必填 reason；书行 reject 可选 note） */
-function ReasonModal({ open, title, withNote, onCancel, onSubmit }: {
-  open: boolean;
-  title: string;
-  withNote: boolean;
-  onCancel: () => void;
-  onSubmit: (reason: string, note?: string) => void;
-}) {
-  const [form] = Form.useForm();
-  return (
-    <Modal
-      title={title} open={open} onCancel={onCancel} destroyOnClose
-      onOk={() => {
-        form.validateFields().then((values) => onSubmit(values.reason, values.note));
-      }}
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item name="reason" label="原因（必填，留痕可追溯）" rules={[{ required: true, message: '请填写原因' }]}>
-          <Input.TextArea rows={2} placeholder="如：扫描缺页 / 版本过旧" />
-        </Form.Item>
-        {withNote && (
-          <Form.Item name="note" label="审理备注（可选）">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-        )}
-      </Form>
-    </Modal>
-  );
-}
 
 /** 知识行确认弹窗与人工登记弹窗已随 2026-09-08 教程行精简移除：
     教程确认属「教程确认轮」（下一轮），人工导入并入教程详情书目操作（TutorialDetailModal）。 */
@@ -312,7 +282,7 @@ function CourseStatusBar({ course, onConfirm }: {
         };
       case '待确认':
         return {
-          label: '确认领域信息',
+          label: '确认课程知识',
           disabled: false,
           loading: false,
           onClick: onConfirm,
@@ -381,12 +351,46 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
   const refreshDetail = useDownloadsStore((s) => s.refreshDetail);
   const [addOpen, setAddOpen] = useState(false);
   const [addForm] = Form.useForm();
-  const [importBook, setImportBook] = useState<BookRecord | null>(null);
-  const [importForm] = Form.useForm();
-  const [rejectBook_, setRejectBook_] = useState<BookRecord | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [detailBook, setDetailBook] = useState<BookRecord | null>(null);
+  const [expandedBookKeys, setExpandedBookKeys] = useState<Set<string>>(new Set());
   const { message } = App.useApp();
   const books = useMemo(() => sortBooks(detail?.books ?? []), [detail]);
+
+  const toggleBookExpand = (key: string) => {
+    setExpandedBookKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  /** 统一上传：打开文件管理器选 PDF → multipart 上传登记（不写路径） */
+  const triggerUpload = (bookId: string) => {
+    uploadTargetRef.current = bookId;
+    uploadInputRef.current?.click();
+  };
+
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const bookId = uploadTargetRef.current;
+    e.target.value = '';
+    uploadTargetRef.current = null;
+    if (!file || !bookId) return;
+    setUploading(true);
+    try {
+      await importBookPdf(bookId, file);
+      message.success('书籍已上传并登记');
+      void refreshDetail(knowledge.knowledge_id);
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <Modal
@@ -433,7 +437,7 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
                 {
                   title: '作者',
                   width: 150,
-                  render: (_: unknown, b: BookRecord) => (b.authors?.length > 0 ? b.authors.join(' / ') : '—'),
+                  render: (_: unknown, b: BookRecord) => (b.authors?.length > 0 ? b.authors.map((a) => a.name).join(' / ') : '—'),
                 },
                 { title: '语言', dataIndex: 'language', width: 56, render: (l: string) => l || '—' },
                 {
@@ -446,40 +450,70 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
                   ),
                 },
                 {
-                  title: '操作',
-                  width: 190,
+                  title: '详情',
+                  key: 'expand',
+                  width: 60,
                   render: (_: unknown, b: BookRecord) => (
-                    <Space size={0}>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={expandedBookKeys.has(b.book_id) ? <DownOutlined /> : <RightOutlined />}
+                      onClick={() => toggleBookExpand(b.book_id)}
+                    />
+                  ),
+                },
+                {
+                  title: '下载方式',
+                  key: 'download',
+                  width: 120,
+                  render: (_: unknown, b: BookRecord) => (
+                    <Space size={4}>
                       {['candidate', 'decided', 'failed'].includes(b.status) && (
                         <Button size="small" type="link" style={{ padding: 0 }}
                           onClick={() => run(fetchBook(b.book_id), '下载任务已提交', knowledge.knowledge_id)}
                         >
-                          下载
-                        </Button>
-                      )}
-                      {['candidate', 'decided'].includes(b.status) && (
-                        <Button size="small" type="link" style={{ padding: 0 }}
-                          onClick={() => { setImportBook(b); importForm.resetFields(); }}
-                        >
-                          导入
-                        </Button>
-                      )}
-                      {['candidate', 'decided', 'downloaded'].includes(b.status) && (
-                        <Button size="small" type="link" danger style={{ padding: 0 }}
-                          onClick={() => setRejectBook_(b)}
-                        >
-                          否决
+                          探索
                         </Button>
                       )}
                       <Button size="small" type="link" style={{ padding: 0 }}
-                        onClick={() => setDetailBook(b)}
+                        loading={uploading}
+                        onClick={() => triggerUpload(b.book_id)}
                       >
-                        详情
+                        上传
                       </Button>
                     </Space>
                   ),
                 },
+                {
+                  title: '判断',
+                  key: 'action',
+                  width: 100,
+                  render: (_: unknown, b: BookRecord) => (
+                    <Space size={0}>
+                      {b.status === 'downloaded' && (
+                        <Button size="small" type="link" style={{ padding: 0 }}
+                          onClick={() => run(verifyBook(b.book_id), '书籍已确认', knowledge.knowledge_id)}
+                        >
+                          确认
+                        </Button>
+                      )}
+                    </Space>
+                  ),
+                },
               ]}
+              expandable={{
+                expandedRowKeys: Array.from(expandedBookKeys),
+                expandedRowRender: (b: BookRecord) => (
+                  <div style={{ padding: '8px 0', background: '#f5f5f5', borderRadius: 4 }}>
+                    {b.edition && <div>版本：{b.edition}</div>}
+                    {b.publisher && <div>出版社：{b.publisher}</div>}
+                    {b.year && <div>出版年：{b.year}</div>}
+                    {b.page_count != null && <div>页数：{b.page_count}</div>}
+                    {b.original_title && <div>原版书名：{b.original_title}</div>}
+                  </div>
+                ),
+                showExpandColumn: false,
+              }}
             />
           )}
         </div>
@@ -532,49 +566,13 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
         </Form>
       </Modal>
 
-      {/* 人工导入书目文件：数据根内相对路径 → 原地登记；绝对路径 → 导入落盘（8901 D3） */}
-      <Modal
-        title={`导入书目文件 · ${importBook?.display_title ?? ''}`}
-        open={importBook !== null} onCancel={() => setImportBook(null)} width={520}
-        destroyOnHidden
-        onOk={async () => {
-          if (!importBook) return;
-          const p = String(importForm.getFieldValue('path') ?? '').trim();
-          if (!p) { message.warning('请填写文件路径'); return; }
-          const isAbsolute = /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\');
-          run(
-            isAbsolute ? importBookPdf(importBook.book_id, p) : registerBook(importBook.book_id, p),
-            isAbsolute ? '导入任务已提交' : '书目文件已登记',
-            knowledge.knowledge_id,
-          );
-          setImportBook(null);
-        }}
-        okText="导入" cancelText="取消"
-      >
-        <Form form={importForm} layout="vertical">
-          <Form.Item
-            label="文件路径"
-            name="path"
-            rules={[{ required: true, message: '请填写文件路径' }]}
-            extra="数据根内相对路径（如 tmp/参考书籍/数学分析/xx.pdf）原地登记；Windows 绝对路径则导入并落盘"
-          >
-            <Input placeholder="tmp/参考书籍/数学分析/01-demidovich_吉米多维奇数学分析习题集_2010.pdf" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 书目否决（reason 必填） */}
-      <ReasonModal
-        open={rejectBook_ !== null}
-        title={`否决书目：${rejectBook_?.display_title ?? ''}`}
-        withNote
-        onCancel={() => setRejectBook_(null)}
-        onSubmit={(reason, note) => {
-          if (rejectBook_) {
-            run(rejectBook(rejectBook_.book_id, reason, note), '书目已否决', knowledge.knowledge_id);
-            setRejectBook_(null);
-          }
-        }}
+      {/* 统一上传：隐藏文件选择器（书籍 PDF → multipart 导入，不写路径） */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".pdf"
+        style={{ display: 'none' }}
+        onChange={(e) => void handleUploadFile(e)}
       />
 
       {/* 书目详情（只读全貌，用户裁决 2026-09-08 项 4） */}
@@ -587,7 +585,16 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
   );
 }
 
-// --- 书行详情弹窗（用户裁决 2026-09-08 项 4：展示 + 渠道尝试记录） ---
+// --- 书目详情弹窗（PLAN-039 重设计：信息网格 + 下载信息精简 + 上传/验证/自动下载） ---
+
+/** 下载状态派生：是否下载成功（holding × status） */
+function bookDownloadState(b: BookRecord): { label: string; color: string } {
+  if (b.holding === 'owned' && ['downloaded', 'verified'].includes(b.status)) {
+    return { label: '下载成功', color: 'green' };
+  }
+  if (b.status === 'failed') return { label: '下载失败', color: 'red' };
+  return { label: '未下载', color: 'default' };
+}
 
 function BookDetailModal({ book, onClose, onMutated }: {
   book: BookRecord | null;
@@ -598,12 +605,10 @@ function BookDetailModal({ book, onClose, onMutated }: {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [sourcesError, setSourcesError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showSources, setShowSources] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [rejectingBook, setRejectingBook] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectNote, setRejectNote] = useState('');
-  const [operatingSource, setOperatingSource] = useState<string | null>(null);
+  const [operating, setOperating] = useState<string | null>(null);
 
   // book prop 变化时同步本地「当前书」（组件在 book=null 时已挂载，靠此 effect 同步）
   useEffect(() => {
@@ -626,195 +631,155 @@ function BookDetailModal({ book, onClose, onMutated }: {
 
   const { message } = App.useApp();
 
-  const handleVerifyBook = async () => {
+  const handleVerify = async () => {
     if (!current) return;
-    setOperatingSource('verify');
+    setOperating('verify');
     try {
-      await verifyBook(current.book_id);
-      message.success('验证完成，书籍已标记为已验证');
-      onMutated();
-      onClose();
-    } catch (err) {
-      message.error(describeError(err));
-    } finally {
-      setOperatingSource(null);
-    }
-  };
-
-  const handleRejectBook = async () => {
-    if (!current) return;
-    if (!rejectReason) {
-      message.warning('请输入否定原因');
-      return;
-    }
-    setOperatingSource('reject');
-    try {
-      await rejectBook(current.book_id, rejectReason, rejectNote || undefined);
-      message.success('已否定书籍');
-      onMutated();
-      setRejectingBook(false);
-      setRejectReason('');
-      setRejectNote('');
-      onClose();
-    } catch (err) {
-      message.error(describeError(err));
-    } finally {
-      setOperatingSource(null);
-    }
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !current) return;
-    
-    // 获取文件的绝对路径（Electron 环境）
-    const filePath = (file as unknown as { path?: string }).path;
-    if (!filePath) {
-      message.error('无法获取文件路径，请确保在 Electron 环境中运行');
-      return;
-    }
-    
-    setImporting(true);
-    try {
-      const updated = await importBookPdf(current.book_id, filePath);
+      const updated = await verifyBook(current.book_id);
       setCurrent(updated);
+      message.success('验证通过，书目已完成');
       onMutated();
-      message.success('导入成功');
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setOperating(null);
+    }
+  };
+
+  const handleAutoDownload = async () => {
+    if (!current) return;
+    setOperating('fetch');
+    try {
+      await fetchBook(current.book_id);
+      message.success('下载任务已提交，完成后可在本弹窗查看结果');
+      onMutated();
+    } catch (err) {
+      message.error(describeError(err));
+    } finally {
+      setOperating(null);
+    }
+  };
+
+  /** 统一上传：文件管理器选 PDF → multipart（不写路径） */
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !current) return;
+    setUploading(true);
+    try {
+      const updated = await importBookPdf(current.book_id, file);
+      setCurrent(updated);
+      message.success('上传成功，书目已登记为待验证');
+      onMutated();
       void loadSources(current.book_id);
     } catch (err) {
       message.error(describeError(err));
     } finally {
-      setImporting(false);
-      // 清空 input 以便重复选择同一文件
-      e.target.value = '';
+      setUploading(false);
     }
   };
 
   if (!book || !current) return null;
-  const displayName = bookDisplayName(current);
+  const download = bookDownloadState(current);
+  const address = current.file_path || current.absolute_path || '—';
+  const metaRows: Array<[string, string]> = [
+    ['书名', current.title || '—'],
+    ['原版书名', current.original_title || '—'],
+    ['卷册', current.part || '—'],
+    ['版本', current.edition || '—'],
+    ['作者', current.authors?.length ? current.authors.map((a) => a.name).join(' / ') : '—'],
+    ['出版社', current.publisher || '—'],
+    ['出版年', current.year != null ? String(current.year) : '—'],
+    ['语言', current.language || '—'],
+    ['角色', current.roles?.length ? current.roles.join(' / ') : '—'],
+    ['页数', current.page_count != null ? String(current.page_count) : '—'],
+  ];
+  const canVerify = current.status === 'downloaded';
+  const canAutoDownload = ['candidate', 'decided', 'failed'].includes(current.status);
+
   return (
     <Modal
-      title={displayName}
+      title={`书目详情 · ${bookDisplayName(current)}`}
       open onCancel={onClose}
-      footer={null}
-      width={720}
+      width={760}
+      style={{ maxWidth: '94vw' }}
+      styles={{ body: { maxHeight: '68vh', overflowY: 'auto' } }}
+      footer={[
+        <Button key="upload" icon={<UploadOutlined />} loading={uploading} onClick={() => fileInputRef.current?.click()}>
+          上传书籍
+        </Button>,
+        canAutoDownload && (
+          <Button key="fetch" loading={operating === 'fetch'} onClick={() => void handleAutoDownload()}>
+            自动下载
+          </Button>
+        ),
+        canVerify && (
+          <Button key="verify" type="primary" loading={operating === 'verify'} onClick={() => void handleVerify()}>
+            验证通过
+          </Button>
+        ),
+        <Button key="close" type="text" onClick={onClose}>关闭</Button>,
+      ]}
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color={BOOK_STATUS[current.status]?.color}>{BOOK_STATUS[current.status]?.label ?? current.status}</Tag>
+          <Tag>{roleLabel(current.roles)}</Tag>
+        </Space>
+
         <div>
-          <Space wrap style={{ marginBottom: 8 }}>
-            <Tag color={BOOK_STATUS[current.status]?.color}>{BOOK_STATUS[current.status]?.label ?? current.status}</Tag>
-            <Tag>{current.kind && BOOK_KIND_LABELS[current.kind] ? BOOK_KIND_LABELS[current.kind] : current.kind}</Tag>
-            <Tag>{roleLabel(current.roles)}</Tag>
-          </Space>
-          <div className="dl-book-meta">
-            {current.edition && <div>版本：{current.edition}</div>}
-            {current.authors?.length > 0 && <div>作者：{current.authors.map(a => a.name).join(' / ')}</div>}
-            {current.roles?.length > 0 && <div>角色：{current.roles.join(' / ')}</div>}
-            {current.language && <div>语言：{current.language}</div>}
-            {current.page_count != null && <div>页数：{current.page_count}</div>}
-            {current.absolute_path && <div>绝对路径：{current.absolute_path}</div>}
-            <div>状态：{BOOK_STATUS[current.status]?.label ?? current.status}</div>
+          <Text strong>书目信息</Text>
+          <div className="dl-book-detail-grid">
+            {metaRows.map(([k, v]) => (
+              <div key={k} className="dl-book-detail-item">
+                <span className="dl-book-detail-label">{k}</span>
+                <span className="dl-book-detail-value" title={v}>{v}</span>
+              </div>
+            ))}
           </div>
         </div>
 
         <div>
-          <Space>
-            <Text strong>渠道尝试（{sources.length}）</Text>
-            <Button size="small" onClick={() => void loadSources(current.book_id)} loading={loading}>
-              刷新
-            </Button>
-            <Button
-              size="small"
-              type="primary"
-              loading={importing}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              添加
-            </Button>
-          </Space>
-          {sourcesError && <div className="dl-book-meta" style={{ color: '#cf1322' }}>{sourcesError}</div>}
-          {sources.length === 0 && !sourcesError && <div className="dl-books-empty">暂无渠道尝试记录</div>}
-          {sources.map((s) => (
-            <div
-              key={s.source_id}
-              className="dl-book-meta"
-              style={{
-                marginTop: 4,
-                padding: '4px 8px',
-                borderRadius: 4,
-              }}
-            >
-              <div style={{ marginBottom: 4 }}>
-                <Space size={6}>
-                  <Tag color={s.ok ? 'green' : 'default'}>{s.ok ? '成功' : '失败'}</Tag>
-                  <span>{SOURCE_CHANNEL_OPTIONS.find((c) => c.value === s.channel)?.label ?? s.channel}</span>
-                  {s.page_url && <a href={s.page_url} target="_blank" rel="noreferrer">页面</a>}
-                  {s.download_url && <a href={s.download_url} target="_blank" rel="noreferrer">下载链接</a>}
-                </Space>
-              </div>
-              {s.note && (
-                <div style={{ color: s.ok ? 'inherit' : '#cf1322', fontSize: 12 }}>
-                  {s.note}
-                </div>
-              )}
+          <Text strong>下载信息</Text>
+          <div className="dl-book-meta" style={{ marginTop: 4 }}>
+            <div>
+              下载状态：<Tag color={download.color} style={{ marginRight: 0 }}>{download.label}</Tag>
             </div>
-          ))}
+            <div>文件地址：<span title={address}>{address}</span></div>
+          </div>
         </div>
-        <Space style={{ marginTop: 16 }}>
-          {current.status === 'downloaded' && (
-            <Button
-              type="primary"
-              loading={operatingSource === 'verify'}
-              onClick={() => void handleVerifyBook()}
-            >
-              验证完毕
-            </Button>
-          )}
-          <Button
-            danger
-            loading={operatingSource === 'reject'}
-            onClick={() => setRejectingBook(true)}
-          >
-            否定
+
+        <div>
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setShowSources((v) => !v)}>
+            查看渠道尝试（{sources.length}）{showSources ? ' ▲' : ' ▼'}
           </Button>
-        </Space>
+          {showSources && (
+            <div style={{ marginTop: 4 }}>
+              <Button size="small" onClick={() => void loadSources(current.book_id)} loading={loading}>刷新</Button>
+              {sourcesError && <div className="dl-book-meta" style={{ color: '#cf1322' }}>{sourcesError}</div>}
+              {sources.length === 0 && !sourcesError && <div className="dl-books-empty">暂无渠道尝试记录</div>}
+              {sources.map((s) => (
+                <div key={s.source_id} className="dl-book-meta" style={{ marginTop: 4, padding: '4px 8px', borderRadius: 4 }}>
+                  <Space size={6}>
+                    <Tag color={s.ok ? 'green' : 'default'}>{s.ok ? '成功' : '失败'}</Tag>
+                    <span>{SOURCE_CHANNEL_OPTIONS.find((c) => c.value === s.channel)?.label ?? s.channel}</span>
+                    {s.page_url && <a href={s.page_url} target="_blank" rel="noreferrer">页面</a>}
+                    {s.download_url && <a href={s.download_url} target="_blank" rel="noreferrer">下载链接</a>}
+                  </Space>
+                  {s.note && <div style={{ color: s.ok ? 'inherit' : '#cf1322', fontSize: 12 }}>{s.note}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Space>
-      <Modal
-        title="否定书籍"
-        open={rejectingBook}
-        onOk={() => void handleRejectBook()}
-        onCancel={() => {
-          setRejectingBook(false);
-          setRejectReason('');
-          setRejectNote('');
-        }}
-        confirmLoading={operatingSource === 'reject'}
-      >
-        <Form layout="vertical">
-          <Form.Item label="否定原因">
-            <Input.TextArea
-              rows={2}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="请输入否定原因（必填）"
-            />
-          </Form.Item>
-          <Form.Item label="备注">
-            <Input.TextArea
-              rows={2}
-              value={rejectNote}
-              onChange={(e) => setRejectNote(e.target.value)}
-              placeholder="可选备注"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+
       <input
         ref={fileInputRef}
         type="file"
         accept=".pdf"
         style={{ display: 'none' }}
-        onChange={(e) => void handleFileSelect(e)}
+        onChange={(e) => void handleUpload(e)}
       />
     </Modal>
   );
@@ -840,7 +805,7 @@ function BookCard({ book, onDetail }: {
         </Space>
       </div>
       <div className="dl-book-meta">
-        {book.authors?.length > 0 && <div>{book.authors.join(' / ')}</div>}
+        {book.authors?.length > 0 && <div>{book.authors.map((a) => a.name).join(' / ')}</div>}
         {book.language && <div>语言：{book.language}</div>}
         {versionText(v) && <div>{versionText(v)}</div>}
         {book.page_count != null && <div>页数：{book.page_count}</div>}
@@ -880,7 +845,7 @@ function KnowledgeSection({ knowledge, detail, run }: {
           <Text type="secondary" style={{ fontSize: 12 }}>下载 {downloadedCount}/{liveBooks.length} 本</Text>
         )}
         <span style={{ flex: 1 }} />
-        <Button size="small" icon={<EyeOutlined />} onClick={() => setTutorialDetailOpen(true)}>详情</Button>
+        <Button size="small" icon={<EyeOutlined />} onClick={() => setTutorialDetailOpen(true)}>下载情况</Button>
       </div>
 
       {detail === undefined ? (

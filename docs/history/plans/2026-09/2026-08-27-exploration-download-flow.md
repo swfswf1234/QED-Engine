@@ -1,38 +1,41 @@
 # 文档探索+下载全流程计划（ARCH-019·REQ-064 配套）
 
-状态：In Progress
+状态：Achieved
 任务类型：B
 最后更新：2026-09-01
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审流程设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[downloads-flow.md](../design/downloads-flow.md)（五阶段流程已并入 REQ-070）、、QED-Tracker shared-tables.md（Accepted）、QED-Tracker 2026-08-api-design.md（Draft）、[api-contracts.md](../architecture/api-contracts.md)、[database-design.md](../architecture/database-design.md)
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审流程设计随计划承载，确定后迁 design/ 固定文档）
+关联设计：[downloads-flow.md](../../../design/downloads-flow.md)（五阶段流程已并入 REQ-070）、、QED-Tracker shared-tables.md（Accepted）、QED-Tracker 2026-08-api-design.md（Draft）、[api-contracts.md](../../../architecture/api-contracts.md)、[database-design.md](../../../architecture/database-design.md)
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-022；REQ-064、REQ-065、ARCH-019）
 归档判定：Merge 倾向（开发完成后流程事实并入 docs/design/ 固定文档，计划壳归档 history/plans/）
 
-> **挂靠说明（2026-09-01）**：本文档为 PLAN-023（[文档下载全流程交互规范](2026-08-27-download-ux-flow.md)）的**技术架构参考**。
-> 交互规范以 PLAN-023 为准；本文档保留三端架构图、数据访问双链路、降级策略等技术事实。
+> **挂靠说明（2026-09-11 修订）**：本文档为技术架构参考；PLAN-023 已 Superseded 并归档
+> （[history/plans/2026-08](../../plans/2026-08/2026-08-27-download-ux-flow.md)），
+> 状态机与交互事实源以 [design/downloads-flow.md](../../../design/downloads-flow.md) /
+> [downloads-ui.md](../../../design/downloads-ui.md) 为准；本文档保留三端架构图、数据访问双链路、降级策略等技术事实。
 >
-> **与 PLAN-023 的冲突说明**：本文档 exploration_stage 4态模型、域探索弹窗流、8900 包装异步会话等内容，
-> 已被 PLAN-023 统一为：5态模型（+失败）、无弹窗直触（REQ-067 §B2）、8900 纯透传。
-> 下方正文保留原始记录供架构参考，**以 PLAN-023 为准的部分已标注**。
+> **口径说明**：本文档 exploration_stage 4 态模型、域探索弹窗流、8900 包装异步会话等内容已过时，
+> 现行口径为：领域 6 态 / 课程 5 态、无弹窗直触（REQ-067 §B2）、8900 写点驱动 + 8901 原生任务链。
+> 下方正文保留原始记录供架构参考。
 
 > **2026-08-31 架构参考说明**：本文档保留为架构参考，核心内容：
 > - 三端架构图（§三端架构）—— 唯一事实源
 > - 数据访问双链路（D1-D4）+ 写权限矩阵（D2）—— 8900/8901 交互规范
-> - 状态机定义（exploration_stage 4态 / 教程 / 书籍）—— 数据层规范（**注意**：4态已被 PLAN-023 的 5态取代）
+> - 状态机定义（exploration_stage 4态 / 教程 / 书籍）—— 数据层规范（**注意**：4 态已被领域 6 态/课程 5 态取代，见 design/downloads-flow.md §2）
 > - 降级策略（§降级策略）—— 运维参考
-> - 探索流程时序（§探索流程）—— 架构参考（**注意**：域探索弹窗流已被 PLAN-023 的无弹窗直触取代）
+> - 探索流程时序（§探索流程）—— 架构参考（**注意**：域探索弹窗流已被无弹窗直触取代）
 >
-> §B（8900 侧改造）和 §F（前端侧改造）已被 [REQ-067](../history/plans/2026-08/2026-08-29-req067-downloads-optimization.md) 吸收：
+> §B（8900 侧改造）和 §F（前端侧改造）已被 [REQ-067](../../plans/2026-08/2026-08-29-req067-downloads-optimization.md) 吸收：
 > - B1/B2 旧端点清理 + 新端点 → 已落地（explore/confirm-name/import 路由已实现）
 > - B3 探索会话端点 → REQ-067 B2（REST 驱动，QED-Tracker 接管）
 > - B4 共享表直读写 → REQ-067 B8（exploration_stage 5状态模型）
 > - B5 api-contracts 更新 → 随 REQ-067 §C 执行
 > - F1-F5 前端改造 → REQ-067 §B 全部吸收
 >
-> §C（核心状态机）中 exploration_stage 4态模型已被 REQ-067 B8 的 5态模型（加"失败"态）取代，以 PLAN-023/REQ-067 为准。
+> §C（核心状态机）中 exploration_stage 4 态模型已被取代（领域 6 态 / 课程 5 态），以 design/downloads-flow.md §2 为准。
 
 > 2026-08-27 重写：对齐 REQ-064 共享表新架构，旧 explore-runs 轮询架构已废弃。
-> 用户操作级流程规范见配套 [2026-08-27-download-ux-flow.md](2026-08-27-download-ux-flow.md)（PLAN-023）。
+> 用户操作级流程规范曾由 PLAN-023 承载，该计划已 Superseded 归档；现行规范见
+> [design/downloads-flow.md](../../../design/downloads-flow.md) / [downloads-ui.md](../../../design/downloads-ui.md)。
 
 ## 目标与成功标准
 

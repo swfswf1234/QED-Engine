@@ -5,7 +5,7 @@
 关闭结果：Achieved
 最后更新：2026-09-08
 关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端只连 8900，降级链路经此）
-关联设计：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（PLAN-023）、[2026-08-29-req067-downloads-optimization.md](../2026-08/2026-08-29-req067-downloads-optimization.md)（PLAN-025）
+关联设计：[2026-08-27-download-ux-flow.md](../2026-08/2026-08-27-download-ux-flow.md)（PLAN-023）、[2026-08-29-req067-downloads-optimization.md](../2026-08/2026-08-29-req067-downloads-optimization.md)（PLAN-025）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-028；REQ-067）
 归档判定：实现完成后归档 history/plans/2026-09/（已执行 2026-09-08）
 

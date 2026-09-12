@@ -42,7 +42,7 @@ def test_error_response_raises_with_detail():
 
     client = _client(handler)
     with pytest.raises(TrackerError) as exc_info:
-        client.decide_book("bk_abc")
+        client.verify_book("bk_abc")
     assert "409" in str(exc_info.value)
     assert "非法状态迁移" in str(exc_info.value)
 
@@ -128,7 +128,7 @@ def test_tracker_error_carries_status_code():
 
     client = _client(handler)
     with pytest.raises(TrackerError) as exc_info:
-        client.decide_book("bk_abc")
+        client.verify_book("bk_abc")
     assert exc_info.value.status_code == 409
 
 
@@ -212,30 +212,29 @@ def test_confirm_knowledge_omits_empty_fields():
 
 
 def test_create_book_posts_books():
+    """create_book（QED-060 目标契约）：book_id + title，不再携带 knowledge_id。"""
     seen = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["path"] = request.url.path
         seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "candidate"})
+        return httpx.Response(201, json={"book_id": "mathanalysis-b01", "status": "candidate"})
 
     client = _client(handler)
     result = client.create_book(
-        "kn_abc",
-        kind="textbook",
+        "mathanalysis-b01",
+        title="数学分析",
+        original_title="Principles of Mathematical Analysis",
         roles=["textbook"],
-        title="微积分学教程",
-        part="第一册",
-        authors=["菲赫金哥尔茨"],
+        domain_id="math",
     )
     assert seen["path"] == "/api/v1/books"
     assert seen["body"] == {
-        "knowledge_id": "kn_abc",
-        "kind": "textbook",
+        "book_id": "mathanalysis-b01",
+        "title": "数学分析",
+        "original_title": "Principles of Mathematical Analysis",
         "roles": ["textbook"],
-        "title": "微积分学教程",
-        "part": "第一册",
-        "authors": ["菲赫金哥尔茨"],
+        "domain_id": "math",
     }
     assert result["status"] == "candidate"
 
@@ -277,7 +276,49 @@ def test_register_book_requires_relative_path():
         client.register_book("bk_abc", relative_path="")
 
 
+def test_import_book_pdf_sends_file_path():
+    """import_book_pdf：必须携带 file_path（此前漏传导致 8901 422）。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"book_id": "bk_abc", "holding": "owned", "status": "downloaded"})
+
+    client = _client(handler)
+    result = client.import_book_pdf("bk_abc", file_path="C:/tmp/upload.pdf")
+    assert seen["path"] == "/api/v1/books/bk_abc/import"
+    assert seen["body"] == {"file_path": "C:/tmp/upload.pdf"}
+    assert result["status"] == "downloaded"
+
+
+def test_import_book_pdf_includes_target_path_when_given():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={"book_id": "bk_abc"})
+
+    client = _client(handler)
+    client.import_book_pdf(
+        "bk_abc",
+        file_path="C:/tmp/upload.pdf",
+        target_path="raw/math/math_analysis/x.pdf",
+    )
+    assert seen["body"] == {
+        "file_path": "C:/tmp/upload.pdf",
+        "target_path": "raw/math/math_analysis/x.pdf",
+    }
+
+
+def test_import_book_pdf_requires_file_path():
+    client = _client(_json_handler({}))
+    with pytest.raises(TrackerError):
+        client.import_book_pdf("bk_abc", file_path="")
+
+
 def test_book_state_transitions_paths():
+    """下载生命周期端点（QED-060）：start/fail/verify/cancel 透传 8901。"""
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -285,80 +326,38 @@ def test_book_state_transitions_paths():
         return httpx.Response(200, json={"book_id": "bk_abc", "status": "changed"})
 
     client = _client(handler)
-    client.decide_book("bk_abc")
     client.start_book("bk_abc")
     client.fail_book("bk_abc")
-    client.retry_book("bk_abc")
     client.verify_book("bk_abc")
+    client.cancel_book("bk_abc")
     assert seen == [
-        "/api/v1/books/bk_abc/decide",
         "/api/v1/books/bk_abc/start",
         "/api/v1/books/bk_abc/fail",
-        "/api/v1/books/bk_abc/retry",
         "/api/v1/books/bk_abc/verify",
+        "/api/v1/books/bk_abc/cancel",
     ]
 
 
-def test_complete_book_sends_required_fields():
-    seen = {}
-
+def test_create_domain_offline_defaults_not_started(monkeypatch):
+    """离线降级 create_domain：新领域默认「未开始」（与在线 8901 默认一致，PLAN-041）。"""
     def handler(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "downloaded"})
+        raise httpx.ConnectError("connection refused")
 
-    client = _client(handler)
-    client.complete_book(
-        "bk_abc",
-        sha256="a" * 64,
-        relative_path="raw/books/math-qe/01/v2.pdf",
-        page_count=600,
+    captured: dict = {}
+
+    def fake_create(settings, **kwargs):
+        captured.update(kwargs)
+        return {"domain_id": "dm1", "exploration_stage": kwargs.get("exploration_stage")}
+
+    monkeypatch.setattr("qed_engine.services.shared_tables.create_domain", fake_create)
+    client = TrackerClient(
+        base_url="http://tracker.test",
+        transport=httpx.MockTransport(handler),
+        settings=object(),
     )
-    assert seen["body"] == {
-        "sha256": "a" * 64,
-        "relative_path": "raw/books/math-qe/01/v2.pdf",
-        "page_count": 600,
-        "absolute_path": "",
-        "file_name": "",
-    }
-
-
-def test_complete_book_requires_sha256_and_path():
-    client = _client(_json_handler({}))
-    with pytest.raises(TrackerError):
-        client.complete_book("bk_abc", sha256="", relative_path="")
-
-
-def test_reject_book_sends_reason_and_note():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "rejected"})
-
-    client = _client(handler)
-    client.reject_book("bk_abc", reason="扫描缺页", note="建议换源")
-    assert seen["body"] == {"reason": "扫描缺页", "note": "建议换源"}
-
-
-def test_reject_book_requires_reason():
-    client = _client(_json_handler({}))
-    with pytest.raises(TrackerError):
-        client.reject_book("bk_abc", reason="")
-
-
-def test_supersede_book_sends_reason():
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["path"] = request.url.path
-        seen["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "superseded"})
-
-    client = _client(handler)
-    result = client.supersede_book("bk_abc", reason="被第 9 版替代")
-    assert seen["path"] == "/api/v1/books/bk_abc/supersede"
-    assert seen["body"] == {"reason": "被第 9 版替代"}
-    assert result["status"] == "superseded"
+    result = client.create_domain(name="高等数学", description="desc")
+    assert captured["exploration_stage"] == "未开始"
+    assert result["exploration_stage"] == "未开始"
 
 
 # 注：旧课程探索 API 契约测试（PLAN-021 冻结端点 §1~§7.2）已随 B2 删除——探索会话

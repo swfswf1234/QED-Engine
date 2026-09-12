@@ -11,8 +11,8 @@
 
 > 本文件是 **QED-Engine 的固定数据库设计文档（总纲）**（ADR 0010）：只登记共享 `qed` 库的
 > 命名空间隔离规则、表清单总览与跨项目契约要点；**qt_*/af_* 部分置空，指向子项目各自的
-> 数据库设计文档**（QED-Tracker `docs/architecture/database-schema.md` 为其全部
-> `qed_*`/`qt_*` 表**结构**唯一事实源；Axiom-Flow `docs/architecture/database-design.md`
+> 数据库设计文档**（QED-Tracker `docs/architecture/database-shared-tables.md`（`qed_*`）与
+> `database-private-tables.md`（`qt_*`）为其全部表**结构**唯一事实源；Axiom-Flow `docs/architecture/database-design.md`
 > 定义其 `af_*` 表）。版本末期确认更新后，前版本进 `history/`。
 
 ## 目的与边界
@@ -20,8 +20,8 @@
 本文件是根仓库对共享 MySQL `qed` 库的**登记与指引**：只维护命名空间隔离规则、表清单总览与
 跨项目契约要点。共享表 `qed_*` 的**结构事实源仍在 QED-Tracker**（其 Alembic 建表维护，
 根仓库仅登记同步）；`qt_*` 属 QED-Tracker、`af_*` 属 Axiom-Flow，根仓库不复制其表结构定义。
-QED-Tracker 侧已回执（REQ-026 关闭，2026-08-16）：其 `docs/architecture/database-schema.md`
-为 qed 库全部 `qed_*`/`qt_*` 表**唯一事实源**。Axiom-Flow 侧「af_* 包定义确认」登记于
+QED-Tracker 侧已回执（REQ-026 关闭，2026-08-16）：其 `docs/architecture/database-shared-tables.md`
+（`qed_*`）与 `database-private-tables.md`（`qt_*`）为 qed 库全部表**唯一事实源**。Axiom-Flow 侧「af_* 包定义确认」登记于
 [REQ-027](../trackers/todo.md)，其 `docs/architecture/database-design.md`
 （2026-08-21）已登记 af_books / af_block_reviews（V2-013 规划契约）。
 跨项目对接语义见[三项目对接规范](../design/cross-project-contracts.md)。
@@ -47,19 +47,19 @@ QED-Tracker 侧已回执（REQ-026 关闭，2026-08-16）：其 `docs/architectu
 
 | 表 | 前缀 | 所有权 | 一行= | 状态 | 事实源 |
 | --- | --- | --- | --- | --- | --- |
-| `qed_domain` | 共享 | QED-Tracker 建表维护，其他项目只读 | 一个学科（math；扩展预留），含 stages | QED-031，迁移 0006 已落地 | QED-Tracker database-schema.md |
-| `qed_course` | 共享 | 同上 | 一门课程（阶段/先修 DAG/别名/顺序），取代 courses/math.json | QED-031 | QED-Tracker database-schema.md |
+| `qed_domain` | 共享 | QED-Tracker 建表维护，其他项目只读 | 一个学科（math；扩展预留），含 stages | QED-031，迁移 0006 已落地 | QED-Tracker database-shared-tables.md |
+| `qed_course` | 共享 | 同上 | 一门课程（阶段/先修 DAG/别名/顺序），取代 courses/math.json | QED-031 | QED-Tracker database-shared-tables.md |
 | `qed_llm_calls` | 共享 | QED-Engine 后端建表维护（call_log.py 幂等），三项目可写 | 一次 LLM 调用记录（prompt/回答/耗时/成败） | ARCH-016，根仓库迁移 | 本文件（ARCH-016 登记）；结构见 [llm-gateway-and-model-management](../design/llm-gateway.md) |
-| `qt_knowledge` | 私有 | QED-Tracker | 一套教程（tutorial）或一组课程延展资料归类（other_material），两态 draft→confirmed | QED-031，2026-09-03 重构 | QED-Tracker database-schema.md |
-| `qt_books` | 私有 | QED-Tracker | 一册/一本书的选用状态与持有状态（candidate→decided→parallel→retired），下载执行态移交 qt_sources | QED-031，2026-09-03 重构 | QED-Tracker database-schema.md |
-| `qt_sources` | 私有 | QED-Tracker | 一次渠道尝试（外键挂 book_id），ok 标达成败 | QED-031，0014 重建 | QED-Tracker database-schema.md |
-| `qt_tasks` | 私有 | QED-Tracker | 一个后台任务记录（queued→running→succeeded/failed） | REQ-032，迁移 0016 建 | QED-Tracker database-schema.md |
+| `qt_knowledge` | 私有 | QED-Tracker | 一套教程（tutorial）或一组课程延展资料归类（other_material），两态 draft→confirmed | QED-031，2026-09-03 重构 | QED-Tracker database-private-tables.md |
+| `qt_books` | 私有 | QED-Tracker | 一册/一本书的选用态（candidate/decided/parallel/retired）+ 持有态（owned/missing）+ 下载生命周期（downloading/downloaded/verified/failed，QED-060） | QED-031 + QED-060 | QED-Tracker database-private-tables.md |
+| `qt_sources` | 私有 | QED-Tracker | 一次渠道尝试（外键挂 book_id），ok 标达成败 | QED-031，0014 重建 | QED-Tracker database-private-tables.md |
+| `qt_tasks` | 私有 | QED-Tracker | 一个后台任务记录（queued→running→succeeded/failed） | REQ-032，迁移 0016 建 | QED-Tracker database-private-tables.md |
 | `af_books` | 私有 | Axiom-Flow | 一册已验证书（qt_books 只读快照 + 解析进度） | **规划**（V2-013 承接） | Axiom-Flow database-design.md |
 | `af_block_reviews` | 私有 | Axiom-Flow | 一次块级判定（一致/不一致） | **规划**（V2-013 承接） | Axiom-Flow database-design.md |
 | 学习表族（规划） | 暂缓 | 待裁决 | 课程进度/练习记录/问答会话 | 规划，M2 里程碑启动时裁决 | 本文件「学习表族规划」节 |
 
 > **qt_*/af_* 部分置空**：QED-Engine 总纲不复制子项目表结构，一律指向子项目数据库文档。
-> qt_* 详情见 QED-Tracker `docs/architecture/database-schema.md`；af_* 详情见
+> qt_* 详情见 QED-Tracker `docs/architecture/database-private-tables.md`（qed_* 见 `database-shared-tables.md`）；af_* 详情见
 > Axiom-Flow `docs/architecture/database-design.md`。
 
 ## qed_* 共享表族
@@ -204,13 +204,14 @@ QED-Engine 后端（`backend/qed_engine/services/llm/call_log.py` 幂等建表 +
 
 ## qt_*（QED-Tracker，私有）
 
-QED-Tracker 定义自身完整数据库定义（`docs/architecture/database-schema.md` 唯一事实源，
-REQ-026 已回执；2026-08-20 起作为固定文档）。根仓库总纲不复制其结构。四张在用表：
+QED-Tracker 定义自身完整数据库定义（`docs/architecture/database-private-tables.md`（qt_*）与
+`database-shared-tables.md`（qed_*）唯一事实源，REQ-026 已回执；2026-08-20 起作为固定文档）。根仓库总纲不复制其结构。四张在用表：
 
 - `qt_knowledge`：一套教程（tutorial）或课程延展资料归类（other_material），两态
   draft→confirmed（2026-09-03 重构，废弃由 notes 承载）。
-- `qt_books`：域级书库，一册/一本书的选用状态（candidate→decided→parallel→retired）
-  与持有状态（owned/missing），承载补书优先级；下载执行由 qt_sources 承载。
+- `qt_books`：域级书库，一册/一本书的选用态（candidate/decided/parallel/retired）+ 持有态
+  （owned/missing）+ 下载生命周期（downloading/downloaded/verified/failed，QED-060）；
+  承载补书优先级，下载执行留痕由 qt_sources 承载。
 - `qt_sources`：一次渠道尝试（外键挂 book_id），ok 标达成败。
 - `qt_tasks`：一个后台任务记录（queued→running→succeeded/failed），REQ-032，
   迁移 0016 建，替代 `meta/tasks/` JSON 文件。
@@ -260,7 +261,8 @@ af_books（解析书目，含课程归属与解析进度）、af_block_reviews�
 
 1. **共享 `qed_*` 前缀表族**：领域/课程为三项目共享表，所有权 QED-Tracker（Alembic 建表
    维护），其他项目只读不写；schema 变更须先经根仓库登记（ADR 0009 补充 0003）。
-2. **唯一数据库设计文档**：qed 库全部 `qed_*`/`qt_*` 表结构唯一事实源为 QED-Tracker
-   database-schema.md，替代旧的 database-schema-ownership.md / three-table-schema.md。
+2. **唯一数据库设计文档**：qed 库表结构唯一事实源为 QED-Tracker `database-shared-tables.md`
+   （`qed_*`）与 `database-private-tables.md`（`qt_*`），替代旧的 database-schema.md /
+   database-schema-ownership.md / three-table-schema.md。
 3. **数据边界新模式**（ARCH-013）：元数据默认存数据库，dataset 只管理数据资料，`meta/` JSON
    退役（REQ-032）。

@@ -232,7 +232,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '状态筛选' }));
     fireEvent.click(await screen.findByTitle('待验证'));
     await waitFor(() => {
-      expect(useDownloadsStore.getState().filters.stage).toBe('await_verify');
+      expect(useDownloadsStore.getState().filters.stage).toBe('to_verify');
     });
     // 仅 k3（线性代数教程，含 downloaded 书籍）保留；k1（已验收）与空书籍 k2 隐藏
     expect(await screen.findByText('筛选结果：1 个教程（已排除否定/过时项）')).toBeInTheDocument();
@@ -257,7 +257,7 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     const card = (await screen.findByText('Rudin 中译')).closest('.dl-book-card') as HTMLElement;
     expect(card).not.toBeNull();
     expect(within(card).getAllByText('教材')).toHaveLength(1);
-    expect(within(card).getByText('已验证')).toBeInTheDocument();
+    expect(within(card).getByText('已完成')).toBeInTheDocument();
   });
 
   it('8901 不可达（/knowledge 503）→ 教程降级提示，课程体系树正常', async () => {
@@ -354,16 +354,16 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
     const card = cardEl.closest('.dl-book-card') as HTMLElement;
     const cardBtns = within(card).getAllByRole('button').map((b) => b.textContent);
     expect(cardBtns).toEqual(['详情']);
-    // 打开教程详情弹窗（行头「详情」）
+    // 打开教程详情弹窗（行头「下载情况」）
     const head = cardEl.closest('.dl-knowledge-section') as HTMLElement;
-    // 行头「详情」按钮带 EyeOutlined 图标，可访问名含图标标签，用正则匹配
-    fireEvent.click(within(head.querySelector('.dl-knowledge-head') as HTMLElement).getByRole('button', { name: /详情/ }));
+    // 行头「下载情况」按钮带 EyeOutlined 图标，可访问名含图标标签，用正则匹配
+    fireEvent.click(within(head.querySelector('.dl-knowledge-head') as HTMLElement).getByRole('button', { name: /下载情况/ }));
     const dialog = await screen.findByRole('dialog');
     // 教程信息修改禁用（8901 无 PATCH /knowledge，已移交）+ 新增书目按钮在场（均可访问名含图标标签）
     expect(within(dialog).getByRole('button', { name: /修改信息/ })).toHaveAttribute('disabled');
     expect(within(dialog).getByRole('button', { name: /新增书目/ })).toBeInTheDocument();
-    // 书目表列：书名/作者/语言/状态/操作
-    for (const col of ['书名', '作者', '语言', '状态', '操作']) {
+    // 书目表列：书名/作者/语言/状态/详情/下载方式/判断
+    for (const col of ['书名', '作者', '语言', '状态', '详情', '下载方式', '判断']) {
       expect(within(dialog).getByText(col)).toBeInTheDocument();
     }
   });
@@ -564,61 +564,56 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       return screen.findByRole('dialog');
     }
 
-    it('渠道列表：成功渠道显示「成功」标签', async () => {
+    it('渠道列表默认收起，展开后成功渠道显示「成功」标签', async () => {
       const downloadedBook = book({ book_id: 'b_dl', title: '已下载书', status: 'downloaded' });
       const dialog = await openBookDetailModal(downloadedBook, [
         { source_id: 's1', channel: 'libgen_li', ok: true, note: '找到文件' },
         { source_id: 's2', channel: 'internet_archive', ok: false, note: '未找到' },
       ]);
       expect(within(dialog).getByText('已下载书')).toBeInTheDocument();
+      // 渠道默认收起（只显示下载状态 + 地址）
+      expect(within(dialog).queryByText('成功')).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: /查看渠道尝试/ }));
       await waitFor(() => {
         expect(within(dialog).getByText('成功')).toBeInTheDocument();
       });
       expect(within(dialog).getByText('失败')).toBeInTheDocument();
       expect(within(dialog).getByText('图书馆链接')).toBeInTheDocument();
       expect(within(dialog).getByText('互联网档案馆')).toBeInTheDocument();
-      // note 渲染：失败渠道显示失效原因（note 字段），成功/失败渠道 note 颜色区分
       expect(within(dialog).getByText('找到文件')).toBeInTheDocument();
       const failNote = within(dialog).getByText('未找到');
-      expect(failNote).toBeInTheDocument();
-      // 失败渠道 note 红色 #cf1322（jsdom 序列化为 rgb），成功渠道 note 继承默认色
       expect(failNote.style.color).toBe('rgb(207, 19, 34)');
       expect(within(dialog).getByText('找到文件').style.color).toBe('inherit');
     });
 
-    it('成功渠道显示验证完毕和否定按钮', async () => {
+    it('downloaded 显示验证通过按钮（无否定按钮，REQ-079 前无 retire 端点）', async () => {
       const downloadedBook = book({ book_id: 'b_dl2', title: '待验证书', status: 'downloaded' });
-      const dialog = await openBookDetailModal(downloadedBook, [
-        { source_id: 's1', channel: 'libgen_li', ok: true },
-      ]);
-      await waitFor(() => {
-        expect(within(dialog).getByText('成功')).toBeInTheDocument();
-      });
-      expect(within(dialog).getByRole('button', { name: /验证完毕/ })).toBeInTheDocument();
-      expect(within(dialog).getByRole('button', { name: /否\s*定/ })).toBeInTheDocument();
+      const dialog = await openBookDetailModal(downloadedBook, []);
+      expect(within(dialog).getByRole('button', { name: /验证通过/ })).toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: /否\s*定/ })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /上传书籍/ })).toBeInTheDocument();
     });
 
-    it('非 downloaded 状态书籍不显示验证完毕按钮', async () => {
+    it('candidate 不显示验证通过，显示自动下载与上传书籍', async () => {
       const candidateBook = book({ book_id: 'b_cand', title: '候选书', status: 'candidate' });
-      const dialog = await openBookDetailModal(candidateBook, [
-        { source_id: 's1', channel: 'manual', ok: true },
-      ]);
-      await waitFor(() => {
-        expect(within(dialog).getByText('成功')).toBeInTheDocument();
-      });
-      expect(within(dialog).queryByRole('button', { name: /验证完毕/ })).not.toBeInTheDocument();
-      expect(within(dialog).getByRole('button', { name: /否\s*定/ })).toBeInTheDocument();
+      const dialog = await openBookDetailModal(candidateBook, []);
+      expect(within(dialog).queryByRole('button', { name: /验证通过/ })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: /否\s*定/ })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /自动下载/ })).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /上传书籍/ })).toBeInTheDocument();
     });
 
-    it('点击验证完毕按钮调用验证 API', async () => {
+    it('下载信息显示是否成功与文件地址', async () => {
+      const ownedBook = book({ book_id: 'b_addr', title: '地址书', status: 'downloaded', holding: 'owned', file_path: 'raw/math/math_analysis/x_ab12cd34.pdf' });
+      const dialog = await openBookDetailModal(ownedBook, []);
+      expect(within(dialog).getByText('下载成功')).toBeInTheDocument();
+      expect(within(dialog).getByText('raw/math/math_analysis/x_ab12cd34.pdf')).toBeInTheDocument();
+    });
+
+    it('点击验证通过按钮调用验证 API', async () => {
       const downloadedBook = book({ book_id: 'b_verify', title: '验证书', status: 'downloaded' });
-      const dialog = await openBookDetailModal(downloadedBook, [
-        { source_id: 's1', channel: 'libgen_li', ok: true },
-      ]);
-      await waitFor(() => {
-        expect(within(dialog).getByText('成功')).toBeInTheDocument();
-      });
-      fireEvent.click(within(dialog).getByRole('button', { name: /验证完毕/ }));
+      const dialog = await openBookDetailModal(downloadedBook, []);
+      fireEvent.click(within(dialog).getByRole('button', { name: /验证通过/ }));
       await waitFor(() => {
         const verifyCalls = mockFetch.mock.calls.filter(
           ([url, init]) => String(url).includes('/books/b_verify/verify')
@@ -636,61 +631,15 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       });
     });
 
-    it('点击否定按钮打开拒绝原因弹窗', async () => {
-      const downloadedBook = book({ book_id: 'b_reject', title: '拒绝书', status: 'downloaded' });
-      const dialog = await openBookDetailModal(downloadedBook, [
-        { source_id: 's1', channel: 'libgen_li', ok: true },
-      ]);
-      await waitFor(() => {
-        expect(within(dialog).getByText('成功')).toBeInTheDocument();
-      });
-      fireEvent.click(within(dialog).getByRole('button', { name: /否\s*定/ }));
-      const rejectModal = await screen.findByText('否定书籍');
-      expect(rejectModal).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('请输入否定原因（必填）')).toBeInTheDocument();
-    });
-
-    it('否定原因弹窗确认后调用拒绝 API', async () => {
-      const downloadedBook = book({ book_id: 'b_reject2', title: '拒绝书2', status: 'downloaded' });
-      const dialog = await openBookDetailModal(downloadedBook, [
-        { source_id: 's1', channel: 'libgen_li', ok: true },
-      ]);
-      await waitFor(() => {
-        expect(within(dialog).getByText('成功')).toBeInTheDocument();
-      });
-      fireEvent.click(within(dialog).getByRole('button', { name: /否\s*定/ }));
-      await screen.findByText('否定书籍');
-      fireEvent.change(screen.getByPlaceholderText('请输入否定原因（必填）'), { target: { value: '质量差' } });
-      fireEvent.change(screen.getByPlaceholderText('可选备注'), { target: { value: '扫描不清晰' } });
-      // 确认按钮在否定弹窗的 footer 中
-      const confirmBtn = screen.getByRole('button', { name: /OK|确[定认]/ });
-      fireEvent.click(confirmBtn);
-      await waitFor(() => {
-        const rejectCalls = mockFetch.mock.calls.filter(
-          ([url, init]) => String(url).includes('/books/b_reject2/reject')
-            && (init as RequestInit | undefined)?.method === 'POST',
-        );
-        expect(rejectCalls).toHaveLength(1);
-        const body = JSON.parse(rejectCalls[0][1].body as string);
-        expect(body.reason).toBe('质量差');
-        expect(body.note).toBe('扫描不清晰');
-      });
-    });
-
-    it('点击添加按钮选择本地 PDF 后调用导入 API', async () => {
+    it('点击上传书籍按钮选择本地 PDF 后以 multipart 调用导入 API', async () => {
       const candidateBook = book({ book_id: 'b_add', title: '导入书', status: 'candidate' });
       const dialog = await openBookDetailModal(candidateBook);
-      await waitFor(() => {
-        expect(within(dialog).getByText('渠道尝试（0）')).toBeInTheDocument();
-      });
-      // 点击「添加」→ 触发隐藏 file input 的 click
-      fireEvent.click(within(dialog).getByRole('button', { name: /添\s*加/ }));
+      fireEvent.click(within(dialog).getByRole('button', { name: /上传书籍/ }));
       const fileInput = dialog.querySelector('input[type="file"]') as HTMLInputElement | null;
       expect(fileInput).not.toBeNull();
       expect(fileInput?.accept).toBe('.pdf');
-      // jsdom 的 File 无 Electron file.path，需手动附加（handleFileSelect 依赖 path 取绝对路径）
+      // 浏览器 File：无 file.path，走 multipart（不再依赖 Electron 路径）
       const file = new File(['pdf-content'], 'book.pdf', { type: 'application/pdf' });
-      Object.defineProperty(file, 'path', { value: '/fake/path/book.pdf' });
       fireEvent.change(fileInput as HTMLInputElement, { target: { files: [file] } });
       await waitFor(() => {
         const importCalls = mockFetch.mock.calls.filter(
@@ -698,21 +647,20 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
             && (init as RequestInit | undefined)?.method === 'POST',
         );
         expect(importCalls).toHaveLength(1);
-        const body = JSON.parse(importCalls[0][1].body as string);
-        expect(body.file_path).toBe('/fake/path/book.pdf');
+        const body = importCalls[0][1].body as FormData;
+        expect(body).toBeInstanceOf(FormData);
+        expect((body.get('file') as File).name).toBe('book.pdf');
       });
-      // 导入成功后 current 就地更新为 downloaded → 弹窗内出现「验证完毕」按钮（父级数据未刷也不阻塞）
+      // 上传成功后 current 就地更新为 downloaded → 弹窗内出现「验证通过」按钮
       await waitFor(() => {
-        expect(within(dialog).getByRole('button', { name: /验证完毕/ })).toBeInTheDocument();
+        expect(within(dialog).getByRole('button', { name: /验证通过/ })).toBeInTheDocument();
       });
     });
 
-    it('无渠道时显示空态提示', async () => {
+    it('无渠道时展开显示空态提示', async () => {
       const bookNoSources = book({ book_id: 'b_empty', title: '无渠道书', status: 'candidate' });
       const dialog = await openBookDetailModal(bookNoSources, []);
-      await waitFor(() => {
-        expect(within(dialog).getByText('渠道尝试（0）')).toBeInTheDocument();
-      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /查看渠道尝试/ }));
       expect(within(dialog).getByText('暂无渠道尝试记录')).toBeInTheDocument();
     });
   });

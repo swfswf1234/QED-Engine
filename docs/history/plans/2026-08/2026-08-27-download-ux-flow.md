@@ -1,15 +1,21 @@
 # 文档下载全流程交互规范（ARCH-019）
 
-状态：In Progress
+状态：Superseded
+关闭结果：Not Applicable
 任务类型：B
-最后更新：2026-09-10
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)（技术架构参考，PLAN-022 挂靠本文档）、[downloads-flow.md](../design/downloads-flow.md)、[frontend-architecture.md](../architecture/frontend-architecture.md)
+最后更新：2026-09-11
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
+关联设计：[2026-08-27-exploration-download-flow.md](../2026-09/2026-08-27-exploration-download-flow.md)（技术架构参考，PLAN-022）、[downloads-flow.md](../../../design/downloads-flow.md)、[frontend-architecture.md](../../../architecture/frontend-architecture.md)
+
+> **归档说明（2026-09-11，PLAN-038）**：本计划已 Superseded——其状态机口径（旧 8 态按钮矩阵、
+> 教程 reject/supersede/complete、探索弹窗流与 mock）与现行设计冲突，交互与状态机事实源统一由
+> [downloads-flow.md](../../../design/downloads-flow.md) 与 [downloads-ui.md](../../../design/downloads-ui.md)
+> 承接；本文件仅作历史留档。
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-023；REQ-053、REQ-059、REQ-060、ARCH-019）
 归档判定：Merge 倾向（开发完成后操作契约并入 docs/architecture/frontend-architecture.md 或 design/ 固定文档，计划壳归档 history/plans/）
 
 > **本文档是全流程交互规范的唯一事实源**（2026-09-01 统一）。
-> - 技术链路见挂靠的 PLAN-022（[2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)）。
+> - 技术链路见挂靠的 PLAN-022（[2026-08-27-exploration-download-flow.md](../2026-09/2026-08-27-exploration-download-flow.md)）。
 > - 域探索触发方式以本文档为准（无弹窗直触，REQ-067 §B2）。
 > - 探索状态机以本文档为准（5 态：未开始/已生成/探索中/待确认/已完成 + 失败）。
 > - 8900 角色为纯透传，探索执行由 QED-Tracker（8901）驱动。
@@ -322,4 +328,4 @@ M8 验收闭环        「验收」逐册确认 → 全部 verified → 教程 c
 - 归档动作：操作契约按归档判定并入 `docs/architecture/frontend-architecture.md`（或 design/ 固定文档），计划壳移入 `docs/history/plans/2026-08/`，todo.md Plan 行收口。
 
 ---
-*本流程文档为「文档下载管理」开发与验收的交互事实源（全流程交互规范主文档）；技术链路见挂靠的 [2026-08-27-exploration-download-flow.md](2026-08-27-exploration-download-flow.md)（PLAN-022）。*
+*本流程文档为「文档下载管理」开发与验收的交互事实源（全流程交互规范主文档）；技术链路见挂靠的 [2026-08-27-exploration-download-flow.md](../2026-09/2026-08-27-exploration-download-flow.md)（PLAN-022）。*

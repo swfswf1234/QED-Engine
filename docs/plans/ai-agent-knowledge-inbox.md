@@ -1,7 +1,7 @@
 # AI Agent 知识收件箱（ai-agent-knowledge-inbox）
 
 状态：Current（长期滚动收件箱）
-最后更新：2026-08-26
+最后更新：2026-09-11
 关联任务：REQ-062（长期任务，见 [todo.md](../trackers/todo.md)）
 
 > **定位声明**：本文档是**长期积累收件箱**，不是一次性计划——**不随任务完成归档**
@@ -69,8 +69,19 @@
 - 建议归类：流程（可考虑固化进 operations.md「重启与诊断」节一句话强调）
 - 状态：待评审
 
+### [2026-09-11] REQ-072 测试结果曾随服务在线状态漂移（已修复，留档作模式警示）
+- 场景：`guides/development.md`「已知坑清单」分流——原第 4 条（guides 重整时移出）。
+- 反复探索点：`test_services_restart_externally_running_script_unit` 因 8901 在线/离线结果
+  不同（在线通过、离线失败），排查时容易误判为测试本身不稳定。
+- 解法：DEFECT-001 已修复——`control.py` 改用 `sm._probe_http` 模块属性访问，monkeypatch 正常
+  生效，测试无论 8901 在线/离线均通过。
+- 建议归类：流程（模式警示：测试不得依赖外部服务在线状态；已由 testing.md 隔离规则覆盖，
+  审核时可判 Not Applicable）
+- 状态：待评审
+
 ## 已晋升记录
 
 | 日期 | 来源任务 | 内容摘要 | 晋升去向 |
 | --- | --- | --- | --- |
 | 2026-08-26 | REQ-062 首批 | conda 环境名 `QED_env` 权威声明、命令矩阵、conda run 多行限制、PowerShell 无 Unix 工具、服务在线状态影响测试 | [development.md](../guides/development.md)「环境准备（AI 开发速查）」 |
+| 2026-09-11 | REQ-072 | guides 重整回退重评：环境事实归 [local-dev.md](../standards/local-dev.md)、命令留 [development.md](../guides/development.md)；原「已知坑清单」环境类（conda 多行/`ModuleNotFoundError`/PowerShell 无 Unix 工具/`conda run` 缓冲崩溃）分流至 local-dev.md「常见环境坑」，非环境类（服务在线状态影响测试）回收入件箱待评审 | [local-dev.md](../standards/local-dev.md)、[development.md](../guides/development.md) |

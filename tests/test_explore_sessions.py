@@ -5,7 +5,7 @@
 - POST /api/v1/explore-sessions/{id}/apply（领域=管理端点逐项 / 课程=knowledge 采纳）
 - DELETE /api/v1/explore-sessions/{id}（放弃 + exploration_stage 回退）
 
-设计关联（DesignRef）：docs/plans/2026-08-27-exploration-download-flow.md
+设计关联（DesignRef）：docs/design/downloads-flow.md
 实现状态：Current
 被测代码：backend/qed_engine/api/explore.py、backend/qed_engine/services/explore_sessions.py
 

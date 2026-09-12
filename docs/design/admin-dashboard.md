@@ -89,14 +89,17 @@
 
 - 每个领域一张饼图卡片，按 3 列换行
 - 数据来源：`knowledge` details 中的 `books[]`，按 `domain_id` 分组
-- 饼图状态（4 态）：
+- 饼图状态（**5 态**，对齐书籍生命周期 QED-060，与 `downloads-ui.md` §3.2 筛选档一致）：
 
 | 状态 | 颜色 | 计算逻辑 |
 | --- | --- | --- |
-| 未开始 | 灰色 #d9d9d9 | `holding === 'missing'` 且 `status === 'candidate'` |
-| 下载中 | 橙色 #faad14 | `holding === 'missing'` 且 `status === 'decided'` |
-| 待确认 | 绿色 #52c41a | `holding === 'owned'` 且 `status === 'decided'` |
-| 完成 | 蓝色 #1677ff | `holding === 'owned'` 且 `status === 'parallel'` |
+| 未开始 | 灰色 #d9d9d9 | `status === 'candidate'` |
+| 下载中 | 橙色 #faad14 | `status in ('decided', 'downloading')` |
+| 待验证 | 青色 #13c2c2 | `status === 'downloaded'` |
+| 完成 | 蓝色 #1677ff | `status === 'verified'` |
+| 失败 | 红色 #ff4d4f | `status === 'failed'` |
+
+`parallel` 与 `retired` 不计入下载进度（`parallel` 为平行读物、`retired` 为退役留痕）。
 
 - 标题：仅显示领域名（如"数学"），不加后缀
 - 聚合函数：`buildBookDownloadProgress(courseSystem, details)` → `DomainCoursesSlice`
@@ -213,7 +216,7 @@ interface BookRecord {
   year: number | null;
   language: string;                // zh / en
   roles: string[];                 // textbook / exercises / solutions
-  status: string;                  // decided / parallel / candidate / retired
+  status: string;                  // 选用 decided/parallel/candidate/retired + 生命周期 downloading/downloaded/verified/failed
   retire_reason: string;
   holding: string;                 // owned / missing
   file_path: string | null;

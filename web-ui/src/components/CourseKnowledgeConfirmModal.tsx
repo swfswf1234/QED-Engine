@@ -1,31 +1,40 @@
 /**
- * 领域信息确认弹窗（课程探索完成后）
+ * 课程知识确认弹窗（课程探索完成后）
  *
  * 功能：
  * 1. 课程信息区：课程名称（不可编辑）、课程描述（不可编辑）
- * 2. 教程详情表格：教程名称（可编辑）、position定位（可编辑）、详情按钮、否定按钮
- * 3. 操作按钮：关闭（取消）、确认（进入已完成阶段）
+ * 2. 教程表格：教程名称、position定位（中文）、状态、下载情况展开、否定按钮
+ * 3. 展开行 = 教材/习题集摘要文本
+ * 4. 操作按钮：关闭（取消）、确认（进入已完成阶段）
  *
  * 依赖：
  * - GET /api/v1/courses/{course_id}：获取课程详情
  * - GET /api/v1/knowledge?course_id={course_id}：获取教程列表
- * - PATCH /api/v1/knowledge/{id}：更新教程（name、position、intro）
  * - DELETE /api/v1/knowledge/{id}：删除教程
  * - POST /api/v1/courses/{course_id}/confirm：确认课程（待确认→已完成）
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
-  App, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Typography,
+  App, Button, Modal, Popconfirm, Table, Typography,
 } from 'antd';
-import { DeleteOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { describeError } from '../api/client';
 import {
-  listKnowledge, updateKnowledge, deleteKnowledge, confirmCourse,
+  listKnowledge, deleteKnowledge, confirmCourse,
 } from '../api/tracker';
 import type { CourseRecord, KnowledgeRecord } from '../stores';
 import { useDownloadsStore } from '../stores/downloads';
 
 const { Text } = Typography;
+
+/** Position 英文→中文映射 */
+const POSITION_MAP: Record<string, string> = {
+  beginner: '新手入门',
+  intermediate: '中级进阶',
+  advanced: '深度研究',
+  comprehensive: '全面系统',
+  elective: '选修拓展',
+};
 
 interface CourseKnowledgeConfirmModalProps {
   course: CourseRecord | null;
@@ -33,101 +42,45 @@ interface CourseKnowledgeConfirmModalProps {
   onClose: () => void;
 }
 
-/** 教程详情弹窗（编辑intro、查看教材/习题集） */
-function TutorialDetailEditModal({ knowledge, onClose, onUpdate }: {
-  knowledge: KnowledgeRecord;
-  onClose: () => void;
-  onUpdate: () => void;
-}) {
-  const [form] = Form.useForm();
-  const [saving, setSaving] = useState(false);
-  const { message } = App.useApp();
+/** 格式化教材/习题集引用为一句话摘要 */
+function formatBookSummary(refs: Record<string, unknown>[] | null): string {
+  if (!refs || refs.length === 0) return '无';
+  return refs.map((ref) => {
+    const title = String(ref.title || '');
+    const authors = Array.isArray(ref.authors)
+      ? (ref.authors as Array<{ name: string; role: string }>)
+          .filter((a) => a.role === 'author')
+          .map((a) => a.name)
+          .join('/')
+      : '';
+    const translators = Array.isArray(ref.authors)
+      ? (ref.authors as Array<{ name: string; role: string }>)
+          .filter((a) => a.role === 'translator')
+          .map((a) => a.name)
+          .join('/')
+      : '';
+    const publisher = String(ref.publisher || '');
+    const year = ref.year ? String(ref.year) : '';
+    const language = ref.language === 'zh' ? '中文版' : ref.language === 'en' ? '英文版' : '';
+    const part = ref.part ? String(ref.part) : '';
 
-  useEffect(() => {
-    if (knowledge) {
-      form.setFieldsValue({
-        name: knowledge.name,
-        position: knowledge.position,
-        intro: knowledge.intro,
-      });
-    }
-  }, [knowledge, form]);
+    const parts: string[] = [];
+    if (title) parts.push(`《${title}》`);
+    if (authors) parts.push(`${authors} 著`);
+    if (translators) parts.push(`${translators} 译`);
+    if (publisher) parts.push(publisher);
+    if (year) parts.push(`${year}年`);
+    if (language) parts.push(language);
+    if (part) parts.push(part);
 
-  const handleSave = async () => {
-    try {
-      const values = await form.validateFields();
-      setSaving(true);
-      await updateKnowledge(knowledge.knowledge_id, {
-        name: values.name,
-        position: values.position,
-        intro: values.intro,
-      });
-      message.success('教程信息已更新');
-      onUpdate();
-      onClose();
-    } catch (err) {
-      message.error(describeError(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={`教程详情 · ${knowledge.name}`}
-      open={true}
-      onCancel={onClose}
-      width={600}
-      footer={[
-        <Button key="cancel" onClick={onClose}>取消</Button>,
-        <Button key="save" type="primary" loading={saving} onClick={handleSave}>保存</Button>,
-      ]}
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item label="教程名称" name="name" rules={[{ required: true, message: '请输入教程名称' }]}>
-          <Input placeholder="教程名称" />
-        </Form.Item>
-        <Form.Item label="Position 定位" name="position">
-          <Select placeholder="请选择position">
-            <Select.Option value="基础">基础</Select.Option>
-            <Select.Option value="进阶">进阶</Select.Option>
-            <Select.Option value="综合">综合</Select.Option>
-            <Select.Option value="专题">专题</Select.Option>
-          </Select>
-        </Form.Item>
-        <Form.Item label="Intro 描述" name="intro">
-          <Input.TextArea rows={4} placeholder="教程介绍（100~200字）" />
-        </Form.Item>
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>教材</Text>
-          <div style={{ color: '#666', marginTop: 4 }}>
-            {knowledge.textbook_ref ? JSON.stringify(knowledge.textbook_ref) : '无'}
-          </div>
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>习题集</Text>
-          <div style={{ color: '#666', marginTop: 4 }}>
-            {knowledge.exercise_ref ? JSON.stringify(knowledge.exercise_ref) : '无'}
-          </div>
-        </div>
-      </Form>
-    </Modal>
-  );
+    return `（${parts.join('，')}）`;
+  }).join('；');
 }
 
-/**
- * 领域信息确认弹窗
- *
- * 课程探索完成后，用户点击「确认领域信息」按钮打开此弹窗。
- * 弹窗内容：
- * 1. 课程信息区：课程名称（不可编辑）、课程描述（不可编辑）
- * 2. 教程详情表格：教程名称（可编辑）、position定位（可编辑）、详情按钮、否定按钮
- * 3. 操作按钮：关闭（取消）、确认（进入已完成阶段）
- */
 export default function CourseKnowledgeConfirmModal({ course, open, onClose }: CourseKnowledgeConfirmModalProps) {
   const [loading, setLoading] = useState(false);
   const [knowledgeList, setKnowledgeList] = useState<KnowledgeRecord[]>([]);
-  const [editingKnowledge, setEditingKnowledge] = useState<KnowledgeRecord | null>(null);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const { message } = App.useApp();
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
 
@@ -135,7 +88,6 @@ export default function CourseKnowledgeConfirmModal({ course, open, onClose }: C
     if (!course) return;
     setLoading(true);
     try {
-      // 获取该课程下的所有教程
       const allKnowledge = await listKnowledge({ course_id: course.course_id });
       setKnowledgeList(allKnowledge);
     } catch (err) {
@@ -176,31 +128,26 @@ export default function CourseKnowledgeConfirmModal({ course, open, onClose }: C
     }
   };
 
+  const toggleExpand = (key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const columns = [
     {
-      title: '教程名称',
+      title: '教程',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: KnowledgeRecord) => (
-        <Space>
-          <span>{text}</span>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditingKnowledge(record);
-            }}
-          >
-            编辑
-          </Button>
-        </Space>
-      ),
     },
     {
-      title: 'Position',
+      title: '教程定位',
       dataIndex: 'position',
       key: 'position',
+      render: (position: string) => POSITION_MAP[position] || position || '-',
     },
     {
       title: '状态',
@@ -208,82 +155,98 @@ export default function CourseKnowledgeConfirmModal({ course, open, onClose }: C
       key: 'status',
       render: (status: string) => {
         const statusMap: Record<string, { label: string; color: string }> = {
-          draft: { label: '草稿', color: 'default' },
-          confirmed: { label: '已确认', color: 'blue' },
-          completed: { label: '已完成', color: 'green' },
+          draft: { label: '草稿', color: '#666' },
+          confirmed: { label: '已确认', color: '#1677ff' },
+          completed: { label: '已完成', color: '#52c41a' },
         };
-        const s = statusMap[status] || { label: status, color: 'default' };
-        return <span style={{ color: s.color === 'default' ? '#666' : s.color }}>{s.label}</span>;
+        const s = statusMap[status] || { label: status, color: '#666' };
+        return <span style={{ color: s.color }}>{s.label}</span>;
       },
     },
     {
-      title: '操作',
-      key: 'action',
+      title: '课程详情',
+      key: 'expand',
+      width: 100,
       render: (_: unknown, record: KnowledgeRecord) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => {
-              setEditingKnowledge(record);
-            }}
-          >
-            详情
+        <Button
+          type="link"
+          size="small"
+          icon={expandedKeys.has(record.knowledge_id) ? <DownOutlined /> : <RightOutlined />}
+          onClick={() => toggleExpand(record.knowledge_id)}
+        >
+          展开
+        </Button>
+      ),
+    },
+    {
+      title: '判断',
+      key: 'action',
+      width: 80,
+      render: (_: unknown, record: KnowledgeRecord) => (
+        <Popconfirm
+          title="确定否定该教程吗？"
+          onConfirm={() => void handleDeleteKnowledge(record.knowledge_id)}
+          okText="否定"
+          cancelText="取消"
+        >
+          <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+            否定
           </Button>
-          <Popconfirm
-            title="确定删除该教程吗？"
-            onConfirm={() => void handleDeleteKnowledge(record.knowledge_id)}
-            okText="删除"
-            cancelText="取消"
-          >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-              否定
-            </Button>
-          </Popconfirm>
-        </Space>
+        </Popconfirm>
       ),
     },
   ];
 
+  const expandedRowRender = (record: KnowledgeRecord) => (
+    <div style={{ padding: '8px 0', background: '#fafafa', borderRadius: 4 }}>
+      <div style={{ marginBottom: 8 }}>
+        <Text strong>教材：</Text>
+        <Text>{formatBookSummary(record.textbook_ref as Record<string, unknown>[] | null)}</Text>
+      </div>
+      <div>
+        <Text strong>习题集：</Text>
+        <Text>{formatBookSummary(record.exercise_ref as Record<string, unknown>[] | null)}</Text>
+      </div>
+      {record.intro && (
+        <div style={{ marginTop: 8 }}>
+          <Text strong>简介：</Text>
+          <Text type="secondary">{record.intro}</Text>
+        </div>
+      )}
+    </div>
+  );
+
   if (!course) return null;
 
   return (
-    <>
-      <Modal
-        title={`课程知识确认 · ${course.name}`}
-        open={open}
-        onCancel={onClose}
-        width={800}
-        footer={[
-          <Button key="cancel" onClick={onClose}>关闭</Button>,
-          <Button key="confirm" type="primary" loading={loading} onClick={handleConfirm}>确认</Button>,
-        ]}
-      >
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>课程描述</div>
-          <div style={{ color: '#666' }}>{course.description || '暂无描述'}</div>
-        </div>
+    <Modal
+      title={`课程知识确认 · ${course.name}`}
+      open={open}
+      onCancel={onClose}
+      width={900}
+      footer={[
+        <Button key="cancel" onClick={onClose}>关闭</Button>,
+        <Button key="confirm" type="primary" loading={loading} onClick={handleConfirm}>确认</Button>,
+      ]}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>课程描述</div>
+        <div style={{ color: '#666' }}>{course.description || '暂无描述'}</div>
+      </div>
 
-        <Table
-          columns={columns}
-          dataSource={knowledgeList}
-          rowKey="knowledge_id"
-          loading={loading}
-          pagination={false}
-          locale={{ emptyText: '暂无教程数据' }}
-        />
-      </Modal>
-
-      {editingKnowledge && (
-        <TutorialDetailEditModal
-          knowledge={editingKnowledge}
-          onClose={() => {
-            setEditingKnowledge(null);
-          }}
-          onUpdate={() => void loadKnowledge()}
-        />
-      )}
-    </>
+      <Table
+        columns={columns}
+        dataSource={knowledgeList}
+        rowKey="knowledge_id"
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: '暂无教程数据' }}
+        expandable={{
+          expandedRowKeys: Array.from(expandedKeys),
+          expandedRowRender,
+          showExpandColumn: false,
+        }}
+      />
+    </Modal>
   );
 }

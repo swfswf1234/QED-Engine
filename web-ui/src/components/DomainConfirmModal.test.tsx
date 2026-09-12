@@ -4,11 +4,23 @@
  * - Radio 切换验证
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ConfigProvider, App as AntApp } from 'antd';
 import DomainConfirmModal from './DomainConfirmModal';
 import { theme } from '../theme';
 import type { DomainSystem } from '../stores';
+import { useDownloadsStore } from '../stores/downloads';
+
+vi.mock('../api/tracker', () => ({
+  updateDomain: vi.fn().mockResolvedValue({}),
+  commitImport: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('../api/explore-helpers', () => ({
+  confirmDomainInfo: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { commitImport } from '../api/tracker';
+import { confirmDomainInfo } from '../api/explore-helpers';
 
 function renderWithProviders(ui: React.ReactNode) {
   return render(
@@ -88,5 +100,20 @@ describe('DomainConfirmModal', () => {
       />,
     );
     expect(screen.getByText(/保存并确认后开始课程体系探索/)).toBeTruthy();
+  });
+
+  it('已导入提交只调 confirm-domain，不调 commit-import（PLAN-041 修复 409）', async () => {
+    useDownloadsStore.setState({ fetchAll: vi.fn().mockResolvedValue(undefined) });
+    renderWithProviders(
+      <DomainConfirmModal
+        domain={mockDomain}
+        open={true}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByDisplayValue('import'));
+    fireEvent.click(screen.getByRole('button', { name: '保存并确认' }));
+    await waitFor(() => expect(confirmDomainInfo).toHaveBeenCalledWith('test-domain', undefined));
+    expect(commitImport).not.toHaveBeenCalled();
   });
 });

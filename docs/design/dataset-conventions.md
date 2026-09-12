@@ -22,11 +22,21 @@
   一律入 DB（表命名空间与所有权见 [../architecture/database-design.md](../architecture/database-design.md)），dataset 内
   不再维护 JSON 状态事实源（`meta/` 退役，存量迁移归档见 [REQ-032](../trackers/todo.md)）。
 
+> **探索产物 JSON 例外（REQ-078）**：QED-Tracker 探索管线的领域/课程知识 JSON
+> （`raw/<domain_id>/domains.json`、`raw/<domain_id>/<course_id>/tutorials.json`；中间态
+> `courses.json`）作为「已确认知识文档」与可重导入输入落 `raw/`，是上述「dataset 不维护
+> JSON 状态事实源」的**例外**——状态事实源仍在 DB，JSON 只作知识正本与重导入输入。
+> 跨项目口径经 REQ-078 确认后冻结。
+
 模型为**统一数据根 + 内容类型顶层**（2026-08-23 ARCH-019 用户评审确定）：三项目经
 `QED_DATA_ROOT`（变量定义见 [project-configuration.md](project-configuration.md)）
 指向同一物理目录，顶层按内容类型组织（`raw/` 原始区、`tmp/` 临时区、`parsed/` 整理后数据
 资料），第二层为领域、第三层为课程。废弃早期"meta/ JSON 状态"、"资源登记双写"与
 "项目子域"（`qed-tracker/`、`axiom-flow/` 子目录）方案。
+
+> **规则与结构的边界**：数据根边界、`tmp/` 生命周期、原子落盘、`raw/` 不可变与测试隔离等
+> **规则**以[临时目录与数据存储规范](../standards/storage-conventions.md)为准；本文件只维护
+> 目录结构与子域契约细节。
 
 ## 目录结构
 

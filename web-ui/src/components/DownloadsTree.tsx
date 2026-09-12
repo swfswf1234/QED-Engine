@@ -584,12 +584,12 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
     }
   };
 
-  // 领域菜单口径（PLAN-033 §2.3 统一表）：探索触发=未开始/待确认（重探）/失败（重试）；
-  // 探索中除删除外全部禁用
+  // 领域菜单口径（PLAN-033 §2.3 统一表 + PLAN-041）：探索触发=未开始/已生成/待确认（重探）/失败（重试）；
+  // 探索中除删除外全部禁用；添加课程在 未开始/已生成 禁用（用户裁决 2026-09-11）
   const domainMenu = (d: DomainSystem): MenuProps => {
     const stage = d.exploration_stage || '未开始';
     const running = stage === '探索中';
-    const exploreEnabled = stage === '未开始' || stage === '待确认' || stage === '失败';
+    const exploreEnabled = ['未开始', '已生成', '待确认', '失败'].includes(stage);
     return {
       items: [
         { key: 'edit', label: '编辑领域知识', disabled: running },

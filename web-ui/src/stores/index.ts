@@ -258,6 +258,8 @@ export interface CourseRecord {
   note?: string;
   /** 探索状态（PLAN-022 F4：未开始/已生成/探索中/已完成） */
   exploration_stage?: string;
+  /** 课程下的教程列表（来自 GET /courses 嵌套数据） */
+  knowledge?: Array<{ knowledge_id: string; name: string }>;
 }
 
 /** 领域课程体系行（GET /courses：领域 + 嵌套课程；服务端已按 sort_order 排序） */

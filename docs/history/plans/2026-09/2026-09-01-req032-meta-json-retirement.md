@@ -1,11 +1,11 @@
 # REQ-032 meta/ JSON 退役计划
 
-状态：In Progress
-最后更新：2026-09-01
+状态：Closed（Partial）
+最后更新：2026-09-11
 任务类型：B
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)
-关联设计：`../design/dataset-conventions.md`、`../architecture/database-schema.md`
-关联 Tracker：docs/trackers/todo.md（REQ-032）
+关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)
+关联设计：`../../design/dataset-conventions.md`、`../../architecture/database-schema.md`
+关联 Tracker：docs/trackers/completed.md（REQ-032）
 归档判定：Phase 1+2 完成后阶段归档；Phase 3（Inventory→qt_books）暂缓
 
 ## 目标与成功标准

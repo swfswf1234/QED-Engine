@@ -1,7 +1,7 @@
 # 操作指南
 
 状态：Current
-最后更新：2026-09-04
+最后更新：2026-09-11
 
 本指南保存 QED-Engine 四服务的**完整服务管理手册**：环境配置、启动（含后台）、停止、重启、
 健康检测、日志监控与故障排查（ADR 0010：guides/ 分操作文档与开发文档）。开发（怎么写代码、
@@ -118,7 +118,7 @@ conda run -n QED_env python scripts/qed_web_service.py start --build --wait
 > 不影响已完成的子进程结果）。需要实时输出时改用
 > `conda run --no-capture-output -n QED_env python …` 或直接调用解释器全路径
 > `D:\software\anaconda3\envs\QED_env\python.exe scripts\qed_web_service.py …`
-> （详见 [development.md](development.md) 已知坑 5）。
+> （详见 [本地开发环境](../standards/local-dev.md)「常见环境坑」）。
 
 ### 日常快速启动（无代码改动）
 
@@ -244,7 +244,7 @@ conda run -n QED_env python scripts/qed_engine_service.py restart --wait
 | `npm run build` 失败（tsc 报错） | 前端代码类型错误 | 修复后重试；服务不会以坏 dist 启动（退出码 1） |
 | `dist/index.html 缺失，自动兜底构建` 提示 | 首次启动或 dist 被清理 | 正常现象，等待构建完成再启动 |
 | `start --build` 卡住/超时（>1800s 天花板） | npm 网络或依赖损坏 | `cd web-ui; npm install` 后单独跑 `npm run build` 看输出；超时会 taskkill 杀整树，不留 node 孤儿 |
-| `conda run` 包着脚本长时间无输出，结束后打印 conda 错误报告 | conda 23.3.1 输出缓冲到子进程退出 + 自身崩溃报错（development.md 已知坑 5） | 不影响结果；要实时输出见「冷启动标准流程」注（`--no-capture-output` 或直接解释器路径） |
+| `conda run` 包着脚本长时间无输出，结束后打印 conda 错误报告 | conda 23.3.1 输出缓冲到子进程退出 + 自身崩溃报错（[本地开发环境](../standards/local-dev.md)「常见环境坑」） | 不影响结果；要实时输出见「冷启动标准流程」注（`--no-capture-output` 或直接解释器路径） |
 | `stop` 回显 `stopped (forced)` | 优雅信号（CTRL_BREAK）未生效（conda run 等跨 console 语境常见），taskkill 强杀兜底成功 | 正常现象，无需处理 |
 | `stop` 回显 `stop failed: pid …` | 优雅停止与 taskkill 强杀后进程仍存活 | 按提示手动 `taskkill /PID <pid> /T /F`，确认后重试 stop 清理 PID 文件 |
 | 前端改版后看不到变化 | dist 未重建 | `cd web-ui; npm run build` 后刷新（no-store 免 Ctrl+F5） |

@@ -1,7 +1,7 @@
 # 联调问题解决清单（QED-Engine ↔ QED-Tracker）
 
-状态：In Progress
-最后更新：2026-09-09
+状态：Achieved
+最后更新：2026-09-11
 任务类型：B
 关联 ADR：无（接口行为对齐，非架构决策）
 关联设计：`../design/downloads-flow.md`、`../architecture/api-contracts.md`
@@ -32,7 +32,9 @@
 **严重程度**：高（手动导入功能完全失效）
 **影响范围**：8901 在线时手动导入领域知识
 **关联 REQ**：REQ-068 ④
-**状态**：Open（待8901修复）；前端已绕行（Radio.Group 模式选择器，2026-09-08）
+**状态**：Closed（2026-09-11 PLAN-038 文档对齐轮）——用户裁决 `explore_pending.kind` 归一为
+`review_results` / `name_confirmation` / `error`，**删除 `import_courses` 双形态**；本 ISSUE 原
+「8901 在线写 `import_courses`」方案被取代，前端不再依赖 kind 判定手动导入路径。
 
 **根因**：`POST /domains/import` 端点在8901在线与离线时设置不同的 `explore_pending.kind`：
 
@@ -76,7 +78,7 @@ const imported = ep?.kind === 'import_courses';
 **严重程度**：高（手动导入触发不需要的 LLM 任务）
 **影响范围**：8901 在线时手动导入领域知识的 API 调用路径
 **关联 REQ**：REQ-067 B3
-**状态**：Open（双侧修复）
+**状态**：Closed（2026-09-11 PLAN-041 收尾）——8901 守卫已放宽为 `已生成/探索中`、8900 已接 `/courses/import`；后续调用顺序冲突见 ISSUE-008。
 
 **根因**：QED-Engine `commit_import_courses()`（`tracker_client.py:448-455`）调用8901 `POST /domains/{id}/confirm`，
 但该端点语义是"确认领域 → 异步提交 courses@v8 LLM 任务"（六步流程步骤 2）。手动导入路径应调用
@@ -402,6 +404,27 @@ if (imported) {
 3. 验证字段展示符合用户要求：书名、部分、版本、作者、角色、语言、页数、绝对路径、状态
 4. 运行 `npm run build` 和 `npm test` 验证无类型错误
 
+### ISSUE-008：「已导入」路径 confirm-domain 后 commit-import 必 409
+
+**发现日期**：2026-09-11（ARCH-019 浏览器验收）
+**严重程度**：高（手动导入领域知识后报错，用户可见「状态冲突」）
+**影响范围**：8900 前端「已导入」确认路径
+**关联 REQ**：REQ-068 ④
+**状态**：Closed（2026-09-11 PLAN-041）
+
+**根因**：`DomainConfirmModal` 的「已导入」分支（ISSUE-004 修复引入）先调 `confirm-domain`
+（8901 置 `待确认`），再调 `commit-import`→8901 `courses/import`，而该端点守卫只接受
+`已生成/探索中`（`QED-Tracker/main.py:1033`）→ 409 `当前状态 待确认，需要 已生成 或 探索中`。
+
+**修复**：前端「已导入」路径**只调 `confirm-domain`**（写 `courses.json` + 置 `待确认`），
+去掉 `commit-import` 调用；课程行与「已完成」由后续「课程知识确认」(`confirm-knowledge`)
+桥接收口。`commit-import` 端点保留（契约不删，UI 不再调用）。
+
+**验证**：`DomainConfirmModal.test.tsx` 断言「已导入」提交只调 `confirm-domain`、不调
+`commit-import`；门禁全绿。
+
+---
+
 ## 回滚
 
 单个 ISSUE 回滚：撤销8901对应代码改动，恢复 `explore_pending` 原始行为。
@@ -429,3 +452,5 @@ if (imported) {
 | 2026-09-09 | ISSUE-005 修复：右侧栏教程按钮精简 + 教程简介字段映射错误 |
 | 2026-09-09 | ISSUE-006 修复：书目详情页添加确认按钮 + 渠道选择交互 |
 | 2026-09-09 | ISSUE-007 修复：书目详情页字段映射调整 |
+| 2026-09-11 | ISSUE-001 关闭：explore_pending.kind 归一（PLAN-038 文档对齐轮，D1=A）；删除 import_courses 双形态 |
+| 2026-09-11 | ISSUE-002 关闭；ISSUE-008 登记并关闭：「已导入」路径去掉 commit-import（PLAN-041）；全部 ISSUE Closed，计划归档 |

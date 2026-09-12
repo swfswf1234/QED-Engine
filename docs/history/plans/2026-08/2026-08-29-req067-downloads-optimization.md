@@ -5,7 +5,7 @@
 关闭结果：Achieved
 最后更新：2026-09-08
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（PLAN-023）
+关联设计：[2026-08-27-download-ux-flow.md](2026-08-27-download-ux-flow.md)（PLAN-023）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-025；REQ-067）
 归档判定：实现完成后归档 history/plans/2026-08/（已执行 2026-09-08）
 
@@ -62,7 +62,7 @@
 
 ## 前置条件
 
-- 前置计划：文档下载管理用户操作流程（[PLAN-023](../../../plans/2026-08-27-download-ux-flow.md)）——本计划承接其界面优化续
+- 前置计划：文档下载管理用户操作流程（[PLAN-023](2026-08-27-download-ux-flow.md)）——本计划承接其界面优化续
 - 探索链路新架构已落地（PLAN-022 B1~B5 + F1~F5，2026-08-28 全量执行）
 - 导入领域知识 API 契约待 QED-Tracker 回执（REQ-067-A / PLAN-026），§B3 依赖该回执
 - 开发环境：见 [本地开发环境](../../../standards/local-dev.md)（机器 wenfu / UUID 2C6ECD2C-BBEE-11ED-8A95-F0D4154ABBA8）

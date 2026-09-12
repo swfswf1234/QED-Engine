@@ -69,7 +69,7 @@ Invoke-RestMethod http://127.0.0.1:8900/api/v1/config/models
 
 接口契约见 [配置中心 API 契约](docs/architecture/api-contracts.md)
 （配置域 + 数据域 + 服务域）。后台运行、常见启动错误与故障排查清单见
-[开发指南](docs/guides/development.md)。
+[操作指南](docs/guides/operations.md)。
 
 ### 统一启停（控制中心）
 
@@ -101,7 +101,7 @@ python scripts/qed_web_service.py start --wait
 前端信息架构与视觉规范见 [前端架构](docs/architecture/frontend-architecture.md)。
 
 > 四服务启动顺序建议（后端 → 子项目 → 前端）与「前端改版需重建 dist」「端口占用排查」
-> 等常见坑，见 [开发指南 · 启动章节](docs/guides/development.md)。
+> 等常见坑，见 [操作指南 · 服务启动](docs/guides/operations.md)。
 
 ### 两个子项目
 

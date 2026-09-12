@@ -1,8 +1,8 @@
 # 测试架构与门禁
 
 状态：Current
-最后更新：2026-09-02
-确认状态：暂定
+最后更新：2026-09-11
+确认状态：已确认
 治理对象：测试职责、分层、隔离、替身、门禁与覆盖率证据；治理契约测试的守护面清单、契约头、编写约定与新增流程
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`、`../history/adr/v0.1/0006-engineering-governance-contract.md`
 关联测试：`tests/contract/test_test_suite_governance.py`
@@ -62,6 +62,7 @@ Axiom-Flow 分层模式建立 `integration/`、`system/`、`smoke/` 并登记 AD
 | 架构与设计追溯 | 架构/设计元数据、Mermaid 视图、代码-文档-测试双向映射（DesignRef）、8900 端点清单与 api-contracts 双向一致 | `test_architecture_documents.py`、`test_design_documents.py`、`test_code_document_mapping.py`、`test_api_endpoint_inventory.py` |
 | 测试工程与门禁 | 测试目录边界与分层、pytest 配置、契约测试自身规范 | `test_test_suite_governance.py` |
 | 跨项目协作 | 子项目独立 git、根仓库不越权、todo 请求标注目标仓库、模板字段 | `test_cross_project_collaboration.py` |
+| 文档与测试一致性 | 文档中声明的规范格式（如正则）与契约测试中的实际实现保持一致，防止 doc/test 漂移 | `test_doc_test_id_alignment.py` |
 
 - 表格固定 3 列（治理面 / 守护内容 / 契约测试），首行为表头。
 - 新增治理面或既有治理面新增守护对象时，更新本清单与对应契约测试。

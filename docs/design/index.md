@@ -47,7 +47,7 @@
 | [admin-console.md](admin-console.md) | Accepted | In Progress | 管理后台·控制台与模型调用记录页 UI（`#/admin` 四区结构 + `#/admin/llm-calls` 检索与审核，REQ-060 已实现） |
 | [admin-dashboard.md](admin-dashboard.md) | Accepted | In Progress | 管理后台·仪表盘只读看板 UI（`#/admin/dashboard`：服务在线 + 文档下载进度双饼图 + 解析进度，统计四态 = holding×status 派生） |
 | [downloads-ui.md](downloads-ui.md) | Accepted | In Progress | 文档下载管理·UI 设计（`#/admin/downloads`：左树领域→课程→教程、右侧四层展示、流程筛选与排序、三层状态口径声明） |
-| [downloads-flow.md](downloads-flow.md) | Accepted | Implemented | 文档下载管理·后台全链路：领域探索六值状态机、8900 五态门面 5 端点、终态写点矩阵、课程收集五阶段规则（原 course-acquisition-flow 并入）、8901 移交清单 |
+| [downloads-flow.md](downloads-flow.md) | Accepted | Implemented | 文档下载管理·后台全链路：领域 6 态 / 课程 5 态状态机、8900 五态门面 6 端点、终态写点矩阵、课程收集五阶段规则（原 course-acquisition-flow 并入）、8901 对齐缺口 |
 
 ## 探索
 

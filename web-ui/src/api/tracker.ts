@@ -238,29 +238,27 @@ export function fetchKnowledgeBooks(knowledgeId: string, opts?: ApiRequestOption
   return api.post<{ task_id?: string }>(`/knowledge/${knowledgeId}/fetch`, undefined, opts);
 }
 
-/** POST /api/v1/books/{id}/import：人工导入本地 PDF（数据根外绝对路径，8901 落盘+mark_owned） */
-export function importBookPdf(bookId: string, filePath: string, opts?: ApiRequestOptions): Promise<BookRecord> {
-  return api.post<BookRecord>(`/books/${bookId}/import`, { file_path: filePath }, opts);
+/** POST /api/v1/books/{id}/import：浏览器文件选择上传 PDF（multipart，8901 落盘 + mark_owned） */
+export function importBookPdf(
+  bookId: string,
+  file: File,
+  targetPath?: string,
+  opts?: ApiRequestOptions,
+): Promise<BookRecord> {
+  const form = new FormData();
+  form.append('file', file);
+  if (targetPath) form.append('target_path', targetPath);
+  return api.postForm<BookRecord>(`/books/${bookId}/import`, form, opts);
 }
 
-/** POST /api/v1/books/{id}/decide：候选→决定 */
-export function decideBook(bookId: string, opts?: ApiRequestOptions): Promise<BookRecord> {
-  return api.post<BookRecord>(`/books/${bookId}/decide`, undefined, opts);
-}
-
-/** POST /api/v1/books/{id}/start：决定→下载中 */
+/** POST /api/v1/books/{id}/start：开始下载（decided→downloading） */
 export function startBook(bookId: string, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>(`/books/${bookId}/start`, undefined, opts);
 }
 
-/** POST /api/v1/books/{id}/fail：下载失败标记（可重试） */
+/** POST /api/v1/books/{id}/fail：标记下载失败（downloading→failed） */
 export function failBook(bookId: string, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>(`/books/${bookId}/fail`, undefined, opts);
-}
-
-/** POST /api/v1/books/{id}/retry：失败重试 → downloading */
-export function retryBook(bookId: string, opts?: ApiRequestOptions): Promise<BookRecord> {
-  return api.post<BookRecord>(`/books/${bookId}/retry`, undefined, opts);
 }
 
 /** POST /api/v1/books/{id}/verify：人工验收通过（downloaded→verified 终态） */
@@ -268,14 +266,9 @@ export function verifyBook(bookId: string, opts?: ApiRequestOptions): Promise<Bo
   return api.post<BookRecord>(`/books/${bookId}/verify`, undefined, opts);
 }
 
-/** POST /api/v1/books/{id}/reject：书籍否定（reason 必填 422；note 可选） */
-export function rejectBook(bookId: string, reason: string, note?: string, opts?: ApiRequestOptions): Promise<BookRecord> {
-  return api.post<BookRecord>(`/books/${bookId}/reject`, { reason, ...(note ? { note } : {}) }, opts);
-}
-
-/** POST /api/v1/books/{id}/supersede：书籍过时（reason 必填 422） */
-export function supersedeBook(bookId: string, reason: string, opts?: ApiRequestOptions): Promise<BookRecord> {
-  return api.post<BookRecord>(`/books/${bookId}/supersede`, { reason }, opts);
+/** POST /api/v1/books/{id}/cancel：取消下载（downloading→decided 复位） */
+export function cancelBook(bookId: string, opts?: ApiRequestOptions): Promise<BookRecord> {
+  return api.post<BookRecord>(`/books/${bookId}/cancel`, undefined, opts);
 }
 
 

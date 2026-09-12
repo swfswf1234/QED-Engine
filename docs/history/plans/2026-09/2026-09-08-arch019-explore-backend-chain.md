@@ -4,7 +4,7 @@
 任务类型：A
 最后更新：2026-09-08
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（PLAN-023，全流程交互规范主文档）、[2026-09-08-arch019-explore-ui-logic.md](2026-09-08-arch019-explore-ui-logic.md)（PLAN-033，前端 UI 逻辑配套）、[2026-08-27-exploration-download-flow.md](../../../plans/2026-08-27-exploration-download-flow.md)（PLAN-022，技术架构参考）
+关联设计：[2026-08-27-download-ux-flow.md](../2026-08/2026-08-27-download-ux-flow.md)（PLAN-023，全流程交互规范主文档）、[2026-09-08-arch019-explore-ui-logic.md](2026-09-08-arch019-explore-ui-logic.md)（PLAN-033，前端 UI 逻辑配套）、[2026-08-27-exploration-download-flow.md2026-08-27-exploration-download-flow.md)（PLAN-022，技术架构参考）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-034；ARCH-019、REQ-067；QED-Tracker 移交清单登记）
 关联代码：backend/qed_engine/api/domain_explore.py、backend/qed_engine/api/explore.py、backend/qed_engine/services/explore_sessions.py、backend/qed_engine/services/shared_tables.py、backend/qed_engine/clients/tracker_client.py、backend/qed_engine/api/main.py、docs/architecture/api-contracts.md、tests/test_domain_explore.py（新建）、tests/test_explore_sessions.py（晋升 design/ 时按此行一次性切换 DesignRef）
 归档判定：Merge 倾向——端点契约并入 docs/architecture/api-contracts.md（已登记部分直接生效），链路设计与写点矩阵并入 docs/design/ 领域探索固定文档，计划壳归档 history/plans/2026-09/
@@ -48,7 +48,7 @@
 
 ## 前置条件
 
-- [PLAN-023](../../../plans/2026-08-27-download-ux-flow.md) 状态机与操作规范为主文档；本文档状态口径与其 §3.2 一致
+- [PLAN-023](../2026-08/2026-08-27-download-ux-flow.md) 状态机与操作规范为主文档；本文档状态口径与其 §3.2 一致
   （五态 + 失败）。
 - `shared_tables.py` 已有六常量 `STAGE_NOT_STARTED/STAGE_GENERATED/STAGE_RUNNING/STAGE_PENDING/
   STAGE_COMPLETED/STAGE_FAILED` 与 `set_*_stage` 单点写入门面。

@@ -41,7 +41,9 @@
 ```
 
 - **领域**：来自 `GET /courses` 领域清单；名称/描述/阶段徽标/explore_pending 提示条由
-  DomainCard 呈现（右侧恒显，见 §3.1）；左树支持右键维护（编辑/删除）。
+  DomainCard 呈现（右侧恒显，见 §3.1）；左树支持右键维护（编辑/删除/探索领域知识/
+  导入领域知识/添加课程）。右键菜单门禁（PLAN-041）：探索在 `未开始/已生成/待确认/失败`
+  可用（`探索中` 除删除外全部禁用）；**添加课程在 `未开始`/`已生成` 禁用**，`待确认/已完成/失败` 可用。
 - **课程**：点击选中 + 联立筛选；右键菜单（编辑/删除/课程探索/导入教程，按探索状态禁用，
   见 domain-explore §2 操作表）。
 - **教程**：叶子节点，只展示 名称 + 验收进度数字（`verified 数/总数`），不可点击展开；
@@ -56,17 +58,33 @@
 | --- | --- | --- | --- |
 | 领域 | 名称、描述、阶段徽标、explore_pending 提示条 | `DomainCard`（**无论筛选如何恒显**） | 探索/确认领域/确认课程（按 domain-explore §2 状态机）；失败态 danger 重试 |
 | 课程 | 名称、描述 + **操作条：课程探索、导入教程** | 课程头（`dl-course-head`） | 编辑/删除（左树右键）；课程探索在 探索中/已完成 禁用 |
-| 教程 | 名称（`.dl-knowledge-name`）、状态、**进度（下载 x/y 本）**、详情 | 教程行 | 详情（弹窗）、自动下载（candidate/decided/failed 可用）、删除（8901 无 DELETE /knowledge，禁用+Tooltip 移交 REQ-068） |
-| 书目 | 书名、作者、语言、**版本标签**（中译本/英文版/苏版/其他，由 language 与书名/作者推导） | 书目卡（纯展示，无操作按钮） | 详情（只读弹窗）；导入/新增书目/否决书目在**教程详情弹窗**内 |
+| 教程 | 名称（`.dl-knowledge-name`）、状态、**进度（下载 x/y 本）**、详情 | 教程行 | 详情（弹窗）、自动下载（candidate/decided/failed 可用）、删除（`DELETE /knowledge/{id}`） |
+| 书目 | 书名、作者、语言、**版本标签**（中译本/英文版/苏版/其他，由 language 与书名/作者推导） | 书目卡（纯展示，无操作按钮） | 详情（弹窗：信息 + 下载信息 + 上传/验证/自动下载）；新增书目在**教程详情弹窗**内 |
 
-**教程详情弹窗**（`TutorialDetailModal`）：教程信息（修改入口因 8901 无 `PATCH /knowledge`
-禁用+移交提示）、书目列表（书名/作者/语言/状态/操作）、**新增书目**（`POST /books` 书库化
-创建：`book_id` 格式 `{abbr}-b{NN}` + 书名必填，归属由教程 refs 承载）、书行**导入**
-（`POST /books/{id}/register`，数据根内相对路径）、**否决书目**（原因必填）。
+**教程详情弹窗**（`TutorialDetailModal`）：教程信息（修改入口经 `PATCH /knowledge/{id}`）、
+书目列表（书名/作者/语言/状态/操作）、**新增书目**（`POST /books` 书库化创建：`book_id`
+格式 `{abbr}-b{NN}` + 书名必填，归属由教程 refs 承载）、书行**上传**
+（浏览器文件选择器 → `POST /books/{id}/import` multipart，**不写路径**）。
 
-**书目详情弹窗**（`BookDetailModal`）只读展示：状态/kind/roles/作者/版本/语言/页数/sha256/
-路径/渠道。书目卡**不再显示 kind 标签**（与 roles 语义重复，2026-08-18 裁决），保留
-状态（阶段）+ roles + 作者/版本/页数。
+**书目详情弹窗**（`BookDetailModal`，PLAN-039 重设计）：
+
+- 尺寸：宽 `760px`，内容区 `max-height:68vh` 滚动，窄屏 `max-width:94vw`。
+- 标题：`书目详情 · {书名（含卷册）}` + 状态 Tag。
+- 区块一「书目信息」：两列网格——书名 / 原版书名 / 卷册 / 版本 / 作者 / 出版社 / 出版年 /
+  语言 / 角色 / 页数。
+- 区块二「下载信息」（**只两行**）：下载状态（成功 = `holding=owned` 且 `status ∈
+  {downloaded, verified}` ｜ 失败 = `status=failed` ｜ 未下载）+ 文件地址（`file_path`，
+  无则 `absolute_path`，均无「—」）。
+- 渠道尝试折叠块「查看渠道尝试（N）」，默认收起（排障用）。
+- 操作区（footer）：`上传书籍`（文件选择器，任意状态）｜ `自动下载`
+  （candidate/decided/failed）｜ `验证通过`（downloaded）｜ `关闭`。
+  > 「否定/退役」按钮已随 PLAN-040 移除：QED-060 删除 `reject` 端点且退役（`retired +
+  > retire_reason`）写入端点未提供（REQ-079），保留即死按钮；端点就绪后再引入。
+- 行为：操作后以服务端返回为准（禁乐观更新）；上传成功就地更新为 `downloaded`。
+
+**统一上传原则**（2026-09-11 用户裁决）：领域 JSON / 课程 JSON / 书籍 PDF 三类入口一律用
+浏览器文件选择器，界面不出现文件路径输入框。书目卡**不再显示 kind 标签**（与 roles 语义
+重复，2026-08-18 裁决）。
 
 ### 3.2 筛选规则
 
@@ -77,14 +95,18 @@
 | 状态筛选（书籍阶段） | 无匹配书籍的教程整行隐藏；无匹配教程的课程整组隐藏 |
 | 汇总行 | 「当前选择：领域/课程 ×」「筛选结果 N 条教程」（rejected/superseded 由数据层隐藏） |
 
-**流程筛选 → 书籍状态映射**（2026-08-18 用户裁决，书籍级生命周期筛选）：
+**流程筛选 → 书籍状态映射**（2026-08-24 用户裁决三栏收敛，**5 档**；与代码
+`stores/downloads.ts` `bookInStage` 一致）：
 
-| 流程 | 书籍状态 |
+| 筛选档 | 书籍状态 |
 | --- | --- |
-| 搜索 | candidate |
-| 确认 | decided |
-| 下载 | downloading / downloaded / failed |
-| 验收 | verified |
+| 待下载 | candidate / decided |
+| 下载中 | downloading |
+| 待验证 | downloaded |
+| 已完成 | verified |
+| 失败 | failed |
+
+`parallel`（平行读物）不计入筛选，`retired`（退役）留痕隐藏。
 
 ### 3.3 书籍排序（`sortBooks`，每教程行内）
 
@@ -101,7 +123,7 @@
 | 口径 | 层级 | 值域 | 事实源 |
 | --- | --- | --- | --- |
 | 探索状态机（六值） | 领域/课程探索流程 | 未开始/已生成/探索中/待确认/已完成/失败 | [downloads-flow.md](downloads-flow.md) §2 |
-| 书籍状态机 | 单本书目生命周期 | candidate/decided/downloading/downloaded/failed/verified（rejected/superseded 留痕） | QED-Tracker database-schema（QED-050-D），8901 透传 |
+| 书籍状态机 | 单本书目选用 + 生命周期 | 选用 `candidate/decided/parallel/retired` + 生命周期 `downloading/downloaded/verified/failed`（UI 5 档见 §3.2） | QED-Tracker `architecture/database-private-tables.md`（QED-050-D/QED-060），8901 透传 |
 | 仪表盘统计四态 | 书籍获取进度派生统计 | missing→decided→downloading→owned（holding×status 派生） | [admin-dashboard.md](admin-dashboard.md) |
 
 流程筛选（§3.2）是书籍状态机在 UI 上的**分组视图**；仪表盘四态是 holding×status 的

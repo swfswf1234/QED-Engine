@@ -1,8 +1,8 @@
 // web-ui/src/components/DownloadsTree.state.test.tsx
 /**
  * DownloadsTree 状态机测试（口径：PLAN-033 §2.3/§2.5 操作×状态×接口统一表）
- * - 领域五态 + 失败异常态：探索触发=未开始/待确认（重探）/失败（重试）；
- *   探索中除删除外全部禁用；已生成走「确认领域」（卡片按钮）不重复探索
+ * - 领域五态 + 失败异常态：探索触发=未开始/已生成/待确认（重探）/失败（重试）；
+ *   探索中除删除外全部禁用；添加课程在 未开始/已生成 禁用（PLAN-041）
  * - 课程三态：探索课程在 探索中/已完成 禁用；导入课程知识在 已完成 禁用
  */
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -107,14 +107,14 @@ describe('DownloadsTree 状态机', () => {
       expectMenuItemDisabled('导入领域知识', false);
     });
 
-    it('已生成状态：添加课程禁用，探索禁用（确认领域走卡片按钮），导入可用', async () => {
+    it('已生成状态：探索/导入可用（PLAN-041 允许重探），添加课程禁用', async () => {
       seed(domainFixture([], '已生成'), []);
       renderTree();
 
       await openDomainContextMenu('高等数学');
 
       expectMenuItemDisabled('添加课程', true);
-      expectMenuItemDisabled('探索领域知识', true);
+      expectMenuItemDisabled('探索领域知识', false);
       expectMenuItemDisabled('导入领域知识', false);
     });
 

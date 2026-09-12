@@ -23,14 +23,14 @@
 
 | 对接点 | 现状 | 目标 |
 | --- | --- | --- |
-| QED-Tracker → Axiom-Flow | HTTP handoff：`axiom push`（默认 `http://127.0.0.1:8000`） | 地址默认 `http://127.0.0.1:8902`，由配置注入（`QED_AXIOM_URL`） |
-| QED-Tracker → dataset/raw | 已迁 `dataset/qed-tracker/`（QED-009） | 冻结（Phase 2 落地） |
+| QED-Tracker → Axiom-Flow | HTTP handoff：`axiom push`（默认 `http://127.0.0.1:8902`，8000 兼容保留） | 冻结（`QED_AXIOM_URL` 配置注入） |
+| QED-Tracker → dataset/raw | 已迁 `dataset/qed-tracker/`（QED-009）；探索产物与下载成品落 `raw/<domain_id>/...` | 冻结（含 JSON 例外口径，REQ-078） |
 | Axiom-Flow → dataset/parsed | 产物写入自身 `data/` | 写入 `dataset/axiom-flow/parsed/`（Phase 3，ALN-003） |
 | QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
-| QED-Engine 配置中心 → 子项目 | 密钥直读根 `.env`（`load-env.ps1` 映射层已退役，2026-08-17） | 子项目直读 `QED_*` 变量 |
+| QED-Engine 配置中心 → 子项目 | 子项目直读根 `.env`（`load-env.ps1` 映射层已于 2026-08-17 退役） | 冻结（子项目直读 `QED_*` 变量） |
 | 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源 |
-| QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031，取代三表 qt_selections/qt_downloads；表结构见 QED-Tracker `docs/design/database-schema.md`） | **元数据默认存数据库**（2026-08-16 用户裁决）：meta/ JSON 退役（DB 为唯一事实源，存量迁移归档见 REQ-032）；dataset/ 只管理数据资料文件 |
+| QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031；表结构见 QED-Tracker `docs/architecture/database-private-tables.md` 与 `database-shared-tables.md`） | **元数据默认存数据库**（2026-08-16 用户裁决）：meta/ JSON 退役（DB 为唯一事实源，存量迁移归档见 REQ-032）；dataset/ 只管理数据资料文件 |
 
 ## 统一数据库（MySQL 8，qed 库）
 
@@ -48,37 +48,43 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 - 前缀 `/api/v1`；`GET /api/v1/health` 存活检查。
 - 只读查询（搜索、资源列表、选择报告、目录）同步返回；8903 浏览器已不直连本服务
   （ADR 0007，经 8900 数据域语义 API 访问）；8900 后端服务端到服务端调用不受 CORS 限制。
-- 两态知识模型（QED-031，2026-09-03 重构）与书库化（QED-050）端点一览：
+- 两态知识模型（QED-031）+ 书库化（QED-050-D）+ 下载生命周期（QED-060）端点一览
+  （2026-09-11 与 QED-Tracker `docs/architecture/api.md` 对齐）：
 
   | 端点 | 语义 |
   | --- | --- |
-  | `GET /knowledge?course_id=&status=` | 教程列表（draft/confirmed，废弃行由 notes 记录） |
-  | `GET /knowledge/{id}` | 教程详情（含 books[] 由 refs 数组聚合） |
-  | `POST /knowledge/{id}/confirm` | 教程 draft→confirmed（无 body，回填 confirmed_at） |
-  | `POST /books` `{"knowledge_id","title",...}` | 新建书籍候选（candidate 态） |
-  | `GET /books/{id}/sources` | 渠道尝试列表（失败留痕不展示由上游过滤） |
-  | `POST /books/{id}/sources` `{"channel",...}` | 登记一次渠道尝试（ok 表达成败） |
-  | `POST /books/{id}/register` `{"relative_path"}` | 人工下载登记（candidate/decided → downloaded） |
-  | `POST /books/{id}/import` `{"file_path","target_path?"}` | 手动导入 PDF（QED-050，校验+拷入+登记） |
-  | `POST /books/{id}/decide` | 候选→决定（candidate → decided） |
-  | `POST /books/{id}/start` | 决定→下载中（decided → downloading） |
-  | `POST /books/{id}/fail` | 下载失败（downloading → failed） |
-  | `POST /books/{id}/retry` | 失败重试（failed → downloading） |
-  | `POST /books/{id}/complete` `{"sha256","relative_path",...}` | 下载完成回填（downloading → downloaded） |
-  | `POST /books/{id}/verify` | 人工验收（downloaded → verified 终态） |
-  | `POST /books/{id}/reject` `{"reason","note?"}` | 书籍否定（reason 必填，硬删+留痕） |
-  | `POST /books/{id}/supersede` `{"reason"}` | 书籍过时（版本换代留痕） |
-  | `POST /books/{id}/cancel` `{"note?"}` | 取消复位（downloading → decided） |
-  | `POST /books/{id}/fetch` | 自动取书（提交 book_download 任务，202） |
+  | `GET /domains`、`GET /courses`、`GET /courses/{domain_id}` | 领域/课程体系只读（qed_* 共享表） |
+  | `GET /domains/{id}` | 领域详情（已生成态优先回 domains.json） |
+  | `POST /domains`、`PATCH /domains/{id}`、`DELETE /domains/{id}` | 领域维护 |
+  | `POST /domains/import` | 手动领域 JSON 导入（只写 domains.json + 已生成；source 已退役） |
+  | `POST /domains/{id}/confirm` | 确认领域（双分支：含 courses→写 courses.json/待确认；否则异步 courses@v8/探索中） |
+  | `POST /domains/{id}/courses/import` | 从 domains.json 同步课程行（待确认） |
+  | `POST /domains/{id}/apply-results` | 确认领域探索结果（待确认→已完成） |
+  | `POST /domains/{id}/re-explore`、`POST /courses/{id}/re-explore` | 重探（→探索中，202） |
+  | `POST /courses/{id}/knowledge` | 采纳推荐建 draft 教程 + decided/parallel 书行 |
+  | `GET /knowledge?course_id=&status=`、`GET /knowledge/{id}` | 教程列表/详情（books[] 由 refs 聚合） |
+  | `POST /knowledge/{id}/confirm`、`PATCH /knowledge/{id}`、`DELETE /knowledge/{id}` | 教程定稿/更新/删除 |
+  | `POST /knowledge/{id}/fetch`、`POST /books/{id}/fetch` | 教程级/书级取书（202 后台任务） |
+  | `POST /books` | 书库化创建（`book_id`+`title`，无 knowledge_id） |
+  | `GET /books/{id}/sources`、`POST /books/{id}/sources` | 渠道尝试列表/登记（ok 表达成败） |
+  | `POST /books/{id}/register`、`POST /books/{id}/import` | 原地登记/人工导入（`mark_owned` → owned+downloaded） |
+  | `POST /books/{id}/start`、`/fail`、`/verify`、`/cancel` | 下载生命周期迁移（QED-060；非法迁移 409） |
+  | `GET /books/search`、`GET /papers/search` | 教材/论文候选搜索（非主线） |
+  | `GET /catalogs`、`GET /catalogs/{id}` | 内置 JSON 课程目录（math-qe） |
+  | `GET /tasks`、`GET /tasks/{id}`、`POST /tasks/{type}` | 后台任务轮询/提交 |
+  | `POST /prompt-explores/dry-run`、`POST /courses/{id}/prompt-explores/dry-run` | 探索评估（同步，不落库） |
 
-  > 书籍端点过渡期标注：选用四态（candidate→decided→parallel→retired）已落地，旧八态
-  > 下载机端点（start/fail/retry/complete/verify）仍可用但待 QED-050-D 重规划。
+  > **书籍端点变更（QED-060）**：旧八态端点 `decide/retry/complete/reject/supersede`
+  > **已删除**；`start/fail/verify/cancel` 以新下载生命周期语义保留（`decided → downloading
+  > → downloaded → verified`，`failed` 可重试，`cancel` 仅 downloading 复位 decided）。
+  > 8900 路由集对齐见 [api-contracts §③.9](../architecture/api-contracts.md)。
 
   - `GET /catalogs`、`GET /catalogs/{id}`：内置 JSON 课程目录（math-qe），不受五表重构影响。
   - `/selections`、`/downloads`、`/resources` 等三表端点已随 QED-030/031 退役（8901 返回 404）；
     三表模型历史契约原文已删除（2026-09-10 REQ-070 重组轮，可自 Git 历史查阅，REQ-030/031 时期提交）。
-  - 表结构事实源为 QED-Tracker `docs/design/database-schema.md`；8900 数据域同路径透传
-    （契约见[配置中心 API 契约](../architecture/api-contracts.md)）。
+  - 表结构事实源为 QED-Tracker `docs/architecture/database-private-tables.md`（qt_*）与
+    `database-shared-tables.md`（qed_*）；8900 数据域同路径透传
+    （契约见[8900 API 接口文档](../architecture/api-contracts.md)）。
 - 写操作（下载、论文推荐、扫描、Axiom 推送）一律创建**后台任务**：
   - `POST /tasks/...` 立即返回 `task_id`；`GET /tasks/{id}` 轮询状态与结果；
   - 状态机 `queued → running → succeeded / failed`；进度字段 0–100；
@@ -127,9 +133,9 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 | 差距 | 影响 | 改造归属 |
 | --- | --- | --- |
 | 子项目数据目录指向自身 `data/` | 产物不集中 | QED-Tracker 侧已迁 `dataset/qed-tracker/`（QED-009）；Axiom-Flow 侧待 ALN-003 |
-| Axiom-Flow 端口 8000 | 端口段不统一 | Axiom-Flow 侧（ALN-002），见 REQ-001 |
-| 密钥经 `load-env.ps1` 映射 | 双变量名并存 | QED-Tracker 直读 `QED_*` 已落地（QED-009）；映射层已退役（2026-08-17，scripts/ 整理） |
 | Axiom-Flow 仍用 `xqfm11` 库 | 无法集中登记与查询 | Axiom-Flow 侧统一 `qed` 库（ALN-003），存量库不迁移；QED-Tracker 侧已落地（QED-012） |
+| 8900 书籍路由集与 8901 新契约不一致 | 书目操作联调 404/语义偏差 | 根仓库代码跟进（[api-contracts §③.9](../architecture/api-contracts.md)，PLAN-038） |
+| 探索产物 JSON 入 `raw/` 的 dataset 例外 | 与「dataset 不维护 JSON 状态事实源」口径并存 | REQ-078（请求：QED-Tracker），回执后同步 `dataset-conventions.md` |
 
 ## 执行与验证
 

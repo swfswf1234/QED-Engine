@@ -6,7 +6,7 @@
 错误映射：未知会话 404；状态非法 409；参数非法 422；8901 管线错误已由会话
 统一落 failed 状态（前端轮询可见），不在路由层重抛。
 
-设计关联（DesignRef）：docs/plans/2026-08-27-exploration-download-flow.md
+设计关联（DesignRef）：docs/design/downloads-flow.md
 实现状态：Current
 关联测试：tests/test_explore_sessions.py
 """

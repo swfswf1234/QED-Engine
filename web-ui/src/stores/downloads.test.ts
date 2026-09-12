@@ -180,25 +180,25 @@ describe('状态筛选 bookInStage（书籍生命周期四阶段，2026-08-24 �
   const knowledgeId = 'k1';
   const mk = (status: string) => book({ book_id: 'b', knowledge_id: knowledgeId, status });
 
-  it('待确认=candidate；decided/downloading/failed 归下载；downloaded=待验证；verified=已完成', () => {
-    expect(bookInStage(mk('candidate'), 'confirm')).toBe(true);
-    expect(bookInStage(mk('candidate'), 'download')).toBe(false);
-    for (const status of ['decided', 'downloading', 'failed']) {
-      expect(bookInStage(mk(status), 'download')).toBe(true);
-      expect(bookInStage(mk(status), 'confirm')).toBe(false);
-      expect(bookInStage(mk(status), 'await_verify')).toBe(false);
-      expect(bookInStage(mk(status), 'completed')).toBe(false);
-    }
-    expect(bookInStage(mk('downloaded'), 'await_verify')).toBe(true);
-    expect(bookInStage(mk('downloaded'), 'download')).toBe(false);
+  it('candidate/decided=待下载；downloading=下载中；downloaded=待验证；verified=已完成；failed=失败', () => {
+    expect(bookInStage(mk('candidate'), 'to_download')).toBe(true);
+    expect(bookInStage(mk('candidate'), 'downloading')).toBe(false);
+    expect(bookInStage(mk('decided'), 'to_download')).toBe(true);
+    expect(bookInStage(mk('decided'), 'downloading')).toBe(false);
+    expect(bookInStage(mk('downloading'), 'downloading')).toBe(true);
+    expect(bookInStage(mk('downloading'), 'to_download')).toBe(false);
+    expect(bookInStage(mk('downloaded'), 'to_verify')).toBe(true);
+    expect(bookInStage(mk('downloaded'), 'downloading')).toBe(false);
     expect(bookInStage(mk('verified'), 'completed')).toBe(true);
-    expect(bookInStage(mk('verified'), 'await_verify')).toBe(false);
+    expect(bookInStage(mk('verified'), 'to_verify')).toBe(false);
+    expect(bookInStage(mk('failed'), 'failed')).toBe(true);
+    expect(bookInStage(mk('failed'), 'to_download')).toBe(false);
   });
 
-  it('空阶段（全部）不过滤；STAGE_OPTIONS 四选项值与标签', () => {
+  it('空阶段（全部）不过滤；STAGE_OPTIONS 五选项值与标签', () => {
     const b = book({ book_id: 'b1', knowledge_id: knowledgeId, status: 'candidate' });
     expect(bookInStage(b, '')).toBe(true);
-    expect(STAGE_OPTIONS.map((o) => o.label)).toEqual(['待确认', '下载', '待验证', '已完成']);
-    expect(STAGE_OPTIONS.map((o) => o.value)).toEqual(['confirm', 'download', 'await_verify', 'completed']);
+    expect(STAGE_OPTIONS.map((o) => o.label)).toEqual(['待下载', '下载中', '待验证', '已完成', '失败']);
+    expect(STAGE_OPTIONS.map((o) => o.value)).toEqual(['to_download', 'downloading', 'to_verify', 'completed', 'failed']);
   });
 });

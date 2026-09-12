@@ -339,7 +339,7 @@ def test_upstream_conflict_passthrough(monkeypatch):
         return httpx.Response(409, json={"detail": "状态机冲突：当前状态 downloading 不允许"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/books/bk_abc/decide", json={})
+    response = client.post("/api/v1/books/bk_abc/verify")
     assert response.status_code == 409
     assert response.json()["detail"] == "状态机冲突：当前状态 downloading 不允许"
 
@@ -398,50 +398,43 @@ def test_knowledge_confirm_via_semantic_api(monkeypatch):
 
 
 def test_book_create_via_semantic_api(monkeypatch):
-    """POST /api/v1/books：新建书籍候选（knowledge_id + title 必填）经 8900。"""
+    """POST /api/v1/books：书库化创建（book_id + title 必填，无 knowledge_id）→ 201。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/books"
         assert json.loads(request.read()) == {
-            "knowledge_id": "kn_abc",
-            "kind": "textbook",
+            "book_id": "mathanalysis-b01",
+            "title": "数学分析",
+            "original_title": "Principles of Mathematical Analysis",
             "roles": ["textbook"],
-            "title": "微积分学教程",
-            "part": "第一册",
-            "authors": ["菲赫金哥尔茨"],
-            "display_title": "",
-            "language": "",
-            "version": None,
-            "source": None,
-            "original_url": "",
+            "domain_id": "math",
         }
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "candidate"})
+        return httpx.Response(201, json={"book_id": "mathanalysis-b01", "status": "candidate"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
     response = client.post(
         "/api/v1/books",
         json={
-            "knowledge_id": "kn_abc",
-            "kind": "textbook",
+            "book_id": "mathanalysis-b01",
+            "title": "数学分析",
+            "original_title": "Principles of Mathematical Analysis",
             "roles": ["textbook"],
-            "title": "微积分学教程",
-            "part": "第一册",
-            "authors": ["菲赫金哥尔茨"],
+            "domain_id": "math",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json()["status"] == "candidate"
 
 
-def test_book_create_requires_knowledge_and_title(monkeypatch):
-    """POST /api/v1/books 缺 knowledge_id/title：8900 直接 422。"""
+def test_book_create_requires_book_id_and_title(monkeypatch):
+    """POST /api/v1/books 缺 book_id/title：8900 直接 422。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("不应请求 8901")
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    assert client.post("/api/v1/books", json={"title": "无主书"}).status_code == 422
-    assert client.post("/api/v1/books", json={"knowledge_id": "kn_abc"}).status_code == 422
+    assert client.post("/api/v1/books", json={"title": "无编号书"}).status_code == 422
+    assert client.post("/api/v1/books", json={"book_id": "mathanalysis-b01"}).status_code == 422
 
 
 def test_book_sources_list_via_semantic_api(monkeypatch):
@@ -510,8 +503,48 @@ def test_book_register_without_path_is_422(monkeypatch):
     assert response.status_code == 422
 
 
+def test_book_import_multipart_forwards_file(monkeypatch):
+    """POST /books/{id}/import：浏览器 multipart 上传 → 8900 落临时文件并透传 file_path。"""
+    from pathlib import Path
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/bk_abc/import"
+        body = json.loads(request.content.decode("utf-8"))
+        seen["body"] = body
+        temp = Path(body["file_path"])
+        assert temp.is_file(), "8900 应先落临时文件再调 8901"
+        seen["content"] = temp.read_bytes()
+        return httpx.Response(200, json={"book_id": "bk_abc", "holding": "owned", "status": "downloaded"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/import",
+        files={"file": ("book.pdf", b"%PDF-1.4 test", "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "downloaded"
+    assert seen["content"] == b"%PDF-1.4 test"
+    assert not Path(seen["body"]["file_path"]).exists(), "临时文件应在请求结束后清理"
+
+
+def test_book_import_rejects_non_pdf(monkeypatch):
+    """非 .pdf 上传：8900 直接 400，不请求 8901。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("不应请求 8901")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post(
+        "/api/v1/books/bk_abc/import",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert response.status_code == 400
+
+
 def test_book_state_actions_via_semantic_api(monkeypatch):
-    """POST /books/{id}/decide|start|fail|retry|verify：书籍生命周期动作经 8900。"""
+    """POST /books/{id}/start|fail|verify|cancel：下载生命周期动作经 8900（QED-060）。"""
     seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -519,80 +552,26 @@ def test_book_state_actions_via_semantic_api(monkeypatch):
         return httpx.Response(200, json={"book_id": "bk_abc", "status": "changed"})
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    for action in ("decide", "start", "fail", "retry", "verify"):
+    for action in ("start", "fail", "verify", "cancel"):
         assert client.post(f"/api/v1/books/bk_abc/{action}").status_code == 200, action
     assert seen == [
-        ("/api/v1/books/bk_abc/decide", {}),
         ("/api/v1/books/bk_abc/start", {}),
         ("/api/v1/books/bk_abc/fail", {}),
-        ("/api/v1/books/bk_abc/retry", {}),
         ("/api/v1/books/bk_abc/verify", {}),
+        ("/api/v1/books/bk_abc/cancel", {}),
     ]
 
 
-def test_book_complete_via_semantic_api(monkeypatch):
-    """POST /books/{id}/complete：下载完成回填经 8900。"""
+def test_removed_book_endpoints_are_gone(monkeypatch):
+    """旧八态下载机端点（decide/retry/complete/reject/supersede）已删除，8900 不再暴露。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/books/bk_abc/complete"
-        assert json.loads(request.read()) == {
-            "sha256": "a" * 64,
-            "relative_path": "raw/books/math-qe/01/v2.pdf",
-            "page_count": 600,
-            "absolute_path": "",
-            "file_name": "",
-        }
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "downloaded"})
+        raise AssertionError(f"不应请求 8901：{request.url.path}")
 
     client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post(
-        "/api/v1/books/bk_abc/complete",
-        json={"sha256": "a" * 64, "relative_path": "raw/books/math-qe/01/v2.pdf", "page_count": 600},
-    )
-    assert response.status_code == 200
-    assert response.json()["status"] == "downloaded"
-
-
-def test_book_reject_forwards_reason_and_note(monkeypatch):
-    """POST /books/{id}/reject：reason 必填 + note 转发 8901。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/books/bk_abc/reject"
-        assert json.loads(request.read()) == {"reason": "扫描缺页", "note": "建议换源"}
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "rejected"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post(
-        "/api/v1/books/bk_abc/reject",
-        json={"reason": "扫描缺页", "note": "建议换源"},
-    )
-    assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
-
-
-def test_book_reject_without_reason_is_422(monkeypatch):
-    """书籍 reject 缺 reason：8900 直接 422。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("不应请求 8901")
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/books/bk_abc/reject", json={})
-    assert response.status_code == 422
-
-
-def test_book_supersede_via_semantic_api(monkeypatch):
-    """POST /books/{id}/supersede：版本换代留痕经 8900。"""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/books/bk_abc/supersede"
-        assert json.loads(request.read()) == {"reason": "被第 9 版替代"}
-        return httpx.Response(200, json={"book_id": "bk_abc", "status": "superseded"})
-
-    client = _client(monkeypatch, tracker=_tracker_client(handler))
-    response = client.post("/api/v1/books/bk_abc/supersede", json={"reason": "被第 9 版替代"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "superseded"
+    for action in ("decide", "retry", "complete", "reject", "supersede"):
+        response = client.post(f"/api/v1/books/bk_abc/{action}", json={})
+        assert response.status_code in (404, 405), (action, response.status_code)
 
 
 def test_five_layer_offline_returns_503(monkeypatch):
@@ -613,7 +592,7 @@ def test_five_layer_offline_returns_503(monkeypatch):
     # POST /books 走 tracker 数据域（注意 GET /api/v1/books 被 Axiom-Flow 预留路由占用）
     response = client.post(
         "/api/v1/books",
-        json={"knowledge_id": "kn_abc", "title": "测试书"},
+        json={"book_id": "mathanalysis-b01", "title": "测试书"},
     )
     assert response.status_code == 503
     assert "QED-Tracker" in response.json()["detail"]

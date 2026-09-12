@@ -15,7 +15,11 @@ qt_books / 渠道 qt_sources，QED-031 知识层次模型，取代三表 qt_sele
 关联测试：tests/test_api.py
 """
 
-from fastapi import APIRouter, HTTPException, Request
+import tempfile
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from qed_engine.clients.tracker_client import TrackerClient, TrackerError
@@ -49,17 +53,20 @@ class KnowledgeUpdateBody(BaseModel):
 
 
 class BookCreateBody(BaseModel):
-    knowledge_id: str
-    kind: str = "textbook"
-    roles: list[str] = []
-    title: str
+    """书库化创建请求体（QED-060 目标契约）：book_id + title 必填，无 knowledge_id。"""
+    book_id: str = ""
+    title: str = ""
+    original_title: str = ""
     part: str = ""
-    display_title: str = ""
-    authors: list[str] = []
+    authors: list[dict] = []
+    publisher: str = ""
+    edition: str = ""
+    year: int | None = None
     language: str = ""
-    version: dict | None = None
-    source: dict | None = None
-    original_url: str = ""
+    roles: list[str] = []
+    status: str = ""
+    domain_id: str = ""
+    notes: str = ""
 
 
 class BookSourceBody(BaseModel):
@@ -74,23 +81,6 @@ class BookSourceBody(BaseModel):
 
 class BookRegisterBody(BaseModel):
     relative_path: str
-
-
-class BookCompleteBody(BaseModel):
-    sha256: str
-    relative_path: str
-    page_count: int | None = None
-    absolute_path: str = ""
-    file_name: str = ""
-
-
-class BookRejectBody(BaseModel):
-    reason: str
-    note: str | None = None
-
-
-class BookSupersedeBody(BaseModel):
-    reason: str
 
 
 def _tracker(request: Request) -> TrackerClient:
@@ -132,12 +122,6 @@ def _is_default_not_implemented(exc: TrackerError) -> bool:
     if exc.status_code not in (404, 405) or not isinstance(exc.detail, str):
         return False
     return "Not Found" in exc.detail or "Method Not Allowed" in exc.detail
-
-
-def _require_reason(reason: str) -> None:
-    """reject/supersede 缺 reason：8900 直接 422，不请求 8901。"""
-    if not reason:
-        raise HTTPException(status_code=422, detail="必须提供原因（reason）")
 
 
 # --- 领域只读/维护（REQ-059，QED-Tracker 承接端点，未上线 404 原样透传） ---
@@ -415,27 +399,35 @@ def delete_knowledge(knowledge_id: str, request: Request) -> dict:
 # --- 书籍（qt_books，五层模型 QED-031） ---
 
 
-@router.post("/books")
+@router.post("/books", status_code=201)
 def create_book(body: BookCreateBody, request: Request) -> dict:
-    """新建书籍候选（先登记再下载）；knowledge_id + title 必填 422。"""
-    if not body.knowledge_id:
-        raise HTTPException(status_code=422, detail="必须提供 knowledge_id")
+    """书库化创建（QED-060）：book_id + title 必填 422；归属由教程 refs 承载。"""
+    if not body.book_id:
+        raise HTTPException(status_code=422, detail="必须提供 book_id")
     if not body.title:
         raise HTTPException(status_code=422, detail="必须提供 title")
+    optional = {
+        "title": body.title,
+        "original_title": body.original_title,
+        "part": body.part,
+        "authors": body.authors,
+        "publisher": body.publisher,
+        "edition": body.edition,
+        "year": body.year,
+        "language": body.language,
+        "roles": body.roles,
+        "status": body.status,
+        "domain_id": body.domain_id,
+        "notes": body.notes,
+    }
+    # 仅传非空项：8901 对 status 等字段做值域校验，空串会被判 422。
+    kwargs = {k: v for k, v in optional.items() if v not in ("", None, [])}
     return _call(
         request,
         _tracker(request).create_book,
-        body.knowledge_id,
-        kind=body.kind,
-        roles=body.roles,
-        title=body.title,
-        part=body.part,
-        display_title=body.display_title,
-        authors=body.authors,
-        language=body.language,
-        version=body.version,
-        source=body.source,
-        original_url=body.original_url,
+        body.book_id,
+        _status_code=201,
+        **kwargs,
     )
 
 
@@ -483,50 +475,47 @@ def fetch_knowledge_books(knowledge_id: str, request: Request) -> dict:
 
 
 @router.post("/books/{book_id}/import")
-def import_book_pdf(book_id: str, request: Request) -> dict:
-    """导入书籍 PDF（手动导入）。"""
-    return _call(request, _tracker(request).import_book_pdf, book_id)
+def import_book_pdf(
+    book_id: str,
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    target_path: Annotated[str | None, Form()] = None,
+) -> dict:
+    """人工导入书籍 PDF（浏览器 multipart 上传，PLAN-039）。
 
-
-@router.post("/books/{book_id}/decide")
-def decide_book(book_id: str, request: Request) -> dict:
-    """候选→决定（人工决定下载）。"""
-    return _call(request, _tracker(request).decide_book, book_id)
+    8900 将上传字节落系统临时文件 → 调 8901 import（完整性校验/sha256/原子落盘/mark_owned）
+    → 无论成败清理临时文件。用户无需提供服务器路径。
+    """
+    filename = file.filename or ""
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="仅支持上传 .pdf 文件")
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = tmp.name
+            tmp.write(file.file.read())
+        return _call(
+            request,
+            _tracker(request).import_book_pdf,
+            book_id,
+            file_path=tmp_path,
+            target_path=target_path or None,
+        )
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
 
 @router.post("/books/{book_id}/start")
 def start_book(book_id: str, request: Request) -> dict:
-    """决定→下载中（任务运行）。"""
+    """开始下载：decided → downloading（QED-060）。"""
     return _call(request, _tracker(request).start_book, book_id)
 
 
 @router.post("/books/{book_id}/fail")
 def fail_book(book_id: str, request: Request) -> dict:
-    """下载失败标记（可 retry）。"""
+    """标记下载失败：downloading → failed（holding 仍 missing）。"""
     return _call(request, _tracker(request).fail_book, book_id)
-
-
-@router.post("/books/{book_id}/retry")
-def retry_book(book_id: str, request: Request) -> dict:
-    """失败重试 → downloading。"""
-    return _call(request, _tracker(request).retry_book, book_id)
-
-
-@router.post("/books/{book_id}/complete")
-def complete_book(book_id: str, body: BookCompleteBody, request: Request) -> dict:
-    """下载完成回填：sha256 + relative_path 必填 422（服务端/自动下载链路调用）。"""
-    if not body.sha256 or not body.relative_path:
-        raise HTTPException(status_code=422, detail="sha256 与 relative_path 必填")
-    return _call(
-        request,
-        _tracker(request).complete_book,
-        book_id,
-        body.sha256,
-        body.relative_path,
-        body.page_count,
-        body.absolute_path,
-        body.file_name,
-    )
 
 
 @router.post("/books/{book_id}/verify")
@@ -535,15 +524,7 @@ def verify_book(book_id: str, request: Request) -> dict:
     return _call(request, _tracker(request).verify_book, book_id)
 
 
-@router.post("/books/{book_id}/reject")
-def reject_book(book_id: str, body: BookRejectBody, request: Request) -> dict:
-    """书籍否定（reason 必填 422，硬删 + 留痕；可选 note）。"""
-    _require_reason(body.reason)
-    return _call(request, _tracker(request).reject_book, book_id, body.reason, body.note)
-
-
-@router.post("/books/{book_id}/supersede")
-def supersede_book(book_id: str, body: BookSupersedeBody, request: Request) -> dict:
-    """书籍过时（版本换代留痕，reason 必填 422）。"""
-    _require_reason(body.reason)
-    return _call(request, _tracker(request).supersede_book, book_id, body.reason)
+@router.post("/books/{book_id}/cancel")
+def cancel_book(book_id: str, request: Request) -> dict:
+    """取消下载：downloading → decided（复位，不删除已落盘文件）。"""
+    return _call(request, _tracker(request).cancel_book, book_id)

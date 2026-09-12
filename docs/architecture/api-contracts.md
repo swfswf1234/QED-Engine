@@ -144,14 +144,20 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 
 ## ③ 数据透传·QED-Tracker（8901 适配）
 
-前端（8903）只连 8900：目录/资源/任务契约归 8900 所有（数据域），内部经
+前端（8903）只连 8900：目录/任务/教程/书籍契约归 8900 所有（数据域），内部经
 `clients/tracker_client.py`（8901 客户端）适配 8901；8901 契约正文以 QED-Tracker
-`docs/architecture/api.md` 为事实源，路径与 8901 一致（透传）。
+`docs/architecture/api.md`（2026-09-11）为事实源，路径与 8901 一致（透传）。
 
-**五层语义（QED-031，2026-09-03 两态重构）**：教程（qt_knowledge）draft→confirmed（两态终态）；书籍（qt_books）
-candidate→decided→parallel→retired（选用四态，下载执行态移交 qt_sources + 资源清单）；渠道（qt_sources）一次尝试一条，
-ok 表达成败。`GET /books` 被数据域·Axiom 预留路由占用（axiom.py，仅 GET，与 tracker 的
-POST /books 不冲突）。
+> **⚠ 8900 路由集对齐状态（2026-09-11，PLAN-038）**：本节语义已对齐 QED-Tracker 新契约
+> （QED-050-D / QED-060）；标「⚠ 待对齐」的条目，其 8900 路由实现仍为过渡形态
+> （旧书籍状态机端点、`POST /books` 旧请求体、`import` 无 body 等），**目标变更与跟进清单见 §③.9**。
+> 8901 侧行为以 QED-Tracker 文档为准。
+
+**五层语义（QED-031 两态 + QED-050/060 书库化）**：教程（qt_knowledge）draft→confirmed
+（两态终态）；书籍（qt_books）为域级书库——选用态 `candidate/decided/parallel/retired` +
+持有态 `owned/missing` + 下载生命周期 `downloading/downloaded/verified/failed`（QED-060），
+归属由教程 refs 承载；渠道（qt_sources）一次尝试一条，`ok` 表达成败。
+`GET /books` 被数据域·Axiom 预留路由占用（axiom.py，仅 GET，与 tracker 的 POST /books 不冲突）。
 
 ### 目录与任务
 
@@ -189,44 +195,58 @@ POST /books 不冲突）。
 教程 draft→confirmed（定稿，无 body，回填 `confirmed_at`）。
 **错误：** 404 不存在、409 非法状态迁移。
 
+#### `PATCH /api/v1/knowledge/{knowledge_id}`
+
+更新教程信息（REQ-067 §B 配套）。**路径参数：** `knowledge_id`。
+**请求体（字段均可选，仅传非空项）：** `name`、`position`、`intro`、`set_no`、`kind`、`notes`。
+**返回：** 200 更新后的教程详情（含 `books[]`）。**错误：** 404 不存在。
+
+#### `DELETE /api/v1/knowledge/{knowledge_id}`
+
+物理删除教程及其孤立书籍数据（仍被其他教程引用的书保留）。**路径参数：** `knowledge_id`。
+**返回：** 200 `{"ok": "true"}`。**错误：** 404 不存在。
+
 ### 书籍
 
-> **⚠ 契约过渡期（QED-050-D 重规划中）**：`qt_books` 已书库化（选用四态
-> decided/parallel/candidate/retired + holding 持有态），旧"八态下载机"端点
-> （decide/start/fail/retry/complete/verify）的调用方需按新状态机适配，
-> 下载执行语义由 qt_sources + 资源清单承接。本节保留既有端点描述供过渡参考。
+> **✅ 已对齐（QED-060，PLAN-040）**：`POST /books` 用 `book_id`+`title`（无 `knowledge_id`）；
+> `register/import` 经 `mark_owned` 落 `holding=owned + status=downloaded`；下载生命周期端点为
+> `start/fail/verify/cancel`（`decide/retry/complete/reject/supersede` 已随本轮删除）。
+> 8900 适配层与前端调用已同步，详见 §③.9。
 
 #### `POST /api/v1/books`
 
-新建书籍候选（candidate 态）。`knowledge_id` + `title` 必填 422。
+书库化创建（201）：域级书库登记一本书（**无 `knowledge_id`**，归属由教程 refs 承载）。
+必填 `book_id` + `title`；其余字段可选，8900 仅转发非空项。
 
 **请求体：**
 ```json
 {
-  "knowledge_id": "math-01-knowledge-001",
-  "title": "数学分析原理",
-  "kind": "textbook",
-  "roles": ["main"],
+  "book_id": "mathanalysis-b01",
+  "title": "数学分析",
+  "original_title": "Principles of Mathematical Analysis",
   "part": "",
-  "display_title": "教程1：数学分析原理（Rudin）",
-  "authors": ["Walter Rudin"],
-  "language": "en",
-  "version": "v3",
-  "source": "internet_archive",
-  "original_url": "https://..."
+  "authors": [{"name": "Rudin", "role": "author"}],
+  "publisher": "高等教育出版社",
+  "edition": "第3版",
+  "year": 2006,
+  "language": "zh",
+  "roles": ["textbook"],
+  "status": "candidate",
+  "domain_id": "math",
+  "notes": ""
 }
 ```
 
-**错误：** 422 缺 knowledge_id/title、404 knowledge_id 不存在。
+**错误：** 409 `BOOK_ALREADY_EXISTS`；422 `INVALID_PARAMS`（book_id 格式错误/缺 title/值域错误）。
 
 #### `GET /api/v1/books/{book_id}/sources`
 
-书籍渠道尝试列表（详情弹窗）。**路径参数：** `book_id`。失败尝试留痕不展示由上游过滤。
-**错误：** 404 书籍不存在。
+书籍渠道尝试列表（详情弹窗，含失败留痕 `ok=0`，消费方自行过滤）。
+**路径参数：** `book_id`。**错误：** 404 书籍不存在。
 
 #### `POST /api/v1/books/{book_id}/sources`
 
-登记一次渠道尝试（ok 表达成败）。
+登记一次渠道尝试（`ok` 表达成败；`channel` 默认 `manual`）。
 
 **请求体：**
 ```json
@@ -243,71 +263,54 @@ POST /books 不冲突）。
 
 #### `POST /api/v1/books/{book_id}/register`
 
-人工下载登记（candidate/decided → downloaded 直转）。`relative_path` 必填 422，PDF 校验与改名落盘在
-8901 侧。**请求体：** `{"relative_path"}`。
+原地登记（数据根内已有文件）：经 `mark_owned` 落 `holding=owned + file_path + status=downloaded`
+（跳过初筛门槛，保留完整性校验）。**请求体：** `{"relative_path"}`。
 
-**错误：** 400 路径不在数据根内/PDF 校验失败、404 文件/书籍不存在、422 缺路径、409 非法状态迁移。
+**错误：** 400 路径不在数据根内/PDF 校验失败、404 文件/书籍不存在、422 缺路径。
 
 #### `POST /api/v1/books/{book_id}/fetch`
 
-自动下载书籍（触发下载任务）。**返回：** `{"task_id": "..."}`。
+书级自动取书（完整五阶段：检索→确认→下载→staging 机器验收→`mark_owned` 登记）。
+**返回：** 202 `{"task_id": "...", "book_id": "..."}`。
 
 #### `POST /api/v1/knowledge/{knowledge_id}/fetch`
 
-批量下载教程所辖书籍（触发下载任务）。**返回：** `{"task_id": "..."}`。
+教程级批量取书（refs 聚合去重 → 排除已 owned → 默认仅 decided；顺序逐书，部分失败不中断）。
+**返回：** 202 `{"task_id": "...", "knowledge_id": "..."}`。
 
 #### `POST /api/v1/books/{book_id}/import`
 
-导入书籍 PDF（手动导入）。**返回：** `{"task_id": "..."}`。
+人工导入书籍 PDF（**multipart/form-data**，PLAN-039）：8900 将上传字节落系统临时文件 →
+调 8901 import（完整性校验 / sha256 去重 / 原子落盘 → `raw/<domain>/<course>/<slug>_<sha8>.pdf`
++ `mark_owned`）→ 清理临时文件。**浏览器文件选择器上传，用户无需提供服务器路径。**
 
-#### `POST /api/v1/books/{book_id}/decide`
+**请求体（multipart）：** `file`（必填，`.pdf`）+ `target_path`（可选，数据根相对路径；
+缺省经 refs 反查课程目录，反查不到 422）。
 
-候选→决定（candidate → decided，人工决定下载）。
+**返回：** 200 登记结果（`{book_id, holding, file_path}`）。
+**错误：** 400（非 PDF/空文件）、404 `BOOK_NOT_FOUND`、422、503。
 
 #### `POST /api/v1/books/{book_id}/start`
 
-决定→下载中（decided → downloading）。
+开始下载（`decided → downloading`，QED-060）。**错误：** 404、409 `INVALID_TRANSITION`。
 
 #### `POST /api/v1/books/{book_id}/fail`
 
-下载失败标记（downloading → failed，可 retry）。
-
-#### `POST /api/v1/books/{book_id}/retry`
-
-失败重试（failed → downloading）。
-
-#### `POST /api/v1/books/{book_id}/complete`
-
-下载完成回填（服务端/自动下载链路调用）。`sha256` + `relative_path` 必填 422。
-
-**请求体：**
-```json
-{
-  "sha256": "64位十六进制",
-  "relative_path": "raw/books/math-qe/01/file.pdf",
-  "page_count": 300,
-  "absolute_path": "/full/path",
-  "file_name": "textbook_abc12345.pdf"
-}
-```
-
-**错误：** 422 sha256 格式错误或缺字段、404 不存在、409 非法状态迁移。
+标记下载失败（`downloading → failed`，holding 仍 missing）。失败后可再次 `fetch` 重试。
 
 #### `POST /api/v1/books/{book_id}/verify`
 
-人工验收通过（downloaded → verified 终态）。
+验收通过（`downloaded → verified` 下载终态）。
 
-#### `POST /api/v1/books/{book_id}/reject`
+#### `POST /api/v1/books/{book_id}/cancel`
 
-书籍否定（reason 必填 422，硬删 + 留痕；note 可选审理备注）。
+取消下载（`downloading → decided` 复位，不删除已落盘文件）；用于解除卡死的 `downloading`。
+**错误：** 404、409（仅 `downloading` 可 cancel）。
 
-**请求体：** `{"reason": "文件损坏", "note": ""}`。
-
-#### `POST /api/v1/books/{book_id}/supersede`
-
-书籍过时（版本换代留痕，reason 必填 422）。
-
-**请求体：** `{"reason": "已有更好版本"}`。
+> **已删除端点（QED-060 / PLAN-040）**：`decide`、`retry`、`complete`、`reject`、`supersede`
+> 属旧八态下载机，8900 已不再注册（请求返回 404/405）。候选→决定改由采纳端点
+> （`POST /courses/{id}/knowledge`）建立 decided 书行；下载完成由五阶段编排内部 `mark_owned`
+> 承接；退役（`retired + retire_reason`）写入端点待 REQ-079 由 QED-Tracker 提供。
 
 ### 领域与课程体系（REQ-059 + 探索，2026-08-28 至 09-04）
 
@@ -356,6 +359,9 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 修改课程（name/course_id 不可变；仅提交显式字段）。
 **可改字段：** `stage/sort_order/description/aliases/track/prerequisites`。
 
+> ⚠ 待对齐（REQ-077）：目标契约新增 `exploration_stage` 字段（课程阶段流转经本端点，
+> 取消 8900 共享表直写依赖）；8901 与 8900 均待支持。
+
 **错误：** 404 COURSE_NOT_FOUND。
 
 #### `DELETE /api/v1/courses/{course_id}`
@@ -366,31 +372,38 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 
 #### `POST /api/v1/courses/{course_id}/knowledge`
 
-导入课程知识（tutorials JSON，手工维护端点，8901 实现）。**请求体：**
-`{"tutorials": [...]}`（tutorials 数组）。
+导入/采纳课程知识（tutorials JSON，每套 = `set_no/name/position/intro/textbook_ref/
+exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书行（parallel_ref 建
+`status=parallel`）并回填 `book_id`。**请求体：** `{"tutorials": [...]}`（`source` 可选，仅来源标记）。
 
-**返回：** `{"tutorials_created": N}`。**错误：** 404 COURSE_NOT_FOUND。
+**返回：** 201 `{"created": [{"knowledge_id","set_no","name","status":"draft","existing":false}]}`。
+**错误：** 404 COURSE_NOT_FOUND、409 SET_NO_CONFLICT、422 INVALID_PARAMS。
+
+> ⚠ 待对齐：8900 当前透传 8901 结果（旧文档曾记 `{"tutorials_created":N}`）。
 
 #### `POST /api/v1/domains/import`
 
-手动领域 JSON 导入（QED-050，六步流程）。语义随 `source`：
-- `source=cli`：一次写 qed_domain + qed_course（幂等 upsert），探索立即定稿
-  `exploration_stage=已完成`。
-- 其余（无 source / `manual`）：**只登记域（qed_domain）**，置 `exploration_stage=已生成` +
-  `explore_pending=review_results`，进入六步流程第 1 步；课程由后续
-  `POST /domains/{id}/courses/import` 写入。
+手动领域 JSON 导入（QED-050，六步流程第 1 步）：校验 manual@v1 → 写
+`raw/{domain_id}/domains.json` → 既有领域置 `exploration_stage=已生成`。**只写文件不落库**
+（课程由 confirm 双分支 / `courses/import` 承接；`source` 参数已退役）。
 
-**请求体：** `{"domain": {...manual@v1 全文...}, "source?"}`。
+**请求体：** `{"domain": {...manual@v1 全文...}, "target_domain_id?": "..."}`。
 
-**返回：** `{"domain_id":"...","courses_created":N,"courses_updated":N,"exploration_stage":"已完成"}`（cli）或 `"已生成"`（其他）。
-
-**错误：** 400 INVALID_PARAMS（校验失败/领域不存在）。
+**返回：** 200 `{"domain_id","file_path","exploration_stage":"已生成","message"}`。
+**错误：** 400 INVALID_PARAMS（校验失败/文件不可读）、404 DOMAIN_NOT_FOUND（领域须先创建）、422 缺 domain。
 
 #### `POST /api/v1/domains/{domain_id}/commit-import`
 
-确认导入课程（REQ-067 B3）：透传 8901 `POST /domains/{domain_id}/confirm`，
-读取 `raw/{domain_id}/domains.json` → upsert QedDomain + QedCourse → `exploration_stage=已完成`。
-**返回：** `{"committed": N}`（N = courses_created）。**错误：** 404、409。
+手动导入课程（六步流程第 3 步）：透传 8901 `POST /domains/{domain_id}/courses/import`，
+从 `raw/{domain_id}/domains.json` 读 courses → upsert `qed_course` → 状态置 **待确认**
+（已完成由 `confirm-knowledge`→apply-results 收口）。
+
+**返回：** `{"domain_id","courses_created":N,"courses_updated":M,"exploration_stage":"待确认"}`。
+**错误：** 400（domains.json 无课程）、404、409 INVALID_TRANSITION（状态须为 已生成/探索中）。
+
+> **UI 不再调用（PLAN-041，2026-09-11）**：`confirm-domain` 已置 `待确认`，再调本端点必 409
+> （守卫只收 `已生成/探索中`）；「已导入」路径改为仅 `confirm-domain`，课程行与「已完成」
+> 由 `confirm-knowledge` 桥接收口。端点保留供其他调用方/离线场景。
 
 > 注：`/domains/{id}/explore` 和 `/domains/{id}/confirm-name` 已移除（2026-09-07），
 > 领域探索与名称确认由 ExploreFlowModal（`/explore-sessions`）承接。
@@ -423,8 +436,8 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 #### `POST /api/v1/explore-sessions/{session_id}/apply`
 
 应用所选（同步）：
-- 领域 = POST /domains + 逐课 POST /domains/{id}/courses + exploration_stage=已完成；
-- 课程 = POST /courses/{id}/knowledge 采纳 draft 教程 + 课程 exploration_stage=已完成。
+- 领域 = POST /domains + 逐课 POST /domains/{id}/courses + exploration_stage=待确认（终态由 confirm-knowledge 收口）；
+- 课程 = POST /courses/{id}/knowledge 采纳 draft 教程 + 课程 exploration_stage=待确认。
 
 **请求体：** `{"selected":[...]}`。
 
@@ -463,15 +476,15 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 改名（可选）并重提领域探索任务。
 **请求体：** `{"name?"}`。**返回 202：** `{"domain_id","task_id","exploration_stage":"探索中","message"}`。
 **错误：** 404、409 非「已生成」且非名称确认挂起。
-**降级：** 8901 连接失败→共享表直写探索中 + `"degraded":true`（离线导入路径：任务未提交，
-待确认数据已在 explore_pending.import_courses，由 confirm-knowledge 收口）。
+**降级：** 8901 连接失败→共享表直写探索中 + `"degraded":true`（离线路径：任务未提交，
+手动导入数据在 `domains.json`/`courses.json`，由 confirm-knowledge 收口）。
 
 #### `POST /api/v1/domains/{domain_id}/confirm-knowledge`
 
-确认课程（待确认→已完成）：唯一「已完成」收口写点。双分支——
-`explore_pending.kind="import_courses"`（离线导入挂起）走共享表 `commit_import_courses`
-（建行+清 pending+已完成）；原生待确认则桥接 `raw/{id}/courses.json`→课程行
-（同名更新、缺失建行）后调 8901 apply-results（未选课程行由 8901 级联删除）。
+确认课程（待确认→已完成）：唯一「已完成」收口写点。桥接 `raw/{id}/courses.json`→课程行
+（同名更新、缺失建行）后调 8901 apply-results（未选课程行由 8901 级联删除）；手动导入
+（六步流程）同路径。`explore_pending` 不承载导入挂起（kind 统一为 `review_results` /
+`name_confirmation` / `error`）。
 **请求体：** `{"selected?":[course_id|名称]}`（缺省全选，manual 六步流程步骤 4 语义）。
 **返回：** `{"domain_id","ok":true,"exploration_stage":"已完成","applied":N,...}`。
 **错误：** 404、409 非「待确认」/课程清单不可用（courses.json 缺失或为空）/选中不匹配、
@@ -499,13 +512,43 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 courses.json 合成 `{"kind":"review_results","courses":[...]}`（原生任务链成功不写 pending）。
 领域不存在或查询异常时降级返回 `available:false` + `exploration_stage="未开始"`（200，不抛错）。
 
+### ③.9 8900 路由集对齐跟进清单（2026-09-11，PLAN-038 立；PLAN-040 书籍组收口）
+
+> 8901 原生端点已由 QED-Tracker 就绪；本节记录 8900 适配层对齐进度。
+
+**书籍组（✅ 已完成，PLAN-040 2026-09-11）**
+
+| 目标 | 8900 状态 | 变更 |
+| --- | --- | --- |
+| `POST /books` 用 `book_id`+`title`（201） | ✅ | 换请求体与状态码（仅转发非空项） |
+| `POST /books/{id}/register` → `mark_owned` | ✅ | 透传 8901（`status=downloaded`） |
+| `POST /books/{id}/import` 改 multipart | ✅ 已实现（PLAN-039） | 浏览器文件选择器上传，8900 落临时文件转 8901 |
+| `POST /books/{id}/start|fail|verify` | ✅ | 透传 8901 下载生命周期 |
+| 新增 `POST /books/{id}/cancel` | ✅ 已新增 | `downloading → decided` |
+| 删除 `decide/retry/complete/reject/supersede` | ✅ 已删除 | 路由与 `TrackerClient` 方法一并移除 |
+
+> 前端跟进（✅ 已完成）：`web-ui/src/api/tracker.ts` 删除 `decideBook/retryBook/rejectBook/
+> supersedeBook`、新增 `cancelBook`；`Downloads.tsx` 移除「否定」按钮与否决流程
+> （退役端点待 REQ-079，无后端可调）。`stores/dashboard.ts` 下载进度聚合补
+> `downloaded/verified/failed` 生命周期仍待跟进。
+
+**领域/课程组**
+
+| 目标 | 当前 8900 状态 | 变更 |
+| --- | --- | --- |
+| 新增 `GET /courses/{domain_id}` | **缺失** | 透传 8901 单领域课程详情 |
+| `PATCH /courses` 支持 `exploration_stage` | 不支持 | 待 8901 支持后透传（REQ-077） |
+| `POST /domains/import` 去 `source` | 已无 `source`（`target_domain_id`） | 文档已对齐 |
+| `commit-import` → `/courses/import`（待确认） | 已按 ISSUE-002 接 `/courses/import` | 文档已对齐 |
+
 ### 错误映射（③ 数据透传·QED-Tracker）
 
 8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409 处理生效）；
 8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，独立性铁律）。
-create/register/complete 缺必填字段由 8900 校验直接 422，不请求 8901。
+create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 结构化错误统一 `{detail: {code, message}}`，`message` 即前端展示文案。
-成功态规整：上游 201/204 一律以 200 返回（透传层不做状态码直通）；发起类端点显式 202。
+成功态规整：上游 201/204 一律以 200 返回（透传层不做状态码直通），除非端点文档显式声明
+创建语义（如 `POST /books` 201）；发起类端点显式 202。
 
 > 历史：旧 `/resources` 清单/详情/预览/状态机端点与 `/tasks/catalog/evaluate`、
 > `/tasks/books/download` 已随 QED-030（qt_resources 退役）移除；三表语义 API 已随 QED-031

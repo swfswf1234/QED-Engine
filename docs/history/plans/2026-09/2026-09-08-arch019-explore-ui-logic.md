@@ -4,7 +4,7 @@
 任务类型：A
 最后更新：2026-09-08
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁 design/ 固定文档）
-关联设计：[2026-08-27-download-ux-flow.md](../../../plans/2026-08-27-download-ux-flow.md)（PLAN-023，全流程交互规范主文档）、[2026-08-29-req067-downloads-optimization.md](../2026-08/2026-08-29-req067-downloads-optimization.md)（PLAN-025，§A 基座与 §B 承接）、[2026-08-27-exploration-download-flow.md](../../../plans/2026-08-27-exploration-download-flow.md)（PLAN-022，技术架构参考）、[2026-09-08-arch019-explore-backend-chain.md](2026-09-08-arch019-explore-backend-chain.md)（PLAN-034，后端链路配套）
+关联设计：[2026-08-27-download-ux-flow.md](../2026-08/2026-08-27-download-ux-flow.md)（PLAN-023，全流程交互规范主文档）、[2026-08-29-req067-downloads-optimization.md](../2026-08/2026-08-29-req067-downloads-optimization.md)（PLAN-025，§A 基座与 §B 承接）、[2026-08-27-exploration-download-flow.md2026-08-27-exploration-download-flow.md)（PLAN-022，技术架构参考）、[2026-09-08-arch019-explore-backend-chain.md](2026-09-08-arch019-explore-backend-chain.md)（PLAN-034，后端链路配套）
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-033；ARCH-019、REQ-067、REQ-053）
 关联代码：web-ui/src/pages/Downloads.tsx、web-ui/src/components/{DownloadsTree,DomainCard,ExploreFlowModal,DomainConfirmModal,CourseConfirmModal}.tsx、web-ui/src/stores/{downloads,explore,index}.ts、web-ui/src/api/{tracker,explore-helpers}.ts、web-ui/src/downloads.css（晋升 design/ 时按此行一次性切换 DesignRef）
 归档判定：Merge 倾向——右侧展示规范与状态机交互并入 docs/design/web-frontend.md（或独立 design/ 固定文档），计划壳归档 history/plans/2026-09/

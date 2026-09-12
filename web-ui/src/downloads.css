@@ -356,6 +356,35 @@
   color: #777;
 }
 
+/* 书目详情弹窗：两列信息网格（PLAN-039） */
+.dl-book-detail-grid {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 16px;
+}
+
+.dl-book-detail-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dl-book-detail-label {
+  flex: 0 0 64px;
+  color: #8c8c8c;
+}
+
+.dl-book-detail-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #1f1f1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dl-book-actions {
   margin-top: 4px;
   display: flex;

@@ -3,7 +3,7 @@ import {
   App, Alert, Button, Form, Input, Modal, Radio, Select, Space, Typography,
 } from 'antd';
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
-import { updateDomain, commitImport } from '../api/tracker';
+import { updateDomain } from '../api/tracker';
 import { confirmDomainInfo } from '../api/explore-helpers';
 import type { DomainSystem } from '../stores';
 import { parseExplorePending, useDownloadsStore } from '../stores/downloads';
@@ -127,18 +127,14 @@ export default function DomainConfirmModal({
       });
 
       if (imported) {
-        // 导入路径：先调 confirm-domain（写 courses.json + stage→待确认），再调 commit-import（写课程行）
+        // 导入路径：仅调 confirm-domain（写 courses.json + stage→待确认）。
+        // 不再调 commit-import：8901 courses/import 守卫只收 已生成/探索中，而 confirm 已置
+        // 待确认 → 必 409（PLAN-041）。课程行与「已完成」由后续「课程知识确认」桥接收口。
         const nameOverride = ep?.kind === 'import_courses' && ep.name_changed
           ? ep.imported_name
           : undefined;
         await confirmDomainInfo(domain.domain_id, nameOverride);
-
-        try {
-          await commitImport(domain.domain_id);
-        } catch (commitErr) {
-          message.warning(describeError(commitErr));
-        }
-        message.success('领域信息已保存，课程已确认');
+        message.success('领域信息已保存，请继续确认课程');
         onClose();
         void fetchAll();
         return;

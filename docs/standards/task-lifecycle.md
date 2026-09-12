@@ -1,8 +1,8 @@
 # 任务生命周期
 
 状态：Current
-最后更新：2026-09-10
-确认状态：暂定
+最后更新：2026-09-11
+确认状态：已确认
 治理对象：任务分类、计划准入、tracker 状态、实施门禁与关闭交付
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`
 关联测试：`tests/contract/test_plan_governance.py`、`tests/contract/test_tracker_governance.py`
@@ -60,7 +60,7 @@ GitHub Release、部署、受保护环境变更、正式数据操作等按既有
 
 | 列 | 允许值 | 说明 |
 | --- | --- | --- |
-| ID | `TASK_ID`（正则 `[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z])?`） | 稳定唯一标识，不复用；前缀自然表达任务类型（ARCH=主线实现、REQ=请求、PLAN=计划、DEFECT=缺陷） |
+| ID | `TASK_ID`（正则 `[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z][A-Z0-9]*)?`） | 稳定唯一标识，不复用；前缀自然表达任务类型（ARCH=主线实现、REQ=请求、PLAN=计划、DEFECT=缺陷）。后缀可选，用于同一父任务的子项分组（如 REQ-067-B10、REQ-070-PARS）；建议后缀不超过 6 字符，优先使用简短语义词（PARS=解析管理、LEARN=学习功能、BATCH=批量子项） |
 | 类别 | 主线 / 支线 / 长期 | 见「任务层级」节 |
 | 优先级 | 高 / 中 / 低 | 见下方规则 |
 | 状态 | 见「状态导航」节 todo 状态枚举 | 与计划状态机联动 |

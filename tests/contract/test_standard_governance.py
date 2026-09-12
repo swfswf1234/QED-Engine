@@ -18,6 +18,8 @@ STANDARD_FILES = {
     "doc-governance.md",
     "adr-governance.md",
     "code-document-traceability.md",
+    "code-standards.md",
+    "storage-conventions.md",
     "testing.md",
     "cross-project-collaboration.md",
     "local-dev.md",
@@ -29,7 +31,17 @@ FACT_DOCUMENTS = {"local-dev.md"}
 REQUIRED_FIELDS = ("状态", "最后更新", "治理对象", "依据 ADR", "关联测试", "确认状态")
 FACT_FIELDS = ("状态", "最后更新", "治理对象", "确认状态")
 REQUIRED_SECTIONS = ("## 目的与边界", "## 强制规则", "## 执行与门禁", "## 变更与取代")
-CONFIRMED_STANDARDS = {"doc-governance.md", "local-dev.md", "code-document-traceability.md", "cross-project-collaboration.md", "adr-governance.md"}
+CONFIRMED_STANDARDS = {
+    "doc-governance.md",
+    "local-dev.md",
+    "code-document-traceability.md",
+    "cross-project-collaboration.md",
+    "adr-governance.md",
+    "task-lifecycle.md",
+    "testing.md",
+    "code-standards.md",
+    "storage-conventions.md",
+}
 VALID_CONFIRM_STATUSES = {"暂定", "已确认"}
 PATH_REFERENCE = re.compile(r"`((?:docs/adr|tests)/[^`]+)`")
 INDEX_LINK = re.compile(r"\[(?P<title>[^]]+)]\((?P<path>[^)]+\.md)\)")

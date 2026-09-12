@@ -140,9 +140,12 @@ class TrackerClient:
 
     # --- 书籍（qt_books：一册/一卷/一个快照） ---
 
-    def create_book(self, knowledge_id: str, **kwargs) -> dict:
-        """新建书籍候选（先登记再下载）：candidate 态；kwargs 透传 8901 /books 字段。"""
-        body = {"knowledge_id": knowledge_id, **kwargs}
+    def create_book(self, book_id: str, **kwargs) -> dict:
+        """书库化创建（QED-060）：book_id + title 必填；kwargs 透传 8901 /books 字段。
+
+        行内无归属列（归属由教程 refs 承载），不再携带 knowledge_id。
+        """
+        body = {"book_id": book_id, **kwargs}
         return self._request("POST", f"{API_PREFIX}/books", json=body)
 
     def list_book_sources(self, book_id: str) -> list:
@@ -171,69 +174,33 @@ class TrackerClient:
         """批量下载教程所辖书籍（触发下载任务）。"""
         return self._request("POST", f"{API_PREFIX}/knowledge/{knowledge_id}/fetch")
 
-    def import_book_pdf(self, book_id: str) -> dict:
-        """导入书籍 PDF（手动导入）。"""
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/import")
+    def import_book_pdf(self, book_id: str, file_path: str, target_path: str | None = None) -> dict:
+        """人工导入 PDF：file_path 为 8900 落盘的临时文件路径（可在数据根外）。
 
-    def decide_book(self, book_id: str) -> dict:
-        """候选→决定（人工决定下载）。"""
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/decide")
+        8901 负责完整性校验、sha256 去重与原子落盘，并 mark_owned（owned + downloaded）。
+        """
+        if not file_path:
+            raise TrackerError("人工导入必须提供 file_path")
+        body: dict = {"file_path": file_path}
+        if target_path:
+            body["target_path"] = target_path
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/import", json=body)
 
     def start_book(self, book_id: str) -> dict:
-        """决定→下载中（任务运行）。"""
+        """开始下载：decided → downloading（QED-060 下载生命周期）。"""
         return self._request("POST", f"{API_PREFIX}/books/{book_id}/start")
 
     def fail_book(self, book_id: str) -> dict:
-        """下载失败标记（可 retry）。"""
+        """标记下载失败：downloading → failed（holding 仍 missing）。"""
         return self._request("POST", f"{API_PREFIX}/books/{book_id}/fail")
-
-    def retry_book(self, book_id: str) -> dict:
-        """失败重试 → downloading。"""
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/retry")
-
-    def complete_book(
-        self,
-        book_id: str,
-        sha256: str,
-        relative_path: str,
-        page_count: int | None = None,
-        absolute_path: str = "",
-        file_name: str = "",
-    ) -> dict:
-        """下载完成回填：sha256 + 数据根相对路径必填（服务端/自动下载链路调用）。"""
-        if not sha256 or not relative_path:
-            raise TrackerError("下载完成必须提供 sha256 与 relative_path")
-        body = {
-            "sha256": sha256,
-            "relative_path": relative_path,
-            "page_count": page_count,
-            "absolute_path": absolute_path,
-            "file_name": file_name,
-        }
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/complete", json=body)
 
     def verify_book(self, book_id: str) -> dict:
         """人工验收通过：downloaded → verified（终态）。"""
         return self._request("POST", f"{API_PREFIX}/books/{book_id}/verify")
 
-    def reject_book(self, book_id: str, reason: str, note: str | None = None) -> dict:
-        """书籍否定（reason 必填，文件硬删留痕；可选审理备注 note）。"""
-        if not reason:
-            raise TrackerError("拒绝必须提供原因（reason），保证留痕可追溯")
-        body: dict = {"reason": reason}
-        if note:
-            body["note"] = note
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/reject", json=body)
-
-    def supersede_book(self, book_id: str, reason: str) -> dict:
-        """书籍过时（版本换代留痕，reason 必填）。"""
-        if not reason:
-            raise TrackerError("标记过时必须提供原因（reason）")
-        return self._request(
-            "POST",
-            f"{API_PREFIX}/books/{book_id}/supersede",
-            json={"reason": reason},
-        )
+    def cancel_book(self, book_id: str) -> dict:
+        """取消下载：downloading → decided（复位，不删除已落盘文件）。"""
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/cancel")
 
     # --- 领域只读/维护（REQ-059，端点由 QED-Tracker 承接，未上线前 404 透传） ---
     # 注：旧探索方法（start_course_explore/get_explore_run/adopt/discard/list/
@@ -334,7 +301,7 @@ class TrackerClient:
                 import logging
                 logger = logging.getLogger("qed_engine.tracker")
                 logger.info("8901不可用，降级直接创建领域：%s", exc)
-                from qed_engine.services.shared_tables import STAGE_GENERATED, create_domain
+                from qed_engine.services.shared_tables import STAGE_NOT_STARTED, create_domain
                 result = create_domain(
                     self._settings,
                     name=name,
@@ -343,7 +310,7 @@ class TrackerClient:
                     stages=stages,
                     classic_tracks=classic_tracks,
                     scope=scope or "",
-                    exploration_stage=STAGE_GENERATED,
+                    exploration_stage=STAGE_NOT_STARTED,
                 )
                 if result is None:
                     raise TrackerError("领域创建失败（降级模式）") from exc

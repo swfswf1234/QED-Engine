@@ -32,9 +32,9 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 状态、三中心定位与当前主线一览（30 秒了解项目到哪）。未关闭任务与未来方向分别见
 [任务台账](docs/trackers/todo.md) 与[能力路线图](docs/trackers/roadmap.md)。
 
-**文档优先级**：agent 与项目开发优先读取**已确认文档**（当前：`standards/doc-governance.md`、
-`standards/local-dev.md`；`architecture/`、`design/` 与其余 standards 文档目前为**暂定**，可读
-可执行但待评审）。文档链路规则见[文档治理规范](docs/standards/doc-governance.md)。
+**文档优先级**：agent 与项目开发优先读取**已确认文档**（当前：`standards/` 全部 9 份标准已确认；
+`architecture/`、`design/` 按各自声明的确认状态——`four-service-architecture.md`、`code-map.md`
+已确认，其余**暂定**，可读可执行但待评审）。文档链路规则见[文档治理规范](docs/standards/doc-governance.md)。
 
 ## 四个服务与独立性
 
@@ -47,28 +47,74 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 **独立性铁律**：Axiom-Flow 与 QED-Tracker 未启动时，QED-Engine 前端对话/展示必须正常；QED-Engine 后端离线时，前两者用本地默认配置降级运行。三个项目均可独立开发、独立部署。
 
-## 文档入口
+## 阅读顺序
 
-具体约束一律以 docs 正文为准，本文件不保存正文事实：
+1. 先读本文件；进入子项目目录前必须先读其 `AGENTS.md`。
+2. 接手任务前读[项目状态快照](docs/trackers/project-status.md)（30 秒现状）。
+3. `docs/standards/` 是工程治理规则的唯一事实源，入口[规范索引](docs/standards/index.md)。
+4. 按下方「标准映射」定位本任务需要的标准与文档；用 `rg` 搜索真实实现和测试，不根据历史文件名推断行为。
+5. 未关闭任务见[任务台账](docs/trackers/todo.md)；只有追溯旧系统时才读 `docs/history/`。
 
-| 需要 | 入口 |
+事实冲突时依次采用：运行代码和测试、当前设计、当前架构、当前指南、路线图、历史资料。历史资料不能覆盖当前实现。
+
+## 文档入口与标准映射（概念 → 本仓库文件）
+
+全局 agent 工具层与技能只引用「概念」，实际文件以本表为准；子项目各自维护同名表。
+
+| 概念 | 本仓库文件 |
 | --- | --- |
-| 项目当前状态（开发状态指针） | [docs/trackers/project-status.md](docs/trackers/project-status.md) |
-| 系统结构与服务边界（固定架构文档） | [docs/architecture/](docs/architecture/index.md)：总体架构、服务架构、固定 API 文档（[api-contracts.md](docs/architecture/api-contracts.md)）、数据库总纲（[database-design.md](docs/architecture/database-design.md)）、映射见 [code-map.md](docs/architecture/code-map.md) |
-| 服务契约、dataset 约定、统一配置接口（相对确定设计文档） | [docs/design/](docs/design/index.md) |
-| 工程治理规则（文档规范等） | `docs/standards/` 是工程治理规则的唯一事实源，入口 [docs/standards/](docs/standards/index.md)，具体采用 [任务生命周期](docs/standards/task-lifecycle.md)、[文档治理规范](docs/standards/doc-governance.md)、[ADR 治理](docs/standards/adr-governance.md)、[代码与文档追溯](docs/standards/code-document-traceability.md)、[测试架构与门禁](docs/standards/testing.md)、[跨项目协作规范](docs/standards/cross-project-collaboration.md)（已确认：文档治理规范、本地开发环境、代码与文档追溯、跨项目协作规范、ADR 治理；其余暂定） |
-| 本地开发环境 | [docs/standards/local-dev.md](docs/standards/local-dev.md)：机器标识、环境依赖、构建命令与开发约定 |
-| 开发/联调步骤 | [docs/guides/](docs/guides/index.md) |
-| 未关闭任务与路线图 | [docs/trackers/](docs/trackers/index.md)，任务台账 [todo.md](docs/trackers/todo.md) |
-| 长期决策（ADR） | [docs/adr/](docs/adr/index.md) |
+| 项目状态快照 | [docs/trackers/project-status.md](docs/trackers/project-status.md) |
+| 文档治理 | [docs/standards/doc-governance.md](docs/standards/doc-governance.md) |
+| ADR 治理 | [docs/standards/adr-governance.md](docs/standards/adr-governance.md) |
+| 任务生命周期 | [docs/standards/task-lifecycle.md](docs/standards/task-lifecycle.md) |
+| 测试门禁 | [docs/standards/testing.md](docs/standards/testing.md) |
+| 跨项目协作 | [docs/standards/cross-project-collaboration.md](docs/standards/cross-project-collaboration.md) |
+| 代码-文档追溯 | [docs/standards/code-document-traceability.md](docs/standards/code-document-traceability.md) |
+| 代码规范 | [docs/standards/code-standards.md](docs/standards/code-standards.md) |
+| 临时目录与数据存储 | [docs/standards/storage-conventions.md](docs/standards/storage-conventions.md) |
+| 本地环境 | [docs/standards/local-dev.md](docs/standards/local-dev.md) |
+| 模块映射 | [docs/architecture/code-map.md](docs/architecture/code-map.md) |
+| 系统结构与服务边界 | [docs/architecture/index.md](docs/architecture/index.md) |
+| 服务契约与相对确定设计 | [docs/design/index.md](docs/design/index.md) |
+| 开发/联调门禁 | [docs/guides/development.md](docs/guides/development.md) |
+| 未关闭任务与路线图 | [docs/trackers/index.md](docs/trackers/index.md) |
+| 长期决策（ADR） | [docs/adr/index.md](docs/adr/index.md) |
 | 全部入口汇总 | [docs/index.md](docs/index.md) |
 
-## 协作流程
+## 任务路由
 
-每项目独立走：**头脑风暴 → 设计文档 → 计划 → 实现（TDD）→ 验证 → 代码评审**。
+| 任务 | 首查实现 | 当前文档 | 定向测试 |
+| --- | --- | --- | --- |
+| 配置中心、密钥与 CLI | `backend/qed_engine/config.py`、`cli.py`、`api/control.py` | [docs/design/project-configuration.md](docs/design/project-configuration.md)、[api-contracts.md](docs/architecture/api-contracts.md) | `tests/test_config.py`、`tests/test_cli.py`、`tests/test_api.py` |
+| 服务启停托管与监控诊断（8900 控制域） | `api/control.py`、`services/service_manager.py`、`log_viewer.py`、`monitor.py` | [docs/design/service-hosting.md](docs/design/service-hosting.md) | `tests/test_api.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py` |
+| 数据域·QED-Tracker 适配（8901） | `api/tracker.py`、`clients/tracker_client.py` | [api-contracts.md](docs/architecture/api-contracts.md)、[cross-project-contracts.md](docs/design/cross-project-contracts.md) | `tests/test_api.py`、`tests/test_tracker_client.py` |
+| 数据域·领域探索 | `api/domain_explore.py`、`api/explore.py`、`services/explore_sessions.py`、`shared_tables.py` | [docs/design/downloads-flow.md](docs/design/downloads-flow.md) | `tests/test_domain_explore.py`、`tests/test_explore_sessions.py` |
+| 数据域·Axiom-Flow 适配（8902） | `api/axiom.py`、`clients/axiom_client.py` | [api-contracts.md](docs/architecture/api-contracts.md) | `tests/test_api.py` |
+| LLM 网关与本地模型 | `services/llm/` | [llm-gateway.md](docs/design/llm-gateway.md)、[local-model-management.md](docs/design/local-model-management.md) | `tests/test_llm_gateway.py`、`tests/test_llm_clients.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py` |
+| 前端（8903） | `web-ui/src/` | [frontend-architecture.md](docs/architecture/frontend-architecture.md)、[downloads-ui.md](docs/design/downloads-ui.md) | `web-ui/src/**/*.test.tsx`（vitest）、`tests/test_web.py` |
+| 代码-设计-测试映射、模块定位 | 全受管模块（映射唯一事实源） | [code-map.md](docs/architecture/code-map.md) | `tests/contract/test_code_document_mapping.py` |
+| 项目状态与主线 | —（状态快照） | [docs/trackers/project-status.md](docs/trackers/project-status.md) | — |
+| 文档治理与契约 | `docs/`、`tests/contract/` | [docs/standards/doc-governance.md](docs/standards/doc-governance.md) | `tests/contract/` |
 
-- 技能清单（精简保留）：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`dispatching-parallel-agents`、`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`requesting-code-review`、`receiving-code-review`。
-- 已移出禁用：`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
+## 强制约束
+
+- 不得隐式扫描、移动或删除用户数据根（`dataset/`）内的 PDF；测试只用临时目录，禁止读写真实数据根。
+- 来源适配器只搜索和解析下载地址；文件写入、重试、校验、哈希与去重必须经过通用服务。
+- 默认测试不访问公网、不要求 API key、不调用外部模型、不写运行数据库；TLS 校验默认开启，仅用户显式配置可关闭。
+- 密钥（`API_KEY` 等）只存 `.env`，不下发、不进入日志 / 异常 / 响应。
+- 前端唯一入口为 8900（ADR 0007），不直连 8901 / 8902。
+- 本仓库不包含子项目代码；在 Axiom-Flow / QED-Tracker 工作区只读 + 写文档，不产生代码改动、不执行其 git 操作。
+- 细则见 [代码规范](docs/standards/code-standards.md) 与 [临时目录与数据存储规范](docs/standards/storage-conventions.md)。
+
+## 协作流程（六步 + 技能）
+
+每项目独立走六步：**进场读必读 → 定级 → 立项 → 实现（TDD）→ 验证 → 收尾**；流程正文见[开发指南·开发流程（六步）](docs/guides/development.md)。
+
+- 技能清单（全局 `~/.config/opencode/skills/`）：
+  - 项目本地：`qed-intake`（进场/定级/立项）、`qed-plan`（计划契约）、`qed-implement`（code-map + TDD）、`qed-closeout`（收尾/台账/文档同步）。
+  - 通用保留：`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`dispatching-parallel-agents`、`requesting-code-review`、`receiving-code-review`。
+  - 已停用：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`using-superpowers`、`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
+- **工具链**：默认开发 agent 提示与技能在全局 `~/.config/opencode/`（见其 `README.md`）；技能只做薄触发与指路，正文以本仓库 docs 为准。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
 - **跨项目协作**：规则见[跨项目协作规范](docs/standards/cross-project-collaboration.md)。
   核心要点：① 根仓库 agent 在子项目工作区只读+写文档，不得产生代码改动；② 子项目 git
@@ -78,7 +124,7 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 ## 变更分级与边界（AI 开发守则）
 
 本项目以**文档控制代码**：先文档后实现，实现完成后文档与代码同步收口。任何改动先按下表
-定级，再按[开发指南·AI 开发工作流程](docs/guides/development.md)六步模式执行；本节只保留
+定级，再按[开发指南·开发流程（六步）](docs/guides/development.md)六步模式执行；本节只保留
 边界判据，流程细则与治理正文见 development.md 与 [文档治理规范](docs/standards/doc-governance.md)。
 
 | 变更对象 | 定级 | 前置动作 |
@@ -87,13 +133,12 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 | `docs/` 目录结构（新建/删除/移动目录或治理类目，判例：曾出现的 `docs/superpowers/`） | **阻止项** | 默认阻止；仅人类明确同意且建 todo + `plans/` 改造计划后方可执行 |
 | `docs/design/` 大变更（新增/重写设计契约） | 大修改 | todo + `plans/` 计划，评审确认后晋升固定文档 |
 | `docs/design/` 小修改或 bug（错漏修正、行为与设计不符的小修） | 小修改 | 登记[设计类小修与 bug 修复台账](docs/plans/design-bugfix-log.md)（无则新建）并补充设计文档，不单独立项 |
+| `standards/` 实质规则变更（新增/转正标准、改变强制规则） | 先立 ADR | 按[文档治理规范·变更与取代](docs/standards/doc-governance.md)新增 ADR，再改标准与契约白名单 |
 | 一般小改（措辞、链接、错别字、无行为修正） | 豁免 | 差异 + 验证记录承接，不入 todo |
 
 - **未定级不实施**：无法判定属于哪级时询问用户，不擅自降级或跳过前置动作。
-- 任务分类器（[任务生命周期](docs/standards/task-lifecycle.md)，暂定）的 A/B/C/D 分类与
+- 任务分类器（[任务生命周期](docs/standards/task-lifecycle.md)）的 A/B/C/D 分类与
   准入规则可随守则演进重构，调整走 `plans/` 计划（ADR 0012）。
-- `standards/` 实质规则变更仍按[文档治理规范·变更与取代](docs/standards/doc-governance.md)
-  先立 ADR。
 
 ## 执行规范
 
@@ -105,7 +150,15 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 修改文档或执行 todo 任务时，必须遵守 [文档治理规范](docs/standards/doc-governance.md) 中的规定，包括文档生命周期、确认状态和归档规则。
 
-## 完成检查
+## 分支与完成门禁
+
+- 本仓库不定义额外分支规则；分支与提交遵循用户指令与各子项目自身 `AGENTS.md`。
+- **写操作纪律**：`git commit` / `git push` / `git reset` / `git clean` 与文件删除 / 移动
+  仅在用户明确要求时执行，agent 不主动触发；执行前展示 `git status` / `git diff` 或待操作
+  文件清单供用户确认。提交保持单一目的。权限层以 `ask` 拦截，逐次人工批准。
+- 完成前运行[开发指南](docs/guides/development.md)中的完整门禁并展示输出。
+
+### 完成检查
 
 1. 不把子项目文件或 dataset 数据加入本仓库索引。
 2. **未在 Axiom-Flow / QED-Tracker 工作区产生代码改动**（文档修改与任务登记除外；若产生，

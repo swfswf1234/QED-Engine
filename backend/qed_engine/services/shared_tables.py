@@ -8,8 +8,7 @@ exploration_stage）；离线或 8901 课程端点暂不支持该字段时（PAT
 QED_DB_PASSWORD 未配置（如测试环境）时直写静默跳过（返回 False，记日志），
 不阻塞会话主流程；状态回退（未开始）同语义。
 
-设计关联（DesignRef）：docs/plans/2026-08-27-exploration-download-flow.md、
-docs/plans/2026-09-02-req067-shared-tables-optimization.md
+设计关联（DesignRef）：docs/design/downloads-flow.md
 实现状态：Current
 关联测试：tests/test_explore_sessions.py
 """
