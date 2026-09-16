@@ -2,11 +2,11 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-08-20
+最后更新：2026-09-14
 确认状态：已确认
 关联代码：服务各自代码见服务架构文档（前端/后端见本目录，Axiom-Flow/QED-Tracker 见各自仓库）
 关联测试：`tests/contract/test_architecture_documents.py`
-关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0003-shared-qed-database-independence.md`、`../history/adr/v0.1/0004-personal-library-positioning.md`、`../history/adr/v0.1/0005-control-center-service-hosting.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`
+关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0003-shared-qed-database-independence.md`、`../history/adr/v0.1/0004-personal-library-positioning.md`、`../history/adr/v0.1/0005-control-center-service-hosting.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`、`../adr/0014-parsing-ownership-and-model-boundary.md`
 
 ## 服务视图
 
@@ -21,20 +21,29 @@ flowchart LR
         CC[QED-Engine 后端 8900<br/>控制域 + 数据域·Tracker + 数据域·Axiom]
     end
     subgraph AF[Axiom-Flow 子仓库（独立 git）]
-        A[API + Worker 8902]
+        A[API + 解析管线 8902]
     end
     subgraph TR[QED-Tracker 子仓库（独立 git）]
         T[下载/校验/登记服务 8901]
+    end
+    subgraph MD[本地模型服务]
+        M[OCR 引擎<br/>MinerU / PaddleOCR-VL]
     end
 
     FE -->|唯一入口：配置/数据/服务域| CC
     CC -->|数据域适配 8901| T
     CC -->|服务托管与探测| T
-    CC -->|服务托管与探测| A
-    T -->|原始 PDF| R[(dataset/qed-tracker/raw)]
-    A -->|解析产物| P[(dataset/axiom-flow/parsed)]
+    CC -->|数据域适配 8902| A
+    CC -->|模型生命周期 /models| M
+    A -->|引擎适配器直连解析| M
+    T -->|原始 PDF| R[(dataset/raw)]
+    A -->|解析产物| P[(dataset/parsed)]
     P --> FE
 ```
+
+> 2026-09-14（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）：解析管线归
+> Axiom-Flow 并直连本地模型服务；8900 只负责模型生命周期与探针。dataset 顶层为
+> `raw/`（原始）+ `parsed/`（解析产物）+ `tmp/`（临时）。
 
 ## 服务职责与端口
 
@@ -42,7 +51,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903（已运行） | 学习中心 + 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理）；**只连 8900**（ADR 0007） | [前端架构](frontend-architecture.md) |
 | QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900（已运行） | **三域组织**：控制域（配置五端点 + /services 启停托管 + 监控诊断 + LLM 网关）+ 数据域·QED-Tracker 透传 + 数据域·Axiom-Flow 透传；密钥不下发 | [后端架构](backend-architecture.md) |
-| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已迁移，8000 兼容保留，ADR 0002） | PDF 解析、OCR、质量审阅与知识发布；只保留 API + Worker | Axiom-Flow `docs/architecture/` |
+| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已迁移，8000 兼容保留，ADR 0002） | 完整解析管线（PDF ingest、引擎适配器、归一化、编排、产物落盘）+ 对照数据供给 + 人工编辑落库；模型服务直连（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） | Axiom-Flow `docs/architecture/` |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901（已服务化） | 教材/习题集/论文的发现、下载、校验、登记；写操作后台任务 + 轮询 | QED-Tracker `docs/architecture/` |
 
 端口规划见 [ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)；前端唯一入口与 8900
@@ -81,5 +90,6 @@ flowchart LR
   8901/8902 契约事实源在各子项目仓库 `docs/architecture/`。
 - **8900 → 8901/8902/8903（服务托管）**：/services 启停托管经生命周期脚本黑盒管理
   （[服务控制设计](../design/service-hosting.md)）。
-- **dataset 数据流**：QED-Tracker 产出原始 PDF（dataset/qed-tracker/raw）→ Axiom-Flow
-  产出解析产物（dataset/axiom-flow/parsed）→ 前端消费（经 8900 代理）。
+- **dataset 数据流**：QED-Tracker 产出原始 PDF（`dataset/raw/`）→ Axiom-Flow 产出解析产物
+  （`dataset/parsed/<domain>/<course>/<book_id>/`）→ 前端消费（经 8900 代理）；解析临时文件
+  在 `dataset/tmp/`。

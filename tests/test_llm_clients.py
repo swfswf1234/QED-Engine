@@ -1,5 +1,5 @@
 """
-模块职责：LLM 供应商客户端契约测试：多厂商文字/视觉（OpenAI 兼容）、LM Studio、MinerU。
+模块职责：LLM 供应商客户端契约测试：多厂商文字/视觉（OpenAI 兼容）、Qwen 本地、MinerU。
 设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：backend/qed_engine/services/llm/clients.py
@@ -43,8 +43,8 @@ def test_provider_text_chat_http_error():
             clients.provider_text_chat(api_key="sk", model="m", messages=[], client=client)
 
 
-def test_lmstudio_chat_uses_first_loaded_model(monkeypatch):
-    """LM Studio：model 为空时探测 /v1/models 取第一个已加载模型。"""
+def test_qwen_chat_uses_first_loaded_model(monkeypatch):
+    """Qwen 本地：model 为空时探测 /v1/models 取第一个已加载模型。"""
 
     calls = []
 
@@ -55,7 +55,7 @@ def test_lmstudio_chat_uses_first_loaded_model(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": "本地回答"}}]})
 
     with _mock_client(handler) as client:
-        reply = clients.lmstudio_chat(
+        reply = clients.qwen_chat(
             base_url="http://127.0.0.1:5001/v1", messages=[{"role": "user", "content": "hi"}],
             client=client,
         )
@@ -131,8 +131,8 @@ def test_provider_text_chat_omits_max_tokens_when_none():
     assert "max_tokens" not in bodies[0]
 
 
-def test_lmstudio_chat_sends_max_tokens():
-    """LM Studio：max_tokens 非 None 时写入请求体（显式指定 model 免探测）。"""
+def test_qwen_chat_sends_max_tokens():
+    """Qwen 本地：max_tokens 非 None 时写入请求体（显式指定 model 免探测）。"""
     bodies = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -140,7 +140,7 @@ def test_lmstudio_chat_sends_max_tokens():
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
     with _mock_client(handler) as client:
-        clients.lmstudio_chat(
+        clients.qwen_chat(
             base_url="http://127.0.0.1:5001/v1", messages=[{"role": "user", "content": "hi"}],
             model="qwen3-8b", client=client, max_tokens=512,
         )

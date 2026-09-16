@@ -10,7 +10,7 @@
 关联文档：[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
 [chunking-notes.md](../learning/chunking-notes.md)（切分策略）、
 [rag-notes.md](../learning/rag-notes.md)（召回链路）、
-[Axiom-Flow af-books-sync 设计]（解析产物与书目基座）
+[Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
 
 > 登记说明（2026-08-18 文档解析管理轮）：用户裁决「原始文档对照」删除、改为「探索」——
 > 探索 = 文档切分 + 文档召回，通过对话方式进行，目的是整理知识；理论顺序为文档解析管理
@@ -75,7 +75,7 @@
 | 文档解析管理闭环（af_books 同步 + 块级对照 + 判定） | 本轮实施 | 书目基座与块级渲染复用 |
 | 解析产物质量达标（公式可渲染率 ≥90%，V2-008） | Axiom-Flow 验收 | 召回质量依赖产物质量 |
 | 检索链路选型（向量库 Milvus 等，V2-009 方向） | 探索项 | 阶段一可用 BM25/关键词简易召回 |
-| LLM 网关（对话模型接入） | 学习中心第二轮 | 对话问答依赖，可用本地 LM Studio 先行 |
+| LLM 网关（对话模型接入） | 学习中心第二轮 | 对话问答依赖，可用本地 Qwen 先行 |
 
 实施顺序建议（各阶段独立立轮）：
 

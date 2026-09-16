@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-11
+最后更新：2026-09-16
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -16,15 +16,25 @@
 
 ## 活跃计划
 
+### ARCH-023 模型注册表与三接口统一轮（2026-09-16）
+- PLAN-046（模型注册表与三接口统一轮），状态见任务台账
+
 ### 现状承载（2026-09-10）
-- REQ-070-PARS（文档解析管理现状），状态见任务台账
 - REQ-070-LEARN（学习功能现状），状态见任务台账
+
+### ARCH-020 解析联调轮（2026-09-14）
+- PLAN-044（文档解析管理·与 Axiom-Flow 交互全链路），状态见任务台账
 
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
 
 ## 已归档计划（2026-09）
+- [本地模型部署轮（local-model-deployment）](../history/plans/2026-09/2026-09-14-local-model-deployment.md)（PLAN-045，Achieved 2026-09-14：MinerU 去模型化镜像重建 + 卷挂载 + mineru.json 路径校准 + 探针端点校准 + 8900 集成 + 真实解析冒烟；事实并入 [design/local-model-management.md](../design/local-model-management.md) 与 `scripts/image-model/README.md`）
+- [文档解析管理·前端设计（parsing-ui）](../history/plans/2026-09/2026-09-14-parsing-management-frontend-design.md)（PLAN-043，Achieved 2026-09-14：设计定稿并经用户评审确认，晋升 [design/parsing-ui.md](../design/parsing-ui.md)；实现归 ARCH-020-D，后端全链路归 PLAN-044）
+- [本地模型管理整理轮（local-model-management-reorg）](../history/plans/2026-09/2026-09-14-local-model-management-reorg.md)（PLAN-042，Achieved 2026-09-14：TEXT_SCRIPT 硬伤修复 + Qwen 切 llama.cpp + 槽位目录/manifest + 全量去 LM Studio + MinerU 清理核查；设计事实并入 [design/local-model-management.md](../design/local-model-management.md)，部署另起 PLAN-045）
+- [文档解析管理界面优化（ARCH-020 前端部分）](../history/plans/2026-09/2026-09-14-arch020-parsing-ui-redesign.md)（Superseded，2026-09-14 随 ARCH-020 重构归档：内容并入 [design/parsing-ui.md](../design/parsing-ui.md)）
+- [文档解析管理现状（Parsing）](../history/plans/2026-09/2026-09-10-parsing-management-current-state.md)（REQ-070-PARS，Achieved 2026-09-14：现状事实并入 [design/parsing-ui.md](../design/parsing-ui.md) 与 PLAN-044 后退役归档）
 - [REQ-032 meta/ JSON 退役计划](../history/plans/2026-09/2026-09-01-req032-meta-json-retirement.md)（REQ-032，已归档：Phase 1+2 完成，Phase 3 暂缓）
 - [文档探索+下载全流程计划（exploration-download-flow）](../history/plans/2026-09/2026-08-27-exploration-download-flow.md)（PLAN-022，Achieved 2026-09-11：B1-B5/F1-F5 全量执行，状态机/交互事实源迁 [design/downloads-flow.md](../design/downloads-flow.md)；随 ARCH-019 收尾归档）
 - [文档下载管理页面交互规范（downloads-interaction-spec）](../history/plans/2026-09/2026-09-10-downloads-interaction-spec.md)（PLAN-037，Achieved 2026-09-11：课程详情弹窗状态机 + 书目详情确认下载链路；实现落地，随 ARCH-019 收尾归档）

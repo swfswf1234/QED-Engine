@@ -1,16 +1,17 @@
 /**
  * 文档解析管理 store（左树右对照 + 书目同步 + 块判定）
- * - 数据源：/books（af_books：课程归属 + 解析进度）、/books/sync（同步已验证书目）、
- *   /books/{id}/pages/{no}（单页 blocks）、/books/{id}/pages/{no}/blocks/{index}/review（判定）
- * - 独立降级：8900 不可达 → 整体错误；8901/8902 离线（503）→ 视图级降级提示，互不拖累
- * - 进度推导：af_books 带 pages_done 优先；否则由 manifest 推导（契约冻结前兼容）
+ * - 数据源：/parsing/tree（左侧树聚合：8900 共享表领域课程 + 8902 书目）、
+ *   /books/sync（同步已验证书目）、/books/{id}/pages/{no}（单页 blocks）、
+ *   /books/{id}/pages/{no}/blocks/{index}/review（判定）
+ * - 独立降级：8900 不可达 → 整体错误；8902 离线（503）→ 视图级降级提示，互不拖累
+ * - ARCH-020：左侧树数据源从 /parsing/tree 获取，8902 离线时仍显示领域→课程（无书目）
  */
 import { create } from 'zustand';
 import {
-  getBookManifest, getBookPage, listBooks, putBlockReview, syncBooks,
+  getBookManifest, getBookPage, getParsingTree, putBlockReview, syncBooks,
 } from '../api/axiom';
 import { ApiError } from '../api/client';
-import type { Block, BlockReview, BookMeta, ManifestEntry, PageData } from '../api/axiom';
+import type { Block, BlockReview, BookMeta, ManifestEntry, PageData, ParsingTreeNode } from '../api/axiom';
 
 /** 从 manifest 推导已解析页数（p<编号>.md 计数；af_books 带 pages_done 后切换上游字段） */
 export function countParsedPages(manifest: ManifestEntry[]): number {
@@ -24,16 +25,8 @@ export interface ParsingBook extends BookMeta {
   progressUnknown?: boolean;
 }
 
-/** 左树节点：领域 → 课程 → 书目 */
-export interface ParsingTreeNode {
-  key: string;
-  type: 'domain' | 'course' | 'book';
-  title: string;
-  domainId?: string;
-  courseId?: string;
-  book?: ParsingBook;
-  children?: ParsingTreeNode[];
-}
+// Re-export ParsingTreeNode from api/axiom
+export type { ParsingTreeNode } from '../api/axiom';
 
 /** 领域/课程兜底名（af_books 冗余字段缺失时用） */
 export function fallbackName(key: string, label: string): string {
@@ -89,6 +82,11 @@ export function buildParsingTree(books: ParsingBook[]): ParsingTreeNode[] {
 }
 
 export interface ParsingStore {
+  /** 左侧树数据（ARCH-020：从 /parsing/tree 获取） */
+  tree: ParsingTreeNode[];
+  treeLoading: boolean;
+  treeError: string | null;
+  /** 书目列表（兼容旧逻辑） */
   books: ParsingBook[];
   loading: boolean;
   /** 整体错误（8900 不可达） */
@@ -110,6 +108,8 @@ export interface ParsingStore {
   /** 块判定缓存：`${book}:${page}:${index}` → 判定 */
   blockReviews: Record<string, BlockReview>;
   reviewSubmitting: boolean;
+  /** 获取左侧树（ARCH-020 新增） */
+  fetchTree: () => Promise<void>;
   fetchBooks: (syncFirst?: boolean) => Promise<void>;
   openCompare: (bookId: string) => Promise<void>;
   loadPage: (bookId: string, pageNo: number) => Promise<void>;
@@ -123,6 +123,9 @@ function errText(e: unknown): string {
 }
 
 export const useParsingStore = create<ParsingStore>((set, get) => ({
+  tree: [],
+  treeLoading: false,
+  treeError: null,
   books: [],
   loading: false,
   error: null,
@@ -140,7 +143,45 @@ export const useParsingStore = create<ParsingStore>((set, get) => ({
   blockReviews: {},
   reviewSubmitting: false,
 
+  fetchTree: async () => {
+    if (get().treeLoading) return;
+    set({ treeLoading: true, treeError: null });
+    const [rawTree, err] = await getParsingTree()
+      .then((t) => [t, null] as const)
+      .catch((e) => [null, e] as const);
+    // 8900 不可达 → 整体错误；8902 离线 → 数据源级降级（树仍返回领域→课程，书目为空）
+    const isUpstream = err instanceof ApiError && err.kind === 'http';
+    // 从树中提取所有书目（用于 openCompare 等操作），同时转换类型
+    const books: ParsingBook[] = [];
+    const convertTree = (nodes: ParsingTreeNode[]): ParsingTreeNode[] => {
+      return nodes.map((node) => {
+        if (node.type === 'book' && node.book) {
+          const book: ParsingBook = {
+            ...node.book,
+            pages_done: node.book.pages_done ?? 0,
+          };
+          books.push(book);
+          return { ...node, book };
+        }
+        if (node.children) {
+          return { ...node, children: convertTree(node.children) };
+        }
+        return node;
+      });
+    };
+    const tree = rawTree ? convertTree(rawTree) : [];
+    set({
+      tree,
+      books,
+      treeError: err && !isUpstream ? errText(err) : null,
+      error: err && !isUpstream ? errText(err) : null,
+      dataError: err ? errText(err) : null,
+    });
+    set({ treeLoading: false });
+  },
+
   fetchBooks: async (syncFirst = true) => {
+    // ARCH-020：fetchBooks 保留兼容，但优先使用 fetchTree
     if (get().loading) return;
     set({ loading: true, error: null, dataError: null });
     // 同步已验证书目（前端触发，REQ-042 用户裁决）——失败不阻塞列表展示
@@ -156,34 +197,8 @@ export const useParsingStore = create<ParsingStore>((set, get) => ({
         lastSyncedAt: sync ? new Date().toISOString() : get().lastSyncedAt,
       });
     }
-    const [books, err] = await listBooks()
-      .then((b) => [b, null] as const)
-      .catch((e) => [null, e] as const);
-    // 8900 不可达（offline/timeout）→ 整体错误；8902 离线（503）→ 数据源级降级
-    const isUpstream = err instanceof ApiError && err.kind === 'http';
-    // 每本书拉 manifest 推导已解析页数（书目少，N+1 可接受；af_books 带 pages_done 后切换）
-    const withProgress = books
-      ? await Promise.all(
-          books.map(async (b): Promise<ParsingBook> => {
-            if (typeof b.pages_done === 'number') {
-              return { ...b, pages_done: b.pages_done, progressUnknown: false };
-            }
-            const [manifest, mErr] = await getBookManifest(b.book_id)
-              .then((m) => [m, null] as const)
-              .catch((e) => [null, e] as const);
-            return {
-              ...b,
-              pages_done: manifest ? countParsedPages(manifest) : 0,
-              progressUnknown: !!mErr,
-            };
-          }),
-        )
-      : get().books;
-    set({
-      books: withProgress,
-      error: err && !isUpstream ? errText(err) : null,
-      dataError: err ? errText(err) : null,
-    });
+    // ARCH-020：直接调用 fetchTree 替代旧的 listBooks 逻辑
+    await get().fetchTree();
     set({ loading: false });
   },
 

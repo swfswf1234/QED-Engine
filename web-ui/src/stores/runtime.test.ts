@@ -57,7 +57,7 @@ describe('useRuntimeStore', () => {
   beforeEach(() => {
     useRuntimeStore.setState({
       services: [], dbStatus: null, loading: false, error: null, dbError: null,
-      gpu: null, gpuError: null, lmstudio: null, lmstudioError: null, mineru: null, mineruError: null,
+      gpu: null, gpuError: null, qwen: null, qwenError: null, mineru: null, mineruError: null,
       operating: null, testing: null, keys: null,
     });
   });
@@ -71,7 +71,7 @@ describe('useRuntimeStore', () => {
     expect(s.services).toEqual([]);
     expect(s.dbStatus).toBeNull();
     expect(s.gpu).toBeNull();
-    expect(s.lmstudio).toBeNull();
+    expect(s.qwen).toBeNull();
     expect(s.mineru).toBeNull();
     expect(s.error).toBeNull();
     expect(s.loading).toBe(false);

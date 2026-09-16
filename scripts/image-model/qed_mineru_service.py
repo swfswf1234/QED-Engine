@@ -1,7 +1,7 @@
 """本地图像模型（MinerU 容器，WSL）生命周期管理：start / stop / restart / status。
 
 经 PowerShell 编排脚本（scripts/image-model/infra-*.ps1，WSL Docker Compose，端口 8002）
-执行启停；健康探测：GET http://127.0.0.1:8002/api/v1/health（QED_MINERU_URL 可覆盖）。
+执行启停；健康探测：GET http://127.0.0.1:8002/health（QED_MINERU_URL 可覆盖）。
 由 services/llm/model_manager.py 调用（资源互斥编排），也可手动执行。
 退出码：0 成功/幂等；1 运行失败；2 参数错误（argparse）。
 """
@@ -48,7 +48,7 @@ def _health_ok(port: int) -> bool:
     # 默认端口 8002 时尊重 QED_MINERU_URL（完整地址含 host）；显式其它端口按 127.0.0.1 构造
     base = default_base_url() if port == 8002 else _base_from_port(port)
     try:
-        with urllib.request.urlopen(base + "/api/v1/health", timeout=1.0) as resp:
+        with urllib.request.urlopen(base + "/health", timeout=1.0) as resp:
             return resp.status == 200
     except (OSError, urllib.error.URLError):
         return False
@@ -72,7 +72,7 @@ def _wait_healthy(port: int, timeout: float) -> int:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if _health_ok(port):
-            print(f"healthy: http://127.0.0.1:{port}/api/v1/health")
+            print(f"healthy: http://127.0.0.1:{port}/health")
             return 0
         time.sleep(HEALTH_INTERVAL_SECONDS)
     print(f"health not OK within {timeout:g}s")
@@ -125,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = subparsers.add_parser("start", help="启动 MinerU 容器（infra-up.ps1）")
     start.add_argument("--wait", nargs="?", const=HEALTH_TIMEOUT_SECONDS, type=float, default=0.0,
-                       help="等待 /api/v1/health 就绪，默认 120s")
+                       help="等待 /health 就绪，默认 120s")
     start.set_defaults(func=cmd_start)
 
     stop = subparsers.add_parser("stop", help="停止容器（infra-down.ps1）")

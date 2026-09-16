@@ -1,4 +1,4 @@
-"""LLM 供应商客户端：多厂商（qwen/deepseek/glm 注册表路由）、LM Studio（OpenAI 兼容）、MinerU。
+"""LLM 供应商客户端：多厂商（qwen/deepseek/glm 注册表路由）、Qwen（OpenAI 兼容）、MinerU。
 
 全部函数接受可注入 httpx.Client（测试用 MockTransport）；网络/HTTP 异常映射为
 RuntimeError（中文原因 + 状态码），由 gateway 层捕获并记录。
@@ -107,7 +107,7 @@ def provider_text_chat(
             http.close()
 
 
-def lmstudio_chat(
+def qwen_chat(
     base_url: str,
     messages: list[dict],
     client: httpx.Client | None = None,
@@ -115,7 +115,7 @@ def lmstudio_chat(
     timeout: float = DEFAULT_TIMEOUT,
     max_tokens: int | None = None,
 ) -> str:
-    """LM Studio 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。
+    """Qwen 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。
 
     max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
     """
@@ -125,10 +125,10 @@ def lmstudio_chat(
         if not model:
             response = http.get(f"{base_url.rstrip('/')}/models")
             if response.status_code != 200:
-                raise RuntimeError(f"LM Studio 模型列表获取失败：HTTP {response.status_code}")
+                raise RuntimeError(f"Qwen 模型列表获取失败：HTTP {response.status_code}")
             models = [item.get("id", "") for item in response.json().get("data", []) if isinstance(item, dict)]
             if not models:
-                raise RuntimeError("LM Studio 未加载任何模型（请先在 LM Studio 加载 qwen 模型）")
+                raise RuntimeError("Qwen 未加载任何模型（请先加载 qwen 模型）")
             model = models[0]
         payload: dict = {"model": model, "messages": messages}
         if max_tokens is not None:

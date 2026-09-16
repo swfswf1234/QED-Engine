@@ -32,7 +32,7 @@ class KeysResponse(BaseModel):
 
     provider: str
     configured: bool
-    # 运行模式：api（云端厂商）/ local（本地 LM Studio / MinerU）；前端依赖卡模式感知用
+    # 运行模式：api（云端厂商）/ local（本地 Qwen / MinerU）；前端依赖卡模式感知用
     mode: str = "api"
 
 
@@ -65,7 +65,7 @@ class GpuStatus(BaseModel):
     reason: str = ""
 
 
-class LmStudioStatus(BaseModel):
+class QwenStatus(BaseModel):
     reachable: bool
     base_url: str = ""
     models: list[str] = []

@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-08-20
+最后更新：2026-09-14
 确认状态：暂定
 关联代码：`web-ui/`（唯一消费方）、`scripts/qed_engine_service.py`（生命周期脚本）；
 后端三域模块（`api/`、`services/`、`clients/`）受管清单见 [code-map.md](code-map.md)
@@ -10,7 +10,8 @@
 `tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_llm_*.py`
 关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（8900 网关化）、
 [ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)（控制中心托管）、
-[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端独立演进）
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（前端独立演进）、
+[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属）
 
 ## 定位与边界
 
@@ -22,9 +23,14 @@
 
 | 域 | 组织 | 职责 |
 | --- | --- | --- |
-| 控制域 | `api/control.py` + `services/*` | **QED-Engine 自身域**：配置语义代理（health/models/keys/database 启动快照）、启动自检（LLM/MySQL 启动时各探测一次）、服务域 /services 启停托管、监控诊断（/logs、/monitor/gpu/lmstudio/mineru、/self-restart）、LLM 网关（/llm/*、/llm/calls、/database/test）与未来问答 |
+| 控制域 | `api/control.py` + `services/*` | **QED-Engine 自身域**：配置语义代理（health/models/keys/database 启动快照）、启动自检（LLM/MySQL 启动时各探测一次）、服务域 /services 启停托管、监控诊断（/logs、/monitor/gpu/qwen/mineru、/self-restart）、LLM 网关（/llm/*、/llm/calls、/database/test）与未来问答 |
 | 数据域·QED-Tracker | `api/tracker.py` + `clients/tracker_client.py` | 下载/书目对接：catalogs、五层（qt_knowledge/qt_books/qt_sources）、tasks 语义透传 8901 |
-| 数据域·Axiom-Flow | `api/axiom.py` + `clients/axiom_client.py` | 文档解析对接：books/pages/manifest/parse-jobs 透传 8902；图片代理 /books/{id}/pages/{no}/image |
+| 数据域·Axiom-Flow | `api/axiom.py` + `clients/axiom_client.py` | 文档解析对接：books/pages/manifest/parse-jobs/parsing-tree 透传 8902；图片代理 /books/{id}/pages/{no}/image。**解析管线不在 8900**——模型调用归 Axiom-Flow 直连（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
+
+> **ARCH-020 规划（2026-09-14）**：Axiom 数据域将扩展 books CRUD（GET/PATCH/DELETE）、
+> `/books/{id}/ingest`、块编辑 `/blocks/{index}/edit` 与页编辑列表；模型生命周期
+> （`/models/{name}`）按引擎注册（`qwen`/`mineru`，PaddleOCR-VL 预留 `paddleocr`）。
+> 规划端点见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
 
 **并行推进原则**：三域仅通过 `api/main.py` 组装与共享 `config.py`/`schemas.py` 解耦；
 任一域改动不触碰其他域文件；前端独立目录演进，只依赖 8900 对外契约。

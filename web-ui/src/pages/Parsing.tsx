@@ -1,61 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Layout, Progress, Row, Select, Space, Spin, Tag, Tree, Typography } from 'antd';
-import { ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Empty, Layout, Row, Select, Space, Spin, Tag, Typography } from 'antd';
+import { CaretRightFilled, ReloadOutlined } from '@ant-design/icons';
 import BlockView from '../components/BlockView';
 import { describeError } from '../api/client';
-import { useParsingStore, buildParsingTree, type ParsingBook, type ParsingTreeNode } from '../stores/parsing';
+import { useParsingStore, type ParsingTreeNode } from '../stores/parsing';
+import '../downloads.css';
 
 const { Title, Text } = Typography;
 
-const PAGE_STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  pending: { label: '待解析', color: 'default' },
-  parsing: { label: '解析中', color: 'processing' },
-  completed: { label: '已解析', color: 'success' },
-  failed: { label: '失败', color: 'error' },
-};
-
-/** 书目节点 title：书名 + 进度 x/y + 状态标签 + 策略 */
-function BookNodeTitle({ book }: { book: ParsingBook }) {
-  const total = book.page_count ?? 0;
-  const done = book.pages_done ?? 0;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const st = PAGE_STATUS_LABELS[book.parse_status ?? (total > 0 && done >= total ? 'completed' : 'pending')];
-  return (
-    <Space size={6} style={{ width: '100%' }}>
-      <Text style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>
-        {book.display_title || book.title || book.book_id}
-      </Text>
-      <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
-        {done}/{total || '?'} 页
-      </Text>
-      <Progress percent={pct} size="small" style={{ width: 48, flexShrink: 0 }} />
-      <Tag color={st.color} style={{ flexShrink: 0, marginInlineEnd: 0 }}>{st.label}</Tag>
-      <Tag style={{ flexShrink: 0, marginInlineEnd: 0 }}>{book.strategy === 'hybrid' ? '混合兜底' : '本地引擎'}</Tag>
-    </Space>
-  );
-}
-
-/** 树 title（领域/课程/书目） */
-function treeTitle(node: ParsingTreeNode): React.ReactNode {
-  if (node.type === 'book' && node.book) return <BookNodeTitle book={node.book} />;
-  return node.title;
-}
-
 /**
  * 文档解析管理（`#/admin/parsing`，原「解析进度」改名，2026-08-18 重构轮）
- * - 左：书目树（领域 → 课程折叠 → 书目+解析进度；数据源 af_books 冗余课程字段，REQ-042）
+ * - 左：书目树（领域 → 课程折叠 → 书目+解析进度；ARCH-020：数据源从 /parsing/tree 获取）
  * - 右：对照分析（原页图 + 块级渲染；块可选中并判定 一致/不一致 + 备注，落库 af_block_reviews）
- * - 顶部：同步书目（前端触发）+ 刷新；进入界面自动同步一次
- * - 8902 离线（503）→ 降级横幅；内容修改功能暂缓（后续轮）
+ * - 顶部：同步书目（前端触发）+ 刷新；进入界面自动加载树
+ * - 8902 离线（503）→ 降级横幅（领域→课程仍显示，书目为空）；内容修改功能暂缓（后续轮）
  */
 export default function Parsing() {
+  const tree = useParsingStore((s) => s.tree);
+  const treeLoading = useParsingStore((s) => s.treeLoading);
+  const treeError = useParsingStore((s) => s.treeError);
   const books = useParsingStore((s) => s.books);
   const loading = useParsingStore((s) => s.loading);
   const error = useParsingStore((s) => s.error);
   const dataError = useParsingStore((s) => s.dataError);
-  const syncing = useParsingStore((s) => s.syncing);
   const syncMessage = useParsingStore((s) => s.syncMessage);
   const syncError = useParsingStore((s) => s.syncError);
+  const fetchTree = useParsingStore((s) => s.fetchTree);
   const fetchBooks = useParsingStore((s) => s.fetchBooks);
 
   const compareBookId = useParsingStore((s) => s.compareBookId);
@@ -71,11 +41,10 @@ export default function Parsing() {
 
   const [selectedBlock, setSelectedBlock] = useState(-1);
 
+  // ARCH-020：进入界面时加载左侧树
   useEffect(() => {
-    void fetchBooks(true);
-  }, [fetchBooks]);
-
-  const tree = useMemo(() => buildParsingTree(books), [books]);
+    void fetchTree();
+  }, [fetchTree]);
 
   const book = useMemo(
     () => books.find((b) => b.book_id === compareBookId) ?? null,
@@ -128,18 +97,51 @@ export default function Parsing() {
     [blocks, compareBookId, comparePageNo, submitReview],
   );
 
+  // ARCH-020：刷新按钮 - 同步书目后重新加载树
+  const onRefresh = useCallback(async () => {
+    await fetchBooks(true); // 先同步
+    await fetchTree();      // 再重新加载树
+  }, [fetchBooks, fetchTree]);
+
+  // 默认展开：第一个领域 + 其下所有课程
+  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
+  const [expandedCourses, setExpandedCourses] = useState<Set<string>>(new Set());
+  const [treeInited, setTreeInited] = useState(false);
+
+  useEffect(() => {
+    if (!treeInited && tree.length > 0) {
+      const first = tree[0];
+      setExpandedDomains(new Set([first.key]));
+      if (first.children?.length) {
+        setExpandedCourses(new Set(first.children.map((c) => c.key)));
+      }
+      setTreeInited(true);
+    }
+  }, [tree, treeInited]);
+
+  const toggleDomain = useCallback((key: string) => {
+    setExpandedDomains((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleCourse = useCallback((key: string) => {
+    setExpandedCourses((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
   return (
     <Layout.Content style={{ padding: 24, maxWidth: 1600, width: '96%', margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={2} style={{ margin: 0 }}>文档解析管理</Title>
-        <Space>
-          <Button icon={<SyncOutlined />} loading={syncing} onClick={() => void fetchBooks(true)}>
-            同步书目
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchBooks(false)}>
-            刷新
-          </Button>
-        </Space>
+        <Button icon={<ReloadOutlined />} loading={treeLoading || loading} onClick={() => void onRefresh()}>
+          刷新
+        </Button>
       </div>
 
       {error && (
@@ -153,7 +155,7 @@ export default function Parsing() {
           <Alert
             type="warning" showIcon style={{ marginBottom: 16 }}
             message="Axiom-Flow 数据不可达"
-            description={`${describeError(dataError)}。8902 离线时展示降级，不阻塞其他界面。`}
+            description={`${describeError(dataError)}。8902 离线时仍显示领域和课程，书目暂不可用。`}
           />
         )}
         {syncMessage && !dataError && (
@@ -169,33 +171,78 @@ export default function Parsing() {
 
         <Row gutter={16}>
           <Col xs={24} lg={7}>
-            <Card size="small" title="书目（按课程）" styles={{ body: { padding: 8 } }}>
-              {books.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? '加载中…' : dataError ? '8902 离线，暂无书目数据' : '暂无书目（点「同步书目」拉取已验证文档）'} />
-              ) : (
-                <Tree
-                  blockNode
-                  defaultExpandAll
-                  showLine={false}
-                  treeData={tree.map((n) => ({
-                    key: n.key,
-                    title: treeTitle(n),
-                    children: n.children?.map((c) => ({
-                      key: c.key,
-                      title: treeTitle(c),
-                      children: c.children?.map((b) => ({ key: b.key, title: treeTitle(b) })),
-                    })),
-                  }))}
-                  onSelect={(_keys, info) => {
-                    if (info.node && info.node.key) {
-                      const node = findNode(tree, String(info.node.key));
-                      if (node) onSelectBook(node);
-                    }
-                  }}
-                  style={{ background: 'transparent' }}
-                />
-              )}
-            </Card>
+            <div className="dl-tree-wrap" style={{ height: '100%' }}>
+              <div className="dl-tree" role="tree" aria-label="书目目录树">
+                {tree.length === 0 && !treeLoading ? (
+                  <div className="dl-tree-empty">
+                    {treeError ? '加载失败，请点「刷新」重试' : dataError ? '8902 离线，暂无书目数据（领域和课程已加载）' : '暂无课程数据'}
+                  </div>
+                ) : (
+                  tree.map((domain) => {
+                    const dExpanded = expandedDomains.has(domain.key);
+                    return (
+                      <div
+                        key={domain.key}
+                        className={`dl-tree-node dl-tree-domain${dExpanded ? ' expanded' : ''}`}
+                        role="treeitem"
+                      >
+                        <span
+                          className="dl-tree-caret dl-tree-caret-domain"
+                          onClick={() => toggleDomain(domain.key)}
+                        >
+                          <CaretRightFilled rotate={dExpanded ? 90 : 0} />
+                        </span>
+                        <span className="dl-tree-name">{domain.title}</span>
+                        {domain.children?.length ? (
+                          <span className="dl-tree-count">{domain.children.length} 门课程</span>
+                        ) : null}
+                        {dExpanded && domain.children?.length ? (
+                          <div className="dl-tree-children">
+                            {domain.children.map((course) => {
+                              const cExpanded = expandedCourses.has(course.key);
+                              return (
+                                <div
+                                  key={course.key}
+                                  className={`dl-tree-node dl-tree-course${cExpanded ? ' expanded' : ''}`}
+                                >
+                                  <span
+                                    className="dl-tree-caret"
+                                    onClick={() => toggleCourse(course.key)}
+                                  >
+                                    <CaretRightFilled rotate={cExpanded ? 90 : 0} />
+                                  </span>
+                                  <span className="dl-tree-name">{course.title}</span>
+                                  {course.children?.length ? (
+                                    <span className="dl-tree-count">{course.children.length} 本</span>
+                                  ) : null}
+                                  {cExpanded && course.children?.length ? (
+                                    <div className="dl-tree-children">
+                                      {course.children.map((bookNode) => (
+                                        <div
+                                          key={bookNode.key}
+                                          className={`dl-tree-node dl-tree-book${compareBookId && bookNode.book?.book_id === compareBookId ? ' selected' : ''}`}
+                                          role="treeitem"
+                                          onClick={() => bookNode.book && onSelectBook(bookNode)}
+                                        >
+                                          <span className="dl-tree-caret dl-tree-caret-disabled" />
+                                          <span className="dl-tree-name">
+                                            {bookNode.book?.display_title || bookNode.book?.title || bookNode.book?.book_id || bookNode.title}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </Col>
 
           <Col xs={24} lg={17}>
@@ -271,16 +318,4 @@ export default function Parsing() {
         </Row>
     </Layout.Content>
   );
-}
-
-/** 从树中按 key 找节点 */
-function findNode(nodes: ParsingTreeNode[], key: string): ParsingTreeNode | null {
-  for (const n of nodes) {
-    if (n.key === key) return n;
-    if (n.children) {
-      const hit = findNode(n.children, key);
-      if (hit) return hit;
-    }
-  }
-  return null;
 }

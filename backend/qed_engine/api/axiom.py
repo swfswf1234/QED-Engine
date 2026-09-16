@@ -1,11 +1,12 @@
-"""数据域·Axiom-Flow 适配路由：parse-jobs / books / pages / manifest 归 8900 所有。
+"""数据域·Axiom-Flow 适配路由：parse-jobs / books / pages / manifest / parsing/tree 归 8900 所有。
 
 前端（8903）只连 8900（ADR 0007）：解析进度与文档解析管理（左树右对照）数据统一由
 本模块暴露，内部经 clients/axiom_client.py 适配 8902。契约按 Axiom-Flow
 8902-integration-contract.md（V2-007 冻结草案）与 af-books-sync.md（REQ-042 同步开发）：
 GET /books、GET /books/{id}/pages/{no}、GET /books/{id}/manifest、POST /parse-jobs、
 GET /parse-jobs/{id}、POST /books/sync（聚合 8901 verified 书籍转发 8902 upsert）、
-PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（块判定）。
+PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（块判定）、
+GET /parsing/tree（左侧树聚合：8900 共享表领域课程 + 8902 书目）。
 
 错误映射：8902 返回 4xx（400 参数非法 / 404 book/page 不存在）→ 同码透传 detail；
 连接失败/5xx → 503 + 明确提示（前端据此降级显示，独立性铁律：8902 离线不破坏其他界面）。
@@ -199,3 +200,86 @@ def create_parse_job(body: ParseJobCreateBody, request: Request) -> dict:
 def get_parse_job(job_id: str, request: Request) -> dict:
     """任务状态与进度（queued/running/completed/failed）。"""
     return _call(request, _axiom(request).get_parse_job, job_id)
+
+
+# --- 左侧树聚合（文档解析管理，ARCH-020） ---
+
+
+@router.get("/parsing/tree")
+def get_parsing_tree(request: Request) -> list:
+    """左侧树聚合端点：8900 共享表领域课程 + 8902 书目。
+
+    数据源：
+    - 领域→课程结构：8900 共享表 list_domains_with_courses()（独立于8902）
+    - 书目列表：8902 GET /books（af_books，含解析进度）
+
+    降级逻辑：
+    - 8902 离线 → 返回领域→课程（书目为空），前端据此显示降级提示
+    - 8900 共享表为空 → 返回空列表
+    """
+    from qed_engine.services.shared_tables import list_domains_with_courses
+
+    settings = request.app.state.settings
+
+    # 1. 从8900 共享表获取领域→课程结构（独立于8902）
+    domains_with_courses = list_domains_with_courses(settings)
+
+    # 2. 从8902获取书目列表（失败时降级为空）
+    try:
+        books = _axiom(request).list_books()
+    except AxiomError:
+        books = []  # 8902 离线 → 书目为空，仍显示领域→课程
+
+    # 3. 聚合：按 domain_id + course_id 匹配书目到课程
+    return _build_parsing_tree(domains_with_courses, books)
+
+
+def _build_parsing_tree(domains_with_courses: list, books: list) -> list:
+    """构建左侧树结构：领域→课程→书目。"""
+    # 按 domain_id + course_id 索引书目
+    books_by_course: dict[str, list[dict]] = {}
+    for book in books:
+        domain_id = book.get("domain_id", "")
+        course_id = book.get("course_id", "")
+        key = f"{domain_id}:{course_id}"
+        if key not in books_by_course:
+            books_by_course[key] = []
+        books_by_course[key].append(book)
+
+    result = []
+    for domain in domains_with_courses:
+        domain_id = domain.get("domain_id", "")
+        domain_node = {
+            "key": f"domain:{domain_id}",
+            "type": "domain",
+            "title": domain.get("name", ""),
+            "domainId": domain_id,
+            "children": [],
+        }
+
+        for course in domain.get("courses", []):
+            course_id = course.get("course_id", "")
+            course_key = f"{domain_id}:{course_id}"
+            course_books = books_by_course.get(course_key, [])
+
+            course_node = {
+                "key": f"course:{course_key}",
+                "type": "course",
+                "title": course.get("name", ""),
+                "courseId": course_id,
+                "domainId": domain_id,
+                "children": [
+                    {
+                        "key": f"book:{b.get('book_id', '')}",
+                        "type": "book",
+                        "title": b.get("display_title") or b.get("title") or b.get("book_id", ""),
+                        "book": b,
+                    }
+                    for b in course_books
+                ],
+            }
+            domain_node["children"].append(course_node)
+
+        result.append(domain_node)
+
+    return result

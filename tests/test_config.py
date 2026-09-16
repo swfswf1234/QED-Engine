@@ -131,14 +131,14 @@ def test_db_password_not_leaked_in_repr():
     assert "sk-db-secret" not in str(settings.qed_db_password)
 
 
-def test_lmstudio_url_default_and_override(monkeypatch):
-    """LM Studio 探测地址：默认 5001/v1（本机实际端口），QED_LMSTUDIO_URL 可覆盖。"""
-    monkeypatch.delenv("QED_LMSTUDIO_URL", raising=False)
+def test_qwen_url_default_and_override(monkeypatch):
+    """Qwen 探测地址：默认 5001/v1（本机实际端口），QED_QWEN_URL 可覆盖。"""
+    monkeypatch.delenv("QED_QWEN_URL", raising=False)
     settings = Settings(_env_file=None)
-    assert settings.qed_lmstudio_url == "http://127.0.0.1:5001/v1"
-    monkeypatch.setenv("QED_LMSTUDIO_URL", "http://127.0.0.1:9999/v1")
+    assert settings.qed_qwen_url == "http://127.0.0.1:5001/v1"
+    monkeypatch.setenv("QED_QWEN_URL", "http://127.0.0.1:9999/v1")
     settings = Settings(_env_file=None)
-    assert settings.qed_lmstudio_url == "http://127.0.0.1:9999/v1"
+    assert settings.qed_qwen_url == "http://127.0.0.1:9999/v1"
 
 
 def test_api_key_env(monkeypatch):
@@ -192,12 +192,12 @@ def test_llm_timeout_default_and_override(monkeypatch):
 
 
 def test_local_model_vars(monkeypatch):
-    """本地模型变量：QED_LMSTUDIO_URL 默认 5001/v1、QED_MINERU_URL、QED_RESOURCE_GUARD、
+    """本地模型变量：QED_QWEN_URL 默认 5001/v1、QED_MINERU_URL、QED_RESOURCE_GUARD、
     QED_LLM_GATEWAY_URL 默认 8900。"""
-    for name in ("QED_LMSTUDIO_URL", "QED_MINERU_URL", "QED_RESOURCE_GUARD", "QED_LLM_GATEWAY_URL"):
+    for name in ("QED_QWEN_URL", "QED_MINERU_URL", "QED_RESOURCE_GUARD", "QED_LLM_GATEWAY_URL"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)
-    assert settings.qed_lmstudio_url == "http://127.0.0.1:5001/v1"
+    assert settings.qed_qwen_url == "http://127.0.0.1:5001/v1"
     assert settings.qed_mineru_url == "http://127.0.0.1:8002"
     assert settings.qed_resource_guard is True
     assert settings.qed_llm_gateway_url == "http://127.0.0.1:8900"

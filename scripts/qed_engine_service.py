@@ -3,7 +3,7 @@
 子进程 = `python -m uvicorn qed_engine.api.main:app`（继承当前解释器，天然落在 QED_env）；
 PID 文件 logs/qed-engine.pid，子进程 stdout/stderr 落 logs/qed-engine-serve.log。
 --mode api|local：覆盖 QED_API_SELECT 环境变量注入子进程（默认读根 .env），重启可换模式；
-api 模式走 API key 调用，local 模式启用本地模型（LM Studio / MinerU）。
+api 模式走 API key 调用，local 模式启用本地模型（Qwen / MinerU）。
 健康探测端点：http://127.0.0.1:8900/api/v1/health。
 契约见 docs/design/llm-gateway.md（2026-08-20）。
 

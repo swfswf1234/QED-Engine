@@ -62,7 +62,7 @@ def test_root_test_files_are_the_config_center_suite():
         "test_log_viewer.py",
         "test_monitor.py",
         "test_qed_engine_service.py",
-        "test_qed_lmstudio_service.py",
+        "test_qed_qwen_service.py",
         "test_qed_mineru_service.py",
         "test_qed_web_service.py",
         "test_self_restart.py",

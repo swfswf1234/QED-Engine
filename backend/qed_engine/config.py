@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     qed_tracker_url: str = "http://127.0.0.1:8901"
     qed_axiom_url: str = "http://127.0.0.1:8902"
     qed_web_url: str = "http://127.0.0.1:8903"
-    # 本地 LLM（LM Studio，OpenAI 兼容）默认地址（QED_LMSTUDIO_URL 可覆盖；本机实测 5001）
-    qed_lmstudio_url: str = "http://127.0.0.1:5001/v1"
+    # 本地 LLM（Qwen，OpenAI 兼容）默认地址（QED_QWEN_URL 可覆盖；本机实测 5001）
+    qed_qwen_url: str = "http://127.0.0.1:5001/v1"
     # 本地图像模型（MinerU 容器，WSL；编排见 scripts/image-model/）
     qed_mineru_url: str = "http://127.0.0.1:8002"
     # 资源互斥开关（默认开）：启动一方本地模型前先停另一方（4080 16GB 显存约束）

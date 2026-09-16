@@ -121,7 +121,7 @@ def test_keys_glm_provider(monkeypatch):
 
 
 def test_keys_local_mode(monkeypatch):
-    """QED_API_SELECT=local：mode=local（前端依赖卡模式感知：local 才探测 LM Studio/MinerU）。"""
+    """QED_API_SELECT=local：mode=local（前端依赖卡模式感知：local 才探测 Qwen/MinerU）。"""
     client = _client(monkeypatch, api_key="sk-local", mode="local")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200

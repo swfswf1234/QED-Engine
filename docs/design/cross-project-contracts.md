@@ -2,11 +2,11 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
+最后更新：2026-09-14
 确认状态：暂定
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
 
 ## 目的与边界
 
@@ -24,12 +24,13 @@
 | 对接点 | 现状 | 目标 |
 | --- | --- | --- |
 | QED-Tracker → Axiom-Flow | HTTP handoff：`axiom push`（默认 `http://127.0.0.1:8902`，8000 兼容保留） | 冻结（`QED_AXIOM_URL` 配置注入） |
-| QED-Tracker → dataset/raw | 已迁 `dataset/qed-tracker/`（QED-009）；探索产物与下载成品落 `raw/<domain_id>/...` | 冻结（含 JSON 例外口径，REQ-078） |
-| Axiom-Flow → dataset/parsed | 产物写入自身 `data/` | 写入 `dataset/axiom-flow/parsed/`（Phase 3，ALN-003） |
+| QED-Tracker → dataset/raw | 已迁 `raw/<domain_id>/...`（QED-009 / ARCH-019）；探索产物与下载成品落 `raw/<domain_id>/<course_id>/` | 冻结（含 JSON 例外口径，REQ-078） |
+| Axiom-Flow → dataset/parsed | 产物写入自身 `data/`（过渡） | 写入 `<QED_DATA_ROOT>/parsed/<domain_id>/<course_id>/<book_id>/`（ARCH-020，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
+| Axiom-Flow → 本地模型服务 | 解析经 8900 `/llm/vision` 网关（v0.1） | **直连本地模型服务**（引擎适配器，MinerU 8002 等）；8900 只负责模型生命周期与探针（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
 | QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 子项目直读根 `.env`（`load-env.ps1` 映射层已于 2026-08-17 退役） | 冻结（子项目直读 `QED_*` 变量） |
-| 三个项目 → MySQL | Axiom-Flow 用 `xqfm11` 库；QED-Tracker 已用 `qed` 库 | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源 |
+| 三个项目 → MySQL | QED-Tracker 与 Axiom-Flow 均用 `qed` 库（ARCH-020 统一） | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源；遗留 `qed_test`（测试库）、`axiom`/`xqfm` 库由 ARCH-020-F 清理 |
 | QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031；表结构见 QED-Tracker `docs/architecture/database-private-tables.md` 与 `database-shared-tables.md`） | **元数据默认存数据库**（2026-08-16 用户裁决）：meta/ JSON 退役（DB 为唯一事实源，存量迁移归档见 REQ-032）；dataset/ 只管理数据资料文件 |
 
 ## 统一数据库（MySQL 8，qed 库）
@@ -111,7 +112,7 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 | --- | --- | --- |
 | A：前端 ↔ 8900 | 8903（web-ui）→ 8900 全部域（配置/数据域/服务域/监控诊断），只连 8900 | [api-contracts](../architecture/api-contracts.md)、[service-hosting](service-hosting.md) |
 | B：8900 ↔ 8901 | 数据域适配（api/tracker.py + clients/tracker_client.py）+ /services 托管启停 | 本文件（8901 契约）、[database-design](../architecture/database-design.md) |
-| C：8900 ↔ 8902 | /services 托管 + /monitor/mineru + 数据域·Axiom（api/axiom.py + clients/axiom_client.py） | [service-hosting](service-hosting.md)、Axiom-Flow v2 契约（V2-007 冻结后） |
+| C：8900 ↔ 8902 | /services 托管 + /monitor/mineru + 数据域·Axiom（api/axiom.py + clients/axiom_client.py）；解析管线在 8902 直连模型服务 | [service-hosting](service-hosting.md)、[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（8902 契约事实源）、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) |
 
 - **只做编排，不复制契约正文**——各组契约事实源仍为上表契约文档。
 - **三组可并行推进**：每组联调中非本组服务离线时功能降级正常（503 / 离线横幅 / 空态），
@@ -132,8 +133,8 @@ MySQL 8 `qed` 库，三个项目共用同一实例与库（表命名空间隔离
 
 | 差距 | 影响 | 改造归属 |
 | --- | --- | --- |
-| 子项目数据目录指向自身 `data/` | 产物不集中 | QED-Tracker 侧已迁 `dataset/qed-tracker/`（QED-009）；Axiom-Flow 侧待 ALN-003 |
-| Axiom-Flow 仍用 `xqfm11` 库 | 无法集中登记与查询 | Axiom-Flow 侧统一 `qed` 库（ALN-003），存量库不迁移；QED-Tracker 侧已落地（QED-012） |
+| 子项目数据目录指向自身 `data/` | 产物不集中 | QED-Tracker 侧已迁 `raw/`（QED-009）；Axiom-Flow 侧迁 `parsed/<domain>/<course>/<book_id>/`（ARCH-020-C） |
+| Axiom-Flow 仍用遗留库（`axiom`/`xqfm`） | 无法集中登记与查询 | Axiom-Flow 侧统一 `qed` 库（ARCH-020-C/F），遗留库备份后删除；QED-Tracker 侧已落地（QED-012） |
 | 8900 书籍路由集与 8901 新契约不一致 | 书目操作联调 404/语义偏差 | 根仓库代码跟进（[api-contracts §③.9](../architecture/api-contracts.md)，PLAN-038） |
 | 探索产物 JSON 入 `raw/` 的 dataset 例外 | 与「dataset 不维护 JSON 状态事实源」口径并存 | REQ-078（请求：QED-Tracker），回执后同步 `dataset-conventions.md` |
 

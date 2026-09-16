@@ -2,7 +2,7 @@
 
 - api 模式：按 QED_API_PROVIDER 路由厂商（qwen 默认；deepseek/glm 注册表预留），
   地址/生效模型经 clients 注册表解析；视觉仅 qwen/glm（deepseek 明确报错）。
-- local 模式：文字 LM Studio（经 model_manager 资源互斥）、视觉 MinerU（同上）。
+- local 模式：文字 Qwen（经 model_manager 资源互斥）、视觉 MinerU（同上）。
 调用成功/失败均记录（record_call 降级不抛）；失败返回 reply="" + success=false + error。
 
 设计关联（DesignRef）：docs/design/llm-gateway.md
@@ -29,7 +29,7 @@ def call_text(
     max_tokens: int | None = None,
     service: str = "qed_engine",
 ) -> dict:
-    """文字模型调用：api → QED_API_PROVIDER 对应厂商；local → LM Studio（资源互斥）。返回 {reply, call_id, success, error}。"""
+    """文字模型调用：api → QED_API_PROVIDER 对应厂商；local → Qwen（资源互斥）。返回 {reply, call_id, success, error}。"""
     started = time.monotonic()
     messages = []
     if system:
@@ -39,13 +39,13 @@ def call_text(
     try:
         if mode == "local":
             model_manager.ensure_text_ready(settings)
-            reply = clients.lmstudio_chat(
-                base_url=settings.qed_lmstudio_url,
+            reply = clients.qwen_chat(
+                base_url=settings.qed_qwen_url,
                 messages=messages,
                 timeout=settings.qed_llm_timeout,
                 max_tokens=max_tokens,
             )
-            provider, model = "lmstudio", "local"
+            provider, model = "qwen", "local"
         else:
             provider = settings.qed_api_provider
             base_url, model = clients.resolve_text(provider, settings.qed_model)

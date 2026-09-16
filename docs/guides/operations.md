@@ -35,7 +35,7 @@
 | 重启 | `restart --wait` | `restart` |
 
 - 后端 `start`/`restart` 额外支持 `--mode api|local`（api=云端 LLM API key，local=本地模型
-  LM Studio / MinerU；LLM 网关见 [LLM 网关设计](../design/llm-gateway.md)）。
+  Qwen / MinerU；LLM 网关见 [LLM 网关设计](../design/llm-gateway.md)）。
 - 前端 `--build` 为**显式旗标**：默认 `start` 纯快启动（8900 控制台托管路径依赖此语义）；
   `dist/index.html` 缺失时任何启动方式都会自动兜底构建。前端测试（vitest）属开发门禁
   （见 [development.md](development.md)），启动流程不执行测试。
@@ -227,11 +227,26 @@ conda run -n QED_env python scripts/qed_engine_service.py restart --wait
 | 前端 8903 | `logs/qed-web-serve.log` |
 | 子项目 | `logs/tracker.log`、`logs/axiom.log` |
 | 经 8900 查看日志 | `GET /api/v1/logs/{service}?tail=200&keyword=…`（`service` ∈ config/tracker/axiom/web） |
-| 组件监控 | `GET /monitor/gpu`、`GET /monitor/lmstudio`、`GET /monitor/mineru` |
+| 组件监控 | `GET /monitor/gpu`、`GET /monitor/qwen`、`GET /monitor/mineru` |
 
-本地模型模式（`--mode local`）配套脚本：`scripts/text-model/qed_lmstudio_service.py`
-（LM Studio，`lms` CLI，默认 5001）、`scripts/image-model/qed_mineru_service.py`
+本地模型模式（`--mode local`）配套脚本：`scripts/text-model/qed_qwen_service.py`
+（Qwen，llama-server，默认 5001）、`scripts/image-model/qed_mineru_service.py`
 （MinerU WSL Docker 容器，8002）——由 8900 模型管理器资源互斥编排调用，也可手动执行。
+
+### 本地模型：MinerU（WSL Docker 容器）
+
+- **镜像构建（去模型化）**：`wsl -e docker build -t mineru:latest -f scripts/image-model/docker/Dockerfile scripts/image-model/docker/`；
+  镜像只含运行时依赖，模型权重经卷挂载 `model/mineru/` → `/root/mineru_models`。
+- **模型路径**：MinerU 在 `MINERU_MODEL_SOURCE=local` 时**不读** `MINERU_MODELS_DIR`，而读镜像内
+  `/root/mineru.json` 的 `models-dir`（由 `scripts/image-model/docker/mineru.json` COPY 进镜像），
+  指向挂载路径。
+- **启停**：`python scripts/image-model/qed_mineru_service.py start|stop|restart|status`，或 8900
+  `POST /api/v1/models/mineru/{start|stop|restart}`（需 `QED_API_SELECT=local`；api 模式返回 409）。
+- **健康端点**：`GET http://127.0.0.1:8002/health`（**不是** `/api/v1/health`）；8900 探针为
+  `GET /api/v1/monitor/mineru`。
+- **GPU 掉线恢复**：若容器内 `nvidia-smi` 报 `GPU access blocked by the operating system`
+  （多次启停 / WSL VM 挂起后偶发），`wsl -e docker restart mineru-api` 或重跑 `infra-up.ps1` 恢复；
+  `infra-up.ps1` 会打印 GPU 穿透验证。
 
 ## 启动故障排查清单
 
@@ -249,6 +264,9 @@ conda run -n QED_env python scripts/qed_engine_service.py restart --wait
 | `stop` 回显 `stop failed: pid …` | 优雅停止与 taskkill 强杀后进程仍存活 | 按提示手动 `taskkill /PID <pid> /T /F`，确认后重试 stop 清理 PID 文件 |
 | 前端改版后看不到变化 | dist 未重建 | `cd web-ui; npm run build` 后刷新（no-store 免 Ctrl+F5） |
 | 控制台中文乱码 | Windows PowerShell 控制台 GBK 编码 | 不影响功能；日志用 `Get-Content -Encoding UTF8` 查看 |
+| MinerU 容器内 `nvidia-smi` 报 `GPU access blocked by the operating system` | 多次启停 / WSL VM 挂起后 GPU 穿透偶发丢失 | `wsl -e docker restart mineru-api`（或重跑 `scripts/image-model/infra-up.ps1`）恢复 |
+| MinerU 健康探测恒失败但容器在跑 | 探针用了 `/api/v1/health`（MinerU 实际为 `/health`） | 统一为 `http://127.0.0.1:8002/health` |
+| MinerU 容器健康但首次解析报 `Engine core initialization failed` | 容器内 GPU 不可见（见上一行） | 先恢复 GPU 再重试解析 |
 | 8903 `start` 显示 already running 但仍打不开 | PID 文件指向已死进程 | `stop` 一次清理 stale PID 再 `start` |
 | 8900 服务域显示 tracker/axiom offline | 子项目未启动 | 见「控制中心托管」两种方式任选 |
 | 端口 8900-8903 全无监听 | 服务全部未启动 | 按「冷启动标准流程」逐步拉起 |

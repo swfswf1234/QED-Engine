@@ -32,7 +32,7 @@ def test_api_mode_never_starts_local():
 
 
 def test_local_text_stops_mineru_before_start(monkeypatch):
-    """local 文字：LM Studio 未就绪 → guard=true 先停 mineru 再启动 text-model。"""
+    """local 文字：Qwen 未就绪 → guard=true 先停 mineru 再启动 text-model。"""
     settings = _settings(qed_api_select="local")
     commands = []
     runner = _noop_runner()
@@ -42,7 +42,7 @@ def test_local_text_stops_mineru_before_start(monkeypatch):
 
     monkeypatch.setattr(model_manager, "_probe_http", fake_probe)
     model_manager.ensure_text_ready(settings, script_runner=runner, log=commands.append)
-    assert commands == ["stop image-model/qed_mineru_service.py", "start text-model/qed_lmstudio_service.py"]
+    assert commands == ["stop image-model/qed_mineru_service.py", "start text-model/qed_qwen_service.py"]
 
 
 def test_local_text_without_guard_skips_stop(monkeypatch):
@@ -56,11 +56,11 @@ def test_local_text_without_guard_skips_stop(monkeypatch):
 
     monkeypatch.setattr(model_manager, "_probe_http", fake_probe)
     model_manager.ensure_text_ready(settings, script_runner=runner, log=commands.append)
-    assert commands == ["start text-model/qed_lmstudio_service.py"]
+    assert commands == ["start text-model/qed_qwen_service.py"]
 
 
 def test_local_text_ready_skips_start(monkeypatch):
-    """local 文字：LM Studio 已就绪 → 不重复启动。"""
+    """local 文字：Qwen 已就绪 → 不重复启动。"""
     settings = _settings(qed_api_select="local")
     commands = []
     runner = _noop_runner()
@@ -76,11 +76,11 @@ def test_local_image_stops_text_before_start(monkeypatch):
     runner = _noop_runner()
     monkeypatch.setattr(model_manager, "_mineru_ready", lambda s: False)
     model_manager.ensure_image_ready(settings, script_runner=runner, log=commands.append)
-    assert commands == ["stop text-model/qed_lmstudio_service.py", "start image-model/qed_mineru_service.py"]
+    assert commands == ["stop text-model/qed_qwen_service.py", "start image-model/qed_mineru_service.py"]
 
 
 def test_local_image_without_guard_skips_stop(monkeypatch):
-    """guard=false：启动图像模型前不自动停 LM Studio。"""
+    """guard=false：启动图像模型前不自动停 Qwen。"""
     settings = _settings(qed_api_select="local", qed_resource_guard=False)
     commands = []
     runner = _noop_runner()
@@ -108,7 +108,7 @@ def test_operate_model_start_text_uses_ensure(monkeypatch):
     monkeypatch.setattr(model_manager, "_probe_http", lambda url, *a, **k: False)
     model_manager.operate_model("qwen", "start", settings=_settings(qed_api_select="local"),
                                 script_runner=runner, log=commands.append)
-    assert "start text-model/qed_lmstudio_service.py" in commands
+    assert "start text-model/qed_qwen_service.py" in commands
 
 
 def test_operate_model_stop_text_runs_stop_script(monkeypatch):
@@ -117,7 +117,7 @@ def test_operate_model_stop_text_runs_stop_script(monkeypatch):
     runner = _noop_runner()
     model_manager.operate_model("qwen", "stop", settings=_settings(),
                                 script_runner=runner, log=commands.append)
-    assert commands == ["stop text-model/qed_lmstudio_service.py"]
+    assert commands == ["stop text-model/qed_qwen_service.py"]
 
 
 def test_operate_model_unknown_name_raises():
@@ -163,3 +163,10 @@ def test_operate_model_start_text_uses_ensure_ready_skips(monkeypatch):
     model_manager.operate_model("qwen", "start", settings=_settings(qed_api_select="local"),
                                 script_runner=runner, log=commands.append)
     assert commands == []
+
+
+def test_text_script_path_exists():
+    """DEFECT-003 回归：TEXT_SCRIPT 必须指向实际存在的脚本文件。"""
+    assert model_manager.TEXT_SCRIPT.is_file(), (
+        f"TEXT_SCRIPT 指向不存在的文件：{model_manager.TEXT_SCRIPT}"
+    )

@@ -74,12 +74,12 @@ export interface LlmTestResult {
 export interface KeysStatus {
   provider: string;
   configured: boolean;
-  /** 运行模式：api（云端厂商）/ local（本地 LM Studio / MinerU） */
+  /** 运行模式：api（云端厂商）/ local（本地 Qwen / MinerU） */
   mode: 'api' | 'local';
 }
 
-/** /monitor/lmstudio：本地文字模型（LM Studio）探测结果 */
-export interface LmStudioStatus {
+/** /monitor/qwen：本地文字模型（Qwen）探测结果 */
+export interface QwenStatus {
   reachable: boolean;
   base_url?: string;
   models?: string[];
@@ -407,7 +407,7 @@ export interface ExploreApplyResult {
 
 // --- 模型操作契约类型（Task 6，2026-09-06：/models/{name} 端点族） ---
 
-/** 本地模型名：qwen（LM Studio 文字）/ mineru（MinerU 图像） */
+/** 本地模型名：qwen（Qwen 文字）/ mineru（MinerU 图像） */
 export type ModelName = 'qwen' | 'mineru';
 
 /** 本地模型操作：start / stop / restart */

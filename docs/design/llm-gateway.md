@@ -2,21 +2,33 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
+最后更新：2026-09-16
 确认状态：暂定
-关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/call_log.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（本设计落盘后的新增/改动模块；`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，`model_manager.py` 与本地模型生命周期操作归 [local-model-management.md](local-model-management.md)，本设计只在正文引用）
-关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_lmstudio_service.py`、`tests/test_qed_mineru_service.py`
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)
+关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/call_log.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（本设计落盘后的新增/改动模块；v2 计划新增的 registry.py、runtimes/ 与对应测试待代码落地后补登记；`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，`model_manager.py` 与本地模型生命周期操作归 [local-model-management.md](local-model-management.md)，本设计只在正文引用）
+关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_qwen_service.py`、`tests/test_qed_mineru_service.py`
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
+关联计划：[2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)（PLAN-046，v2 修订来源）
+
+> **解析路径变更（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
+> 文档解析管线归 Axiom-Flow 并经引擎适配器**直连本地模型服务**，不再经本网关；本网关的
+> `/llm/vision` 降级为控制台测试与通用视觉用途。下文「Axiom-Flow 经网关调用」表述按此修订。
+
+> **v2 修订（2026-09-16，PLAN-046）**：① 新增**模型身份注册表**（`registry.py`，唯一事实源）——
+> 模型身份不分 api/local，.env 每槽位一个身份变量，注册表解析身份 → api 引用/本地引用；
+> ② .env 收敛——全局只新增 `QED_LOCAL_RUNTIME`（本地加载方式），**取消槽位级 source 变量**，
+> api/local 渠道保持全局 `QED_API_SELECT` 语义；③ 新增 `POST /llm/embedding`（第三接口，
+> text-embedding-v4 先行）；④ 调用记录 provider 取值扩展（lmstudio/llamacpp）。runtime 同化与
+> LM Studio 半托管语义归 [local-model-management.md](local-model-management.md)。
 
 ## 背景与目的
 
 QED-Engine 三项目当前模型调用形态：
 
 - **根 `.env`**：密钥唯一事实源（`API_KEY` 唯一密钥 + `QED_API_PROVIDER` 选厂商；逐厂商 key 已取消），子项目公共键自 2026-08-26（REQ-063）起经「向上查找父目录 `.env`」由根兜底、不再重复持有；QED-Tracker 自身 `.env` 仅存私有底线键（API_KEY/QED_DB_PASSWORD 等），Axiom-Flow 侧精简见 REQ-003 备注（待其承接）。
-- **LLM 网关不存在**（文档记为第二轮规划）：8900 只有 `/monitor/lmstudio`、`/monitor/mineru` 探测端点，无真实调用能力。
-- **本地模型**：LM Studio（qwen 7b 量化，`http://127.0.0.1:5001`）已启动可用于测试；MinerU 容器编排脚本（`compose.yaml`/`infra-*.ps1`/`Dockerfile`）位于 Axiom-Flow 仓库 `scripts/`，由 Axiom-Flow 维护。
+- **LLM 网关不存在**（文档记为第二轮规划）：8900 只有 `/monitor/qwen`、`/monitor/mineru` 探测端点，无真实调用能力。
+- **本地模型**：Qwen（qwen 7b 量化，`http://127.0.0.1:5001`）已启动可用于测试；MinerU 容器编排脚本（`compose.yaml`/`infra-*.ps1`/`Dockerfile`）位于 Axiom-Flow 仓库 `scripts/`，由 Axiom-Flow 维护。
 - **前端控制台**：仅四服务卡 + MySQL 依赖卡；GPU/显存、文字/图像模型状态与调用记录均无展示。
-- **硬件约束**：本机 4080（16GB 显存），LM Studio 文字模型与 MinerU 图像服务不能同时进 GPU。
+- **硬件约束**：本机 4080（16GB 显存），Qwen 文字模型与 MinerU 图像服务不能同时进 GPU。
 
 本设计定义三项目统一的**模型调用网关**与**本地模型生命周期管理**：
 
@@ -24,7 +36,7 @@ QED-Engine 三项目当前模型调用形态：
    统一使用 `QED_API_SELECT`（api/local 模式选择）+ `API_KEY`（唯一密钥）+ `QED_API_PROVIDER`
    （厂商选择，api 模式）三个核心变量，公共键不重复持有，QED-Tracker 与 Axiom-Flow 参照执行。
 2. 8900 提供 LLM 网关端点（文字/图像），负责 api/local 模型路由、资源互斥与调用记录；QED-Engine 模式下三项目统一经网关调用，local 模式下子项目用自身 `API_KEY` 直连供应商。
-3. 本地文字模型（LM Studio）与图像模型（MinerU）的启停/重启脚本归入根仓库 `scripts/text-model/` 与 `scripts/image-model/` 两个文件夹；MinerU 编排由 Axiom-Flow 移交 QED-Engine。
+3. 本地文字模型（Qwen / llama-server）与图像模型（MinerU）的启停/重启脚本归入根仓库 `scripts/text-model/` 与 `scripts/image-model/` 两个文件夹；MinerU 编排由 Axiom-Flow 移交 QED-Engine。
 4. 调用记录（prompt 模板/提问/回答/耗时/调用时间/成败）落 qed 库单表 `qed_llm_calls`，三项目均可写入（local 模式也记录，用于 prompt 与工具调用调优），8900 提供检索端点，前端控制台提供检索界面。
 5. 前端控制台改造：四服务卡后新增 GPU 总览条；依赖组件三卡（MySQL/文字模型/图像模型，默认置灰 + 测试按钮）；模型调用记录检索页。
 
@@ -39,8 +51,8 @@ flowchart LR
         MM --> GW
         GW --> CL
     end
-    subgraph LocalText[本地文字模型]
-        LMS[LM Studio qwen7b<br/>127.0.0.1:5001]
+    subgraph LocalText[本地文字 runtime（QED_LOCAL_RUNTIME）]
+        LMS[LM Studio :1234（默认，半托管）<br/>llama-server :5001（预留）]
     end
     subgraph LocalImage[本地图像模型]
         MRU[MinerU 容器<br/>127.0.0.1:8002]
@@ -53,7 +65,7 @@ flowchart LR
         TR[llm_client 兼容层]
     end
     subgraph Axiom[Axiom-Flow 8902]
-        AX[llm_client 兼容层]
+        AX[解析管线 + 引擎适配器]
     end
     subgraph FE[前端 8903]
         CON[控制台<br/>GPU 总览/依赖卡/调用检索]
@@ -61,24 +73,32 @@ flowchart LR
     GW -- api 模式 --> APIT
     GW -- api 模式 --> APII
     GW -- local 模式 --> LMS
-    GW -- local 模式 --> MRU
+    GW -- local 模式（测试） --> MRU
     TR -- local 直连 --> APIT
-    AX -- local 直连 --> APII
+    AX -- 解析直连（ARCH-020） --> MRU
+    AX -- api 档位 --> APII
     TR -- qed-engine 模式 --> GW
-    AX -- qed-engine 模式 --> GW
     GW --> CL
     TR -- local 模式 --> CL
-    AX -- local 模式 --> CL
+    AX -- 自写调用记录 --> CL
     CON --> GW
     CON --> CL
 ```
 
-- **模式（`QED_API_SELECT`）**：
-  - `api`（默认）：走 API key 调用供应商（文字 qwen-plus / 图像 qwen-vl-ocr），不启动本地模型。
-  - `local`：文字走 LM Studio（5001）、图像走 MinerU（8002）。
+- **模式（`QED_API_SELECT`，全局，v2 保持）**：
+  - `api`（默认）：走 API key 调用供应商（文字/向量按身份解析，当前 qwen 系），不启动本地模型。
+  - `local`：文字走 `QED_LOCAL_RUNTIME` 所选本地 runtime（默认 LM Studio :1234）、图像走 MinerU（8002）。
+- **本地加载方式（`QED_LOCAL_RUNTIME`，v2 新增，唯一全局变量）**：`lmstudio`（默认，半托管）/
+  `llamacpp`（llama-server）/ `docker`（未来 llama.cpp 打包服务复用）。runtime 同化语义见
+  [local-model-management.md](local-model-management.md)。api/local 渠道**不设槽位级变量**（2026-09-16
+  用户裁决），三项目经网关的调用透明性由注册表解析保证。
 - **QED-Engine 模式（子项目视角）**：QED-Tracker / Axiom-Flow 的 `QED_API_SELECT=qed-engine` 时，LLM 调用一律 HTTP 走 8900 网关，不接触密钥；网关按 QED-Engine 自身模式（api/local）路由。
 - **local 模式（子项目视角）**：子项目用自身 `.env` 的 `API_KEY` 直连供应商；此时**不依赖 8900 在线**（独立性铁律）。
-- **Axiom-Flow 与 MinerU**：MinerU 编排移交 QED-Engine 后，Axiom-Flow 不再直接操作 MinerU；qed-engine 模式下图像模型经网关可达（含 MinerU），local 模式下用自身 `API_KEY` 直连 qwen-vl-ocr。
+- **Axiom-Flow 与 MinerU（ARCH-020 修订）**：MinerU 编排与模型文件归 QED-Engine 管理；**文档解析
+  不再经本网关**——Axiom-Flow 解析管线经引擎适配器直连本地模型服务（MinerU 8002 等），
+  模型选择在 Axiom-Flow 配置（`AXIOM_OCR_ENGINE`），换模型不改调用链
+  （[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）。本网关的 `/llm/vision`
+  保留为控制台测试与通用视觉用途。
 - 子项目各自维护一个**兼容 LLM 客户端文件**（`llm_client.py`）：对外提供统一调用接口，内部按模式切换 `direct`（local 直连）/ `gateway`（HTTP 调 8900），业务调用方代码不变。
 
 ## .env 变量与网关约定（唯一事实源见 project-configuration.md）
@@ -107,17 +127,64 @@ QED_LLM_GATEWAY_URL=http://127.0.0.1:8900
 
 ```ini
 # ============ 本地模型与资源互斥 ============
-QED_LMSTUDIO_URL=http://127.0.0.1:5001/v1   # local 文字模型（LM Studio，OpenAI 兼容）
+QED_LOCAL_RUNTIME=lmstudio                  # 本地模型加载方式（v2 唯一新增全局变量）：lmstudio（默认）/ llamacpp / docker
+QED_LMSTUDIO_URL=http://127.0.0.1:1234/v1   # LM Studio OpenAI 兼容地址（默认 runtime）
+QED_QWEN_URL=http://127.0.0.1:5001/v1       # llamacpp runtime（llama-server），选 llamacpp 时生效
 QED_MINERU_URL=http://127.0.0.1:8002        # local 图像模型（MinerU 容器）
-QED_RESOURCE_GUARD=true                     # 资源互斥开关：启动一方模型前先停另一方（默认开）
+QED_RESOURCE_GUARD=true                     # 资源互斥开关：启动一方本地模型前先停其他在跑本地模型（默认开）
 ```
 
-- `QED_LMSTUDIO_URL` 默认值由 1234 调整为 5001（本机 LM Studio 实际端口），仍可被 `.env` 覆盖。
-- **资源互斥语义**（`QED_RESOURCE_GUARD=true` 时，由模型管理器执行）：
-  - 启动/调用本地文字模型前：探测 MinerU 容器，运行中则先停止。
-  - 启动/调用本地图像模型前：探测 LM Studio，运行中则先停止。
+- `QED_LOCAL_RUNTIME`（v2）：全局唯一规划「本地模型经何种方式加载」的变量；runtime 同化与
+  LM Studio 半托管语义见 [local-model-management.md](local-model-management.md)。
+- `QED_QWEN_URL` 默认值由 1234 调整为 5001（llama-server 实际端口），仍可被 `.env` 覆盖。
+- **资源互斥语义（v2：单活仲裁）**（`QED_RESOURCE_GUARD=true` 时，由模型管理器执行）：
+  - 启动/调用任一本地模型前：遍历注册表其他全部本地候选槽位，在跑的一律停止（LM Studio 卸载
+    模型释放显存；llamacpp/docker 停进程/容器）——本地同时最多一个模型进 GPU（4080 16GB）。
   - 批处理方向：文字批处理期间图像模型保持停止，图像批处理期间文字模型保持停止，不在同一批内交叉；互斥在模型服务启动时自动完成，批任务天然分阶段。
   - `QED_RESOURCE_GUARD=false` 时跳过自动互斥，模型共存由用户自行负责。
+
+### 模型身份变量（v2：每槽位一个，值不分 api/local）
+
+```ini
+# ============ 模型身份（值 = 注册表身份名，解析规则见下节）============
+QED_MODEL=qwen3.8-27b             # 文字槽位身份（api 模式无该身份 api 引用时回退 qwen-plus）
+QED_OCR_MODEL=qwen-vl-plus        # 图像槽位身份
+QED_EMBEDDING_MODEL=text-embedding-v4   # 向量槽位身份
+```
+
+- 身份变量值统一为**模型身份**（2026-09-16 用户裁决：模型参数不区分 API 还是本地两套）；
+  身份 → api 引用 / 本地引用的映射归注册表，运行态覆盖经 `manifest.active`（见
+  [local-model-management.md](local-model-management.md)）。
+
+## 模型身份注册表（v2，`services/llm/registry.py`，唯一事实源）
+
+注册表 = **身份目录**（模型身份 → api 引用 / 本地引用 / 可用性 / 渠道标签）+ **槽位解析**
+（身份 × 渠道 × runtime → 具体端点与模型名）。替代 v1 的双表分离（api 厂商注册表
+`clients.PROVIDERS` 与本地 `MODEL_SCRIPTS` 各自为政）——PROVIDERS 降级为注册表 api 引用的
+地址解析层，`MODEL_SCRIPTS` 由 runtime 适配器取代（见 local-model-management.md）。
+
+**首版身份目录**：
+
+| 槽位 | 身份 | api 引用 | 本地引用（runtime: 标识） | 可用性 |
+| --- | --- | --- | --- | --- |
+| `text` | `qwen-plus` | qwen@dashscope | 无 | api 可用 |
+| `text` | `qwen3.8-27b` | 无（回退 qwen-plus） | lmstudio: unsloth/Qwen3.8-27B-GGUF | 本机已下载 |
+| `text` | `qwen3.5-9b` | 无（回退 qwen-plus） | lmstudio: lmstudio-community/Qwen3.5-9B-GGUF | 本机已下载 |
+| `vision` | `qwen-vl-plus` | qwen@dashscope | 无 | api 可用 |
+| `vision` | `mineru` | 无（回退 qwen-vl-plus） | docker: MinerU 容器（8002） | 本机已部署 |
+| `embedding` | `text-embedding-v4` | qwen@dashscope | 无（预留） | api 可用 |
+
+**解析规则**（`registry.resolve(settings)`，gateway / model_manager / 端点层统一消费）：
+
+1. 身份取值优先级：`manifest.active`（运行态，控制台选择）> `.env` 身份变量 > 槽位默认身份。
+2. `api` 渠道：身份的 api 引用；无 api 引用 → 回退槽位厂商默认模型（告警一次，不阻断）。
+3. `local` 渠道：身份的本地引用（按 `QED_LOCAL_RUNTIME` 匹配 runtime）；身份无该 runtime 引用 →
+   回退槽位默认本地身份（告警一次，不阻断）；槽位无本地候选（embedding）→ 调用报明确错误。
+4. `available` 元数据（本地文件/镜像存在性）供控制台展示「是否可用」；不阻断解析。
+
+- **插拔约定**：新增本地模型 = 注册表加身份条目（+ 对应 runtime 引用），不改 gateway/clients
+  调用链；新增厂商 = api 引用加条目；未来 AGENT/MCP 统一配置以同一注册表为准（反代面为
+  roadmap 预留，本轮不实现）。
 
 ## 脚本布局
 
@@ -153,26 +220,30 @@ QED_RESOURCE_GUARD=true                     # 资源互斥开关：启动一方�
 ```
 backend/qed_engine/services/llm/
 ├── __init__.py
-├── gateway.py          # 网关路由：/llm/text、/llm/vision、/llm/embedding(预留)
-├── model_manager.py    # 模型生命周期编排 + 资源互斥（QED_RESOURCE_GUARD）
+├── gateway.py          # 网关路由：/llm/text、/llm/vision、/llm/embedding（v2 转正）
+├── registry.py         # v2 新增：身份目录 + 槽位解析（唯一事实源，见上节）
+├── runtimes/           # v2 新增：runtime 同化适配器（lmstudio/llamacpp/docker，见 local-model-management.md）
+├── model_manager.py    # 槽位生命周期编排 + 单活互斥（QED_RESOURCE_GUARD）
 ├── call_log.py         # qed_llm_calls 写入与查询
-└── clients.py          # 多厂商注册表（qwen/deepseek/glm）API / lmstudio(OpenAI 兼容) / mineru HTTP 客户端
+└── clients.py          # api 引用地址解析（原厂商注册表 PROVIDERS）+ qwen(OpenAI 兼容) / mineru / embeddings HTTP 客户端
 ```
 
 ### 端点契约（挂 `api/control.py`，前缀 /api/v1）
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen / local LM Studio）；记录调用；`{reply, call_id}`。`max_tokens` 非 None 时透传上游写入请求体（REQ-061：原「预留字段」已转正，不再静默丢弃） |
-| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?, max_tokens?}` → 按模式路由（api 按 `QED_API_PROVIDER` 选厂商，当前 qwen-vl / local MinerU；deepseek 无视觉）；记录调用；`{reply, call_id}`。`max_tokens` 语义同 text（REQ-061 一并纳入） |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按全局渠道路由（api：注册表解析身份 api 引用，按 `QED_API_PROVIDER` 选厂商；local：`QED_LOCAL_RUNTIME` 所选 runtime）；记录调用；`{reply, call_id}`。`max_tokens` 非 None 时透传上游写入请求体（REQ-061：原「预留字段」已转正，不再静默丢弃） |
+| `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?, max_tokens?}` → 按全局渠道路由（api：注册表解析身份 api 引用，qwen-vl / glm-vl；local：MinerU PDF 解析，deepseek 无视觉）；记录调用；`{reply, call_id}`。`max_tokens` 语义同 text（REQ-061 一并纳入） |
 
+| `POST /llm/embedding`（v2 新增） | 向量调用：`{input: [str], }` → 按模式路由（api：text-embedding-v4；local：槽位无本地候选报明确错误）；记录调用（response 记维度摘要，不存向量本体）；`{embeddings, model, call_id}` |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
+| `POST /llm/test/embedding`（v2 新增） | 向量模型测试：最小 embedding 调用，成功/失败 + 原因 |
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |
 | `PATCH /llm/calls/{id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
 | `POST /database/test` | MySQL 即时连接探测（控制台测试按钮，替代启动快照只读） |
 | `GET /monitor/gpu` | 扩展：原 nvidia-smi 字段 + 系统内存（psutil，兜底 wmic） |
-| `GET /monitor/lmstudio` | 现状保留（5001 探测） |
+| `GET /monitor/qwen` | 现状保留（5001 探测） |
 | `GET /monitor/mineru` | 现状保留（8002 探测） |
 
 **上游调用超时（REQ-061，2026-08-26）**：网关向所有文字/视觉上游客户端透传
@@ -191,7 +262,7 @@ backend/qed_engine/services/llm/
 | `id` | BIGINT PK AUTO_INCREMENT | — |
 | `service` | VARCHAR(32) | 调用方：`qed_engine` / `qed_tracker` / `axiom_flow` |
 | `mode` | VARCHAR(16) | `api` / `local` |
-| `provider` | VARCHAR(32) | `qwen` / `deepseek` / `glm` / `lmstudio` / `mineru` / `gateway`（api 模式按 `QED_API_PROVIDER` 记录实际厂商） |
+| `provider` | VARCHAR(32) | `qwen` / `deepseek` / `glm` / `lmstudio` / `llamacpp` / `mineru` / `gateway`（api 模式按 `QED_API_PROVIDER` 记录实际厂商；local 模式按实际 runtime 记录，v2 扩展） |
 | `model` | VARCHAR(64) | 实际模型名 |
 | `endpoint` | VARCHAR(16) | `text` / `vision` / `embedding` |
 | `prompt_template` | VARCHAR(255) | 模板名/标识，可空 |
@@ -218,7 +289,7 @@ backend/qed_engine/services/llm/
 2. **GPU 总览条**（在四服务卡之后）：`/monitor/gpu` → 显卡型号 / 显存使用（used/total）/ 利用率 / 模型进程占用（进程名+显存）/ 系统内存使用；不可用降级显示原因。
 3. **依赖组件三卡**（默认置灰，`/monitor/*` 状态 + 测试按钮即时验证）：
    - MySQL（qed 库）：测试按钮 → `POST /database/test` 即时连接探测，反馈成功/失败+原因。
-   - 文字模型：状态（LM Studio / API 探测）+ 测试按钮 → `POST /llm/test/text` 真实调用（记录进表）。
+   - 文字模型：状态（Qwen / API 探测）+ 测试按钮 → `POST /llm/test/text` 真实调用（记录进表）。
    - 图像模型：状态（MinerU / API 探测）+ 测试按钮 → `POST /llm/test/vision` 真实调用（记录进表）。
 4. **模型调用记录检索页**（`#/admin/llm-calls`）：读 `GET /llm/calls` 检索展示与审核标注
    （REQ-060 已实现）；页面 UI 设计见 [admin-console.md](admin-console.md)「模型调用记录页」节。
@@ -236,7 +307,7 @@ backend/qed_engine/services/llm/
 
 ## 验证
 
-- 根仓库门禁：`pytest tests -q` + `ruff check backend tests scripts` + 契约测试；新增用例覆盖：网关路由（api/local）、资源互斥（mock 模型服务启停）、`qed_llm_calls` 写入/检索、monitor 内存扩展、测试端点、`qed_engine_service.py` 生命周期。
+- 根仓库门禁：`pytest tests -q` + `ruff check backend tests scripts` + 契约测试；新增用例覆盖：网关路由（全局渠道 + 注册表身份解析，v2）、runtime 单活互斥（mock 适配器，N 槽位，v2）、`/llm/embedding` 与维度摘要记录（v2）、`/models/{slot}/select` 与 manifest.active 运行态（v2）、`qed_llm_calls` 写入/检索、monitor 内存扩展、测试端点、`qed_engine_service.py` 生命周期。
 - 前端门禁：`npx tsc -b` + vitest + build。
-- 真实冒烟（人工）：api 模式下三项目经网关调用成功（调用记录落库）；local 模式下 LM Studio 调用成功（MinerU 自动停止）；MinerU 调用成功（LM Studio 自动停止）；控制台三卡测试按钮与调用检索展示。
+- 真实冒烟（人工）：api 模式下三项目经网关调用成功（调用记录落库）；local 模式下 Qwen 调用成功（MinerU 自动停止）；MinerU 调用成功（Qwen 自动停止）；控制台三卡测试按钮与调用检索展示。
 - 子项目门禁按各自仓库 `docs/guides/development.md` 执行，回执后联调。

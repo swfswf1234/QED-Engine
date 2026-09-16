@@ -19,7 +19,7 @@ const itemsFixture = [
     task: 'paper-plan', step: 'plan', review_status: 'unreviewed', review_note: '',
   },
   {
-    id: 2, service: 'qed_tracker', mode: 'local', provider: 'lm-studio', model: 'qwen2.5-7b',
+    id: 2, service: 'qed_tracker', mode: 'local', provider: 'qwen', model: 'qwen2.5-7b',
     endpoint: 'summarize', prompt: '短 prompt', response: '', prompt_template: 'paper-plan/plan@v1',
     duration_ms: null, status: 'error', error: '超时', created_at: '2026-08-20 11:00:00',
     task: 'paper-plan', step: 'assess', review_status: 'passed', review_note: '效果好',

@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-11
+最后更新：2026-09-14
 确认状态：已确认
 维护位置：`docs/architecture/code-map.md`
 关联代码：受管模块清单
@@ -31,9 +31,9 @@
 | `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | catalogs/tasks/三表契约归 8900，内部经 tracker_client.py 适配 8901。 |
 | `backend/qed_engine/api/explore.py` | 数据域·探索会话路由 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | /explore-sessions 五端点，取代旧 explore-runs 透传。 |
 | `backend/qed_engine/api/domain_explore.py` | 数据域·领域探索五态门面路由 | Current | `docs/design/downloads-flow.md` | `tests/test_domain_explore.py` | 五端点委托 8901 原生任务链：task_id 登记、courses.json→课程行桥接、explore_pending 合成与离线降级（PLAN-034 已落地）。 |
-| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/pages/manifest/parse-jobs 契约归 8900，内部经 axiom_client.py 适配 8902。 |
+| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/pages/manifest/parse-jobs/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；ARCH-020 规划扩展 books CRUD/ingest/edits（见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）。 |
 | `backend/qed_engine/clients/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/cross-project-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/三表，transport 可注入。 |
-| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/pages/manifest/parse-jobs，transport 可注入。 |
+| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/pages/manifest/parse-jobs/sync/review，transport 可注入；ARCH-020 规划扩展 CRUD/ingest/edit。 |
 
 ### 服务层·控制域
 
@@ -41,7 +41,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/services/service_manager.py` | 服务控制能力层 | Current | `docs/design/service-hosting.md` | `tests/test_api.py`、`tests/test_self_restart.py` | 注册表/HTTP 探测/Popen 启动/优雅停止/自身重启。 |
 | `backend/qed_engine/services/log_viewer.py` | 服务日志查看能力 | Current | `docs/architecture/api-contracts.md` | `tests/test_log_viewer.py` | 白名单 tail/keyword；未知服务 LogError→404。 |
-| `backend/qed_engine/services/monitor.py` | 组件监控探测 | Current | `docs/architecture/api-contracts.md` | `tests/test_monitor.py` | GPU/LM Studio/mineru 探测；尽力报告不抛 5xx。 |
+| `backend/qed_engine/services/monitor.py` | 组件监控探测 | Current | `docs/architecture/api-contracts.md` | `tests/test_monitor.py` | GPU/Qwen/mineru 探测；尽力报告不抛 5xx。 |
 
 ### 服务层·数据域
 
@@ -55,7 +55,7 @@
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py` | 文字/视觉统一入口，按 QED_API_SELECT 路由 api/local。 |
-| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen/LM Studio/MinerU；httpx transport 可注入。 |
+| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen/Qwen/MinerU；httpx transport 可注入。 |
 | `backend/qed_engine/services/llm/model_manager.py` | 本地模型资源互斥 | In Progress | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | QED_RESOURCE_GUARD 互斥：local 模式先停对方；MODEL_SCRIPTS + operate_model 统一入口。 |
 | `backend/qed_engine/services/llm/call_log.py` | LLM 调用记录 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_call_log.py` | qed_llm_calls 幂等建表/写入/分页检索；DB 不可达降级。 |
 
@@ -69,16 +69,16 @@
 | `tests/test_api.py` | 配置中心 API 契约测试 | Current | `docs/architecture/api-contracts.md` | — | 密钥值不泄露。 |
 | `tests/test_web.py` | 8903 前端契约测试 | Current | `docs/architecture/frontend-architecture.md` | — | serve_web.py + web-ui/src 源码契约。 |
 | `tests/test_log_viewer.py` | 日志查看契约测试 | Current | `docs/architecture/api-contracts.md` | — | 白名单/tail/keyword/越权/编码容错。 |
-| `tests/test_monitor.py` | 组件监控契约测试 | Current | `docs/architecture/api-contracts.md` | — | GPU/LM Studio/mineru 各分支。 |
+| `tests/test_monitor.py` | 组件监控契约测试 | Current | `docs/architecture/api-contracts.md` | — | GPU/Qwen/mineru 各分支。 |
 | `tests/test_self_restart.py` | 自身重启契约测试 | Current | `docs/architecture/api-contracts.md` | — | 延迟 spawn/失败语义。 |
 | `tests/test_explore_sessions.py` | 探索会话契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点/状态机/apply 双链路/TTL。 |
 | `tests/test_domain_explore.py` | 领域探索五态门面契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点：原生任务提交/透传/桥接/降级/状态合成。 |
 | `tests/test_qed_web_service.py` | 8903 前端生命周期脚本契约测试 | Current | `docs/design/service-hosting.md` | — | PID 文件/serve 命令/health 端口。 |
 | `tests/test_qed_engine_service.py` | 8900 后端生命周期脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | PID/serve/health/--mode/子命令。 |
-| `tests/test_qed_lmstudio_service.py` | 本地文字模型脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
+| `tests/test_qed_qwen_service.py` | 本地文字模型脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
 | `tests/test_qed_mineru_service.py` | 本地图像模型脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | infra-*.ps1 编排/健康探测/子命令。 |
 | `tests/test_llm_gateway.py` | LLM 网关契约测试 | In Progress | `docs/design/llm-gateway.md` | — | api/local 路由、调用记录字段。 |
-| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | In Progress | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、LM Studio、MinerU。 |
+| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | In Progress | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、Qwen、MinerU。 |
 | `tests/test_llm_model_manager.py` | 本地模型资源互斥契约测试 | In Progress | `docs/design/local-model-management.md` | — | api 模式不启本地模型/互斥；operate_model 端点路径（start/stop/restart）。 |
 | `tests/test_llm_call_log.py` | LLM 调用记录契约测试 | In Progress | `docs/design/llm-gateway.md` | — | 建表 SQL、写入字段、分页检索。 |
 | `tests/test_llm_endpoints.py` | LLM 网关端点契约测试 | In Progress | `docs/design/llm-gateway.md` | — | /llm/text、/llm/vision、/llm/test/* 端点。 |

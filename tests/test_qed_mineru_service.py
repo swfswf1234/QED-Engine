@@ -1,6 +1,6 @@
 """
 模块职责：守护 scripts/image-model/qed_mineru_service.py（本地图像模型 MinerU 生命周期）契约——
-infra-*.ps1 编排调用、健康探测（8002 /api/v1/health）、子命令结构。
+infra-*.ps1 编排调用、健康探测（8002 /health）、子命令结构。
 设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：In Progress
 被测代码：scripts/image-model/qed_mineru_service.py
@@ -20,13 +20,14 @@ def test_mineru_script_contract():
     """infra 编排脚本引用 + 健康端点 + 子命令齐全。"""
     src = SCRIPT.read_text(encoding="utf-8")
     assert "infra-up.ps1" in src and "infra-down.ps1" in src and "infra-status.ps1" in src
-    assert "8002" in src and "/api/v1/health" in src
+    assert "8002" in src and "/health" in src
+    assert "/api/v1/health" not in src, "MinerU 真实健康端点为 /health（容器 healthcheck 与日志证实）"
     for cmd in ("start", "stop", "restart", "status"):
         assert cmd in src, f"脚本缺少子命令 {cmd}"
 
 
 def test_mineru_health_probe(monkeypatch):
-    """_health_ok：8002 /api/v1/health 200 即就绪。"""
+    """_health_ok：8002 /health 200 即就绪。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("qed_mineru_service_mod", SCRIPT)
@@ -52,7 +53,7 @@ def test_mineru_health_probe(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert mod._health_ok(8002) is True
-    assert "/api/v1/health" in calls["url"]
+    assert calls["url"].endswith("/health"), calls["url"]
 
 
 def test_mineru_run_infra_timeout(monkeypatch):
@@ -113,4 +114,4 @@ def test_mineru_health_probe_honors_env_on_default_port(monkeypatch):
     monkeypatch.setenv("QED_MINERU_URL", "http://127.0.0.1:9999")
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert mod._health_ok(8002) is True
-    assert "127.0.0.1:9999" in calls["url"] and "/api/v1/health" in calls["url"]
+    assert "127.0.0.1:9999" in calls["url"] and calls["url"].endswith("/health")

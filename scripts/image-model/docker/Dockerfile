@@ -20,8 +20,12 @@ RUN python3 -m pip install -U 'mineru[core]>=3.4.0' --break-system-packages && \
 
 # NOTE（Task 8，2026-09-06）：模型权重不再固化在镜像内。
 # 原：RUN /bin/bash -c "mineru-models-download -s modelscope -m all"
-# 改为：运行时挂载仓库 model/mineru/（compose.yaml 卷），MINERU_MODEL_SOURCE=local 指向挂载路径。
+# 改为：运行时挂载仓库 model/mineru/（compose.yaml 卷）→ /root/mineru_models。
 # 模型下载用 scripts/image-model/download-models.py。
+#
+# 本地模型解析（2026-09-14 校准）：MINERU_MODEL_SOURCE=local 时 MinerU 不读环境变量
+# MINERU_MODELS_DIR，而是读 ~/mineru.json 的 models-dir；故 COPY 该配置指向挂载路径。
+COPY mineru.json /root/mineru.json
 
 # Set the entry point to activate the virtual environment and run the command line tool
 ENTRYPOINT ["/bin/bash", "-c", "export MINERU_MODEL_SOURCE=local && exec \"$@\"", "--"]

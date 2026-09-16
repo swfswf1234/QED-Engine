@@ -1,4 +1,4 @@
-"""组件监控探测能力（控制域监控诊断）：GPU（nvidia-smi）、LM Studio（OpenAI 兼容）、mineru。
+"""组件监控探测能力（控制域监控诊断）：GPU（nvidia-smi）、Qwen（OpenAI 兼容）、mineru。
 
 探测均为「尽力报告」：任何失败返回 available/reachable=false + 中文原因，不抛 5xx；
 nvidia-smi 命令执行（runner）与 httpx transport 可注入（测试）。
@@ -276,9 +276,9 @@ def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None
     return result
 
 
-def probe_lmstudio(settings: Settings, client: httpx.Client | None = None) -> dict:
-    """LM Studio（OpenAI 兼容）探测：/v1/models + 已加载模型列表（5s 超时）。"""
-    base = settings.qed_lmstudio_url.rstrip("/")
+def probe_qwen(settings: Settings, client: httpx.Client | None = None) -> dict:
+    """Qwen 本地模型（OpenAI 兼容）探测：/v1/models + 已加载模型列表（5s 超时）。"""
+    base = settings.qed_qwen_url.rstrip("/")
     try:
         own = client is None
         http = client or httpx.Client(timeout=PROBE_TIMEOUT)
@@ -302,7 +302,7 @@ def probe_mineru(client: httpx.Client | None = None) -> dict:
     """mineru 解析服务（8002，WSL 容器）健康探测。
 
     容器未启动/WSL 不可达 → reachable=false + 中文原因（提示运行容器编排脚本），
-    不泄漏堆栈。健康端点按 mineru 实际实现校准（默认沿 /api/v1/health 模式）。
+    不泄漏堆栈。健康端点 `/health`（MinerU 实际实现，容器 healthcheck 与日志证实）。
     """
     try:
         own = client is None

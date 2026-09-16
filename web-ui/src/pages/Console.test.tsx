@@ -73,7 +73,7 @@ describe('控制台 Console（Phase 2）', () => {
   beforeEach(() => {
     useRuntimeStore.setState({
       services: [], dbStatus: null, loading: false, error: null, dbError: null,
-      gpu: null, gpuError: null, lmstudio: null, lmstudioError: null, mineru: null, mineruError: null,
+      gpu: null, gpuError: null, qwen: null, qwenError: null, mineru: null, mineruError: null,
       keys: null, modelsConfig: null, testing: null, operating: null,
     });
   });
@@ -90,7 +90,7 @@ describe('控制台 Console（Phase 2）', () => {
     const routes = {
       ...baseRoutes,
       '/monitor/gpu': { available: false, reason: '未检测到显卡' },
-      '/monitor/lmstudio': { reachable: false, reason: '未启动' },
+      '/monitor/qwen': { reachable: false, reason: '未启动' },
       '/monitor/mineru': { reachable: false, reason: '未启动' },
     };
     mockApi(routes);
@@ -344,7 +344,7 @@ describe('控制台 Console（Phase 2）', () => {
         sys_memory_percent: 45,
         reason: '',
       },
-      '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
+      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
       '/monitor/mineru': { reachable: false, port: 8002, reason: 'mineru docker 容器未启动' },
     };
     mockApi(routes);
@@ -373,7 +373,7 @@ describe('控制台 Console（Phase 2）', () => {
   it('GPU 全量内存占比饼图：模型占用/其他/空闲 三色切片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/lmstudio': { reachable: false, reason: '未启动' },
+      '/monitor/qwen': { reachable: false, reason: '未启动' },
       '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
@@ -412,7 +412,7 @@ describe('控制台 Console（Phase 2）', () => {
   it('显存占用 ≥95%：无警告 Alert（已移除进程清单与警告功能）', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/lmstudio': { reachable: false, reason: '未启动' },
+      '/monitor/qwen': { reachable: false, reason: '未启动' },
       '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
@@ -468,7 +468,7 @@ describe('控制台 Console（Phase 2）', () => {
   it('WDDM 模式（每进程显存 [N/A]=null）：饼图退化为模型占用/空闲两片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
+      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
       '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
@@ -507,7 +507,7 @@ describe('控制台 Console（Phase 2）', () => {
       '/services': servicesFixture,
       '/config/database': dbFixture,
       '/monitor/gpu': { available: false, reason: '未检测到显卡' },
-      '/monitor/lmstudio': { reachable: false, reason: '超时' },
+      '/monitor/qwen': { reachable: false, reason: '超时' },
       '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
       '/database/test': { reachable: true, reason: '' },
       '/llm/test/text': { ok: true, detail: '模型响应正常' },
@@ -524,7 +524,7 @@ describe('控制台 Console（Phase 2）', () => {
     await waitFor(() => {
       const s = useRuntimeStore.getState();
       expect(s.dbStatus).not.toBeNull();
-      expect(s.lmstudio).not.toBeNull();
+      expect(s.qwen).not.toBeNull();
       expect(s.mineru).not.toBeNull();
     });
     // 字段行·来源：三卡均「本地」
@@ -566,7 +566,7 @@ describe('控制台 Console（Phase 2）', () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
+      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
       '/monitor/mineru': { reachable: false, port: 8002, reason: '' },
       '/config/keys': { provider: 'qwen', configured: true, mode: 'local' },
       '/llm/test/text': { ok: false, detail: '鉴权失败' },
@@ -587,8 +587,8 @@ describe('控制台 Console（Phase 2）', () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      // LM Studio / MinerU 均未启动——api 模式下不应把它们显示为模型卡的「离线」
-      '/monitor/lmstudio': { reachable: false, reason: '未启动' },
+      // Qwen / MinerU 均未启动——api 模式下不应把它们显示为模型卡的「离线」
+      '/monitor/qwen': { reachable: false, reason: '未启动' },
       '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
       '/config/keys': { provider: 'qwen', configured: true, mode: 'api' },
       '/config/models': {
@@ -613,7 +613,7 @@ describe('控制台 Console（Phase 2）', () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      '/monitor/lmstudio': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
+      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
       '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': { available: false, reason: '未检测到显卡' },
       '/config/keys': { provider: 'qwen', configured: true, mode: 'local' },
@@ -625,9 +625,9 @@ describe('控制台 Console（Phase 2）', () => {
     // 测试通过 → 已验证在线
     await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(textCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
-    // LM Studio 转为离线（模拟服务停止后刷新）
+    // Qwen 转为离线（模拟服务停止后刷新）
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/monitor/lmstudio')) {
+      if (url.includes('/monitor/qwen')) {
         return Promise.resolve(
           new Response(JSON.stringify({ reachable: false, reason: '未启动' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
         );

@@ -49,7 +49,7 @@
 | `QED_API_SELECT` | 模型模式 | `api` | `api`（默认，API key 调用）/ `local`（本地模型）/ `qed-engine`（仅子项目，经 8900 网关） |
 | `QED_LLM_GATEWAY_URL` | 网关地址 | `http://127.0.0.1:8900` | 子项目 `qed-engine` 模式读取；api/local 模式忽略 |
 | `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉上游透传（REQ-061：原 60s 硬编码导致长生成 ReadTimeout）；按需调大 |
-| `QED_LMSTUDIO_URL` | 本地文字模型地址 | `http://127.0.0.1:5001/v1` | local 模式文字模型（LM Studio，OpenAI 兼容）；默认值由 1234 调整为 5001（本机实际端口） |
+| `QED_QWEN_URL` | 本地文字模型地址 | `http://127.0.0.1:5001/v1` | local 模式文字模型（Qwen，OpenAI 兼容）；默认值由 1234 调整为 5001（本机实际端口） |
 | `QED_MINERU_URL` | 本地图像模型地址 | `http://127.0.0.1:8002` | local 模式图像模型（MinerU 容器） |
 | `QED_RESOURCE_GUARD` | 资源互斥开关 | `true` | 启动一方本地模型前先停另一方（4080 16GB 显存约束）；`false` 时跳过 |
 
@@ -122,7 +122,7 @@ scripts/
 ├── qed_web_service.py           # 8903 前端生命周期（静态服务，运行期不需要 .env）
 ├── serve_web.py                 # 前端开发态服务（构建期配置在 web-ui/.env.production）
 ├── text-model/
-│   └── qed_lmstudio_service.py  # LM Studio 启停/重启/状态（优先 lms CLI，兜底进程管理）
+│   └── qed_qwen_service.py      # Qwen 启停/重启/状态（优先 lms CLI，兜底进程管理）
 └── image-model/
     ├── qed_mineru_service.py    # MinerU 容器启停/重启/状态（WSL 8002）
     ├── compose.yaml             # MinerU 容器编排（自 Axiom-Flow 迁入）

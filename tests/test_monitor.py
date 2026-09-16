@@ -1,5 +1,5 @@
 """
-模块职责：组件监控探测（monitor）契约测试：GPU/LM Studio/mineru 各分支与响应形状。
+模块职责：组件监控探测（monitor）契约测试：GPU/Qwen/mineru 各分支与响应形状。
 设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/services/monitor.py
@@ -176,7 +176,7 @@ def test_gpu_multi_gpu_parses_first_line():
     assert result["memory_total_mb"] == 16376
 
 
-def _lmstudio_settings():
+def _qwen_settings():
     return Settings(_env_file=None)
 
 
@@ -184,14 +184,14 @@ def _mock_client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_lmstudio_ok_returns_models():
-    """LM Studio 可达：/v1/models 返回已加载模型列表。"""
+def test_qwen_ok_returns_models():
+    """Qwen 可达：/v1/models 返回已加载模型列表。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/models"
         return httpx.Response(200, json={"data": [{"id": "qwen3-8b"}, {"id": "qwen3-27b"}]})
 
-    result = monitor.probe_lmstudio(_lmstudio_settings(), client=_mock_client(handler))
+    result = monitor.probe_qwen(_qwen_settings(), client=_mock_client(handler))
     assert result == {
         "reachable": True,
         "base_url": "http://127.0.0.1:5001/v1",
@@ -200,38 +200,38 @@ def test_lmstudio_ok_returns_models():
     }
 
 
-def test_lmstudio_http_error_reports_reason():
-    """LM Studio 返回非 200 → reachable=false + HTTP 状态码。"""
+def test_qwen_http_error_reports_reason():
+    """Qwen 返回非 200 → reachable=false + HTTP 状态码。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={})
 
-    result = monitor.probe_lmstudio(_lmstudio_settings(), client=_mock_client(handler))
+    result = monitor.probe_qwen(_qwen_settings(), client=_mock_client(handler))
     assert result["reachable"] is False
     assert result["reason"] == "HTTP 500"
 
 
-def test_lmstudio_connect_error_reports_reason():
-    """LM Studio 未启动（连接失败）→ reachable=false + 异常类名。"""
+def test_qwen_connect_error_reports_reason():
+    """Qwen 未启动（连接失败）→ reachable=false + 异常类名。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    result = monitor.probe_lmstudio(_lmstudio_settings(), client=_mock_client(handler))
+    result = monitor.probe_qwen(_qwen_settings(), client=_mock_client(handler))
     assert result["reachable"] is False
     assert result["reason"] == "ConnectError"
     assert result["models"] == []
 
 
-def test_lmstudio_url_override():
-    """QED_LMSTUDIO_URL 覆盖探测目标。"""
-    settings = Settings(_env_file=None, qed_lmstudio_url="http://127.0.0.1:9999/v1")
+def test_qwen_url_override():
+    """QED_QWEN_URL 覆盖探测目标。"""
+    settings = Settings(_env_file=None, qed_qwen_url="http://127.0.0.1:9999/v1")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/models"
         return httpx.Response(200, json={"data": []})
 
-    result = monitor.probe_lmstudio(settings, client=_mock_client(handler))
+    result = monitor.probe_qwen(settings, client=_mock_client(handler))
     assert result["base_url"] == "http://127.0.0.1:9999/v1"
 
 
@@ -302,18 +302,18 @@ def test_monitor_gpu_endpoint(monkeypatch):
     assert body["sys_memory_percent"] == 45
 
 
-def test_monitor_lmstudio_endpoint(monkeypatch):
-    """GET /monitor/lmstudio：reachable + models。"""
+def test_monitor_qwen_endpoint(monkeypatch):
+    """GET /monitor/qwen：reachable + models。"""
     from qed_engine.api import control
 
     monkeypatch.setattr(
         control,
-        "probe_lmstudio",
+        "probe_qwen",
         lambda settings: {"reachable": True, "base_url": "http://127.0.0.1:5001/v1",
                           "models": ["qwen3-8b"], "reason": ""},
     )
     client = _client(monkeypatch)
-    response = client.get("/api/v1/monitor/lmstudio")
+    response = client.get("/api/v1/monitor/qwen")
     assert response.status_code == 200
     assert response.json()["models"] == ["qwen3-8b"]
 

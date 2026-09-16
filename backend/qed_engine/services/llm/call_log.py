@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS qed_llm_calls (
   id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
   service VARCHAR(32) NOT NULL COMMENT '调用方标识：qed_engine/qed_tracker/axiom_flow',
   mode VARCHAR(16) NOT NULL COMMENT '调用模式：api（经 8900 网关）/ local（直连厂商）',
-  provider VARCHAR(32) NOT NULL COMMENT '模型提供方：qwen/deepseek/glm/lmstudio/gateway',
+  provider VARCHAR(32) NOT NULL COMMENT '模型提供方：qwen/deepseek/glm/gateway',
   model VARCHAR(64) NOT NULL COMMENT '实际模型名（如 qwen-plus、qwen3.7-plus）',
   endpoint VARCHAR(16) NOT NULL COMMENT '调用类型：text/vision/embedding',
   prompt_template VARCHAR(255) COMMENT '模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）',
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS qed_llm_calls (
 _COLUMN_COMMENTS: dict[str, str] = {
     "service": "调用方标识：qed_engine/qed_tracker/axiom_flow",
     "mode": "调用模式：api（经 8900 网关）/ local（直连厂商）",
-    "provider": "模型提供方：qwen/deepseek/glm/lmstudio/gateway",
+    "provider": "模型提供方：qwen/deepseek/glm/gateway",
     "model": "实际模型名（如 qwen-plus、qwen3.7-plus）",
     "endpoint": "调用类型：text/vision/embedding",
     "prompt_template": "模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）",

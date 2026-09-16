@@ -2,11 +2,11 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-10
+最后更新：2026-09-14
 确认状态：暂定
 关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/control.py`、`backend/qed_engine/api/tracker.py`、`backend/qed_engine/api/axiom.py`、`backend/qed_engine/clients/axiom_client.py`、`backend/qed_engine/services/log_viewer.py`、`backend/qed_engine/services/monitor.py`（探索会话与 LLM 网关模块的契约事实源见设计文档，归属见 [code-map.md](code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`
-关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`、`../history/adr/v0.1/0008-frontend-react-refactor.md`、`../history/adr/v0.1/0010-documentation-versioning.md`
+关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`、`../history/adr/v0.1/0008-frontend-react-refactor.md`、`../history/adr/v0.1/0010-documentation-versioning.md`、`../adr/0014-parsing-ownership-and-model-boundary.md`
 
 > 本文件是 **QED-Engine 的固定 API 接口文档**（ADR 0010），按**接口类型**组织（REQ-046）：
 > **QED-Engine 前端无 API 接口**（静态页面 + 只连 8900，见 [frontend-architecture.md](frontend-architecture.md)），
@@ -27,8 +27,8 @@
 | ① 服务管理类 | `GET /health`、`GET /services`、`POST /services/{name}/start\|stop\|restart`、`POST /self-restart` | 4 |
 | ② 配置语义类 | `GET /config/models`、`GET /config/keys`、`GET /config/database` | 3 |
 | ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程/探索会话 | 约 33 |
-| ④ 数据透传·Axiom-Flow | 书目/页/manifest/块判定/parse-jobs | 9 |
-| ⑤ 监控诊断与 LLM 网关 | 日志/GPU/LM Studio/mineru + LLM 调用族 + `POST /models/{name}/start\|stop\|restart` | 15 |
+| ④ 数据透传·Axiom-Flow | 书目/页/manifest/块判定/parse-jobs/parsing-tree | 10 |
+| ⑤ 监控诊断与 LLM 网关 | 日志/GPU/Qwen/mineru + LLM 调用族 + `POST /models/{name}/start\|stop\|restart` | 15 |
 
 **启动自检**（ARCH-014）：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
 结果写日志，MySQL 结果为 `/config/database` 启动快照；不再提供按需探测端点。
@@ -112,7 +112,7 @@
 - `configured`：`API_KEY` 是否已配置。该布尔仅表示「key 是否已配置」，**不代表服务可达**。
   供应商可达性由 8900 **启动自检**负责（见下节），前端横幅不再展示。
 - `mode`：当前 `QED_API_SELECT`（api / local）。前端控制台依赖卡模式感知用——api 模式
-  文字/图像模型为云端厂商（不探测 LM Studio/MinerU），local 模式探测本地服务。
+  文字/图像模型为云端厂商（不探测 Qwen/MinerU），local 模式探测本地服务。
 
 ### GET /api/v1/config/database
 
@@ -557,24 +557,42 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 
 ## ④ 数据透传·Axiom-Flow（8902 适配）
 
-前端（8903）只连 8900：Axiom-Flow 解析进度与原始文档对照数据归 8900 所有（数据域），
-内部经 `clients/axiom_client.py`（8902 客户端）适配 8902。8902 契约事实源：
-Axiom-Flow `docs/architecture/api.md`（V2-007 冻结后按回执微调）与
-`docs/design/af-books-sync.md`（REQ-042 同步开发，V2-013 承接）。
+前端（8903）只连 8900：Axiom-Flow 解析管理数据归 8900 所有（数据域），内部经
+`clients/axiom_client.py`（8902 客户端）适配 8902。8902 契约事实源：Axiom-Flow
+`docs/architecture/api.md` 与根仓库设计
+[文档解析管理·与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)
+（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）。
+**解析管线在 Axiom-Flow 直连模型服务，不经 8900 网关**（见 §⑤ 说明）。
 
-### 端点表
+### 端点表（已实现）
 
 | 端点 | 语义 | 内部适配 |
 | --- | --- | --- |
-| `GET /books` | 书目列表（af_books：课程归属 domain_id/course_id/course_name + 解析进度 pages_done/parse_status） | AxiomClient.list_books |
-| `POST /books/sync` | **同步已验证书目（REQ-042）**：8900 聚合 8901 `/knowledge`（books status=verified，经 get_catalog 映射课程名）→ 8902 upsert af_books（幂等，book_id 同源 qt_books） | AxiomClient.sync_books |
-| `GET /books/{id}/pages/{no}` | 单页完整数据（原页图 URL + markdown + blocks，对照主数据源） | AxiomClient.get_book_page |
+| `GET /books` | 书目列表（af_books：课程归属 domain_id/course_id/course_name + ingest/解析进度） | AxiomClient.list_books |
+| `POST /books/sync` | 同步已验证书目：8900 聚合 8901 verified 书目 → 8902 upsert af_books（幂等，book_id 同源 qt_books） | AxiomClient.sync_books |
+| `GET /books/{id}/pages/{no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并） | AxiomClient.get_book_page |
 | `GET /books/{id}/pages/{no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
 | `GET /books/{id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `PUT /books/{id}/pages/{no}/blocks/{index}/review` | **块判定写入（REQ-042）**：verdict 枚举 ok/bad（422 校验）；落库 af_block_reviews | AxiomClient.review_block |
+| `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验） | AxiomClient.review_block |
 | `GET /books/{id}/pages/{no}/blocks/{index}/review` | 块判定回显（无判定 → 404 透传） | AxiomClient.get_block_review |
-| `POST /parse-jobs` | 提交解析任务（202；strategy 默认 hybrid）；完成后回写 af_books.pages_done/parse_status | AxiomClient.create_parse_job |
+| `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；engine 缺省 mineru） | AxiomClient.create_parse_job |
 | `GET /parse-jobs/{id}` | 任务状态与进度（queued/running/completed/failed） | AxiomClient.get_parse_job |
+| `GET /parsing/tree` | 左侧树聚合：8900 共享表（领域→课程）+ 8902 af_books；8902 离线降级为领域→课程 | 见 `api/axiom.py` `_build_parsing_tree` |
+
+### 规划契约（ARCH-020，实施后转正）
+
+> 下列端点为设计冻结目标，**8900/8902 尚未实现**，暂不进入上方已实现端点表（契约测试守护
+> 端点清单与代码一致）；实施后按 [代码-文档追溯规范](../standards/code-document-traceability.md)
+> 迁入上方表。完整契约见[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
+
+| 规划端点 | 方法 | 语义 |
+| --- | --- | --- |
+| `/books/{id}` | GET | 单书目元数据 |
+| `/books/{id}` | PATCH | 修改书目（notes 等） |
+| `/books/{id}` | DELETE | 删除 af_books 行（`?purge=true` 连产物） |
+| `/books/{id}/ingest` | POST | 渲染页图 + book.json（不调模型） |
+| `/books/{id}/pages/{no}/blocks/{index}/edit` | PUT | 块编辑 upsert（verdict/note/corrected_text/corrected_bbox） |
+| `/books/{id}/pages/{no}/edits` | GET | 页内编辑列表 |
 
 ### 错误映射（④ 数据透传·Axiom-Flow）
 
@@ -586,7 +604,7 @@ Axiom-Flow `docs/architecture/api.md`（V2-007 冻结后按回执微调）与
 
 ## ⑤ 监控诊断与 LLM 网关
 
-支撑前端控制台的组件监控（GPU / LM Studio / mineru / 日志 / 8900 自身重启）与 LLM 网关。
+支撑前端控制台的组件监控（GPU / Qwen / mineru / 日志 / 8900 自身重启）与 LLM 网关。
 实现于 `services/log_viewer.py`、`services/monitor.py` 与 `services/llm/`（网关/客户端/
 模型管理器/调用记录），路由挂 `api/control.py`。
 
@@ -623,7 +641,7 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 - **同源差异提示**：PDH 分配口径总和与 nvidia-smi 物理驻留可能不一致（实测 ≈3721MB vs 2705MB），
   属定义差异非 bug；前端饼图剩余片用 `max(0, used − Σ进程)` 兜底并标注。
 - `processes[].kind`（REQ-038）：模型进程名关键词白名单
-  （lmstudio/lm studio/llama/qwen/mineru/python/vmmem/ollama，大小写不敏感包含匹配）
+  （lm studio/lmstudio/llama/qwen/mineru/python/vmmem/ollama，大小写不敏感包含匹配）
   命中 → `"model"`，其余 → `"other"`；前端饼图据此高亮「非模型任务占用」。
 - Windows WDDM 模式下每进程显存为 `[N/A]`/`[Insufficient Permissions]` → 该行保留，
   `memory_mb` 由 PDH 补（取不到则为 `None`）；`[Insufficient Permissions]` 进程名按 pid 经
@@ -633,7 +651,7 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### POST /api/v1/models/{name}/start
 
-本地模型（LM Studio / MinerU）启动，经 `model_manager.operate_model`（资源互斥：启动前先停对方，
+本地模型（Qwen / MinerU）启动，经 `model_manager.operate_model`（资源互斥：启动前先停对方，
 QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
 
 ```json
@@ -642,7 +660,7 @@ QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
 
 - **api 模式（`QED_API_SELECT=api`）→ 409**（云端无启停语义，仅测试）。
 - 未知 `name` → 404。
-- 状态收敛由前端轮询 `/monitor/lmstudio`、`/monitor/mineru` 判定（无独立状态端点）。
+- 状态收敛由前端轮询 `/monitor/qwen`、`/monitor/mineru` 判定（无独立状态端点）。
 
 ### POST /api/v1/models/{name}/stop
 
@@ -660,9 +678,9 @@ QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
 {"name": "qwen", "status": "starting"}
 ```
 
-### GET /api/v1/monitor/lmstudio
+### GET /api/v1/monitor/qwen
 
-本地 LLM（LM Studio，OpenAI 兼容）探测：服务可达性 + 已加载模型。
+本地 LLM（Qwen，OpenAI 兼容）探测：服务可达性 + 已加载模型。
 
 ```json
 {"reachable": true, "base_url": "http://127.0.0.1:5001/v1", "models": ["qwen3-8b"],
@@ -670,7 +688,7 @@ QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
 ```
 
 - 探测目标与超时沿 `/config/llm-status` 模式（未配置不探测）；默认
-  `http://127.0.0.1:5001/v1`（`QED_LMSTUDIO_URL` 可覆盖，变量表见
+  `http://127.0.0.1:5001/v1`（`QED_QWEN_URL` 可覆盖，变量表见
   [project-configuration.md](../design/project-configuration.md)）。
 
 ### GET /api/v1/monitor/mineru
@@ -687,9 +705,15 @@ mineru 解析服务（8002，WSL 容器）健康探测。
 ### LLM 网关（ARCH-016：`/llm/*` 端点族）
 
 按 `QED_API_SELECT`（api/local）路由：api 按 `QED_API_PROVIDER` 选厂商（当前 qwen），
-local 走本地模型（文字 LM Studio / 图像 MinerU，经 `QED_RESOURCE_GUARD` 互斥）。
+local 走本地模型（文字 Qwen / 图像 MinerU，经 `QED_RESOURCE_GUARD` 互斥）。
 密钥只在请求头，绝不下发、不入响应体；成功/失败均落 `qed_llm_calls` 记录表
 （单表三项目可写）。详情契约事实源：[llm-gateway.md](../design/llm-gateway.md)。
+
+> **解析路径变更（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
+> 文档解析不再经 `/llm/vision` 网关——Axiom-Flow 解析管线经引擎适配器直连本地模型服务
+> （MinerU 8002 等）；8900 只负责模型生命周期（`/models/{name}`）、探针与资源互斥。
+> `/llm/vision` 保留为控制台测试与通用视觉用途；`/models/{name}` 的 `name` 按引擎注册
+> （`qwen`/`mineru`，PaddleOCR-VL 接入时新增 `paddleocr`）。
 
 | 端点 | 语义 |
 | --- | --- |

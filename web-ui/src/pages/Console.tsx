@@ -100,7 +100,7 @@ function ServiceCard({
  * 依赖组件卡（元数据库，2026-08-24 结构化重构 + 模式感知）：
  * - 字段行：来源（静态 prop，本地/云端）/ 类型（服务标识，api 模式模型卡显示云端厂商）/
  *   可达 / 备注（单行省略，悬停看全文）
- * - 可达判定（模式感知，修复「LM Studio 未启动却显示已验证在线」错位 bug）：
+ * - 可达判定（模式感知，修复「Qwen 未启动却显示已验证在线」错位 bug）：
  *   云端卡（api 模式模型卡）：验证对象即云端厂商 → 测试结果直接决定可达；
  *   本地探测卡：探测优先——探测离线时陈旧「已验证在线」不得残留，测试结论只并入备注；
  *   mode 未加载（null）按本地语义渲染兜底。
@@ -112,7 +112,7 @@ function DependencyCard({
   icon: React.ReactNode;
   /** 部署来源：本地 / 云端 */
   origin: string;
-  /** 服务类型标识：MySQL / LM Studio / MinerU / 云端 · {provider} */
+  /** 服务类型标识：MySQL / Qwen / MinerU / 云端 · {provider} */
   svcType: string;
   /** 云端卡：api 模式下的文字/图像模型（验证对象=云端厂商，无本地探测语义） */
   cloud: boolean;
@@ -280,13 +280,13 @@ function ModelCard({
  *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；web 兜底合并见 runtime store）
  * - 区块顺序：服务管理 → 基础设施 → 资源监控（GPU 状态 + LLM/OCR 模型卡）
  * - GPU 状态卡：/monitor/gpu（组件独立模块 components/GpuOverview）
- * - 模型卡：LLM 模型（/monitor/lmstudio）+ OCR 模型（/monitor/mineru），
+ * - 模型卡：LLM 模型（/monitor/qwen）+ OCR 模型（/monitor/mineru），
  *   默认置灰未验证，「测试」按钮即时验证点亮（各失败仅降级本卡）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
  */
 export default function Console() {
   const {
-    services, dbStatus, gpu, gpuError, lmstudio, lmstudioError, mineru, mineruError,
+    services, dbStatus, gpu, gpuError, qwen, qwenError, mineru, mineruError,
     keys, modelsConfig, loading, error, dbError, operating, testing, fetchAll, fetchGpu, operate,
     operateModel, testDatabase, testText, testVision,
   } = useRuntimeStore();
@@ -313,7 +313,7 @@ export default function Console() {
   /** 模型操作（/models/{name}/{op}，消息提示；确认框在受控 Modal 复用 ServiceOp 模型） */
   const onModelOperate = async (name: ModelName, op: ModelOp) => {
     const result = await operateModel(name, op);
-    const label = name === 'qwen' ? 'Qwen（LM Studio）' : 'MinerU';
+    const label = name === 'qwen' ? 'Qwen' : 'MinerU';
     const opLabel = OP_LABELS[op];
     if (result.success) {
       message.success(`「${label}」${opLabel}成功（${result.status}）`);
@@ -444,10 +444,10 @@ export default function Console() {
             label="LLM 模型"
             icon={<RobotOutlined />}
             origin={cloudModels ? '云端' : '本地'}
-            modelName={cloudModels ? (modelsConfig?.default?.model ?? '未配置') : (lmstudio?.models?.[0] ?? '未加载')}
+            modelName={cloudModels ? (modelsConfig?.default?.model ?? '未配置') : (qwen?.models?.[0] ?? '未加载')}
             cloud={cloudModels}
-            probe={lmstudio}
-            probeError={lmstudioError}
+            probe={qwen}
+            probeError={qwenError}
             testing={testing === 'text'}
             operating={operating === 'qwen'}
             onTest={testText}

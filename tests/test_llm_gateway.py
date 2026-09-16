@@ -67,13 +67,13 @@ def test_call_text_api_provider_routing(monkeypatch):
 
 
 def test_call_text_local_mode(monkeypatch):
-    """local 模式：先 ensure_text_ready 再走 LM Studio；记录 local/lmstudio。"""
+    """local 模式：先 ensure_text_ready 再走 Qwen；记录 local/qwen。"""
     captured = {}
 
     def fake_ensure(settings, script_runner=None, log=None):
         captured["ensure"] = True
 
-    def fake_lmstudio(base_url, messages, **kw):
+    def fake_qwen(base_url, messages, **kw):
         return "本地回答"
 
     def fake_record(settings, **kwargs):
@@ -81,13 +81,13 @@ def test_call_text_local_mode(monkeypatch):
         return 2
 
     monkeypatch.setattr(gateway.model_manager, "ensure_text_ready", fake_ensure)
-    monkeypatch.setattr(gateway.clients, "lmstudio_chat", fake_lmstudio)
+    monkeypatch.setattr(gateway.clients, "qwen_chat", fake_qwen)
     monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
     result = gateway.call_text(_settings(qed_api_select="local"), prompt="hi")
     assert result["reply"] == "本地回答"
     assert captured["ensure"] is True
     assert captured["record"]["mode"] == "local"
-    assert captured["record"]["provider"] == "lmstudio"
+    assert captured["record"]["provider"] == "qwen"
 
 
 def test_call_text_failure_recorded(monkeypatch):
@@ -230,10 +230,10 @@ def test_call_text_api_passes_timeout_and_max_tokens(monkeypatch):
 
 
 def test_call_text_local_passes_timeout_and_max_tokens(monkeypatch):
-    """local 模式：timeout/max_tokens 同样透传 lmstudio_chat（不因本地模式丢失）。"""
+    """local 模式：timeout/max_tokens 同样透传 qwen_chat（不因本地模式丢失）。"""
     captured = {}
 
-    def fake_lmstudio(base_url, messages, timeout=None, max_tokens=None, **kw):
+    def fake_qwen(base_url, messages, timeout=None, max_tokens=None, **kw):
         captured["timeout"] = timeout
         captured["max_tokens"] = max_tokens
         return "ok"
@@ -245,7 +245,7 @@ def test_call_text_local_passes_timeout_and_max_tokens(monkeypatch):
         return 1
 
     monkeypatch.setattr(gateway.model_manager, "ensure_text_ready", fake_ensure)
-    monkeypatch.setattr(gateway.clients, "lmstudio_chat", fake_lmstudio)
+    monkeypatch.setattr(gateway.clients, "qwen_chat", fake_qwen)
     monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
     settings = _settings(qed_api_select="local", qed_llm_timeout=90.0)
     result = gateway.call_text(settings, prompt="hi", max_tokens=512)

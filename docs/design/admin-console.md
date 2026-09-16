@@ -71,7 +71,7 @@
 
 | 模型 | name | 本地服务 | 脚本 | 模式行为 |
 | --- | --- | --- | --- | --- |
-| 文字模型 | `qwen` | LM Studio | `scripts/text-model/` | api 模式：仅测试 + 云端厂商名；local：启停/重启/测试 |
+| 文字模型 | `qwen` | Qwen / llama-server | `scripts/text-model/` | api 模式：仅测试 + 云端厂商名；local：启停/重启/测试 |
 | 图像模型 | `mineru` | MinerU | `scripts/image-model/` | 同上 |
 
 每卡：来源（云端厂商/本地服务）、探针结果（可达 + 备注）、**显存摘要**（模型进程 PDH 显存合计）、
@@ -142,8 +142,8 @@ State:
   dbStatus: DatabaseStatus | null  // MySQL 探测结果
   gpu: GpuStatus | null            // GPU + 系统内存（含 utilization_source）
   gpuError: string | null
-  lmstudio: LmStudioStatus | null  // 文字模型探针
-  lmstudioError: string | null
+  qwen: QwenStatus | null      // 文字模型探针
+  qwenError: string | null
   mineru: MineruStatus | null      // 图像模型探针
   mineruError: string | null
   keys: KeysStatus | null          // 厂商配置 + 运行模式（keys.mode = api|local）
@@ -164,7 +164,7 @@ Actions:
 ModelActionResponse { name; op; success; status; reason? }
 ```
 
-错误隔离：全局错误（error）仅 8900 不可达；各依赖独立错误（dbError/gpuError/lmstudioError/
+错误隔离：全局错误（error）仅 8900 不可达；各依赖独立错误（dbError/gpuError/qwenError/
 mineruError）独立降级。`withWebServiceFallback()`：8900 离线时 `/services` 缺 `web` 条目时硬编码
 注入 8903 "online"，确保前端服务始终可见。
 
@@ -177,7 +177,7 @@ mineruError）独立降级。`withWebServiceFallback()`：8900 离线时 `/servi
 | `listServices()` | `GET /services` | GET | `service_manager.get_specs()` + `service_status()` |
 | `getDatabaseStatus()` | `GET /config/database` | GET | `app.state.db_status`（启动快照） |
 | `monitorGpu()` | `GET /monitor/gpu` | GET | `monitor.probe_gpu()`（PDH + nvidia-smi）+ `probe_memory()` |
-| `monitorLmstudio()` | `GET /monitor/lmstudio` | POST | `monitor.probe_lmstudio()` |
+| `monitorQwen()` | `GET /monitor/qwen` | POST | `monitor.probe_qwen()` |
 | `monitorMineru()` | `GET /monitor/mineru` | GET | `monitor.probe_mineru()` |
 | `getKeys()` | `GET /config/keys` | GET | `app.state.settings` |
 

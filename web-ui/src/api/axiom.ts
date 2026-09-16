@@ -8,6 +8,7 @@
  * - /books/{id}/pages/{no}/blocks/{index}/review：块判定（PUT 写入 / GET 回显）
  * - /books/{id}/manifest：产物清单
  * - /parse-jobs：任务提交与状态查询
+ * - /parsing/tree：左侧树聚合（8900 共享表领域课程 + 8902 书目，ARCH-020）
  */
 import { api, type ApiRequestOptions } from './client';
 
@@ -149,4 +150,22 @@ export function createParseJob(
 /** GET /api/v1/parse-jobs/{id}：任务状态与进度 */
 export function getParseJob(jobId: string, opts?: ApiRequestOptions): Promise<ParseJob> {
   return api.get<ParseJob>(`/parse-jobs/${jobId}`, opts);
+}
+
+// --- 左侧树聚合（ARCH-020） ---
+
+/** 左侧树节点（领域→课程→书目） */
+export interface ParsingTreeNode {
+  key: string;
+  type: 'domain' | 'course' | 'book';
+  title: string;
+  domainId?: string;
+  courseId?: string;
+  book?: BookMeta;
+  children?: ParsingTreeNode[];
+}
+
+/** GET /api/v1/parsing/tree：左侧树聚合（8900 共享表领域课程 + 8902 书目） */
+export function getParsingTree(opts?: ApiRequestOptions): Promise<ParsingTreeNode[]> {
+  return api.get<ParsingTreeNode[]>('/parsing/tree', opts);
 }

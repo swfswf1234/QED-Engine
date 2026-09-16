@@ -2,13 +2,14 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
+最后更新：2026-09-14
 确认状态：暂定
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
 关联测试：无（子项目各自契约测试守护其数据根行为）
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、
-[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)（元数据入 DB 与表命名空间）；
+[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)（元数据入 DB 与表命名空间）、
+[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow）；
 本规范由 [计划 2026-08-arch019-data-foundation](../history/plans/2026-08/2026-08-arch019-data-foundation.md)
 设计正文经用户评审确定后迁入（2026-08-23，ADR 0011 流程）。
 
@@ -43,31 +44,38 @@
 ```text
 <QED_DATA_ROOT>/                      # 默认 <workspace>/dataset（git 忽略）
 ├── raw/                              # 原始文件区（唯一被外部读取的 PDF/快照区；写入方 QED-Tracker）
-│   └── <domain_id>/                  # 领域层：math（随体系扩展）
-│       ├── <course_id>/              # 课程层：01_math_analysis …
+│   └── <domain_id>/                  # 领域层：math-advanced（随体系扩展）
+│       ├── <course_id>/              # 课程层：math_analysis / linear_algebra …
 │       │   └── <语义slug>_<sha256前8>.pdf
+│       ├── domains.json              # 领域知识正本（探索产物，可重导入；REQ-078 例外）
+│       └── <course_id>/tutorials.json# 课程知识正本（探索产物，可重导入）
 │       └── _general/                 # 领域级通用桶：无法归属课程的文件（含旧 inbox/papers 存量）
 ├── tmp/                              # 临时区（终态文件不保留，任务结束清理；按项目分桶）
 │   ├── qed-tracker/downloads/<task-id>.part
-│   ├── axiom-flow/<job-id>/
+│   ├── axiom-flow/<job-id>/          # Axiom-Flow 解析中间产物（模型调用暂存等）
 │   └── exploration/<对象名>探索.txt   # 探索发起文档（2026-08-23 ARCH-019 新增：用户手写
 │                                     # 领域/课程探索参考，如「高等数学探索.txt」；可反复
 │                                     # 使用，不参与自动清理）
 └── parsed/                           # 解析产物区（写入方 Axiom-Flow）
-    └── <domain_id>/<course_id>/<document-id>/
+    └── <domain_id>/<course_id>/<book_id>/   # book_id 同源 qt_books（如 mathanalysis-b05）
 ```
 
 - **教程层的论文/相关资料类别由数据库表达**：教程（qt_knowledge）下的论文/延展资料是
   `qt_books` 行（kind=paper/blog/other）挂该 knowledge_id；界面按类别分组展示、无内容不显示
   该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB，
   ARCH-013 裁决；2026-08-23 ARCH-019 裁决收敛）。
+- **废弃目录**：早期「项目子域」方案目录 `dataset/axiom-flow/`、`dataset/qed-tracker/`
+  （含 `meta/` JSON 遗留）不再属于本布局；物理清理（备份后删除）由 ARCH-020-F（D 类数据操作）
+  执行，本文件只定义目标结构。
+- `parsed/<domain>/<course>/<book_id>/` 内部产物格式（页图/Markdown/blocks.json/manifest）
+  见 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
 
 ## 契约
 
 | 子域 | 写入方 | 读取方 | 内容 |
 | --- | --- | --- | --- |
 | `raw/<domain>/<course>/` | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始数据（PDF/快照），保持来源完整性与校验信息；元数据（sha256/路径/状态）在 `qt_books` |
-| `parsed/<domain>/<course>/<doc-id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页面事实、Markdown、manifest）；解析任务与质量元数据在 `af_*`（规划） |
+| `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*`（ARCH-020 四表） |
 | `tmp/<project>/…` | 各写入方自用 | — | 下载/解析中间产物，任务结束清理，不跨项目读取 |
 | `tmp/exploration/` | 用户手工维护 | QED-Tracker（LLM 探索输入，经 ref_doc_path） | 探索发起文档（`<对象名>探索.txt`），用户资产不自动清理 |
 | ~~`qed-tracker/meta/`~~ | — | — | **退役**（2026-08-16）：JSON 不再作为元数据事实源，存量迁移归档（REQ-032） |
@@ -97,5 +105,8 @@
   `tmp/` 清空不迁移；DB 五表同批备份后清空重走一轮。
 - QED-Tracker 落盘拼装改造为共享布局、`QED_DATA_ROOT` 映射接入属其侧请求（REQ-055 同批）；
   改造前其新下载仍写旧布局则视为缺陷。
-- Axiom-Flow 产物当前为自身 `data/`（内容寻址目录），指向 `<root>/parsed/…` 属 Phase 3
-  改造（ALN-003 合并扩展）。
+- Axiom-Flow 产物落点：ARCH-020 重构（2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）
+  定为 `<root>/parsed/<domain>/<course>/<book_id>/`；其仓库内 `data/` 为过渡期工作目录，
+  迁移后退役（Axiom-Flow 侧文档承接）。
+- 遗留目录 `dataset/axiom-flow/`、`dataset/qed-tracker/` 与 `raw/math.rar`、`tmp/参考书籍/`
+  的物理清理属 ARCH-020-F（D 类数据操作，备份后执行）。

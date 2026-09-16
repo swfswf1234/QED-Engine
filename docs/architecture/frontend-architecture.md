@@ -2,14 +2,15 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-10
+最后更新：2026-09-14
 确认状态：暂定
 关联代码：`web-ui/`（React 19 + TypeScript + Vite 构建，构建产物 `web-ui/dist/` 由
 `scripts/serve_web.py` 静态托管 8903）、`web-ui/.env.production`（`VITE_API_BASE`）
 关联测试：`tests/test_web.py`（守护 serve_web 契约与 web-ui 源码 token）
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)（全局端口）、
 [ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
-[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（React 全家桶重构）
+[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（React 全家桶重构）、
+[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属）
 
 ## 定位与边界
 
@@ -68,7 +69,9 @@ web-ui/
     + 依赖组件三卡（MySQL/文字模型/图像模型）+ 模型调用记录检索页（`#/admin/llm-calls`）。
   - `#/admin/dashboard` 仪表盘（Dashboard）：服务在线 + 文档下载进度双饼图 + 文档解析进度。
   - `#/admin/downloads` 文档下载管理（Downloads）：知识树（领域→课程→教程）+ 书籍卡片 + 流程筛选。
-  - `#/admin/parsing` 文档解析管理（Parsing）：左树右对照单视图（书目+进度 → 原页图 + 块级渲染 + 判定）。
+  - `#/admin/parsing` 文档解析管理（Parsing）：左树（领域→课程→书目+解析进度）+ 右侧对比
+    （原页图 + 语义 bbox 方框 + 块级渲染与编辑：判定/备注/文字修正/范围修改），工具栏单一
+    「刷新」按钮（同步书目 + 重载）；设计见 [解析管理 UI 设计](../design/parsing-ui.md)。
 
 ## 与后端的交互
 

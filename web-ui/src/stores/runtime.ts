@@ -3,24 +3,24 @@
  * - 挂载策略：AdminLayout 进入管理台时拉取一次；Console 挂载时补拉保新鲜
  *   （fetchAll 带 loading 防重入，双挂载只发一轮请求）；zustand 模块级单例跨页存活
  * - 数据面：服务快照（/services）+ MySQL（/config/database）+ GPU（/monitor/gpu）+
- *   LM Studio（/monitor/lmstudio）+ MinerU（/monitor/mineru）+ 运行模式（/config/keys）
+ *   Qwen（/monitor/qwen）+ MinerU（/monitor/mineru）+ 运行模式（/config/keys）
  *   六路独立拉取，互不拖累
  * - 独立超时：services 5s（本地脚本查询，秒回）；database 10s（后端 3s 探测 + 60s 缓存）；
- *   gpu/lmstudio/mineru 8s（后端探测 5s，放宽）
+ *   gpu/qwen/mineru 8s（后端探测 5s，放宽）
  * - 启停操作 + 过渡态轮询收敛（starting/stopping → online/offline）
  * - 测试动作：MySQL 即时探测 / 文字 / 图像（置 testing 标记 → 调端点 → outcome）
- * - 离线降级：8900 不可达 → 整体 error 横幅；database/gpu/lmstudio/mineru 失败 → 仅对应字段降级
+ * - 离线降级：8900 不可达 → 整体 error 横幅；database/gpu/qwen/mineru 失败 → 仅对应字段降级
  */
 import { create } from 'zustand';
 import {
-  listServices, operateService, getDatabaseStatus, monitorGpu, monitorLmstudio, monitorMineru,
+  listServices, operateService, getDatabaseStatus, monitorGpu, monitorQwen, monitorMineru,
   fetchModelsConfig, type ServiceOp, type ModelsConfig,
 } from '../api/services';
 import {
   databaseTest, getKeys, llmTestText, llmTestVision, operateModel as operateModelApi,
 } from '../api/llm';
 import type {
-  DatabaseStatus, GpuStatus, KeysStatus, LmStudioStatus, MineruStatus, ModelName, ModelOp, ServiceStatus,
+  DatabaseStatus, GpuStatus, KeysStatus, QwenStatus, MineruStatus, ModelName, ModelOp, ServiceStatus,
 } from './index';
 
 /** 过渡态收敛轮询参数（对齐后端 TRANSITION_WINDOW=15s） */
@@ -36,8 +36,8 @@ export const DATABASE_TIMEOUT_MS = 10000;
 export const GPU_TIMEOUT_MS = 8000;
 /** GPU 显存构成自动刷新周期（REQ-038，2026-08-21 用户裁决：60s 一次足矣） */
 export const GPU_REFRESH_INTERVAL_MS = 60_000;
-/** /monitor/lmstudio、/monitor/mineru 探测超时（后端 5s 探测，放宽到 8s） */
-export const LMSTUDIO_TIMEOUT_MS = 8000;
+/** /monitor/qwen、/monitor/mineru 探测超时（后端 5s 探测，放宽到 8s） */
+export const QWEN_TIMEOUT_MS = 8000;
 export const MINERU_TIMEOUT_MS = 8000;
 /** 测试动作（MySQL 即时探测/文字/图像）超时（真实模型调用，放宽） */
 export const TEST_TIMEOUT_MS = 15000;
@@ -129,10 +129,10 @@ export interface RuntimeStore {
   gpu: GpuStatus | null;
   /** GPU 探测独立错误（不影响服务卡展示） */
   gpuError: string | null;
-  /** LM Studio（本地文字模型）探测结果（依赖组件三卡；失败仅置 lmstudioError） */
-  lmstudio: LmStudioStatus | null;
-  /** LM Studio 探测独立错误 */
-  lmstudioError: string | null;
+  /** Qwen（本地文字模型）探测结果（依赖组件三卡；失败仅置 qwenError） */
+  qwen: QwenStatus | null;
+  /** Qwen 探测独立错误 */
+  qwenError: string | null;
   /** MinerU（本地图像模型）探测结果（依赖组件三卡；失败仅置 mineruError） */
   mineru: MineruStatus | null;
   /** MinerU 探测独立错误 */
@@ -168,8 +168,8 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   dbError: null,
   gpu: null,
   gpuError: null,
-  lmstudio: null,
-  lmstudioError: null,
+  qwen: null,
+  qwenError: null,
   mineru: null,
   mineruError: null,
   keys: null,
@@ -182,15 +182,15 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     // （AdminLayout 挂载拉取 + Console 挂载补拉场景下只发一轮）
     if (get().loading || get().operating) return;
     set({ loading: true });
-    // 六路并行独立拉取：services 失败 → 整体横幅；database/gpu/lmstudio/mineru/keys 失败 → 仅对应字段降级
+    // 六路并行独立拉取：services 失败 → 整体横幅；database/gpu/qwen/mineru/keys 失败 → 仅对应字段降级
     const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
       call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
-    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr], [lmstudio, lmstudioErr], [mineru, mineruErr], [keys], [modelsConfig]] =
+    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr], [qwen, qwenErr], [mineru, mineruErr], [keys], [modelsConfig]] =
       await Promise.all([
         fetchOne(() => listServices({ timeoutMs: SERVICES_TIMEOUT_MS })),
         fetchOne(() => getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS })),
         fetchOne(() => monitorGpu({ timeoutMs: GPU_TIMEOUT_MS })),
-        fetchOne(() => monitorLmstudio({ timeoutMs: LMSTUDIO_TIMEOUT_MS })),
+        fetchOne(() => monitorQwen({ timeoutMs: QWEN_TIMEOUT_MS })),
         fetchOne(() => monitorMineru({ timeoutMs: MINERU_TIMEOUT_MS })),
         fetchOne(() => getKeys({ timeoutMs: SERVICES_TIMEOUT_MS })),
         fetchOne(() => fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS })),
@@ -200,14 +200,14 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       services: services ?? get().services,
       dbStatus: dbStatus ?? get().dbStatus,
       gpu: gpu ?? get().gpu,
-      lmstudio: lmstudio ?? get().lmstudio,
+      qwen: qwen ?? get().qwen,
       mineru: mineru ?? get().mineru,
       keys: keys ?? get().keys,
       modelsConfig: modelsConfig ?? get().modelsConfig,
       error: servicesErr ? reason(servicesErr) : null,
       dbError: dbErr ? reason(dbErr) : null,
       gpuError: gpuErr ? reason(gpuErr) : null,
-      lmstudioError: lmstudioErr ? reason(lmstudioErr) : null,
+      qwenError: qwenErr ? reason(qwenErr) : null,
       mineruError: mineruErr ? reason(mineruErr) : null,
     });
     if (!get().operating) set({ loading: false });
@@ -308,10 +308,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
         reason: err instanceof Error ? err.message : String(err),
       };
     }
-    // 模型收敛：start/restart 目标 = 模型探针可达（qwen→lmstudio / mineru reachable），stop = 不可达
+    // 模型收敛：start/restart 目标 = 模型探针可达（qwen / mineru reachable），stop = 不可达
     const targetReachable = op !== 'stop';
     const probe = async (): Promise<boolean> => (
-      name === 'qwen' ? monitorLmstudio() : monitorMineru()
+      name === 'qwen' ? monitorQwen() : monitorMineru()
     ).then((s) => (s as { reachable: boolean }).reachable);
     return new Promise<OperateResult>((resolve) => {
       const deadline = Date.now() + POLL_TIMEOUT_MS;

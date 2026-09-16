@@ -31,11 +31,11 @@ from qed_engine.api.schemas import (
     LlmTestResponse,
     LlmTextRequest,
     LlmVisionRequest,
-    LmStudioStatus,
     LogsResponse,
     MineruStatus,
     ModelRoute,
     ModelsResponse,
+    QwenStatus,
     ReviewCallRequest,
     ReviewCallResponse,
 )
@@ -49,7 +49,7 @@ from qed_engine.services.llm import clients as llm_clients
 from qed_engine.services.llm import gateway as llm_gateway
 from qed_engine.services.llm import model_manager as mm
 from qed_engine.services.log_viewer import LogError, read_log
-from qed_engine.services.monitor import probe_gpu, probe_lmstudio, probe_memory, probe_mineru
+from qed_engine.services.monitor import probe_gpu, probe_memory, probe_mineru, probe_qwen
 from qed_engine.services.service_manager import (
     ServiceError,
     get_specs,
@@ -474,10 +474,10 @@ def monitor_gpu() -> GpuStatus:
     return GpuStatus(**probe_gpu(memory_fn=probe_memory))
 
 
-@router.get("/monitor/lmstudio", response_model=LmStudioStatus)
-def monitor_lmstudio(request: Request) -> LmStudioStatus:
-    """本地 LLM（LM Studio）探测：可达性 + 已加载模型。"""
-    return LmStudioStatus(**probe_lmstudio(request.app.state.settings))
+@router.get("/monitor/qwen", response_model=QwenStatus)
+def monitor_qwen(request: Request) -> QwenStatus:
+    """本地 LLM（Qwen）探测：可达性 + 已加载模型。"""
+    return QwenStatus(**probe_qwen(request.app.state.settings))
 
 
 @router.get("/monitor/mineru", response_model=MineruStatus)
