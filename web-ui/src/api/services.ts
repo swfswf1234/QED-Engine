@@ -3,7 +3,7 @@
  * 契约来源：backend/qed_engine/api/service_manager.py、api/main.py
  */
 import { api, type ApiRequestOptions } from './client';
-import type { DatabaseStatus, GpuStatus, QwenStatus, MineruStatus, ServiceStatus, ServicesResponse } from '../stores';
+import type { DatabaseStatus, GpuStatus, ServiceStatus, ServicesResponse } from '../stores';
 
 export interface ServiceActionResponse {
   name: string;
@@ -41,16 +41,6 @@ export async function getDatabaseStatus(opts?: ApiRequestOptions): Promise<Datab
 /** GET /api/v1/monitor/gpu：GPU + 系统内存总览（控制台总览条） */
 export async function monitorGpu(opts?: ApiRequestOptions): Promise<GpuStatus> {
   return api.get<GpuStatus>('/monitor/gpu', opts);
-}
-
-/** GET /api/v1/monitor/qwen：Qwen（本地文字模型）探测 */
-export async function monitorQwen(opts?: ApiRequestOptions): Promise<QwenStatus> {
-  return api.get<QwenStatus>('/monitor/qwen', opts);
-}
-
-/** GET /api/v1/monitor/mineru：MinerU（本地图像模型）探测 */
-export async function monitorMineru(opts?: ApiRequestOptions): Promise<MineruStatus> {
-  return api.get<MineruStatus>('/monitor/mineru', opts);
 }
 
 export interface ModelRoute {

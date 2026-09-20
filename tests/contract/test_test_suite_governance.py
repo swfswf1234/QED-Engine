@@ -59,6 +59,7 @@ def test_root_test_files_are_the_config_center_suite():
         "test_llm_endpoints.py",
         "test_llm_gateway.py",
         "test_llm_model_manager.py",
+        "test_llm_registry.py",
         "test_log_viewer.py",
         "test_monitor.py",
         "test_qed_engine_service.py",

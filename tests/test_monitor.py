@@ -223,9 +223,41 @@ def test_qwen_connect_error_reports_reason():
     assert result["models"] == []
 
 
+def test_qwen_token_header_passthrough():
+    """LM Studio API 认证（W7 实测）：token 非空时 GET 带 Authorization；空时不带。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"data": []})
+
+    result = monitor.probe_qwen(_qwen_settings(), client=_mock_client(handler), token="lm-secret")
+    assert result["reachable"] is True
+    assert seen == ["Bearer lm-secret"]
+    seen.clear()
+    monitor.probe_qwen(_qwen_settings(), client=_mock_client(handler))
+    assert seen == [None]
+
+
+def test_slot_text_lmstudio_passes_token():
+    """probe_slot(text, lmstudio)：把 QED_LMSTUDIO_TOKEN 透传给探针请求。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"data": [{"id": "qwen3.8-27b", "state": "loaded"}]})
+
+    settings = Settings(_env_file=None, qed_local_runtime="lmstudio",
+                        qed_lmstudio_token="lm-secret")
+    result = monitor.probe_slot(settings, "text", client=_mock_client(handler))
+    assert result["reachable"] is True
+    assert result["runtime"] == "lmstudio"
+    assert seen == ["Bearer lm-secret"]
+
+
 def test_qwen_url_override():
-    """QED_QWEN_URL 覆盖探测目标。"""
-    settings = Settings(_env_file=None, qed_qwen_url="http://127.0.0.1:9999/v1")
+    """QED_MODEL_URL 覆盖探测目标。"""
+    settings = Settings(_env_file=None, qed_model_url="http://127.0.0.1:9999/v1")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/models"
@@ -236,14 +268,14 @@ def test_qwen_url_override():
 
 
 def test_mineru_ok():
-    """mineru 8002 健康端点 200 → reachable=True。"""
+    """mineru 5002 健康端点 200 → reachable=True。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/health"
         return httpx.Response(200, json={"status": "ok"})
 
     result = monitor.probe_mineru(client=_mock_client(handler))
-    assert result == {"reachable": True, "port": 8002, "reason": ""}
+    assert result == {"reachable": True, "port": 5002, "reason": ""}
 
 
 def test_mineru_http_error_reports_status():
@@ -325,7 +357,7 @@ def test_monitor_mineru_endpoint(monkeypatch):
     monkeypatch.setattr(
         control,
         "probe_mineru",
-        lambda: {"reachable": False, "port": 8002, "reason": "mineru docker 容器未启动（请运行容器编排脚本启动）"},
+        lambda: {"reachable": False, "port": 5002, "reason": "mineru docker 容器未启动（请运行容器编排脚本启动）"},
     )
     client = _client(monkeypatch)
     response = client.get("/api/v1/monitor/mineru")

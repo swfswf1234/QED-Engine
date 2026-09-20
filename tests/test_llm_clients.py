@@ -1,7 +1,7 @@
 """
 模块职责：LLM 供应商客户端契约测试：多厂商文字/视觉（OpenAI 兼容）、Qwen 本地、MinerU。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：backend/qed_engine/services/llm/clients.py
 """
 
@@ -63,6 +63,25 @@ def test_qwen_chat_uses_first_loaded_model(monkeypatch):
     assert "/models" in calls[0]
 
 
+def test_qwen_chat_bearer_token_header():
+    """LM Studio API 认证（W7 实测）：api_key 非空时带 Authorization；空时不带头。"""
+    headers = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        headers.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "本地回答"}}]})
+
+    with _mock_client(handler) as client:
+        clients.qwen_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[], client=client,
+            model="qwen3.8-27b", api_key="lm-secret",
+        )
+        clients.qwen_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[], client=client, model="qwen3.8-27b",
+        )
+    assert headers == ["Bearer lm-secret", None]
+
+
 def test_provider_vision_chat_sends_image():
     """多厂商视觉：请求体含 image_url data URI（base64 图片）。"""
 
@@ -92,7 +111,7 @@ def test_mineru_parse_polls_result():
 
     with _mock_client(handler) as client:
         reply = clients.mineru_parse(
-            base_url="http://127.0.0.1:8002",
+            base_url="http://127.0.0.1:5002",
             file_bytes=b"pdf-bytes", filename="a.pdf", client=client,
             poll_interval=0.01, max_wait=1.0,
         )
@@ -211,3 +230,59 @@ def test_resolve_vision_explicit_model_preferred():
 def test_resolve_vision_deepseek_none():
     """resolve_vision：deepseek 无视觉 → None。"""
     assert clients.resolve_vision("deepseek", "") is None
+
+
+# ---------- 向量化（PLAN-046：/llm/embedding 数据源） ----------
+
+
+def test_provider_embeddings_ok_sorted_by_index():
+    """向量化：POST /embeddings，响应按 index 排序后抽取 embedding。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/embeddings")
+        assert request.headers["Authorization"] == "Bearer sk-test"
+        import json as _json
+        payload = _json.loads(request.content)
+        assert payload["model"] == "text-embedding-v4"
+        assert payload["input"] == ["你好", "世界"]
+        return httpx.Response(200, json={
+            "data": [
+                {"index": 1, "embedding": [0.3, 0.4]},
+                {"index": 0, "embedding": [0.1, 0.2]},
+            ],
+        })
+
+    with _mock_client(handler) as client:
+        vectors = clients.provider_embeddings(
+            api_key="sk-test", model="text-embedding-v4",
+            input_texts=["你好", "世界"], client=client,
+        )
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+
+
+def test_provider_embeddings_http_error():
+    """向量化：HTTP 非 200 → RuntimeError 中文原因。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    with _mock_client(handler) as client:
+        with pytest.raises(RuntimeError, match="HTTP 429"):
+            clients.provider_embeddings(
+                api_key="sk-test", model="text-embedding-v4",
+                input_texts=["hi"], client=client,
+            )
+
+
+def test_provider_embeddings_bad_format():
+    """向量化：响应缺 data[].embedding → RuntimeError 格式异常。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"index": 0}]})
+
+    with _mock_client(handler) as client:
+        with pytest.raises(RuntimeError, match="向量响应格式异常"):
+            clients.provider_embeddings(
+                api_key="sk-test", model="text-embedding-v4",
+                input_texts=["hi"], client=client,
+            )

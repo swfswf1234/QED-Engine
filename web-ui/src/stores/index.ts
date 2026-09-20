@@ -78,19 +78,78 @@ export interface KeysStatus {
   mode: 'api' | 'local';
 }
 
-/** /monitor/qwen：本地文字模型（Qwen）探测结果 */
-export interface QwenStatus {
-  reachable: boolean;
-  base_url?: string;
-  models?: string[];
-  reason?: string;
+// --- 槽位契约类型（PLAN-046 模型统一注册：三槽位单管道，控制台三卡数据源） ---
+
+/** 槽位名：text 文字 / vision 图像 / embedding 向量 */
+export type SlotName = 'text' | 'vision' | 'embedding';
+
+/** 可启停槽位（embedding 无本地 runtime，仅 api，无启停语义） */
+export type ModelSlot = 'text' | 'vision';
+
+/** 模型来源：本地部署 / API 调用 */
+export type ModelSource = 'api' | 'local';
+
+/** 槽位模型下拉选项（按来源 × 渠道过滤，带一句话备注） */
+export interface SlotModelOption {
+  value: string;
+  label: string;
+  description?: string;
 }
 
-/** /monitor/mineru：本地图像模型（MinerU）探测结果 */
-export interface MineruStatus {
-  reachable: boolean;
-  port?: number;
-  reason?: string;
+/** 槽位渠道下拉选项（status：available 登记可用 / pending 待上线置灰） */
+export interface SlotChannelOption {
+  value: string;
+  label: string;
+  status: 'available' | 'pending';
+}
+
+/** 槽位来源下拉选项（status：available 可选 / pending 待上线置灰） */
+export interface SlotSourceOption {
+  value: ModelSource;
+  label: string;
+  status?: 'available' | 'pending';
+}
+
+/** 槽位运行态选择（POST /models/{slot}/select：source / runtime / model 至少一项） */
+export interface SlotSelectPatch {
+  source?: ModelSource;
+  /** lmstudio | llamacpp | docker | default（default = 回退全局默认） */
+  runtime?: string;
+  model?: string;
+}
+
+/** GET /models/{slot}：槽位状态（来源/渠道/身份/备注/可用性 + 三个下拉，PLAN-046 v3 五字段卡） */
+export interface SlotStatus {
+  slot: SlotName;
+  /** 生效来源：本地部署 / API 调用（manifest.source > 全局 QED_API_SELECT） */
+  source: ModelSource;
+  /** 生效渠道：api → 'direct'（直连）；local → runtime 名 */
+  channel: string;
+  /** local 时为 lmstudio / llamacpp / docker；api 时空 */
+  runtime?: string;
+  /** 当前身份（模型下拉选中值） */
+  identity?: string;
+  /** 生效模型标识（api=云端模型名；local=本地标识） */
+  model?: string;
+  /** api=厂商（qwen/deepseek/...）；local=runtime 名 */
+  provider?: string;
+  base_url?: string;
+  /** 当前身份一句话备注（「备注」行） */
+  description?: string;
+  /** 可用判定：api=API_KEY 已配置；local=绑定模型探针就绪 */
+  ready: boolean;
+  /** 可用性文本：可用 / 不可用 / 未就绪 */
+  availability?: string;
+  /** 来源下拉数据源 */
+  source_options?: SlotSourceOption[];
+  /** 渠道下拉数据源（待上线置灰） */
+  channel_options?: SlotChannelOption[];
+  /** 模型下拉数据源（按来源 × 渠道过滤） */
+  options?: SlotModelOption[];
+  /** 解析备注（如回退告警） */
+  notes?: string[];
+  /** 解析错误（非空即解析失败，卡片标红） */
+  error?: string;
 }
 
 /** /llm/calls 单条记录 */
@@ -405,10 +464,7 @@ export interface ExploreApplyResult {
 // --- 仪表盘 store（Dashboard 填充） ---
 // Phase 3：五层聚合数据（/knowledge + /books 详情）+ 服务健康摘要
 
-// --- 模型操作契约类型（Task 6，2026-09-06：/models/{name} 端点族） ---
-
-/** 本地模型名：qwen（Qwen 文字）/ mineru（MinerU 图像） */
-export type ModelName = 'qwen' | 'mineru';
+// --- 模型操作契约类型（Task 6，2026-09-06 /models/{name} 端点族；PLAN-046 槽位名泛化） ---
 
 /** 本地模型操作：start / stop / restart */
 export type ModelOp = 'start' | 'stop' | 'restart';

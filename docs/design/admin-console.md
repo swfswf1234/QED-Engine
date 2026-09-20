@@ -2,13 +2,20 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
+最后更新：2026-09-16
 确认状态：暂定
 关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)
 关联设计：[service-hosting.md](service-hosting.md)（服务托管）、[local-model-management.md](local-model-management.md)（本地模型生命周期）、[llm-gateway.md](llm-gateway.md)（模型网关/调用记录）、[api-contracts](../architecture/api-contracts.md)（固定 API）
 关联计划：[2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)（本设计晋升来源）、[2026-08-req060-llm-call-review](../history/plans/2026-08/2026-08-req060-llm-call-review.md)（调用记录页来源）
+
+> **v3 修订（2026-09-16，PLAN-046，控制台模型卡优化）**：SlotCard 由「渠道 / 模型 / 可用 / 备注」
+> 四行升级为**五字段**——**来源**（本地部署 / API 调用，Select）→ **模型**（按来源 × 渠道过滤，
+> 选项带一句话备注）→ **渠道**（本地可选 默认 / LM Studio / Docker，llama.cpp 待上线置灰；
+> API 显示「直连」）→ **可用**（探针自动判定 + 右侧「验证」按钮真实调用）→ **备注**（身份
+> `description`）。选择（来源/渠道/模型）均写运行态 `manifest.json`，反转 v2「渠道仅展示不可切换」
+> 口径；详见 [local-model-management.md](local-model-management.md)、[llm-gateway.md](llm-gateway.md)。
 
 ## 背景与定位
 
@@ -25,9 +32,10 @@
 - 服务托管细节（注册表/启停单元/生命周期脚本）归 [service-hosting.md](service-hosting.md)，
   本文件只定义 UI 侧的四区结构、Store、API 链路与资源监控口径。
 
-## 四区结构（2026-09-06 用户裁决）
+## 三区结构（2026-09-16 v2 收敛：GPU 与模型三槽位卡合并为资源监控区）
 
-顺序固定：**服务管理 → 基础设施 → 资源总览 → 本地模型**。
+顺序固定：**服务管理 → 基础设施 → 资源监控（GPU 状态 + 文字/图像/向量三槽位卡）**。
+（原四区「资源总览 + 本地模型」两区合并；2026-09-06 四区裁决由本轮 v2 演进。）
 
 ### 区 1：服务管理（四服务卡，ServiceCard）
 
@@ -50,7 +58,7 @@
 
 本期仅探测 + 测试（无启停）。
 
-### 区 3：资源总览（GpuOverview）
+### 区 3：资源监控（GpuOverview + SlotCard 三槽位卡）
 
 展示 GPU 型号、VRAM 已用/总量、利用率、系统内存已用/总量、VRAM 构成饼图、进程列表。
 
@@ -67,17 +75,26 @@
 饼图分类：模型进程（蓝/绿）、非模型任务（橙，含聚合「其他任务」）、系统/图形（灰）、空闲（绿）。
 告警：VRAM ≥ 95% 显示横幅并列出非模型任务进程。刷新：60 秒自动刷新，操作期间暂停。
 
-### 区 4：本地模型（ModelCard，文字/图像）
+**模型三槽位卡（SlotCard，v3 五字段）**：数据源 `GET /models/{slot}`（SlotStatus，三卡并行拉取）。
 
-| 模型 | name | 本地服务 | 脚本 | 模式行为 |
-| --- | --- | --- | --- | --- |
-| 文字模型 | `qwen` | Qwen / llama-server | `scripts/text-model/` | api 模式：仅测试 + 云端厂商名；local：启停/重启/测试 |
-| 图像模型 | `mineru` | MinerU | `scripts/image-model/` | 同上 |
+| 字段 | 内容 | 交互 |
+| --- | --- | --- |
+| **来源** | 本地部署 / API 调用（Select） | `POST /models/{slot}/select {source}` 写运行态，刷新选项 |
+| **模型** | 按「来源 × 渠道」过滤的身份（Select，选项带一句话备注） | `POST /models/{slot}/select {model}` 写 `manifest.active`，选中后自动探针 |
+| **渠道** | 本地：默认 / LM Studio / Docker / llama.cpp（待上线置灰）；API：直连（只读） | `POST /models/{slot}/select {runtime}` 写运行态 |
+| **可用** | 探针自动判定：可用 / 不可用 / 未就绪；右侧「验证」按钮 | `POST /llm/test/{slot}` 真实小调用，反馈成功/失败 + 原因 |
+| **备注** | 当前身份 `description`（一句话介绍） | — |
 
-每卡：来源（云端厂商/本地服务）、探针结果（可达 + 备注）、**显存摘要**（模型进程 PDH 显存合计）、
-测试按钮、操作按钮（按模式渲染）。操作经 `POST /models/{name}/{start|stop|restart}`（8900 聚合，
-资源互斥在 model_manager，见 [local-model-management.md](local-model-management.md)）。
-api 模式下启停按钮不渲染（只测试）。
+| 槽位卡 | slot | 渠道选项（登记可用 → 可选） | 操作 |
+| --- | --- | --- | --- |
+| 文字模型 | `text` | 默认 / LM Studio / Docker(待上线) / llama.cpp(待上线) | 来源+模型+渠道 + 启停/重启 + 验证 |
+| 图像模型 | `vision` | 默认(=Docker) / Docker / LM Studio(待上线) / llama.cpp(待上线) | 同上 |
+| 向量模型 | `embedding` | 来源固定 API（「本地部署」待上线置灰），渠道「直连」 | 来源/模型只读 + 验证 |
+
+- **来源 = local 才渲染**启停/重启按钮（`POST /models/{slot}/{start|stop|restart}`，单活仲裁在
+  model_manager，见 [local-model-management.md](local-model-management.md)）；来源 = api 时仅验证。
+- 选择（来源/渠道/模型）均写运行态 `manifest.json`（`source`/`runtime`/`active`，重启保留）；
+  渠道「待上线」置灰不可选；「默认」= 全局 `QED_API_SELECT` / `QED_LOCAL_RUNTIME` 默认值。
 
 ## 模型调用记录页（`#/admin/llm-calls`，REQ-060 已实现）
 
@@ -142,43 +159,46 @@ State:
   dbStatus: DatabaseStatus | null  // MySQL 探测结果
   gpu: GpuStatus | null            // GPU + 系统内存（含 utilization_source）
   gpuError: string | null
-  qwen: QwenStatus | null      // 文字模型探针
-  qwenError: string | null
-  mineru: MineruStatus | null      // 图像模型探针
-  mineruError: string | null
+  slots: Record<SlotName, SlotStatus | null>      // v2：text/vision/embedding 三槽位状态
+  slotErrors: Record<SlotName, string | null>     // 槽位独立错误
   keys: KeysStatus | null          // 厂商配置 + 运行模式（keys.mode = api|local）
   loading: boolean                 // fetchAll 进行中标记
   error: string | null             // 全局错误（8900 不可达）
   dbError: string | null
-  operating: string | null         // 当前操作（服务名/模型名 + 操作）
-  testing: 'db' | 'text' | 'vision' | null
+  operating: string | null         // 当前操作（服务名/模型槽位 + 操作）
+  testing: 'db' | 'text' | 'vision' | 'embedding' | null
 
 Actions:
-  fetchAll()        → 6 并行请求，per-field 错误降级
+  fetchAll()        → 7 并行请求（services/database/gpu/三槽位/keys），per-field 错误降级
   fetchGpu()        → 独立 GPU 刷新（60 秒间隔）
+  fetchSlots()      → 三槽位状态重拉（选择模型/模型操作后刷新）
   operate(name, op) → 服务启停重启 + 轮询收敛（1s × 15）
-  operateModel(name, op) → 模型操作 + 收敛轮询（探针 reachable 为目标态）
-  testDatabase() / testText() / testVision() → 依赖测试
+  operateModel(slot, op) → 模型槽位操作 + 收敛轮询（GET /models/{slot}.ready 为目标态）
+  selectModel(slot, patch) → POST /models/{slot}/select（patch = {source?|runtime?|model?}）+ fetchSlots
+  testDatabase() / testText() / testVision() / testEmbedding() → 依赖/槽位测试
 
-类型（stores/index.ts）：ModelName = 'qwen' | 'mineru'；ModelOp = 'start' | 'stop' | 'restart'；
-ModelActionResponse { name; op; success; status; reason? }
+类型（stores/index.ts）：SlotName = 'text' | 'vision' | 'embedding'；ModelSlot = 'text' | 'vision'；
+ModelOp = 'start' | 'stop' | 'restart'；Source = 'api' | 'local'；
+SlotStatus { slot; source; channel; runtime?; identity?; model?; provider?; base_url?;
+description?; availability?; ready; source_options?; channel_options?; options?; notes?; error? }
+（v3：options 由 `string[]` 升级为 `{value,label,description}[]`；新增 source/channel_options/
+description/availability）
 ```
 
-错误隔离：全局错误（error）仅 8900 不可达；各依赖独立错误（dbError/gpuError/qwenError/
-mineruError）独立降级。`withWebServiceFallback()`：8900 离线时 `/services` 缺 `web` 条目时硬编码
+错误隔离：全局错误（error）仅 8900 不可达；各依赖独立错误（dbError/gpuError/slotErrors）
+独立降级。`withWebServiceFallback()`：8900 离线时 `/services` 缺 `web` 条目时硬编码
 注入 8903 "online"，确保前端服务始终可见。
 
 ## API 链路
 
-### 初始加载（fetchAll，6 并行）
+### 初始加载（fetchAll，7 并行）
 
 | 前端调用 | 后端路由 | 方法 | 后端服务 |
 | --- | --- | --- | --- |
 | `listServices()` | `GET /services` | GET | `service_manager.get_specs()` + `service_status()` |
 | `getDatabaseStatus()` | `GET /config/database` | GET | `app.state.db_status`（启动快照） |
 | `monitorGpu()` | `GET /monitor/gpu` | GET | `monitor.probe_gpu()`（PDH + nvidia-smi）+ `probe_memory()` |
-| `monitorQwen()` | `GET /monitor/qwen` | POST | `monitor.probe_qwen()` |
-| `monitorMineru()` | `GET /monitor/mineru` | GET | `monitor.probe_mineru()` |
+| `getSlotStatus('text'\|'vision'\|'embedding')` ×3 | `GET /models/{slot}` | GET | `registry.resolve` + runtime 探针（v2，取代 monitorQwen/monitorMineru） |
 | `getKeys()` | `GET /config/keys` | GET | `app.state.settings` |
 
 ### 操作
@@ -187,9 +207,10 @@ mineruError）独立降级。`withWebServiceFallback()`：8900 离线时 `/servi
 | --- | --- | --- |
 | 服务启动/停止/重启 | `operateService(name, op)` | `POST /services/{name}/{start\|stop\|restart}` |
 | 8900 自重启 | `selfRestart()` | `POST /self-restart` |
-| 模型启动/停止/重启 | `operateModel(name, op)` | `POST /models/{name}/{start\|stop\|restart}` |
+| 模型槽位启动/停止/重启 | `operateModel(slot, op)` | `POST /models/{slot}/{start\|stop\|restart}` |
+| 模型选择（来源/渠道/身份） | `selectModel(slot, patch)` | `POST /models/{slot}/select`（v2 新增，v3 扩展 `{source?, runtime?, model?}`） |
 | MySQL 测试 | `databaseTest()` | `POST /database/test` |
-| 文字/图像模型测试 | `llmTestText()` / `llmTestVision()` | `POST /llm/test/text`、`POST /llm/test/vision` |
+| 文字/图像/向量模型测试 | `llmTestText()` / `llmTestVision()` / `llmTestEmbedding()` | `POST /llm/test/text`、`POST /llm/test/vision`、`POST /llm/test/embedding` |
 
 ### 请求链路
 
@@ -207,14 +228,14 @@ Browser (8903)
 
 | 文件 | 职责 |
 | --- | --- |
-| `web-ui/src/pages/Console.tsx` | 主页面：四区布局 + ServiceCard/ModelCard |
-| `web-ui/src/components/GpuOverview.tsx` | 资源总览卡 + VRAM 饼图 + 非模型聚合（partitionOtherProcs） |
+| `web-ui/src/pages/Console.tsx` | 主页面：三区布局 + ServiceCard/SlotCard（v3 五字段：来源/模型/渠道/可用/备注） |
+| `web-ui/src/components/GpuOverview.tsx` | 资源监控 GPU 卡 + VRAM 饼图 + 非模型聚合（partitionOtherProcs） |
 | `web-ui/src/components/StatusBadge.tsx` | 状态徽章 |
 | `web-ui/src/components/AdminLayout.tsx` | 管理台骨架，mount 时触发 fetchAll |
-| `web-ui/src/stores/runtime.ts` | Zustand store：fetchAll/operate/operateModel/test |
-| `web-ui/src/stores/index.ts` | 类型定义（ServiceStatus/GpuStatus/KeysStatus/ModelName 等） |
+| `web-ui/src/stores/runtime.ts` | Zustand store：fetchAll/fetchSlots/operate/operateModel/selectModel/test |
+| `web-ui/src/stores/index.ts` | 类型定义（ServiceStatus/GpuStatus/KeysStatus/SlotName/SlotStatus 等） |
 | `web-ui/src/api/services.ts` | listServices/operateService/selfRestart |
-| `web-ui/src/api/llm.ts` | getKeys/llmTestText/llmTestVision/databaseTest/operateModel |
+| `web-ui/src/api/llm.ts` | getKeys/llmTestText/llmTestVision/llmTestEmbedding/databaseTest/operateModel/getSlotStatus/selectSlotModel |
 | `web-ui/src/api/client.ts` | 统一 API 客户端（fetch + 超时 + 离线降级） |
 | `backend/qed_engine/api/control.py` | 控制域路由（含 /models 端点族） |
 | `backend/qed_engine/services/monitor.py` | probe_gpu（PDH 集成）/probe_pdh/resolve_process_name |
@@ -238,3 +259,10 @@ Browser (8903)
   利用率来源切换、非模型聚合、模型卡——见 [2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)。
 - 2026-09-10：并入模型调用记录页设计（`#/admin/llm-calls`，REQ-060 实现反提），文件定位
   扩展为「管理后台 UI：控制台与模型调用记录」（REQ-070 文档体系重组轮）。
+- 2026-09-16：**模型注册表统一轮（PLAN-046，v2）**——四区收敛为三区（GPU + 三槽位卡合并为
+  资源监控区），ModelCard → SlotCard（渠道/可用字段 + local 模式模型下拉），Store 槽位化
+  （slots/slotErrors 取代 qwen/mineru 探针），fetchAll 七路并行（三槽位 + keys），见
+  [2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)。
+- 2026-09-16：**模型卡优化（PLAN-046，v3）**——SlotCard 五字段（来源/模型/渠道/可用/备注），
+  来源与渠道槽位级可切换（写 manifest source/runtime/active），模型下拉按来源 × 渠道过滤，
+  可用行探针自动判定 + 验证按钮真实调用，同上计划。

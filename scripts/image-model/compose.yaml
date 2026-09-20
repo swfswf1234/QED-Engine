@@ -1,11 +1,11 @@
 # Axiom-Flow 推理基础设施编排（WSL Ubuntu 24.04 + Docker Engine）
 #
 # 服务：mineru-api —— MinerU FastAPI 单体（内嵌 vLLM 推理引擎，hybrid-engine 后端），
-#       暴露 8002；模型不入镜像，运行时挂载仓库 model/mineru/（/root/mineru.json 声明路径）。
+#       暴露 5002；模型不入镜像，运行时挂载仓库 model/mineru/（/root/mineru.json 声明路径）。
 #
 # 架构说明：MinerU 3.4 的 router 模式（mineru-router，独立 vLLM worker）在本环境
 # 存在 worker 502 循环问题，实测不可用；mineru-api 单体模式（官方 compose profile api）
-# 已验证端到端解析成功，与 spec 端口 8002 一致，采用单体模式。
+# 已验证端到端解析成功，与 spec 端口 5002 一致，采用单体模式。
 #
 # 构建镜像（首次，含全部模型下载，耗时较长）：
 #   docker build -t mineru:latest -f docker/Dockerfile docker/
@@ -17,7 +17,7 @@ services:
     container_name: mineru-api
     restart: unless-stopped
     ports:
-      - 8002:8002
+      - 5002:5002
     environment:
       MINERU_MODEL_SOURCE: local
       # 注：MINERU_MODELS_DIR 对 MinerU 无效（不读该变量）；模型路径由镜像内
@@ -28,14 +28,14 @@ services:
     entrypoint: mineru-api
     command:
       --host 0.0.0.0
-      --port 8002
+      --port 5002
       --gpu-memory-utilization 0.5
     ulimits:
       memlock: -1
       stack: 67108864
     ipc: host
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8002/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5002/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

@@ -27,7 +27,7 @@
 | ① 服务管理类 | `GET /health`、`GET /services`、`POST /services/{name}/start\|stop\|restart`、`POST /self-restart` | 4 |
 | ② 配置语义类 | `GET /config/models`、`GET /config/keys`、`GET /config/database` | 3 |
 | ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程/探索会话 | 约 33 |
-| ④ 数据透传·Axiom-Flow | 书目/页/manifest/块判定/parse-jobs/parsing-tree | 10 |
+| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块判定与编辑/ingest/parse-jobs/parsing-tree | 15 |
 | ⑤ 监控诊断与 LLM 网关 | 日志/GPU/Qwen/mineru + LLM 调用族 + `POST /models/{name}/start\|stop\|restart` | 15 |
 
 **启动自检**（ARCH-014）：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
@@ -569,30 +569,38 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | 端点 | 语义 | 内部适配 |
 | --- | --- | --- |
 | `GET /books` | 书目列表（af_books：课程归属 domain_id/course_id/course_name + ingest/解析进度） | AxiomClient.list_books |
-| `POST /books/sync` | 同步已验证书目：8900 聚合 8901 verified 书目 → 8902 upsert af_books（幂等，book_id 同源 qt_books） | AxiomClient.sync_books |
-| `GET /books/{id}/pages/{no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并） | AxiomClient.get_book_page |
+| `GET /books/{id}` | 单本详情（8902 `BookOut` 原样透传：`file_path` 数据根相对路径 + `ingest_status`/`page_count`，前端 PDF 直显判定源） | AxiomClient.get_book |
+| `POST /books/sync` | 同步已验证书目：8900 聚合 8901 verified 书目 → 8902 upsert af_books（幂等，book_id 同源 qt_books）；payload 按 8902 `BookSyncItem`（`file_path`=8901 relative_path、`authors` 为 `{name,role}` 对象数组，不发 sha256/page_count） | AxiomClient.sync_books |
+| `GET /books/{id}/pages/{no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并）；8902 `PageData` 无 `page_no`，由 8900 用路径参数补写，并把相对 `image_url` 重写为 8900 页图代理绝对地址（serve_web 不代理 /api） | AxiomClient.get_book_page |
 | `GET /books/{id}/pages/{no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
+| `GET /books/{id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
 | `GET /books/{id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验） | AxiomClient.review_block |
-| `GET /books/{id}/pages/{no}/blocks/{index}/review` | 块判定回显（无判定 → 404 透传） | AxiomClient.get_block_review |
-| `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；engine 缺省 mineru） | AxiomClient.create_parse_job |
-| `GET /parse-jobs/{id}` | 任务状态与进度（queued/running/completed/failed） | AxiomClient.get_parse_job |
+| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（ARCH-020-D 实施，工作台/列表 ingest 按钮硬依赖） | AxiomClient.ingest_book |
+| `PUT /books/{id}/pages/{no}/blocks/{index}/edit` | **块编辑门面（目标形态）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
+| `GET /books/{id}/pages/{no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
+| `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**8900 门面**：前端契约保持 /review，内部转 8902 `PUT …/blocks/{index}/edit` | AxiomClient.edit_block |
+| `GET /books/{id}/pages/{no}/blocks/{index}/review` | 块判定回显；内部走 8902 页级 `GET …/pages/{no}/edits` 过滤 block_index，无记录 → 8900 合成 404 | AxiomClient.get_page_edits |
+| `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；`engine` 缺省 mineru） | AxiomClient.create_parse_job |
+| `GET /parse-jobs/{id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
 | `GET /parsing/tree` | 左侧树聚合：8900 共享表（领域→课程）+ 8902 af_books；8902 离线降级为领域→课程 | 见 `api/axiom.py` `_build_parsing_tree` |
 
-### 规划契约（ARCH-020，实施后转正）
+### 规划契约（ARCH-020-B，8900 透传待实施）
 
-> 下列端点为设计冻结目标，**8900/8902 尚未实现**，暂不进入上方已实现端点表（契约测试守护
-> 端点清单与代码一致）；实施后按 [代码-文档追溯规范](../standards/code-document-traceability.md)
-> 迁入上方表。完整契约见[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
+> 下列端点 **8902 已全部实现**（release@a5d2e96，契约事实源 Axiom-Flow
+> `docs/architecture/api.md`）。原本节所列 `POST /books/{id}/ingest`、
+> `PUT …/blocks/{index}/edit`、`GET …/pages/{no}/edits` 已于 **ARCH-020-D**
+> （2026-09-20 工作台轮）实施并迁入上方已实现表；`/review` 门面 transitional
+> 保留（旧前端兼容），随 `af_block_reviews` 退役删除。
 
 | 规划端点 | 方法 | 语义 |
 | --- | --- | --- |
-| `/books/{id}` | GET | 单书目元数据 |
 | `/books/{id}` | PATCH | 修改书目（notes 等） |
 | `/books/{id}` | DELETE | 删除 af_books 行（`?purge=true` 连产物） |
-| `/books/{id}/ingest` | POST | 渲染页图 + book.json（不调模型） |
-| `/books/{id}/pages/{no}/blocks/{index}/edit` | PUT | 块编辑 upsert（verdict/note/corrected_text/corrected_bbox） |
-| `/books/{id}/pages/{no}/edits` | GET | 页内编辑列表 |
+| `/books/{id}/chunks` | GET | 块集读取 |
+
+> 完整契约见[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
+
+> `GET /books/{id}` 已于 2026-09-20 界面优化轮实施并迁入上表（PDF 直显前置）。
 
 ### 错误映射（④ 数据透传·Axiom-Flow）
 
@@ -651,36 +659,105 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### POST /api/v1/models/{name}/start
 
-本地模型（Qwen / MinerU）启动，经 `model_manager.operate_model`（资源互斥：启动前先停对方，
-QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
+本地模型槽位启动，经 `model_manager.operate_model`（PLAN-046 单活仲裁：启动前先停其他
+在跑槽位，`QED_RESOURCE_GUARD`）。`name ∈ {text, vision}`，旧名 `qwen`/`mineru` 经别名兼容
+（deprecated，语义等同 `text`/`vision`）。
 
 ```json
-{"name": "qwen", "status": "starting"}
+{"name": "text", "status": "starting"}
 ```
 
-- **api 模式（`QED_API_SELECT=api`）→ 409**（云端无启停语义，仅测试）。
+- **槽位来源 = api（`manifest.source` > `QED_API_SELECT`）→ 409**（云端无启停语义，仅测试）；
+  来源 = local 允许启停（v3：按槽位生效来源判定，取代 v2 全局模式判定）。
 - 未知 `name` → 404。
-- 状态收敛由前端轮询 `/monitor/qwen`、`/monitor/mineru` 判定（无独立状态端点）。
+- 状态收敛由前端轮询 `GET /models/{slot}` 的 `ready` 字段判定（v2；已取代旧版 `/monitor/{slot}` 轮询）。
 
 ### POST /api/v1/models/{name}/stop
 
-停止本地模型（调对应生命周期脚本）；api 模式 409；未知 name 404。
+停止本地模型槽位（lmstudio=卸载模型保留 server；docker=停生命周期脚本）；
+槽位来源 = api → 409；未知 name 404。
 
 ```json
-{"name": "mineru", "status": "stopping"}
+{"name": "vision", "status": "stopping"}
 ```
 
 ### POST /api/v1/models/{name}/restart
 
-重启本地模型（先停后启，互斥经 model_manager）；api 模式 409；未知 name 404。
+重启本地模型槽位（先停后启，单活仲裁经 model_manager）；槽位来源 = api → 409；未知 name 404。
 
 ```json
-{"name": "qwen", "status": "starting"}
+{"name": "text", "status": "starting"}
+```
+
+### POST /api/v1/models/{name}/select
+
+槽位运行态选择（PLAN-046 新增，v3 扩展）：`{source?, runtime?, model?}`（至少一项）写入
+`model/<槽位>/manifest.json` 的对应字段（重启保留，解析优先级最高）：
+
+| 字段 | 取值 | 写入 |
+| --- | --- | --- |
+| `source` | `api` \| `local` | `manifest.source`（槽位来源） |
+| `runtime` | `lmstudio` \| `llamacpp` \| `docker` \| `default` | `manifest.runtime`（`default` = 清空回退全局默认） |
+| `model` | 注册表身份名 | `manifest.active`（v2 已有，向后兼容 `{model}` 单字段） |
+
+槽位名支持旧名别名；`embedding` 无运行态 manifest → 404；未知槽位/身份/runtime → 404；
+`source`/`runtime` 非法取值 → 422。select 不受来源限制（两来源均可写）。
+
+```json
+{"name": "text", "status": "selected"}
+```
+
+### GET /api/v1/models/{name}
+
+槽位状态（PLAN-046 新增，v3 扩展，控制台三卡数据源）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `source` | 生效来源 `api` \| `local`（`manifest.source` > `QED_API_SELECT`；无本地候选的 embedding 固定 `api`） |
+| `channel` | 生效渠道：api → `direct`（直连）；local → runtime 名 |
+| `runtime` | local 时 `lmstudio`/`llamacpp`/`docker`；api 空 |
+| `identity` / `model` / `provider` / `base_url` | 生效身份 / 模型 / 提供方 / 端点 |
+| `description` | 当前身份一句话备注（控制台「备注」行） |
+| `ready` | api=API_KEY 已配置；local=绑定模型探针就绪 |
+| `availability` | 可用性文本：可用 / 不可用 / 未就绪 |
+| `source_options` | 来源下拉：`[{value,label,status}]`（status = available / pending；embedding 的本地部署为 pending） |
+| `channel_options` | 渠道下拉：`[{value,label,status}]`（status = available / pending；`default` 为全局默认） |
+| `options` | 模型下拉（按来源 × 渠道过滤）：`[{value,label,description}]` |
+| `notes` / `error` | 回退告警 / 解析失败原因 |
+
+未知槽位 → 404。
+
+```json
+{"slot": "text", "source": "local", "channel": "lmstudio", "runtime": "lmstudio",
+ "identity": "qwen3.8-27b", "model": "qwen3.8-27b", "provider": "lmstudio",
+ "base_url": "http://127.0.0.1:5001/v1", "description": "Qwen3.8 27B，本机 LM Studio 已下载",
+ "ready": true, "availability": "可用",
+ "source_options": [{"value": "local", "label": "本地部署"}, {"value": "api", "label": "API 调用"}],
+ "channel_options": [{"value": "default", "label": "默认", "status": "available"},
+                     {"value": "lmstudio", "label": "LM Studio", "status": "available"},
+                     {"value": "docker", "label": "Docker", "status": "pending"},
+                     {"value": "llamacpp", "label": "llama.cpp", "status": "pending"}],
+ "options": [{"value": "qwen3.8-27b", "label": "qwen3.8-27b",
+              "description": "Qwen3.8 27B，本机 LM Studio 已下载"}],
+ "notes": [], "error": ""}
+```
+
+### GET /api/v1/monitor/{slot}
+
+槽位泛化探针（PLAN-046 新增）：`text` 按槽位渠道探 OpenAI 兼容端点（`QED_MODEL_URL`）；
+`vision` 探 MinerU `/health`（`QED_OCR_MODEL_URL`）；`embedding` 无本地 runtime
+（恒 `reachable=false` + 原因）。未知槽位 → 404。
+旧名 `/monitor/qwen`、`/monitor/mineru` 保留（deprecated）。
+
+```json
+{"slot": "text", "runtime": "lmstudio", "reachable": true,
+ "base_url": "http://127.0.0.1:5001/v1", "models": ["qwen3.8-27b"], "reason": ""}
 ```
 
 ### GET /api/v1/monitor/qwen
 
-本地 LLM（Qwen，OpenAI 兼容）探测：服务可达性 + 已加载模型。
+**deprecated（PLAN-046）**：槽位泛化为 `GET /monitor/{slot}`（`text`，按槽位渠道
+探端点），本端点过渡期保留（别名语义）。本地 LLM（Qwen，OpenAI 兼容）探测：服务可达性 + 已加载模型。
 
 ```json
 {"reachable": true, "base_url": "http://127.0.0.1:5001/v1", "models": ["qwen3-8b"],
@@ -688,15 +765,16 @@ QED_RESOURCE_GUARD）。`name ∈ {qwen, mineru}`。
 ```
 
 - 探测目标与超时沿 `/config/llm-status` 模式（未配置不探测）；默认
-  `http://127.0.0.1:5001/v1`（`QED_QWEN_URL` 可覆盖，变量表见
+  `http://127.0.0.1:5001/v1`（`QED_MODEL_URL` 可覆盖，变量表见
   [project-configuration.md](../design/project-configuration.md)）。
 
 ### GET /api/v1/monitor/mineru
 
-mineru 解析服务（8002，WSL 容器）健康探测。
+**deprecated（PLAN-046）**：槽位泛化为 `GET /monitor/{slot}`（`vision`，探 MinerU
+`/health`），本端点过渡期保留（别名语义）。mineru 解析服务（5002，WSL 容器）健康探测。
 
 ```json
-{"reachable": true, "port": 8002, "reason": ""}
+{"reachable": true, "port": 5002, "reason": ""}
 ```
 
 - 容器未启动/WSL 不可达 → `reachable=false` + 中文原因（提示运行容器编排脚本），
@@ -704,23 +782,25 @@ mineru 解析服务（8002，WSL 容器）健康探测。
 
 ### LLM 网关（ARCH-016：`/llm/*` 端点族）
 
-按 `QED_API_SELECT`（api/local）路由：api 按 `QED_API_PROVIDER` 选厂商（当前 qwen），
-local 走本地模型（文字 Qwen / 图像 MinerU，经 `QED_RESOURCE_GUARD` 互斥）。
-密钥只在请求头，绝不下发、不入响应体；成功/失败均落 `qed_llm_calls` 记录表
+按**槽位来源**路由（`manifest.source` > `QED_API_SELECT` 默认）：api 按 `QED_API_PROVIDER` 选厂商
+（当前 qwen），local 走本地模型（文字槽位渠道 runtime / 图像 MinerU，经 `QED_RESOURCE_GUARD`
+互斥）。密钥只在请求头，绝不下发、不入响应体；成功/失败均落 `qed_llm_calls` 记录表
 （单表三项目可写）。详情契约事实源：[llm-gateway.md](../design/llm-gateway.md)。
 
 > **解析路径变更（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
 > 文档解析不再经 `/llm/vision` 网关——Axiom-Flow 解析管线经引擎适配器直连本地模型服务
-> （MinerU 8002 等）；8900 只负责模型生命周期（`/models/{name}`）、探针与资源互斥。
+> （MinerU 5002 等）；8900 只负责模型生命周期（`/models/{name}`）、探针与资源互斥。
 > `/llm/vision` 保留为控制台测试与通用视觉用途；`/models/{name}` 的 `name` 按引擎注册
 > （`qwen`/`mineru`，PaddleOCR-VL 接入时新增 `paddleocr`）。
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061） |
-| `POST /llm/vision` | 图像模型调用：`{image_base64 或 pdf_base64+pdf_filename, prompt?, prompt_template?, max_tokens?}` → 路由 api/local（deepseek 无视觉）→ `{reply, success, call_id?}`；超时与 `max_tokens` 语义同 text（REQ-061） |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061） |
+| `POST /llm/vision` | 图像模型调用：`{image_base64 或 pdf_base64+pdf_filename, prompt?, prompt_template?, max_tokens?}` → 注册表解析路由 api/local → `{reply, success, call_id?}`；超时与 `max_tokens` 语义同 text（REQ-061） |
+| `POST /llm/embedding` | 向量模型调用（PLAN-046 新增，仅 api）：`{input: [str]}` → `{embeddings, success, call_id?}`（顺序与 input 一致）；空 input 422；调用记录 prompt 记 JSON 输入、response 记维度摘要（不存向量本体） |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
+| `POST /llm/test/embedding` | 向量模型测试（PLAN-046 新增，控制台测试按钮）：小 input 真实调用，成功/失败 + 原因 |
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |
 | `PATCH /llm/calls/{id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
 | `POST /database/test` | MySQL 即时连接探测（控制台测试按钮，替代启动快照只读） |

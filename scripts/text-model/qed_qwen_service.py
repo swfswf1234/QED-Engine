@@ -1,13 +1,13 @@
 """本地文字模型（llama-server / Qwen GGUF）生命周期管理：start / stop / restart / status。
 
 启动 llama-server 加载 model/qwen/ 下的 GGUF 模型（OpenAI 兼容端口 5001）；
-健康探测：GET {QED_QWEN_URL}/v1/models（QED_QWEN_URL 未设置时默认
+健康探测：GET {QED_MODEL_URL}/v1/models（QED_MODEL_URL 未设置时默认
 http://127.0.0.1:5001/v1，OpenAI 兼容）。
 由 services/llm/model_manager.py 调用（资源互斥编排），也可手动执行。
 退出码：0 成功/幂等；1 运行失败；2 参数错误（argparse）。
 
 设计关联（DesignRef）：docs/design/local-model-management.md
-实现状态：In Progress
+实现状态：Current
 关联测试：tests/test_qed_qwen_service.py
 """
 
@@ -40,8 +40,8 @@ def _load_manifest() -> dict:
 
 
 def default_base_url() -> str:
-    """QED_QWEN_URL 环境变量，默认 http://127.0.0.1:5001/v1。"""
-    return os.getenv("QED_QWEN_URL", "http://127.0.0.1:5001/v1").rstrip("/")
+    """QED_MODEL_URL 环境变量，默认 http://127.0.0.1:5001/v1。"""
+    return os.getenv("QED_MODEL_URL", "http://127.0.0.1:5001/v1").rstrip("/")
 
 
 def _port_from_url(url: str) -> int:
@@ -183,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="本地文字模型（llama-server / Qwen GGUF）生命周期管理（start/stop/restart/status）。",
     )
     parser.add_argument("--port", type=int, default=None,
-                        help="健康探测端口（默认 QED_QWEN_URL 解析或 5001）")
+                        help="健康探测端口（默认 QED_MODEL_URL 解析或 5001）")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="启动 llama-server（加载 GGUF）")

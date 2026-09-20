@@ -19,7 +19,7 @@ from qed_engine.config import Settings
 
 GPU_QUERY = "name,memory.total,memory.used,utilization.gpu"
 PROC_QUERY = "pid,process_name,used_memory"
-MINERU_URL = "http://127.0.0.1:8002"
+MINERU_URL = "http://127.0.0.1:5002"
 MINERU_HEALTH_PATH = "/health"
 PROBE_TIMEOUT = 5.0
 
@@ -276,14 +276,20 @@ def probe_gpu(runner: Runner | None = None, memory_fn: Callable[[], dict] | None
     return result
 
 
-def probe_qwen(settings: Settings, client: httpx.Client | None = None) -> dict:
-    """Qwen 本地模型（OpenAI 兼容）探测：/v1/models + 已加载模型列表（5s 超时）。"""
-    base = settings.qed_qwen_url.rstrip("/")
+def probe_qwen(settings: Settings, client: httpx.Client | None = None,
+               base_url: str | None = None, token: str = "") -> dict:
+    """Qwen 本地模型（OpenAI 兼容）探测：/v1/models + 已加载模型列表（5s 超时）。
+
+    base_url 可覆盖（PLAN-046 槽位泛化：/monitor/text 传文字模型端点）；缺省用 QED_MODEL_URL。
+    token 为 LM Studio API 认证（W7 实测：本机开启认证需 Bearer；空=不带头，llama-server 无认证时传空）。
+    """
+    base = (base_url or settings.qed_model_url).rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         own = client is None
         http = client or httpx.Client(timeout=PROBE_TIMEOUT)
         try:
-            response = http.get(f"{base}/models")
+            response = http.get(f"{base}/models", headers=headers)
         finally:
             if own:
                 http.close()
@@ -298,24 +304,49 @@ def probe_qwen(settings: Settings, client: httpx.Client | None = None) -> dict:
         return {"reachable": False, "base_url": base, "models": [], "reason": type(exc).__name__}
 
 
-def probe_mineru(client: httpx.Client | None = None) -> dict:
-    """mineru 解析服务（8002，WSL 容器）健康探测。
+def probe_mineru(client: httpx.Client | None = None, base_url: str | None = None) -> dict:
+    """mineru 解析服务（5002，WSL 容器）健康探测。
 
     容器未启动/WSL 不可达 → reachable=false + 中文原因（提示运行容器编排脚本），
     不泄漏堆栈。健康端点 `/health`（MinerU 实际实现，容器 healthcheck 与日志证实）。
+    base_url 可覆盖（PLAN-046 槽位泛化）；缺省用内置 5002。
     """
+    base = (base_url or MINERU_URL).rstrip("/")
+    port = httpx.URL(base).port or 5002
     try:
         own = client is None
         http = client or httpx.Client(timeout=PROBE_TIMEOUT)
         try:
-            response = http.get(f"{MINERU_URL}{MINERU_HEALTH_PATH}")
+            response = http.get(f"{base}{MINERU_HEALTH_PATH}")
         finally:
             if own:
                 http.close()
         if response.status_code == 200:
-            return {"reachable": True, "port": 8002, "reason": ""}
-        return {"reachable": False, "port": 8002, "reason": f"HTTP {response.status_code}"}
+            return {"reachable": True, "port": port, "reason": ""}
+        return {"reachable": False, "port": port, "reason": f"HTTP {response.status_code}"}
     except httpx.TimeoutException:
-        return {"reachable": False, "port": 8002, "reason": "超时"}
+        return {"reachable": False, "port": port, "reason": "超时"}
     except httpx.HTTPError:
-        return {"reachable": False, "port": 8002, "reason": "mineru docker 容器未启动（请运行容器编排脚本启动）"}
+        return {"reachable": False, "port": port, "reason": "mineru docker 容器未启动（请运行容器编排脚本启动）"}
+
+
+def probe_slot(settings: Settings, slot: str, client: httpx.Client | None = None) -> dict:
+    """槽位泛化探针（PLAN-046 /monitor/{slot}）：text 按槽位渠道探文字模型端点，
+    vision 探 MinerU，embedding 无本地 runtime。归一化返回 slot/runtime/reachable。"""
+    if slot == "vision":
+        result = probe_mineru(client, base_url=settings.qed_ocr_model_url)
+        runtime_key = "docker"
+    elif slot == "text":
+        # 延迟导入：monitor 不依赖注册表内部结构，仅取槽位生效渠道（manifest.runtime > 全局默认）
+        from qed_engine.services.llm import registry
+
+        runtime_key = registry.slot_runtime(settings, "text")
+        # LM Studio 本机开启 API 认证（W7 实测）：探针带 QED_LMSTUDIO_TOKEN
+        token = settings.resolved_lmstudio_token() if runtime_key == "lmstudio" else ""
+        result = probe_qwen(settings, client, base_url=settings.qed_model_url, token=token)
+    else:  # embedding：无本地候选
+        return {"slot": slot, "runtime": "", "reachable": False, "base_url": "",
+                "models": [], "reason": "向量槽位仅 api（本地预留）"}
+    return {"slot": slot, "runtime": runtime_key,
+            "reachable": result["reachable"], "reason": result["reason"],
+            "base_url": result.get("base_url", ""), "models": result.get("models", [])}

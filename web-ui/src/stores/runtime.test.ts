@@ -57,7 +57,9 @@ describe('useRuntimeStore', () => {
   beforeEach(() => {
     useRuntimeStore.setState({
       services: [], dbStatus: null, loading: false, error: null, dbError: null,
-      gpu: null, gpuError: null, qwen: null, qwenError: null, mineru: null, mineruError: null,
+      gpu: null, gpuError: null,
+      slots: { text: null, vision: null, embedding: null },
+      slotErrors: { text: null, vision: null, embedding: null },
       operating: null, testing: null, keys: null,
     });
   });
@@ -66,25 +68,29 @@ describe('useRuntimeStore', () => {
     vi.restoreAllMocks();
   });
 
-  it('默认状态：五路快照皆空、无错误', () => {
+  it('默认状态：各路快照皆空、无错误', () => {
     const s = useRuntimeStore.getState();
     expect(s.services).toEqual([]);
     expect(s.dbStatus).toBeNull();
     expect(s.gpu).toBeNull();
-    expect(s.qwen).toBeNull();
-    expect(s.mineru).toBeNull();
+    expect(s.slots).toEqual({ text: null, vision: null, embedding: null });
     expect(s.error).toBeNull();
     expect(s.loading).toBe(false);
     // 运行模式未加载（依赖卡按 local 语义渲染兜底）
     expect(s.keys).toBeNull();
   });
 
-  it('fetchAll 六路并行拉取（含 /config/keys）；loading 中重复调用防重入', async () => {
+  it('fetchAll 七路并行拉取（含 /config/keys 与三槽位）；loading 中重复调用防重入', async () => {
     let servicesCalls = 0;
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/config/keys')) {
         return Promise.resolve(
           new Response(JSON.stringify({ provider: 'qwen', configured: true, mode: 'api' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+        );
+      }
+      if (url.includes('/models/text')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ slot: 'text', source: 'local', channel: 'lmstudio', runtime: 'lmstudio', identity: 'qwen3.8-27b', model: 'qwen3.8-27b', ready: false, options: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
         );
       }
       if (url.includes('/services')) {
@@ -100,9 +106,12 @@ describe('useRuntimeStore', () => {
     await p1;
     expect(servicesCalls).toBe(1);
     expect(useRuntimeStore.getState().loading).toBe(false);
-    // services 成功落库；keys 落库；其余四路各自降级为独立错误，不影响 services 数据
+    // services 成功落库；keys/text 槽位落库；其余路各自降级为独立错误，不影响 services 数据
     expect(useRuntimeStore.getState().services).toHaveLength(1);
     expect(useRuntimeStore.getState().keys).toEqual({ provider: 'qwen', configured: true, mode: 'api' });
+    expect(useRuntimeStore.getState().slots.text?.channel).toBe('lmstudio');
+    expect(useRuntimeStore.getState().slots.vision).toBeNull();
+    expect(useRuntimeStore.getState().slotErrors.vision).not.toBeNull();
     expect(useRuntimeStore.getState().error).toBeNull();
     expect(useRuntimeStore.getState().gpuError).not.toBeNull();
   });

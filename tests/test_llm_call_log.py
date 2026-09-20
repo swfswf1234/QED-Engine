@@ -1,7 +1,7 @@
 """
 模块职责：LLM 调用记录（qed_llm_calls）契约测试：建表 SQL、写入字段、分页检索、降级。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：backend/qed_engine/services/llm/call_log.py
 """
 

@@ -5,7 +5,7 @@
 数据库不可达时写入降级（记日志返回 None），不阻塞 LLM 调用主流程。
 
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 关联测试：tests/test_llm_call_log.py
 """
 

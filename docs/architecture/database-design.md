@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-14
+最后更新：2026-09-20
 需求方：QED-Tracker（课程体系 `qed_domain`/`qed_course`，REQ-026/QED-031）、QED-Engine（LLM 调用记录 `qed_llm_calls`，ARCH-016）、Axiom-Flow（解析管理 `af_*` 四表，ARCH-020）
 确认状态：暂定
 关联代码：`.env.example`（`QED_DB_*` 变量模板）
@@ -21,11 +21,13 @@
 跨项目契约要点。共享表 `qed_*` 的**结构事实源仍在 QED-Tracker**（其 Alembic 建表维护，
 根仓库仅登记同步）；`qt_*` 属 QED-Tracker、`af_*` 属 Axiom-Flow，根仓库不复制其表结构定义。
 QED-Tracker 侧已回执（REQ-026 关闭，2026-08-16）：其 `docs/architecture/database-shared-tables.md`
-（`qed_*`）与 `database-private-tables.md`（`qt_*`）为 qed 库全部表**唯一事实源**。Axiom-Flow 侧「af_* 定义确认」登记于
-[REQ-027](../trackers/todo.md)；**ARCH-020 重构（2026-09-14）**将 af_* 重定义为四表
+（`qed_*`）与 `database-private-tables.md`（`qt_*`）为 qed 库全部表**唯一事实源**。Axiom-Flow 侧 af_*
+表定义确认经 [REQ-027](../trackers/completed.md) 关闭（2026-09-20 用户裁决：以其迁移落地为回执，见
+[已关闭台账](../trackers/completed.md)）；**ARCH-020 重构（2026-09-14）**将 af_* 重定义为四表
 （af_books / af_parse_jobs / af_pages / af_block_edits），设计见
 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)，
-Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源。
+Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源（四表已随其迁移
+`20260917_0001` 于 2026-09-20 在本机 qed 库落地）。
 跨项目对接语义见[三项目对接规范](../design/cross-project-contracts.md)。
 
 **数据边界新模式（2026-08-16 用户裁决，ARCH-013）**：dataset 只管理数据资料（原始数据 +
@@ -57,10 +59,10 @@ Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源。
 | `qt_books` | 私有 | QED-Tracker | 一册/一本书的选用态（candidate/decided/parallel/retired）+ 持有态（owned/missing）+ 下载生命周期（downloading/downloaded/verified/failed，QED-060） | QED-031 + QED-060 | QED-Tracker database-private-tables.md |
 | `qt_sources` | 私有 | QED-Tracker | 一次渠道尝试（外键挂 book_id），ok 标达成败 | QED-031，0014 重建 | QED-Tracker database-private-tables.md |
 | `qt_tasks` | 私有 | QED-Tracker | 一个后台任务记录（queued→running→succeeded/failed） | REQ-032，迁移 0016 建 | QED-Tracker database-private-tables.md |
-| `af_books` | 私有 | Axiom-Flow | 一册已验证书（qt_books 只读快照 + ingest/解析进度） | **规划**（ARCH-020） | Axiom-Flow database-design.md |
-| `af_parse_jobs` | 私有 | Axiom-Flow | 一次解析任务（逐页/全本，状态与进度） | **规划**（ARCH-020） | Axiom-Flow database-design.md |
-| `af_pages` | 私有 | Axiom-Flow | 一页解析状态与质量信号 | **规划**（ARCH-020） | Axiom-Flow database-design.md |
-| `af_block_edits` | 私有 | Axiom-Flow | 一次块级人工编辑（判定/备注/文字/范围） | **规划**（ARCH-020） | Axiom-Flow database-design.md |
+| `af_books` | 私有 | Axiom-Flow | 一册已验证书（qt_books 只读快照 + ingest/解析进度） | **已落地**（ARCH-020-C，迁移 20260917_0001，2026-09-20 本机 qed 库建表 + ingest E2E 实证） | Axiom-Flow database-design.md |
+| `af_parse_jobs` | 私有 | Axiom-Flow | 一次解析任务（逐页/全本，状态与进度） | **已落地**（同上） | Axiom-Flow database-design.md |
+| `af_pages` | 私有 | Axiom-Flow | 一页解析状态与质量信号 | **已落地**（同上） | Axiom-Flow database-design.md |
+| `af_block_edits` | 私有 | Axiom-Flow | 一次块级人工编辑（判定/备注/文字/范围） | **已落地**（同上） | Axiom-Flow database-design.md |
 | 学习表族（规划） | 暂缓 | 待裁决 | 课程进度/练习记录/问答会话 | 规划，M2 里程碑启动时裁决 | 本文件「学习表族规划」节 |
 
 > **qt_*/af_* 部分置空**：QED-Engine 总纲不复制子项目表结构，一律指向子项目数据库文档。
@@ -225,7 +227,7 @@ QED-Tracker 定义自身完整数据库定义（`docs/architecture/database-priv
 
 Axiom-Flow 侧表结构由 Axiom-Flow `docs/architecture/database-design.md` 定义；根仓库只维护
 命名空间与敏感字段规则，不复制其结构。**ARCH-020 重构（2026-09-14）**将 af_* 重定义为四表
-（替代原 af_books/af_block_reviews 两表草案）：
+（替代原 af_books/af_block_reviews 两表草案），**ARCH-020-C 已落地**（2026-09-20）：
 
 - `af_books`：一册已验证书（qt_books 只读快照：book_id/domain_id/course_id/course_name/
   knowledge_id/title/part/display_title/authors/file_path + ingest_status/parse_status/pages_done）。
@@ -235,7 +237,12 @@ Axiom-Flow 侧表结构由 Axiom-Flow `docs/architecture/database-design.md` 定
   corrected_text/corrected_bbox/时间戳）。
 
 完整 DDL 与字段语义见[与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)
-（ARCH-020 设计，设计确定后 Axiom-Flow 侧 database-design.md 转正）；Axiom-Flow Alembic 独立建表。
+§5 与 Axiom-Flow `docs/architecture/database-design.md`（结构事实源）；四表由 Axiom-Flow Alembic
+独立建表，迁移 `20260917_0001_create_af_tables.py` 已于 2026-09-20 在本机 qed 库
+`alembic upgrade head` 落地（列/默认值/注释/PK/UNIQUE/索引与设计逐列一致，E2E ingest 486 页实证）。
+REQ-027（af_* 定义确认回执）据此于 2026-09-20 用户裁决关闭。附带发现：Axiom-Flow 侧
+database-design.md 表清单状态列仍写「规划」（与其元数据 Implementation: Current 自相矛盾），
+2026-09-20 用户裁决暂不处理，待其 Phase B 文档重构轮自然覆盖。
 
 ## QED-Engine 学习表族（规划，暂缓）
 

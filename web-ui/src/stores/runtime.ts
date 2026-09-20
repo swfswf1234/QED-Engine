@@ -3,24 +3,26 @@
  * - 挂载策略：AdminLayout 进入管理台时拉取一次；Console 挂载时补拉保新鲜
  *   （fetchAll 带 loading 防重入，双挂载只发一轮请求）；zustand 模块级单例跨页存活
  * - 数据面：服务快照（/services）+ MySQL（/config/database）+ GPU（/monitor/gpu）+
- *   Qwen（/monitor/qwen）+ MinerU（/monitor/mineru）+ 运行模式（/config/keys）
- *   六路独立拉取，互不拖累
+ *   模型三槽位（/models/text|vision|embedding，PLAN-046）+ 运行模式（/config/keys）
+ *   七路独立拉取，互不拖累
  * - 独立超时：services 5s（本地脚本查询，秒回）；database 10s（后端 3s 探测 + 60s 缓存）；
- *   gpu/qwen/mineru 8s（后端探测 5s，放宽）
- * - 启停操作 + 过渡态轮询收敛（starting/stopping → online/offline）
- * - 测试动作：MySQL 即时探测 / 文字 / 图像（置 testing 标记 → 调端点 → outcome）
- * - 离线降级：8900 不可达 → 整体 error 横幅；database/gpu/qwen/mineru 失败 → 仅对应字段降级
+ *   gpu/槽位状态 8s（后端本地探针 1s，放宽）
+ * - 启停操作 + 收敛轮询：服务经 /services 过渡态；模型槽位经 /models/{slot}.ready
+ * - 测试动作：MySQL 即时探测 / 文字 / 图像 / 向量（置 testing 标记 → 调端点 → outcome）
+ * - 模型选择：POST /models/{slot}/select（local 模式下拉，写运行态 manifest.active）
+ * - 离线降级：8900 不可达 → 整体 error 横幅；database/gpu/槽位 失败 → 仅对应字段降级
  */
 import { create } from 'zustand';
 import {
-  listServices, operateService, getDatabaseStatus, monitorGpu, monitorQwen, monitorMineru,
+  listServices, operateService, getDatabaseStatus, monitorGpu,
   fetchModelsConfig, type ServiceOp, type ModelsConfig,
 } from '../api/services';
 import {
-  databaseTest, getKeys, llmTestText, llmTestVision, operateModel as operateModelApi,
+  databaseTest, getKeys, llmTestText, llmTestVision, llmTestEmbedding,
+  getSlotStatus, operateModel as operateModelApi, selectSlotModel,
 } from '../api/llm';
 import type {
-  DatabaseStatus, GpuStatus, KeysStatus, QwenStatus, MineruStatus, ModelName, ModelOp, ServiceStatus,
+  DatabaseStatus, GpuStatus, KeysStatus, SlotName, SlotStatus, SlotSelectPatch, ModelSlot, ModelOp, ServiceStatus,
 } from './index';
 
 /** 过渡态收敛轮询参数（对齐后端 TRANSITION_WINDOW=15s） */
@@ -36,10 +38,9 @@ export const DATABASE_TIMEOUT_MS = 10000;
 export const GPU_TIMEOUT_MS = 8000;
 /** GPU 显存构成自动刷新周期（REQ-038，2026-08-21 用户裁决：60s 一次足矣） */
 export const GPU_REFRESH_INTERVAL_MS = 60_000;
-/** /monitor/qwen、/monitor/mineru 探测超时（后端 5s 探测，放宽到 8s） */
-export const QWEN_TIMEOUT_MS = 8000;
-export const MINERU_TIMEOUT_MS = 8000;
-/** 测试动作（MySQL 即时探测/文字/图像）超时（真实模型调用，放宽） */
+/** /models/{slot} 槽位状态超时（后端本地探针 1s + 状态汇总，放宽到 8s） */
+export const SLOT_TIMEOUT_MS = 8000;
+/** 测试动作（MySQL 即时探测/文字/图像/向量）超时（真实模型调用，放宽） */
 export const TEST_TIMEOUT_MS = 15000;
 
 /**
@@ -103,7 +104,7 @@ export interface LlmTestOutcome {
 /** 测试动作模板：置 testing 标记 → 调端点 → 归一化 outcome（失败 catch 为 {ok:false, detail}） */
 async function runTest(
   set: (partial: Partial<RuntimeStore>) => void,
-  kind: 'db' | 'text' | 'vision',
+  kind: 'db' | 'text' | 'vision' | 'embedding',
   call: () => Promise<{ ok: boolean; detail?: string }>,
 ): Promise<LlmTestOutcome> {
   set({ testing: kind });
@@ -129,36 +130,42 @@ export interface RuntimeStore {
   gpu: GpuStatus | null;
   /** GPU 探测独立错误（不影响服务卡展示） */
   gpuError: string | null;
-  /** Qwen（本地文字模型）探测结果（依赖组件三卡；失败仅置 qwenError） */
-  qwen: QwenStatus | null;
-  /** Qwen 探测独立错误 */
-  qwenError: string | null;
-  /** MinerU（本地图像模型）探测结果（依赖组件三卡；失败仅置 mineruError） */
-  mineru: MineruStatus | null;
-  /** MinerU 探测独立错误 */
-  mineruError: string | null;
+  /** 模型三槽位状态（/models/{slot}，PLAN-046 控制台三卡数据源；失败仅置 slotErrors） */
+  slots: Record<SlotName, SlotStatus | null>;
+  /** 槽位状态拉取独立错误（键与 slots 对齐） */
+  slotErrors: Record<SlotName, string | null>;
   /** 运行模式与厂商（/config/keys；依赖卡模式感知用，null=未加载按 local 语义兜底渲染） */
   keys: KeysStatus | null;
   /** 模型路由表（/config/models；云端模型名来源，null=未加载） */
   modelsConfig: ModelsConfig | null;
   /** 操作中（按钮 loading），值为服务名 */
   operating: string | null;
-  /** 测试按钮执行中标记（db=MySQL 即时探测 / text=文字 / vision=图像） */
-  testing: 'db' | 'text' | 'vision' | null;
+  /** 测试按钮执行中标记（db=MySQL 即时探测 / text=文字 / vision=图像 / embedding=向量） */
+  testing: 'db' | 'text' | 'vision' | 'embedding' | null;
   fetchAll: () => Promise<void>;
-  /** 仅重拉 GPU（REQ-038 饼图 60s 自动刷新用；失败保留旧值，不影响其他五路数据） */
+  /** 仅重拉 GPU（REQ-038 饼图 60s 自动刷新用；失败保留旧值，不影响其他路数据） */
   fetchGpu: () => Promise<void>;
+  /** 仅重拉三槽位状态（选择模型/模型操作后刷新；失败保留旧值） */
+  fetchSlots: () => Promise<void>;
   /** 启停操作：请求 + 轮询收敛，返回收敛结果（成功/失败/超时），由前端提示 */
   operate: (name: string, op: ServiceOp) => Promise<OperateResult>;
-  /** 本地模型启停/重启（Task 6）：POST /models/{name}/{op}，复用 operate 收敛语义 */
-  operateModel: (name: ModelName, op: ModelOp) => Promise<OperateResult>;
+  /** 本地模型槽位启停/重启：POST /models/{slot}/{op}，收敛于 /models/{slot}.ready */
+  operateModel: (slot: ModelSlot, op: ModelOp) => Promise<OperateResult>;
+  /** 槽位运行态选择（来源/渠道/身份）：POST /models/{slot}/select → 重拉槽位状态，返回是否成功 */
+  selectModel: (slot: SlotName, patch: SlotSelectPatch) => Promise<boolean>;
   /** MySQL 即时连接测试（测试按钮） */
   testDatabase: () => Promise<LlmTestOutcome>;
   /** 文字模型测试（测试按钮） */
   testText: () => Promise<LlmTestOutcome>;
   /** 图像模型测试（测试按钮） */
   testVision: () => Promise<LlmTestOutcome>;
+  /** 向量模型测试（测试按钮，PLAN-046） */
+  testEmbedding: () => Promise<LlmTestOutcome>;
 }
+
+/** 三槽位空态（键齐全，Record 类型安全） */
+const EMPTY_SLOTS: Record<SlotName, SlotStatus | null> = { text: null, vision: null, embedding: null };
+const EMPTY_SLOT_ERRORS: Record<SlotName, string | null> = { text: null, vision: null, embedding: null };
 
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   services: [],
@@ -168,10 +175,8 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   dbError: null,
   gpu: null,
   gpuError: null,
-  qwen: null,
-  qwenError: null,
-  mineru: null,
-  mineruError: null,
+  slots: { ...EMPTY_SLOTS },
+  slotErrors: { ...EMPTY_SLOT_ERRORS },
   keys: null,
   modelsConfig: null,
   operating: null,
@@ -182,16 +187,18 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     // （AdminLayout 挂载拉取 + Console 挂载补拉场景下只发一轮）
     if (get().loading || get().operating) return;
     set({ loading: true });
-    // 六路并行独立拉取：services 失败 → 整体横幅；database/gpu/qwen/mineru/keys 失败 → 仅对应字段降级
+    // 七路并行独立拉取：services 失败 → 整体横幅；database/gpu/槽位/keys 失败 → 仅对应字段降级
     const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
       call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
-    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr], [qwen, qwenErr], [mineru, mineruErr], [keys], [modelsConfig]] =
+    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr],
+      [text, textErr], [vision, visionErr], [embedding, embeddingErr], [keys], [modelsConfig]] =
       await Promise.all([
         fetchOne(() => listServices({ timeoutMs: SERVICES_TIMEOUT_MS })),
         fetchOne(() => getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS })),
         fetchOne(() => monitorGpu({ timeoutMs: GPU_TIMEOUT_MS })),
-        fetchOne(() => monitorQwen({ timeoutMs: QWEN_TIMEOUT_MS })),
-        fetchOne(() => monitorMineru({ timeoutMs: MINERU_TIMEOUT_MS })),
+        fetchOne(() => getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS })),
+        fetchOne(() => getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS })),
+        fetchOne(() => getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS })),
         fetchOne(() => getKeys({ timeoutMs: SERVICES_TIMEOUT_MS })),
         fetchOne(() => fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS })),
       ]);
@@ -200,17 +207,47 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       services: services ?? get().services,
       dbStatus: dbStatus ?? get().dbStatus,
       gpu: gpu ?? get().gpu,
-      qwen: qwen ?? get().qwen,
-      mineru: mineru ?? get().mineru,
+      slots: {
+        text: text ?? get().slots.text,
+        vision: vision ?? get().slots.vision,
+        embedding: embedding ?? get().slots.embedding,
+      },
       keys: keys ?? get().keys,
       modelsConfig: modelsConfig ?? get().modelsConfig,
       error: servicesErr ? reason(servicesErr) : null,
       dbError: dbErr ? reason(dbErr) : null,
       gpuError: gpuErr ? reason(gpuErr) : null,
-      qwenError: qwenErr ? reason(qwenErr) : null,
-      mineruError: mineruErr ? reason(mineruErr) : null,
+      slotErrors: {
+        text: textErr ? reason(textErr) : null,
+        vision: visionErr ? reason(visionErr) : null,
+        embedding: embeddingErr ? reason(embeddingErr) : null,
+      },
     });
     if (!get().operating) set({ loading: false });
+  },
+
+  fetchSlots: async () => {
+    // 三槽位独立重拉（选择/操作后刷新）：失败仅置对应 slotError，保留旧值
+    const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
+      call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
+    const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
+    const [[text, textErr], [vision, visionErr], [embedding, embeddingErr]] = await Promise.all([
+      fetchOne(() => getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS })),
+      fetchOne(() => getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS })),
+      fetchOne(() => getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS })),
+    ]);
+    set({
+      slots: {
+        text: text ?? get().slots.text,
+        vision: vision ?? get().slots.vision,
+        embedding: embedding ?? get().slots.embedding,
+      },
+      slotErrors: {
+        text: textErr ? reason(textErr) : null,
+        vision: visionErr ? reason(visionErr) : null,
+        embedding: embeddingErr ? reason(embeddingErr) : null,
+      },
+    });
   },
 
   fetchGpu: async () => {
@@ -293,39 +330,37 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     });
   },
 
-  operateModel: async (name, op): Promise<OperateResult> => {
+  operateModel: async (slot, op): Promise<OperateResult> => {
     const { operating } = get();
     if (operating) {
-      return { name, op, success: false, status: 'busy', reason: '另一操作进行中，请稍后再试' };
+      return { name: slot, op, success: false, status: 'busy', reason: '另一操作进行中，请稍后再试' };
     }
-    set({ operating: name, error: null });
+    set({ operating: slot, error: null });
     try {
-      await operateModelApi(name, op);
+      await operateModelApi(slot, op);
     } catch (err) {
       set({ operating: null, loading: false });
       return {
-        name, op, success: false, status: 'error',
+        name: slot, op, success: false, status: 'error',
         reason: err instanceof Error ? err.message : String(err),
       };
     }
-    // 模型收敛：start/restart 目标 = 模型探针可达（qwen / mineru reachable），stop = 不可达
-    const targetReachable = op !== 'stop';
-    const probe = async (): Promise<boolean> => (
-      name === 'qwen' ? monitorQwen() : monitorMineru()
-    ).then((s) => (s as { reachable: boolean }).reachable);
+    // 槽位收敛：start/restart 目标 = /models/{slot}.ready（local 绑定模型探针就绪），stop = 未就绪
+    const targetReady = op !== 'stop';
     return new Promise<OperateResult>((resolve) => {
       const deadline = Date.now() + POLL_TIMEOUT_MS;
       const poll = async () => {
         try {
-          let reachable: boolean;
+          let ready: boolean;
           try {
-            reachable = await probe();
+            ready = (await getSlotStatus(slot)).ready;
           } catch {
-            reachable = false;
+            ready = false;
           }
-          if (reachable === targetReachable) {
+          if (ready === targetReady) {
             set({ operating: null, loading: false });
-            resolve({ name, op, success: true, status: op === 'stop' ? 'offline' : 'online' });
+            void get().fetchSlots();
+            resolve({ name: slot, op, success: true, status: op === 'stop' ? 'offline' : 'online' });
             return;
           }
           if (Date.now() < deadline) {
@@ -334,19 +369,35 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
           }
           set({ operating: null, loading: false });
           resolve({
-            name, op, success: false, status: 'timeout',
+            name: slot, op, success: false, status: 'timeout',
             reason: `收敛超时（${POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
           });
         } catch (err) {
           set({ operating: null, loading: false });
           resolve({
-            name, op, success: false, status: 'error',
+            name: slot, op, success: false, status: 'error',
             reason: err instanceof Error ? err.message : String(err),
           });
         }
       };
       setTimeout(poll, POLL_INTERVAL_MS);
     });
+  },
+
+  selectModel: async (slot, patch) => {
+    try {
+      await selectSlotModel(slot, patch);
+      await get().fetchSlots();
+      return true;
+    } catch (err) {
+      set({
+        slotErrors: {
+          ...get().slotErrors,
+          [slot]: err instanceof Error ? err.message : String(err),
+        },
+      });
+      return false;
+    }
   },
 
   testDatabase: async () =>
@@ -365,6 +416,12 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   testVision: async () =>
     runTest(set, 'vision', async () => {
       const res = await llmTestVision({ timeoutMs: TEST_TIMEOUT_MS });
+      return { ok: res.ok, detail: res.detail };
+    }),
+
+  testEmbedding: async () =>
+    runTest(set, 'embedding', async () => {
+      const res = await llmTestEmbedding({ timeoutMs: TEST_TIMEOUT_MS });
       return { ok: res.ok, detail: res.detail };
     }),
 }));

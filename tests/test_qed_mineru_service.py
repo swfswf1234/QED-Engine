@@ -1,8 +1,8 @@
 """
 模块职责：守护 scripts/image-model/qed_mineru_service.py（本地图像模型 MinerU 生命周期）契约——
-infra-*.ps1 编排调用、健康探测（8002 /health）、子命令结构。
+infra-*.ps1 编排调用、健康探测（5002 /health）、子命令结构。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：scripts/image-model/qed_mineru_service.py
 """
 
@@ -20,14 +20,14 @@ def test_mineru_script_contract():
     """infra 编排脚本引用 + 健康端点 + 子命令齐全。"""
     src = SCRIPT.read_text(encoding="utf-8")
     assert "infra-up.ps1" in src and "infra-down.ps1" in src and "infra-status.ps1" in src
-    assert "8002" in src and "/health" in src
+    assert "5002" in src and "/health" in src
     assert "/api/v1/health" not in src, "MinerU 真实健康端点为 /health（容器 healthcheck 与日志证实）"
     for cmd in ("start", "stop", "restart", "status"):
         assert cmd in src, f"脚本缺少子命令 {cmd}"
 
 
 def test_mineru_health_probe(monkeypatch):
-    """_health_ok：8002 /health 200 即就绪。"""
+    """_health_ok：5002 /health 200 即就绪。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("qed_mineru_service_mod", SCRIPT)
@@ -52,7 +52,7 @@ def test_mineru_health_probe(monkeypatch):
         return FakeResp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert mod._health_ok(8002) is True
+    assert mod._health_ok(5002) is True
     assert calls["url"].endswith("/health"), calls["url"]
 
 
@@ -73,21 +73,21 @@ def test_mineru_run_infra_timeout(monkeypatch):
 
 
 def test_mineru_default_port_from_env(monkeypatch):
-    """default_port：QED_MINERU_URL 端口解析；空时默认 8002。"""
+    """default_port：QED_OCR_MODEL_URL 端口解析；空时默认 5002。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("qed_mineru_service_mod", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    monkeypatch.setenv("QED_MINERU_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("QED_OCR_MODEL_URL", "http://127.0.0.1:9999")
     assert mod.default_port() == 9999
-    monkeypatch.delenv("QED_MINERU_URL", raising=False)
-    assert mod.default_port() == 8002
+    monkeypatch.delenv("QED_OCR_MODEL_URL", raising=False)
+    assert mod.default_port() == 5002
 
 
 def test_mineru_health_probe_honors_env_on_default_port(monkeypatch):
-    """_health_ok(8002)：QED_MINERU_URL 完整地址（host 含端口）被尊重。"""
+    """_health_ok(5002)：QED_OCR_MODEL_URL 完整地址（host 含端口）被尊重。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("qed_mineru_service_mod", SCRIPT)
@@ -111,7 +111,7 @@ def test_mineru_health_probe_honors_env_on_default_port(monkeypatch):
         calls["url"] = url
         return FakeResp()
 
-    monkeypatch.setenv("QED_MINERU_URL", "http://127.0.0.1:9999")
+    monkeypatch.setenv("QED_OCR_MODEL_URL", "http://127.0.0.1:9999")
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert mod._health_ok(8002) is True
+    assert mod._health_ok(5002) is True
     assert "127.0.0.1:9999" in calls["url"] and calls["url"].endswith("/health")

@@ -18,7 +18,7 @@
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `backend/qed_engine/config.py` | 统一配置读取 | Current | `docs/design/project-configuration.md` | `tests/test_config.py` | 根 `.env` 唯一事实源，空 key 降级。 |
+| `backend/qed_engine/config.py` | 统一配置读取 | Current | `docs/design/project-configuration.md` | `tests/test_config.py` | 根 `.env` 唯一事实源（四段式：全局 / API 调用 / 本地模型 / 元数据库），空 key 降级。 |
 | `backend/qed_engine/cli.py` | 统一 CLI `qed` | Current | `docs/design/project-configuration.md` | `tests/test_cli.py` | config 子命令、tracker 客户端子命令、服务发现与最小配置尾注。 |
 
 ### API 层
@@ -26,14 +26,14 @@
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/api/main.py` | 后端 API 入口（三域组装） | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 组装控制域与数据域路由，CORS 8900-8903，state 注入；配置五端点已拆至 control.py。 |
-| `backend/qed_engine/api/control.py` | 控制域路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py` | /services 端点族 + 配置五端点 + 监控诊断路由。 |
-| `backend/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 健康、模型路由、密钥布尔状态、数据库状态与 LLM 可达性。 |
+| `backend/qed_engine/api/control.py` | 控制域路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_llm_endpoints.py` | /services 端点族 + 配置五端点 + 监控诊断路由 + /models 槽位端点族（PLAN-046 v3：GET 五字段卡数据源 + select 写 source/runtime/active + 按槽位来源 409）+ /llm 网关端点。 |
+| `backend/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 健康、模型路由、密钥布尔状态、数据库状态与 LLM 可达性；SlotStatus（v3 五字段卡：source/channel/description/availability + 三下拉）、ModelSelectRequest（source/runtime/model）。 |
 | `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | catalogs/tasks/三表契约归 8900，内部经 tracker_client.py 适配 8901。 |
 | `backend/qed_engine/api/explore.py` | 数据域·探索会话路由 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | /explore-sessions 五端点，取代旧 explore-runs 透传。 |
 | `backend/qed_engine/api/domain_explore.py` | 数据域·领域探索五态门面路由 | Current | `docs/design/downloads-flow.md` | `tests/test_domain_explore.py` | 五端点委托 8901 原生任务链：task_id 登记、courses.json→课程行桥接、explore_pending 合成与离线降级（PLAN-034 已落地）。 |
-| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/pages/manifest/parse-jobs/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；ARCH-020 规划扩展 books CRUD/ingest/edits（见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）。 |
+| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/单本详情/PDF 流/pages/manifest/parse-jobs/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；`GET /books/{id}/file` 为 8900 本地端点（af_books.file_path 数据根相对路径 + 边界校验，见 [dataset 目录约定](../design/dataset-conventions.md)）；ARCH-020-D 已实施 `POST /books/{id}/ingest` 透传 + 块编辑门面 `PUT …/blocks/{i}/edit`/`GET …/pages/{no}/edits`（/review 门面过渡保留）；剩余 PATCH/DELETE/chunks 见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md）。 |
 | `backend/qed_engine/clients/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/cross-project-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/三表，transport 可注入。 |
-| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/pages/manifest/parse-jobs/sync/review，transport 可注入；ARCH-020 规划扩展 CRUD/ingest/edit。 |
+| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/单本详情(get_book)/ingest_book/pages/manifest/parse-jobs/sync/edit（engine/id/progress 对象按 8902 v2 契约；edit_block verdict 可选支持部分修正），transport 可注入；/review 门面内部转 /edit，ARCH-020-D 前端已直连 /edit。 |
 
 ### 服务层·控制域
 
@@ -41,7 +41,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/services/service_manager.py` | 服务控制能力层 | Current | `docs/design/service-hosting.md` | `tests/test_api.py`、`tests/test_self_restart.py` | 注册表/HTTP 探测/Popen 启动/优雅停止/自身重启。 |
 | `backend/qed_engine/services/log_viewer.py` | 服务日志查看能力 | Current | `docs/architecture/api-contracts.md` | `tests/test_log_viewer.py` | 白名单 tail/keyword；未知服务 LogError→404。 |
-| `backend/qed_engine/services/monitor.py` | 组件监控探测 | Current | `docs/architecture/api-contracts.md` | `tests/test_monitor.py` | GPU/Qwen/mineru 探测；尽力报告不抛 5xx。 |
+| `backend/qed_engine/services/monitor.py` | 组件监控探测 | Current | `docs/architecture/api-contracts.md` | `tests/test_monitor.py` | GPU + 槽位泛化探测（probe_slot：text 探 `QED_MODEL_URL` / vision 探 `QED_OCR_MODEL_URL`（5002）；qwen/mineru 旧函数保留别名）；尽力报告不抛 5xx。 |
 
 ### 服务层·数据域
 
@@ -54,10 +54,15 @@
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py` | 文字/视觉统一入口，按 QED_API_SELECT 路由 api/local。 |
-| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen/Qwen/MinerU；httpx transport 可注入。 |
-| `backend/qed_engine/services/llm/model_manager.py` | 本地模型资源互斥 | In Progress | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | QED_RESOURCE_GUARD 互斥：local 模式先停对方；MODEL_SCRIPTS + operate_model 统一入口。 |
-| `backend/qed_engine/services/llm/call_log.py` | LLM 调用记录 | In Progress | `docs/design/llm-gateway.md` | `tests/test_llm_call_log.py` | qed_llm_calls 幂等建表/写入/分页检索；DB 不可达降级。 |
+| `backend/qed_engine/services/llm/registry.py` | 模型身份注册表 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_registry.py` | PLAN-046 v3：身份目录（身份→api/本地引用 + description）+ 槽位级来源/渠道运行态（manifest.source/runtime/active）+ 渠道/模型选项派生，gateway/model_manager 统一消费。 |
+| `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py` | 文字/视觉/向量统一入口，经注册表解析按 QED_API_SELECT 路由 api/local（local 经单活仲裁拉起）。 |
+| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen 文字/视觉、MinerU、provider_embeddings（向量）；httpx transport 可注入。 |
+| `backend/qed_engine/services/llm/model_manager.py` | 本地模型资源管理（单活仲裁） | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 v3：ensure_local_ready(slot) 单活仲裁（槽位渠道 manifest.runtime > 全局默认）；operate_model 槽位化 + qwen/mineru 旧名别名。 |
+| `backend/qed_engine/services/llm/runtimes/base.py` | 本地 runtime 基座 | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：LocalRuntime 协议（probe/start/stop）+ RuntimeResult + 脚本型基类（llamacpp/docker 复用 scripts/ 生命周期脚本）。 |
+| `backend/qed_engine/services/llm/runtimes/lmstudio.py` | LM Studio 半托管 runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 + W7 实测：probe=REST v0 `state=loaded`；start=lms server start + `lms load --gpu max`（先卸载其他已加载）；stop=`lms unload`（server 保留）；端点 `QED_MODEL_URL`；探活经 QED_LMSTUDIO_TOKEN 带认证。 |
+| `backend/qed_engine/services/llm/runtimes/llamacpp.py` | llamacpp runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：llama-server 生命周期复用 text-model 脚本（端点 `QED_MODEL_URL`）；身份目录暂无 llamacpp 引用（预留，加引用即接通）。 |
+| `backend/qed_engine/services/llm/runtimes/docker.py` | docker runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：MinerU 容器生命周期复用 image-model 脚本（infra-*.ps1）；端点 `QED_OCR_MODEL_URL`（5002）；vision 槽位默认 runtime。 |
+| `backend/qed_engine/services/llm/call_log.py` | LLM 调用记录 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_call_log.py` | qed_llm_calls 幂等建表/写入/分页检索；DB 不可达降级。 |
 
 ### 测试·根目录
 
@@ -69,19 +74,20 @@
 | `tests/test_api.py` | 配置中心 API 契约测试 | Current | `docs/architecture/api-contracts.md` | — | 密钥值不泄露。 |
 | `tests/test_web.py` | 8903 前端契约测试 | Current | `docs/architecture/frontend-architecture.md` | — | serve_web.py + web-ui/src 源码契约。 |
 | `tests/test_log_viewer.py` | 日志查看契约测试 | Current | `docs/architecture/api-contracts.md` | — | 白名单/tail/keyword/越权/编码容错。 |
-| `tests/test_monitor.py` | 组件监控契约测试 | Current | `docs/architecture/api-contracts.md` | — | GPU/Qwen/mineru 各分支。 |
+| `tests/test_monitor.py` | 组件监控契约测试 | Current | `docs/architecture/api-contracts.md` | — | GPU / 文字模型（QED_MODEL_URL）/ MinerU（5002）各分支。 |
 | `tests/test_self_restart.py` | 自身重启契约测试 | Current | `docs/architecture/api-contracts.md` | — | 延迟 spawn/失败语义。 |
 | `tests/test_explore_sessions.py` | 探索会话契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点/状态机/apply 双链路/TTL。 |
 | `tests/test_domain_explore.py` | 领域探索五态门面契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点：原生任务提交/透传/桥接/降级/状态合成。 |
 | `tests/test_qed_web_service.py` | 8903 前端生命周期脚本契约测试 | Current | `docs/design/service-hosting.md` | — | PID 文件/serve 命令/health 端口。 |
-| `tests/test_qed_engine_service.py` | 8900 后端生命周期脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | PID/serve/health/--mode/子命令。 |
-| `tests/test_qed_qwen_service.py` | 本地文字模型脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
-| `tests/test_qed_mineru_service.py` | 本地图像模型脚本契约测试 | In Progress | `docs/design/llm-gateway.md` | — | infra-*.ps1 编排/健康探测/子命令。 |
-| `tests/test_llm_gateway.py` | LLM 网关契约测试 | In Progress | `docs/design/llm-gateway.md` | — | api/local 路由、调用记录字段。 |
-| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | In Progress | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、Qwen、MinerU。 |
-| `tests/test_llm_model_manager.py` | 本地模型资源互斥契约测试 | In Progress | `docs/design/local-model-management.md` | — | api 模式不启本地模型/互斥；operate_model 端点路径（start/stop/restart）。 |
-| `tests/test_llm_call_log.py` | LLM 调用记录契约测试 | In Progress | `docs/design/llm-gateway.md` | — | 建表 SQL、写入字段、分页检索。 |
-| `tests/test_llm_endpoints.py` | LLM 网关端点契约测试 | In Progress | `docs/design/llm-gateway.md` | — | /llm/text、/llm/vision、/llm/test/* 端点。 |
+| `tests/test_qed_engine_service.py` | 8900 后端生命周期脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | PID/serve/health/--mode/子命令。 |
+| `tests/test_qed_qwen_service.py` | 本地文字模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
+| `tests/test_qed_mineru_service.py` | 本地图像模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | infra-*.ps1 编排/健康探测/子命令。 |
+| `tests/test_llm_gateway.py` | LLM 网关契约测试 | Current | `docs/design/llm-gateway.md` | — | api/local 路由、调用记录字段。 |
+| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | Current | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、Qwen、MinerU。 |
+| `tests/test_llm_model_manager.py` | 本地模型资源互斥契约测试 | Current | `docs/design/local-model-management.md` | — | api 模式不启本地模型/互斥；operate_model 端点路径（start/stop/restart）。 |
+| `tests/test_llm_registry.py` | 模型身份注册表契约测试 | Current | `docs/design/llm-gateway.md` | — | 身份目录覆盖、来源/渠道/身份三级运行态优先级、渠道与模型选项派生、api/local 解析与回退。 |
+| `tests/test_llm_call_log.py` | LLM 调用记录契约测试 | Current | `docs/design/llm-gateway.md` | — | 建表 SQL、写入字段、分页检索。 |
+| `tests/test_llm_endpoints.py` | LLM 网关端点契约测试 | Current | `docs/design/llm-gateway.md` | — | /llm/text、/llm/vision、/llm/test/* 端点。 |
 | `tests/conftest.py` | 根测试基座（autouse 打桩） | Current | `docs/architecture/api-contracts.md` | — | probe_pdh/monitor.subprocess.run 打桩，隔离真实 PowerShell 调用与测试污染。 |
 
 ### 测试·契约

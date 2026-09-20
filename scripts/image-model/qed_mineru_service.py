@@ -1,7 +1,7 @@
 """本地图像模型（MinerU 容器，WSL）生命周期管理：start / stop / restart / status。
 
-经 PowerShell 编排脚本（scripts/image-model/infra-*.ps1，WSL Docker Compose，端口 8002）
-执行启停；健康探测：GET http://127.0.0.1:8002/health（QED_MINERU_URL 可覆盖）。
+经 PowerShell 编排脚本（scripts/image-model/infra-*.ps1，WSL Docker Compose，端口 5002）
+执行启停；健康探测：GET http://127.0.0.1:5002/health（QED_OCR_MODEL_URL 可覆盖）。
 由 services/llm/model_manager.py 调用（资源互斥编排），也可手动执行。
 退出码：0 成功/幂等；1 运行失败；2 参数错误（argparse）。
 """
@@ -25,19 +25,19 @@ HEALTH_INTERVAL_SECONDS = 0.5
 
 
 def default_port() -> int:
-    """健康探测端口：QED_MINERU_URL 端口解析，默认 8002。"""
-    raw = os.getenv("QED_MINERU_URL", "")
+    """健康探测端口：QED_OCR_MODEL_URL 端口解析，默认 5002。"""
+    raw = os.getenv("QED_OCR_MODEL_URL", "")
     if raw:
         try:
             return int(raw.rstrip("/").rsplit(":", 1)[1])
         except (ValueError, IndexError):
             pass
-    return 8002
+    return 5002
 
 
 def default_base_url() -> str:
-    """QED_MINERU_URL 环境变量完整地址（含端口），默认 http://127.0.0.1:8002。"""
-    return os.getenv("QED_MINERU_URL", "http://127.0.0.1:8002").rstrip("/")
+    """QED_OCR_MODEL_URL 环境变量完整地址（含端口），默认 http://127.0.0.1:5002。"""
+    return os.getenv("QED_OCR_MODEL_URL", "http://127.0.0.1:5002").rstrip("/")
 
 
 def _base_from_port(port: int) -> str:
@@ -45,8 +45,8 @@ def _base_from_port(port: int) -> str:
 
 
 def _health_ok(port: int) -> bool:
-    # 默认端口 8002 时尊重 QED_MINERU_URL（完整地址含 host）；显式其它端口按 127.0.0.1 构造
-    base = default_base_url() if port == 8002 else _base_from_port(port)
+    # 默认端口 5002 时尊重 QED_OCR_MODEL_URL（完整地址含 host）；显式其它端口按 127.0.0.1 构造
+    base = default_base_url() if port == 5002 else _base_from_port(port)
     try:
         with urllib.request.urlopen(base + "/health", timeout=1.0) as resp:
             return resp.status == 200
@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="本地图像模型（MinerU 容器）生命周期管理（start/stop/restart/status）。",
     )
     parser.add_argument("--port", type=int, default=None,
-                        help="健康探测端口（默认 QED_MINERU_URL 解析或 8002）")
+                        help="健康探测端口（默认 QED_OCR_MODEL_URL 解析或 5002）")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="启动 MinerU 容器（infra-up.ps1）")

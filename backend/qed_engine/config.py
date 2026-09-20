@@ -45,11 +45,15 @@ class Settings(BaseSettings):
     qed_tracker_url: str = "http://127.0.0.1:8901"
     qed_axiom_url: str = "http://127.0.0.1:8902"
     qed_web_url: str = "http://127.0.0.1:8903"
-    # 本地 LLM（Qwen，OpenAI 兼容）默认地址（QED_QWEN_URL 可覆盖；本机实测 5001）
-    qed_qwen_url: str = "http://127.0.0.1:5001/v1"
-    # 本地图像模型（MinerU 容器，WSL；编排见 scripts/image-model/）
-    qed_mineru_url: str = "http://127.0.0.1:8002"
-    # 资源互斥开关（默认开）：启动一方本地模型前先停另一方（4080 16GB 显存约束）
+    # 本地模型加载方式（2026-09-16 四段式）：lmstudio（默认）/ llamacpp / docker
+    qed_local_runtime: str = "lmstudio"
+    # 文字模型地址（lmstudio 与 llamacpp 共用；OpenAI 兼容，默认 5001）
+    qed_model_url: str = "http://127.0.0.1:5001/v1"
+    # 图像模型地址（MinerU 容器，健康端点 /health，默认 5002）
+    qed_ocr_model_url: str = "http://127.0.0.1:5002"
+    # LM Studio API 认证 token（W7 实测：本机开启认证，REST v0 与 OpenAI 调用需 Bearer；空=不带头）
+    qed_lmstudio_token: SecretStr = SecretStr("")
+    # 资源互斥开关（默认开）：单活仲裁，启动一方本地模型前先停其他在跑本地模型（4080 16GB 约束）
     qed_resource_guard: bool = True
     # LLM 网关地址（子项目 qed-engine 模式读取；api/local 模式忽略）
     qed_llm_gateway_url: str = "http://127.0.0.1:8900"
@@ -78,6 +82,10 @@ class Settings(BaseSettings):
         """唯一密钥（API_KEY），空字符串表示未配置。"""
         return self.api_key.get_secret_value()
 
+    def resolved_lmstudio_token(self) -> str:
+        """LM Studio API 认证 token（QED_LMSTUDIO_TOKEN），空字符串表示未开启认证。"""
+        return self.qed_lmstudio_token.get_secret_value()
+
     @property
     def data_root_path(self) -> Path:
         """数据根绝对路径：相对值锚定仓库根（与脚本启动 CWD=仓库根一致）。"""
@@ -92,5 +100,15 @@ class Settings(BaseSettings):
         if self.qed_api_provider not in {"qwen", "deepseek", "glm"}:
             raise ValueError(
                 f"QED_API_PROVIDER 非法取值：{self.qed_api_provider!r}（仅支持 qwen / deepseek / glm）"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_local_runtime(self) -> "Settings":
+        """QED_LOCAL_RUNTIME 仅支持注册 runtime（lmstudio/llamacpp/docker），非法值拒绝启动。"""
+        if self.qed_local_runtime not in {"lmstudio", "llamacpp", "docker"}:
+            raise ValueError(
+                f"QED_LOCAL_RUNTIME 非法取值：{self.qed_local_runtime!r}"
+                "（仅支持 lmstudio / llamacpp / docker）"
             )
         return self

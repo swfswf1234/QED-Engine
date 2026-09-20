@@ -4,7 +4,7 @@
 实现状态：In Progress
 最后更新：2026-09-16
 确认状态：暂定
-关联代码：`backend/qed_engine/services/llm/model_manager.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel。v2 计划新增的 services/llm/registry.py、services/llm/runtimes/ 待代码落地后补登记；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
+关联代码：`backend/qed_engine/services/llm/model_manager.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。v2 新增的 services/llm/registry.py 主登记见 llm-gateway.md、runtimes/ 适配器见本设计「槽位与 runtime」节，均已在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
 关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
 关联设计：[llm-gateway.md](llm-gateway.md)（网关/调用记录/全局模式/身份目录——分工见下）、[admin-console.md](admin-console.md)（控制台四区）、[dataset-conventions.md](dataset-conventions.md)（数据目录约定）
@@ -16,45 +16,66 @@
 > **N 槽位单活仲裁**；`manifest.active` 升级为运行态事实源（控制台模型下拉写入）；/models、
 > /monitor 端点从模型名泛化为槽位名（旧名别名过渡）。LM Studio 命名回归（PLAN-042 曾移除），
 > 本次作为**runtime 之一**纳入并半托管。
+>
+> **v3 修订（2026-09-16，PLAN-046，控制台模型卡优化）**：**反转 v2 第二轮裁决 #5/#6**——
+> ① **来源与本地渠道改为槽位级运行态选择**（控制台每卡独立选「本地部署 / API 调用」与
+> 「默认 / LM Studio / Docker / llama.cpp(待上线)」），`manifest.json` 扩展 `source` / `runtime`
+> 字段，全局 `QED_API_SELECT` / `QED_LOCAL_RUNTIME` 退化为**默认值**；
+> ② 渠道选项按槽位从注册表**派生**（登记可用 / 待上线），模型下拉按来源 × 渠道过滤；
+> ③ 控制台「可用」行探针自动判定 + 「验证」按钮真实调用；「备注」行显示身份一句话介绍；
+> ④ 配置中心四段式（2026-09-16 用户裁决）：本地模型变量统一 `QED_LOCAL_RUNTIME` /
+> `QED_MODEL_URL`（文字，合并 LM Studio 与 llama.cpp）/ `QED_OCR_MODEL_URL`（图像，端口
+> 8002→5002）/ `QED_LMSTUDIO_TOKEN` / `QED_RESOURCE_GUARD`，删除 `QED_LMSTUDIO_URL` /
+> `QED_QWEN_URL` / `QED_MINERU_URL`。
 
 ## 背景与定位
 
 本地模型（文字：Qwen；图像：MinerU）的生命周期管理，从「控制台依赖卡只读探针」
-扩展为**可操作**：启动/停止/重启 + 测试 + 显存摘要 + **模型选择（v2）**。本设计定义操作入口、
+扩展为**可操作**：启动/停止/重启 + 测试 + 显存摘要 + **来源/渠道/模型选择（v3）**。本设计定义操作入口、
 模型文件目录与编排外迁；**模型调用网关、api/local 路由、调用记录、身份目录不在本文件**（归 llm-gateway.md）。
 
 分工边界：
 
-- **网关/路由/调用记录/全局模式/身份目录**：`llm-gateway.md`（/llm/text /llm/vision /llm/embedding）。
+- **网关/路由/调用记录/来源渠道解析/身份目录**：`llm-gateway.md`（/llm/text /llm/vision /llm/embedding）。
 - **runtime 同化/生命周期操作/模型文件/编排**：本文件（/models/{slot}、model/ 目录、runtimes/）。
-- **UI 四区与展示**：`admin-console.md`。
+- **UI 展示（三区 · 槽位卡五字段）**：`admin-console.md`。
 
 **用户既定口径（2026-09-16 裁决）**：无论经 LM Studio、llama.cpp 还是 docker 部署，都同化为
 统一的「本地模型」进行启停与服务，后续 AGENT、MCP 等以同样方式配置；资源互斥保证文字/图像模型
 中本地同时只有一个模型在跑（最关键约束）。
 
-## 槽位与 runtime（v2）
+## 槽位与 runtime（v3：来源/渠道槽位级）
 
-| 槽位（slot） | 类别 | api 来源 | 本地 runtime（`QED_LOCAL_RUNTIME` 选择） | 探针 | 测试端点 |
+| 槽位（slot） | 类别 | api 身份 | 本地渠道选项（默认 → 可选） | 探针 | 测试端点 |
 | --- | --- | --- | --- | --- | --- |
-| `text` | 文字 | qwen-plus | **lmstudio（默认，半托管）**；llamacpp（llama-server，预留）；docker（llama.cpp 打包，未来） | `GET /monitor/text`（旧 `/monitor/qwen` 别名） | `POST /llm/test/text` |
-| `vision` | 图像 | qwen-vl-plus | **docker（MinerU 容器，现状保留）**；未来可探索其他本地图像模型 | `GET /monitor/vision`（旧 `/monitor/mineru` 别名） | `POST /llm/test/vision` |
-| `embedding` | 向量 | text-embedding-v4 | 无（预留，后续按需接入） | — | `POST /llm/test/embedding`（新增） |
+| `text` | 文字 | qwen-plus | 默认（=全局 `QED_LOCAL_RUNTIME`）；**LM Studio 登记可用**；Docker / llama.cpp 待上线 | `GET /monitor/text`（旧 `/monitor/qwen` 别名） | `POST /llm/test/text` |
+| `vision` | 图像 | qwen-vl-plus | 默认（=docker）；**Docker（MinerU）登记可用**；LM Studio / llama.cpp 待上线 | `GET /monitor/vision`（旧 `/monitor/mineru` 别名） | `POST /llm/test/vision` |
+| `embedding` | 向量 | text-embedding-v4 | 无本地候选（全待上线；**来源固定 api，全局 local 不影响**） | — | `POST /llm/test/embedding` |
+
+- **来源（source）**：`api` | `local`，槽位级运行态（`manifest.source`）> 全局 `QED_API_SELECT` 默认。
+- **渠道（runtime）**：仅 `local` 来源有意义，槽位级运行态（`manifest.runtime`）> 槽位默认
+  runtime（`text` = `QED_LOCAL_RUNTIME`，`vision` = `docker`）。`api` 来源渠道显示「直连」。
+- **渠道选项**（控制台下拉，从注册表派生）：该 runtime 在槽位下有身份引用 = 登记可用，否则
+  待上线（置灰不可选）。新增部署形态 = 注册表加身份本地引用，渠道选项自动出现。
 
 - **runtime 同化接口**（`services/llm/runtimes/`）：三种部署形态各实现同一接口，`model_manager`
   只面向接口，不感知部署细节：
 
 ```python
 class LocalRuntime(Protocol):
-    def probe(settings) -> bool      # 就绪 =「模型可用」而非仅进程存活
-    def start(settings) -> Result    # 幂等；失败返回明确中文原因
-    def stop(settings) -> Result     # 释放显存/进程
+    def probe(self, settings, model: str = "") -> bool                 # 就绪 =「模型可用」而非仅进程存活
+    def start(self, settings, model: str = "", ...) -> RuntimeResult   # 幂等；ok=False 时 detail 为明确中文原因
+    def stop(self, settings, model: str = "", ...) -> RuntimeResult    # 释放显存/进程
 ```
 
-- **lmstudio（半托管）**：probe = `GET {QED_LMSTUDIO_URL}/models` 且已加载模型含当前身份；
-  start = server 未起时尝试 `lms server start`（PATH 探测，失败报明确原因）+ LM Studio REST API v0
-  加载当前身份模型（幂等）；stop = REST API v0 **卸载模型释放显存**（server 进程本身由 LM Studio
-  自管，不杀）。REST v0 具体端点以本机 LM Studio 版本实测为准（冒烟时核对并回填本表）。
+- **lmstudio（半托管）**：probe = `GET /api/v0/models`（REST v0）且 `state == "loaded"` 的模型
+  含当前身份（W7 实测：`/v1/models` 列**全量已下载**模型，不能当已加载判定）；
+  start = server 未起时尝试 `lms server start`（PATH 探测，失败报明确原因）→ 先 `lms unload`
+  其他已加载模型（单活 + 显存释放）→ `lms load <模型key> --gpu max`（幂等）；stop =
+  `lms unload`（全量释放用 `lms unload --all`），server 进程本身由 LM Studio 自管，不杀。
+  W7 实测（2026-09-16）：**REST API v0 无 load/unload 端点**（POST /api/v0/load 返回伪 200
+  「Unexpected endpoint」），生命周期一律走 `lms` CLI；LM Studio 开启 API token 认证时
+  探活请求经 `QED_LMSTUDIO_TOKEN` 带 Bearer（密钥只存 .env）。
 - **llamacpp**：现 `scripts/text-model/qed_qwen_service.py`（manifest → llama-server 进程）平移，
   脚本保留 CLI 入口（start/stop/restart/status）。
 - **docker**：现 `scripts/image-model/qed_mineru_service.py`（infra-*.ps1 + compose）平移，
@@ -70,7 +91,7 @@ class LocalRuntime(Protocol):
 
 ```python
 # v2：槽位 → runtime 适配器（替代原 MODEL_SCRIPTS 两单元硬编码）
-SLOT_RUNTIMES = {"text": <由 QED_LOCAL_RUNTIME 解析>, "vision": docker_runtime, "embedding": None}
+SLOT_RUNTIMES = {"text": <槽位渠道解析：manifest.runtime > QED_LOCAL_RUNTIME>, "vision": docker_runtime, "embedding": None}
 
 def operate_model(slot: str, op: str) -> dict:
     # start/restart：ensure_local_ready(slot)（单活互斥已含，QED_RESOURCE_GUARD）
@@ -82,35 +103,45 @@ def operate_model(slot: str, op: str) -> dict:
 
 - **start/restart 复用 ensure_local_ready**：单活互斥语义（见下）由其生效，不重复实现。
 - **stop 直调 runtime**：不经过就绪检查。
-- **select（新增）**：`operate_model(slot, "select", model=<身份>)` 校验身份属于该槽位且有本地
-  引用后写入 `model/<slot>/manifest.json` 的 `active` 字段（运行态事实源），下一次 start 生效；
-  当前已在跑时提示需重启槽位。
+- **select（新增）**：独立端点 `POST /models/{slot}/select`（不走 operate_model）经
+  `registry.set_manifest_active(slot, identity)` 写 `model/<slot>/manifest.json` 的 `active`
+  字段（运行态事实源）。校验仅限「槽位支持运行态选择 + 身份属于该槽位」——未知槽位/身份、
+  embedding → 404；**api/local 渠道均可写**（运行态在下次 local 调用/启动时生效），不校验本地
+  引用归属（api-only 身份也可选，渠道解析按注册表回退规则兜底）。
 - 返回值统一：`{ slot, op, ok, ... }`（实际以 model_manager 实现为准，端点层再包一层 409/404 语义）。
 
-## 端点契约：/models/{slot}（8900 聚合）
+## 端点契约：/models/{slot}（8900 聚合，v3）
 
 | 端点 | 语义 | 非 200 分支 |
 | --- | --- | --- |
-| `POST /models/{slot}/start` | 启动本地模型（local 模式） | api 模式 → 409；未知 slot → 404 |
+| `POST /models/{slot}/start` | 启动本地模型（槽位来源 = local） | 槽位来源 api → 409；未知 slot → 404 |
 | `POST /models/{slot}/stop` | 停止本地模型 | 同上 |
 | `POST /models/{slot}/restart` | 重启本地模型 | 同上 |
-| `POST /models/{slot}/select`（新增） | 切换当前身份（写 manifest.active） | api 模式 → 409；身份不属于槽位/无本地引用 → 404 |
-| `GET /models/{slot}`（新增） | 槽位状态：当前身份 / 渠道 / runtime / 可用性 | 未知 slot → 404 |
+| `POST /models/{slot}/select`（v2 新增，v3 扩展） | 写运行态 `manifest`：`{source?, runtime?, model?}`（至少一项；`{model}` 向后兼容） | 未知槽位/身份/runtime、embedding 写运行态 → 404 |
+| `GET /models/{slot}`（v2 新增，v3 扩展） | 槽位状态：来源 / 渠道 / 身份 / 模型 / 可用性 / 备注 / 选项 | 未知 slot → 404 |
 
-- **api 模式**（keys.mode=api）：本地模型不参与，仅云端厂商；启停/select 端点返回 409（「api 模式下
-  本地模型不可操作」），控制台 UI 此时不渲染启停与下拉（只有测试）。
-- **未知 slot**（非 text/vision；embedding 无本地语义同 404）：404。
+- **来源判定按槽位生效值**（v3）：槽位来源（`manifest.source` > 全局 `QED_API_SELECT`）为 `api`
+  时启停端点返回 409（「该槽位为 api 来源，本地模型仅支持测试」）；为 `local` 时允许启停。
+  控制台据此渲染启停按钮（来源为 local 才显示）。
+- **select 不受来源限制**（运行态选择两来源均可写）：写 `manifest.source` / `manifest.runtime` /
+  `manifest.active`；`embedding` 无运行态 manifest → 404。
+- **未知 slot**：start/stop/restart 仅 `text`/`vision`；GET 支持 `text`/`vision`/`embedding`。
 - **旧名别名**：`qwen` → text、`mineru` → vision（deprecated，过渡期保留，响应注记提示新名）。
 - 全部经 8900 聚合（ADR 0007）：前端不直连本地模型端口或脚本宿主。
 
-## 控制台需求（v2，UI 细节归 admin-console.md）
+## 控制台需求（v3，UI 细节归 admin-console.md）
 
-- 三卡（文字/图像/向量）**备注显示渠道**：api / lmstudio / llama.cpp / docker（经 `GET /models/{slot}`
-  与 `GET /config/models` 取得），以及**模型可用状态**（注册表 `available` 元数据 + 探针结果，
-  如「本机已下载」「未部署」「不可达」）。
-- **local 模式可选择模型**：文字卡显示身份下拉（注册表内该槽位可选身份，首版 qwen3.8-27b /
-  qwen3.5-9b），选择即调 `POST /models/text/select`；图像/向量卡同理（可选身份少时下拉置灰）。
-- 启停/重启/测试按钮保留（api 模式仅测试）。
+三卡（文字/图像/向量）五字段，数据源 `GET /models/{slot}`（`GET /config/models` 保留为路由表）：
+
+1. **来源**：Select「本地部署 / API 调用」，选择即 `POST /models/{slot}/select {source}` 写运行态。
+2. **模型**：Select 按「来源 × 渠道」过滤的注册表身份，选项带一句话备注；选择即写 `manifest.active`。
+3. **渠道**：来源 = 本地时 Select「默认 / LM Studio / Docker / llama.cpp(待上线置灰)」（登记可用
+   可选、待上线置灰）；来源 = API 时显示「直连」。
+4. **可用**：探针自动判定（选中后刷新即显示 可用 / 不可用 / 未就绪）；右侧「验证」按钮 →
+   `POST /llm/test/{slot}` 真实小调用，反馈成功/失败 + 原因。
+5. **备注**：当前身份 `description`（一句话介绍）。
+
+- 启停/重启按钮保留（来源 = local 才渲染，单活仲裁）；向量卡无本地候选（来源固定 api，仅验证）。
 
 ## 模型文件目录与 manifest 约定（2026-09-14 立约定 / 2026-09-16 v2 升级）
 
@@ -127,11 +158,13 @@ model/
     └── <模型目录>/         # 具体权重（modelscope / hf）
 ```
 
-**manifest.json 约定（v2 语义）**：
+**manifest.json 约定（v3 语义）**：
 
 ```json
 {
   "active": "<身份名>",
+  "source": "local",
+  "runtime": "lmstudio",
   "serve": {
     "port": 5001,
     "ctx": 8192,
@@ -143,17 +176,21 @@ model/
 - `active`：**运行态事实源**——当前生效的模型身份（空字符串 = 未选择，回退 `.env` 身份变量默认值）。
   控制台模型下拉经 `/models/{slot}/select` 写入；生命周期与网关解析（registry）消费。
   v1 的「active = 模型目录名」升级为「active = 注册表身份名」（lmstudio 身份无需本地目录）。
+- `source`（v3 新增）：**槽位来源运行态**——`api` | `local`；空 = 未选择，回退全局 `QED_API_SELECT`。
+- `runtime`（v3 新增）：**槽位本地渠道运行态**——`lmstudio` | `llamacpp` | `docker`；空 = 未选择，
+  回退槽位默认 runtime（`text` = `QED_LOCAL_RUNTIME`，`vision` = `docker`）。
 - `serve`：服务启动参数（llamacpp runtime 的 llama-server 读取；docker runtime 以 compose 为准）。
-- **换模型只改 active（控制台）或身份目录（代码）**：不动 env、不动 gateway/clients 调用链。
-- **参数解耦**：env 只存端点与全局开关（`QED_LOCAL_RUNTIME` / `QED_LMSTUDIO_URL` / `QED_QWEN_URL` /
-  `QED_MINERU_URL`），模型身份变量（`QED_MODEL` 等）值不分 api/local，由注册表解析。
+- **换模型/来源/渠道只改 manifest（控制台）或身份目录（代码）**：不动 env、不动 gateway/clients 调用链。
+- **参数解耦**：env 只存端点与全局默认（`QED_LOCAL_RUNTIME` / `QED_MODEL_URL` /
+  `QED_OCR_MODEL_URL`），模型身份变量（`QED_MODEL` 等）值不分 api/local，
+  由注册表解析。
 - **MinerU manifest 为登记性**：MinerU 容器实际模型路径由 compose 卷挂载 + 镜像内
   `/root/mineru.json` 决定（见下节），manifest.active 不参与容器运行时——此为 v1 已知偏差的
   如实登记，v2 不强行统一。
 
 **当前 manifest 骨架**：
 - `model/qwen/manifest.json`：`{ "active": "", "serve": { "port": 5001, "ctx": 8192, "n_gpu_layers": -1 } }`
-- `model/mineru/manifest.json`：`{ "active": "", "serve": { "port": 8002, "model_source": "local" } }`
+- `model/mineru/manifest.json`：`{ "active": "", "serve": { "port": 5002, "model_source": "local" } }`
 
 **模型文件结构**：
 - `.gitignore`：`/model/*` 忽略全部内容（目录骨架经 `.gitkeep` 保留）。
@@ -164,7 +201,8 @@ model/
   - PowerShell 示例：`python scripts/image-model/download-models.py -s modelscope`（QED_env）
 - llama.cpp 路径：llama-server 从 `model/qwen/<模型目录>/` 加载（OpenAI 兼容端口 5001）。
 - LM Studio 路径：模型在 `~/.lmstudio/models/<发布者>/<模型名>-GGUF/`，注册表按身份记录
-  runtime 标识（如 `unsloth/Qwen3.8-27B-GGUF`），不做文件搬运。
+  runtime 标识（W7 实测：lms CLI 的模型 key，如 `qwen3.8-27b`、`qwen/qwen3.5-9b`——
+  **不是**磁盘目录的 `发布者/xxx-GGUF` 路径），不做文件搬运。
 
 ## MinerU 容器外迁与部署（2026-09-06 外迁 / 2026-09-14 落地）
 
@@ -180,7 +218,10 @@ model/
 - **落地验证（2026-09-14）**：`mineru:latest` 重建成功（去模型化）；容器 healthy、`/health` 200、
   GPU 穿透正常；真实 PNG 经 `POST /file_parse` 解析成功（`md_content` 正确）；
   8900 `/monitor/mineru` reachable、`/models/mineru/{start|stop|restart}` 正常（local 模式）。
-- **健康端点**：`GET http://127.0.0.1:8002/health`（**不是** `/api/v1/health`）。
+- **健康端点**：`GET http://127.0.0.1:5002/health`（**不是** `/api/v1/health`）。
+- **端口迁移 8002 → 5002（2026-09-16 用户裁决）**：`compose.yaml` 端口映射 / `--port` /
+  healthcheck 与 `qed_mineru_service.py` 默认值、`QED_OCR_MODEL_URL` 同步为 5002；Axiom-Flow
+  直连地址经跨项目请求同步（其读根 `.env` 的键由 `QED_MINERU_URL` 改为 `QED_OCR_MODEL_URL`）。
 
 ## 资源互斥与模式（v2：单活仲裁）
 
@@ -189,8 +230,8 @@ model/
   llamacpp/docker 按探针/进程判定），再启动目标——本地同时最多一个模型进 GPU（4080 16GB）。
 - 判定与执行收敛在 `model_manager.ensure_local_ready(slot)`，runtime 细节不外泄。
 - `QED_RESOURCE_GUARD=false` 时跳过自动互斥，模型共存由用户自行负责。
-- 全局模式（api/local）语义与调用拓扑见 [llm-gateway.md](llm-gateway.md)：`api` 模式不启动任何
-  本地模型；`local` 模式文字走 `QED_LOCAL_RUNTIME` 所选 runtime、图像走 MinerU。
+- 来源/渠道（api/local）语义与调用拓扑见 [llm-gateway.md](llm-gateway.md)：`api` 来源不启动任何
+  本地模型；`local` 来源文字走槽位渠道所选 runtime、图像走 MinerU。
 
 ## 关键组件文件
 
@@ -211,7 +252,8 @@ model/
 ## 已知约束与约定
 
 1. **全部经 8900**（ADR 0007）：模型操作不让前端直连脚本/容器端口。
-2. **api 模式只读**：云端模式不渲染启停与模型下拉，仅测试按钮；LM Studio 模型在 api 模式不加载。
+2. **来源 = api 时只读**：云端来源不渲染启停按钮（仅「验证」）；LM Studio 模型在 api 来源不加载。
+   来源 = local 时渲染启停与模型下拉。
 3. **模型文件不提交**：`model/` 内容 git 忽略；下载脚本与 README 提交；LM Studio 模型留在
    `~/.lmstudio/` 不迁移、不提交。
 4. **权重下载可重复**：download-models.py 幂等（已存在跳过），断点续传不保证（modelscope 下载器行为）。
@@ -221,9 +263,12 @@ model/
 7. **GPU 掉线偶发**：多次启停 / WSL VM 挂起后容器内 GPU 可能不可见（`nvidia-smi` 报
    `GPU access blocked by the operating system`），`docker restart mineru-api` 或重跑
    `infra-up.ps1` 恢复；解析前建议先确认容器内 GPU 可见。
-8. **LM Studio REST v0 端点待实测**（v2 新增）：加载/卸载端点以本机 LM Studio 版本为准，
-   PLAN-046 冒烟时核对并回填「槽位与 runtime」节；`lms` CLI 不在 PATH 时 start 报明确原因
-   （半托管降级为探活 + 调用）。
+8. **LM Studio 生命周期经 `lms` CLI**（v2 新增；W7 实测回填 2026-09-16）：REST API v0 无
+   load/unload 端点，加载/卸载一律经 `lms load <key> --gpu max` / `lms unload`；探活用
+   `GET /api/v0/models` 的 `state == "loaded"`（`/v1/models` 列全量已下载模型）。端口以本机
+   实际配置为准（`lms server status` 查看，默认 1234，本机为 5001，经 `QED_MODEL_URL` 配置）；
+   本机开启 API token 认证，经 `QED_LMSTUDIO_TOKEN` 带 Bearer。`lms` CLI 不在 PATH 时 start
+   报明确原因（半托管降级为探活 + 调用）。
 
 ## 设计来源与演进
 

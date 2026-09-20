@@ -42,9 +42,9 @@ if (Test-Path $keepalive) {
 }
 
 Write-Host "`n==> 端点探测："
-$probe = Invoke-WebRequest -Uri "http://127.0.0.1:8002/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
+$probe = Invoke-WebRequest -Uri "http://127.0.0.1:5002/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction SilentlyContinue
 if ($probe -and $probe.StatusCode -eq 200) {
-    Write-Host "mineru-api 8002: OK ($($probe.StatusCode))" -ForegroundColor Green
+    Write-Host "mineru-api 5002: OK ($($probe.StatusCode))" -ForegroundColor Green
 } else {
-    Write-Host "mineru-api 8002: 不可达（容器未运行或仍在启动）" -ForegroundColor Yellow
+    Write-Host "mineru-api 5002: 不可达（容器未运行或仍在启动）" -ForegroundColor Yellow
 }

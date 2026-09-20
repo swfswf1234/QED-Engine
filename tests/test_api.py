@@ -995,7 +995,7 @@ def test_services_start_web_uses_lifecycle_script(monkeypatch):
     assert record[0][-1] == "start"
     assert any("qed_web_service.py" in cmd for cmd in record[0])
 
-# ---------- 数据域·Axiom（8902 适配，契约草案 Axiom-Flow 8902-integration-contract.md） ----------
+# ---------- 数据域·Axiom（8902 适配，契约事实源 Axiom-Flow docs/architecture/api.md） ----------
 
 
 def _axiom_client(handler) -> AxiomClient:
@@ -1003,11 +1003,23 @@ def _axiom_client(handler) -> AxiomClient:
 
 
 def test_axiom_books_via_gateway(monkeypatch):
-    """GET /api/v1/books：书目列表（含解析进度）经 8900 透传 8902。"""
+    """GET /api/v1/books：书目列表（BookOut 形状：page_count/parse_status/ingest_status）经 8900 透传 8902。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/books"
-        return httpx.Response(200, json=[{"book_id": "01-rudin", "title": "Rudin", "pages_total": 20, "pages_done": 20}])
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "book_id": "01-rudin",
+                    "title": "Rudin",
+                    "page_count": 20,
+                    "pages_done": 20,
+                    "ingest_status": "ingested",
+                    "parse_status": "completed",
+                }
+            ],
+        )
 
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.get("/api/v1/books")
@@ -1016,16 +1028,30 @@ def test_axiom_books_via_gateway(monkeypatch):
 
 
 def test_axiom_book_page_via_gateway(monkeypatch):
-    """GET /api/v1/books/{id}/pages/{no}：单页数据（原页图 URL + markdown + blocks）。"""
+    """GET /books/{id}/pages/{no}：8902 PageData（无 page_no、相对 image_url）由 8900 补 page_no 并重写图片地址为 8900 绝对 URL。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/books/01-rudin/pages/3"
-        return httpx.Response(200, json={"page_no": 3, "image_url": "/static/01-rudin/p0003.png", "markdown": "## 标题\n$$x^2$$", "blocks": []})
+        return httpx.Response(
+            200,
+            json={
+                "blocks": {"page": 3, "source": "mineru", "blocks": [], "quality": None},
+                "markdown": "## 标题\n$$x^2$$",
+                "image_url": "/api/v1/books/01-rudin/pages/3/image",
+                "edits": [],
+            },
+        )
 
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.get("/api/v1/books/01-rudin/pages/3")
     assert response.status_code == 200
-    assert response.json()["markdown"].startswith("## 标题")
+    data = response.json()
+    assert data["markdown"].startswith("## 标题")
+    # 8900 补写页号（8902 不返回 page_no）
+    assert data["page_no"] == 3
+    # 图片地址改写为 8900 的代理端点（ADR 0007：浏览器只连 8900；serve_web 无 /api 代理，相对路径在生产必断）
+    assert data["image_url"].endswith("/api/v1/books/01-rudin/pages/3/image")
+    assert data["image_url"].startswith("http")
 
 
 def test_axiom_manifest_via_gateway(monkeypatch):
@@ -1065,23 +1091,115 @@ def test_axiom_page_image_offline_maps_503(monkeypatch):
     assert "Axiom-Flow 服务不可达" in response.json()["detail"]
 
 
+def test_axiom_book_detail_via_gateway(monkeypatch):
+    """GET /api/v1/books/{id}：单本详情透传 8902（BookOut 含 file_path/ingest_status，前端判断 PDF 直显）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/01-rudin"
+        return httpx.Response(
+            200,
+            json={"book_id": "01-rudin", "file_path": "raw/math/01-rudin.pdf", "ingest_status": "ingested"},
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin")
+    assert response.status_code == 200
+    assert response.json()["file_path"] == "raw/math/01-rudin.pdf"
+
+
+def _tmp_pdf_root(monkeypatch, tmp_path):
+    """临时数据根 + 假 PDF（测试隔离：不读写真实 dataset 数据根）。"""
+    pdf = tmp_path / "raw" / "math" / "01-rudin.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setenv("QED_DATA_ROOT", str(tmp_path))
+    return pdf
+
+
+def test_axiom_book_file_streams_pdf(monkeypatch, tmp_path):
+    """GET /books/{id}/file：af_books.file_path（数据根相对路径）解析后 inline PDF 流（原始文件优先直显）。"""
+    _tmp_pdf_root(monkeypatch, tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"book_id": "01-rudin", "file_path": "raw/math/01-rudin.pdf"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/file")
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.4 fake"
+    assert response.headers["content-type"] == "application/pdf"
+    assert "inline" in response.headers.get("content-disposition", "")
+
+
+def test_axiom_book_file_traversal_rejected(monkeypatch, tmp_path):
+    """file_path 越出数据根（../）→ 400 阻止（数据根边界安全：不泄露根外文件）。"""
+    _tmp_pdf_root(monkeypatch, tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"book_id": "x", "file_path": "../../Windows/win.ini"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/x/file")
+    assert response.status_code == 400
+
+
+def test_axiom_book_file_missing_404(monkeypatch, tmp_path):
+    """file_path 为空 → 404（前端据此显示「源文件未登记」而非报错横幅）。"""
+    _tmp_pdf_root(monkeypatch, tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"book_id": "x", "file_path": ""})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/x/file")
+    assert response.status_code == 404
+
+    def missing_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"book_id": "x", "file_path": "raw/math/nope.pdf"})
+
+    client2 = _client(monkeypatch, axiom=_axiom_client(missing_handler))
+    assert client2.get("/api/v1/books/x/file").status_code == 404
+
+
+def test_axiom_book_file_offline_maps_503(monkeypatch):
+    """PDF 流端点：8902 离线 → 503 降级（独立性铁律，与其他 8902 端点一致）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/file")
+    assert response.status_code == 503
+    assert "Axiom-Flow 服务不可达" in response.json()["detail"]
+
+
 def test_axiom_parse_job_create_and_query(monkeypatch):
-    """POST /parse-jobs（202）+ GET /parse-jobs/{id}：任务提交与状态查询。"""
+    """POST /parse-jobs（202）+ GET /parse-jobs/{id}：8900 门面用 engine 字段，8902 响应主键 id + progress 对象，原样透传。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/parse-jobs" and request.method == "POST":
             body = json.loads(request.content)
             assert body["book_id"] == "01-rudin"
-            assert body["strategy"] == "qwen-vl-plus"
-            return httpx.Response(202, json={"job_id": "j-1", "status": "queued", "progress": 0})
+            assert body["engine"] == "mineru"
+            assert body["pages"] == [1, 2]
+            assert "strategy" not in body  # 8902 无 strategy 字段，不得再发
+            return httpx.Response(
+                202,
+                json={"id": "j-1", "book_id": "01-rudin", "engine": "mineru", "status": "queued", "progress": {"parsed": 0, "total": 2}},
+            )
         if request.url.path == "/api/v1/parse-jobs/j-1":
-            return httpx.Response(200, json={"job_id": "j-1", "status": "running", "progress": 5})
+            return httpx.Response(
+                200,
+                json={"id": "j-1", "book_id": "01-rudin", "engine": "mineru", "status": "running", "progress": {"parsed": 1, "total": 2}},
+            )
         return httpx.Response(404, json={"detail": f"unexpected {request.url.path}"})
 
     client = _client(monkeypatch, axiom=_axiom_client(handler))
-    created = client.post("/api/v1/parse-jobs", json={"book_id": "01-rudin", "pages": [1, 2], "strategy": "qwen-vl-plus"})
+    created = client.post("/api/v1/parse-jobs", json={"book_id": "01-rudin", "pages": [1, 2], "engine": "mineru"})
     assert created.status_code == 202
     assert created.json()["status"] == "queued"
+    assert created.json()["id"] == "j-1"
+    assert created.json()["progress"] == {"parsed": 0, "total": 2}
     queried = client.get("/api/v1/parse-jobs/j-1")
     assert queried.json()["status"] == "running"
 
@@ -1156,7 +1274,7 @@ def test_axiom_sync_books_via_gateway(monkeypatch):
                     "title": "数学分析原理",
                     "part": "",
                     "display_title": "数学分析原理",
-                    "authors": ["Rudin"],
+                    "authors": [{"name": "Rudin", "role": "author"}],
                     "sha256": "ab" * 32,
                     "relative_path": "raw/books/...",
                     "page_count": 342,
@@ -1182,8 +1300,13 @@ def test_axiom_sync_books_via_gateway(monkeypatch):
         assert body[0]["course_name"] == "数学分析"
         assert body[0]["domain_id"] == "math"
         assert body[0]["knowledge_id"] == "kn_1"
-        assert body[0]["page_count"] == 342
-        return httpx.Response(200, json={"synced": 1, "updated": 0, "books": body})
+        # BookSyncItem 契约字段：file_path（数据根相对路径，8902 importer 语义），不再有 relative_path/sha256/page_count
+        assert body[0]["file_path"] == "raw/books/..."
+        assert "relative_path" not in body[0]
+        assert "sha256" not in body[0]
+        assert "page_count" not in body[0]
+        assert body[0]["authors"] == [{"name": "Rudin", "role": "author"}]
+        return httpx.Response(200, json={"synced": 1, "updated": 0, "books": []})
 
     client = _client(
         monkeypatch,
@@ -1241,28 +1364,120 @@ def test_axiom_sync_books_axiom_offline_maps_503(monkeypatch):
     assert "Axiom-Flow 服务不可达" in response.json()["detail"]
 
 
+def test_axiom_sync_books_real_tracker_shape(monkeypatch):
+    """真实 8901 形状（E2E 暴露）：书籍字段为 file_path、知识行 domain_id 可为 None → payload file_path 取真值、domain 回退空串。"""
+
+    knowledge_rows = [{"knowledge_id": "kt-mathanalysis-1", "domain_id": None, "course_id": "math_analysis"}]
+    details = {
+        "kt-mathanalysis-1": {
+            "books": [
+                {
+                    "book_id": "mathanalysis-b01",
+                    "title": "微积分及其应用",
+                    "part": "",
+                    "display_title": None,
+                    "authors": [{"name": "Bittinger", "role": "author"}],
+                    "file_path": "raw/math-advanced/math_analysis/rudin_41ed7e1e.pdf",
+                    "page_count": None,
+                    "status": "verified",
+                }
+            ]
+        }
+    }
+
+    def axiom_handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body[0]["file_path"] == "raw/math-advanced/math_analysis/rudin_41ed7e1e.pdf"
+        assert body[0]["domain_id"] == ""
+        assert body[0]["course_id"] == "math_analysis"
+        return httpx.Response(200, json={"synced": 1, "updated": 0, "books": []})
+
+    client = _client(
+        monkeypatch,
+        tracker=_tracker_client(_sync_tracker_handler(knowledge_rows, details)),
+        axiom=_axiom_client(axiom_handler),
+    )
+    response = client.post("/api/v1/books/sync")
+    assert response.status_code == 200
+
+
+def test_axiom_parsing_tree_course_only_fallback(monkeypatch):
+    """真实数据 domain_id 为空（8901 知识行无领域）：书目仍按 course_id 回退挂到唯一匹配课程节点。"""
+    import qed_engine.services.shared_tables as shared_tables
+
+    monkeypatch.setattr(shared_tables, "list_domains_with_courses", lambda settings: _fake_shared_tree())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "book_id": "mathanalysis-b01",
+                    "domain_id": "",
+                    "course_id": "01_math_analysis",
+                    "title": "微积分及其应用",
+                    "display_title": "",
+                }
+            ],
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/parsing/tree")
+    assert response.status_code == 200
+    course = response.json()[0]["children"][0]
+    assert course["children"][0]["book"]["book_id"] == "mathanalysis-b01"
+
+
 def test_axiom_block_review_put_and_get(monkeypatch):
-    """PUT/GET /books/{id}/pages/{no}/blocks/{index}/review：块判定透传 8902（upsert 语义）。"""
+    """8900 /review 门面 → 8902 /edit + /edits（REQ-001 对齐）：请求转发与 EditRecord→BlockReview 映射。"""
+
+    edit_record = {
+        "edit_id": "e-1",
+        "book_id": "01-rudin",
+        "page_no": 3,
+        "block_index": 2,
+        "block_type": "formula",
+        "verdict": "bad",
+        "note": "公式渲染缺失",
+        "corrected_text": None,
+        "corrected_bbox": None,
+        "edited_at": "2026-09-20T10:00:00",
+        "updated_at": "2026-09-20T10:00:00",
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        assert path == "/api/v1/books/01-rudin/pages/3/blocks/2/review"
-        if request.method == "PUT":
+        if path == "/api/v1/books/01-rudin/pages/3/blocks/2/edit" and request.method == "PUT":
             body = json.loads(request.content)
             assert body["verdict"] == "bad"
             assert body["note"] == "公式渲染缺失"
-            return httpx.Response(200, json={"book_id": "01-rudin", "page_no": 3, "block_index": 2, "verdict": "bad"})
-        if request.method == "GET":
-            return httpx.Response(200, json={"book_id": "01-rudin", "page_no": 3, "block_index": 2, "verdict": "bad", "note": "公式渲染缺失"})
-        return httpx.Response(405, json={"detail": "method"})
+            return httpx.Response(200, json=edit_record)
+        if path == "/api/v1/books/01-rudin/pages/3/edits" and request.method == "GET":
+            return httpx.Response(200, json=[edit_record])
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
 
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     put = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/review", json={"verdict": "bad", "note": "公式渲染缺失"})
     assert put.status_code == 200
     assert put.json()["verdict"] == "bad"
+    assert put.json()["note"] == "公式渲染缺失"
+    assert put.json()["block_index"] == 2
     get = client.get("/api/v1/books/01-rudin/pages/3/blocks/2/review")
     assert get.status_code == 200
     assert get.json()["note"] == "公式渲染缺失"
+    assert get.json()["block_type"] == "formula"
+
+
+def test_axiom_block_review_get_missing_404(monkeypatch):
+    """GET /review 回显：页级 /edits 中无该块记录 → 8900 返回 404（前端按无判定处理）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books/01-rudin/pages/3/edits"
+        return httpx.Response(200, json=[])
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/01-rudin/pages/3/blocks/2/review")
+    assert response.status_code == 404
 
 
 def test_axiom_block_review_verdict_validation(monkeypatch):
@@ -1274,6 +1489,172 @@ def test_axiom_block_review_verdict_validation(monkeypatch):
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/review", json={"verdict": "unknown"})
     assert response.status_code == 422
+
+
+# --- ARCH-020-D 前置（B 轮并入）：ingest 透传 + /edit 门面 ---
+
+
+def test_axiom_ingest_passthrough(monkeypatch):
+    """POST /books/{id}/ingest 透传 8902（列表态「ingest」按钮硬依赖），响应原样返回。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/books/01-rudin/ingest"
+        return httpx.Response(
+            200,
+            json={
+                "book_id": "01-rudin",
+                "page_count": 408,
+                "sha256": "ab" * 32,
+                "ingest_status": "ingested",
+            },
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.post("/api/v1/books/01-rudin/ingest")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ingest_status"] == "ingested"
+    assert body["page_count"] == 408
+
+
+def test_axiom_ingest_offline_maps_503(monkeypatch):
+    """ingest 透传：8902 不可达 → 503（统一上游不可用语义）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "boom"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.post("/api/v1/books/01-rudin/ingest")
+    assert response.status_code == 503
+
+
+def test_axiom_edit_facade_put_get(monkeypatch):
+    """/edit 门面（设计 §5 目标形态）：PUT 转发 verdict/note/corrected_text/corrected_bbox，GET 页级编辑列表原样返回。"""
+
+    edit_record = {
+        "edit_id": "e-2",
+        "book_id": "01-rudin",
+        "page_no": 3,
+        "block_index": 2,
+        "block_type": "formula",
+        "verdict": "bad",
+        "note": "漏了上限",
+        "corrected_text": "\\lim_{n\\to\\infty}",
+        "corrected_bbox": [10, 20, 30, 40],
+        "edited_at": "2026-09-20T12:00:00",
+        "updated_at": "2026-09-20T12:00:00",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/books/01-rudin/pages/3/blocks/2/edit" and request.method == "PUT":
+            body = json.loads(request.content)
+            assert body["verdict"] == "bad"
+            assert body["note"] == "漏了上限"
+            assert body["corrected_text"] == "\\lim_{n\\to\\infty}"
+            assert body["corrected_bbox"] == [10, 20, 30, 40]
+            return httpx.Response(200, json=edit_record)
+        if path == "/api/v1/books/01-rudin/pages/3/edits" and request.method == "GET":
+            return httpx.Response(200, json=[edit_record])
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    put = client.put(
+        "/api/v1/books/01-rudin/pages/3/blocks/2/edit",
+        json={
+            "verdict": "bad",
+            "note": "漏了上限",
+            "corrected_text": "\\lim_{n\\to\\infty}",
+            "corrected_bbox": [10, 20, 30, 40],
+        },
+    )
+    assert put.status_code == 200
+    assert put.json()["corrected_bbox"] == [10, 20, 30, 40]
+    edits = client.get("/api/v1/books/01-rudin/pages/3/edits")
+    assert edits.status_code == 200
+    assert edits.json()[0]["edit_id"] == "e-2"
+
+
+def test_axiom_edit_facade_partial_and_invalid(monkeypatch):
+    """/edit 门面：仅文字修正（无 verdict）→ 不发送 verdict 字段；verdict 非法 → 422 不打上游。"""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"book_id": "01-rudin", "page_no": 3, "block_index": 2})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    put = client.put(
+        "/api/v1/books/01-rudin/pages/3/blocks/2/edit",
+        json={"corrected_text": "正文修正"},
+    )
+    assert put.status_code == 200
+    assert "verdict" not in seen[0]
+    assert seen[0]["corrected_text"] == "正文修正"
+    bad = client.put("/api/v1/books/01-rudin/pages/3/blocks/2/edit", json={"verdict": "maybe"})
+    assert bad.status_code == 422
+
+
+# --- /parsing/tree 聚合（ARCH-020；后端此前零用例） ---
+
+
+def _fake_shared_tree() -> list:
+    return [
+        {
+            "domain_id": "math",
+            "name": "数学",
+            "courses": [{"course_id": "01_math_analysis", "name": "数学分析"}],
+        }
+    ]
+
+
+def test_axiom_parsing_tree_aggregates_books(monkeypatch):
+    """GET /parsing/tree：共享表领域课程 + 8902 书目按 domain:course 挂到课程节点下。"""
+    import qed_engine.services.shared_tables as shared_tables
+
+    monkeypatch.setattr(shared_tables, "list_domains_with_courses", lambda settings: _fake_shared_tree())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/books"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "book_id": "01-rudin",
+                    "domain_id": "math",
+                    "course_id": "01_math_analysis",
+                    "display_title": "数学分析原理",
+                    "parse_status": "completed",
+                    "pages_done": 20,
+                }
+            ],
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/parsing/tree")
+    assert response.status_code == 200
+    tree = response.json()
+    assert tree[0]["title"] == "数学"
+    course = tree[0]["children"][0]
+    assert course["title"] == "数学分析"
+    assert course["children"][0]["book"]["book_id"] == "01-rudin"
+
+
+def test_axiom_parsing_tree_degrades_without_axiom(monkeypatch):
+    """8902 离线：/parsing/tree 仍 200，返回领域→课程、书目为空（独立性铁律）。"""
+    import qed_engine.services.shared_tables as shared_tables
+
+    monkeypatch.setattr(shared_tables, "list_domains_with_courses", lambda settings: _fake_shared_tree())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/parsing/tree")
+    assert response.status_code == 200
+    tree = response.json()
+    assert tree[0]["children"][0]["children"] == []
 
 
 # 注：旧探索透传路由测试（PLAN-021 冻结端点 §1~§7.2）已随 B1 删除——8900 改由自有

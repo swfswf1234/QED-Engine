@@ -16,6 +16,7 @@
 # IDE / 编辑器
 /.idea/
 .vscode/
+.qoder/
 
 # Python
 __pycache__/

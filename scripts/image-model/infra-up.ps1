@@ -49,4 +49,4 @@ if (-not (Test-Path $keepalive) -or -not (Get-Process -Id (Get-Content $keepaliv
     Write-Host "keepalive 会话已存在 (PID $(Get-Content $keepalive))"
 }
 
-Write-Host "==> 就绪：mineru-api 端点 http://127.0.0.1:8002（OpenAPI /docs）" -ForegroundColor Green
+Write-Host "==> 就绪：mineru-api 端点 http://127.0.0.1:5002（OpenAPI /docs）" -ForegroundColor Green

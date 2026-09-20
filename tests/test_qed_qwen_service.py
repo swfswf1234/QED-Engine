@@ -1,8 +1,8 @@
 """
 模块职责：守护 scripts/text-model/qed_qwen_service.py（本地文字模型生命周期）契约——
-llama-server 启停、健康探测（QED_QWEN_URL / 默认 5001/v1）、manifest 读取、子命令结构。
+llama-server 启停、健康探测（QED_MODEL_URL / 默认 5001/v1）、manifest 读取、子命令结构。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：scripts/text-model/qed_qwen_service.py
 """
 
@@ -23,7 +23,7 @@ def test_qwen_script_contract():
     src = SCRIPT.read_text(encoding="utf-8")
     assert "llama-server" in src, "应使用 llama-server"
     assert "/v1/models" in src, "健康探测应检查 /v1/models"
-    assert "QED_QWEN_URL" in src, "应读取 QED_QWEN_URL 环境变量"
+    assert "QED_MODEL_URL" in src, "应读取 QED_MODEL_URL 环境变量"
     assert "manifest" in src, "应读取 manifest.json"
     assert "5001" in src, "默认端口应为 5001"
     for cmd in ("start", "stop", "restart", "status"):
@@ -39,7 +39,7 @@ def test_qwen_manifest_exists():
 
 
 def test_qwen_health_probe(monkeypatch):
-    """_health_ok：/v1/models 200 即就绪（默认 5001 尊重 QED_QWEN_URL）。"""
+    """_health_ok：/v1/models 200 即就绪（默认 5001 尊重 QED_MODEL_URL）。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("qed_qwen_service_mod", SCRIPT)

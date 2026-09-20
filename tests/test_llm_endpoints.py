@@ -1,9 +1,12 @@
 """
-模块职责：LLM 网关端点契约测试：/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test。
+模块职责：LLM 网关端点契约测试：/llm/text、/llm/vision、/llm/embedding、/llm/test/*、
+/llm/calls、/database/test、/models/{slot}（状态/选择/启停）、/monitor/{slot}。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：backend/qed_engine/api/control.py
 """
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +37,15 @@ def _mock_startup_side_effects(monkeypatch):
     monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
     monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
     monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_manifest(tmp_path, monkeypatch):
+    """隔离运行态 manifest：默认指向空临时目录（避免读真实 model/<槽位>/manifest.json）。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    return tmp_path
 
 
 def _client(monkeypatch):
@@ -296,3 +308,207 @@ def test_models_restart_text_local(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["status"] == "starting"
     assert calls == [("qwen", "restart")]
+
+
+def test_models_start_slot_name(monkeypatch):
+    """POST /models/text/start：槽位名直接可用（v2 泛化）。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    calls = []
+    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/text/start")
+    assert resp.status_code == 200
+    assert calls == [("text", "start")]
+
+
+# --- PLAN-046：/llm/embedding、GET /models/{slot}、/models/{slot}/select、/monitor/{slot} ---
+
+
+def test_llm_embedding_endpoint(monkeypatch):
+    """POST /llm/embedding：input 文本列表 → embeddings + call_id。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(
+        control, "gateway_call_embedding",
+        lambda settings, **kw: {"embeddings": [[0.1, 0.2]], "call_id": 9, "success": True, "error": ""},
+    )
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/llm/embedding", json={"input": ["你好"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True and body["embeddings"] == [[0.1, 0.2]] and body["call_id"] == 9
+
+
+def test_llm_embedding_endpoint_empty_input(monkeypatch):
+    """POST /llm/embedding：input 为空 → 422。"""
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/llm/embedding", json={"input": []})
+    assert resp.status_code == 422
+
+
+def test_llm_test_embedding_endpoint(monkeypatch):
+    """POST /llm/test/embedding：小 input 真实调用，成功 → ok=True + 向量数摘要。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(
+        control, "gateway_call_embedding",
+        lambda settings, **kw: {"embeddings": [[0.1, 0.2], [0.3, 0.4]], "call_id": 1,
+                                 "success": True, "error": ""},
+    )
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/llm/test/embedding")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert "2 vectors" in body["detail"]
+
+
+def test_models_get_status_api_mode(monkeypatch):
+    """GET /models/text（api 来源）：source=api、channel=direct、厂商/模型/options；ready=API_KEY。"""
+    monkeypatch.setenv("QED_API_SELECT", "api")
+    monkeypatch.setenv("API_KEY", "sk-test")
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/models/text")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slot"] == "text" and body["source"] == "api" and body["channel"] == "direct"
+    assert body["model"] == "qwen-plus" and body["provider"] == "qwen"
+    assert body["ready"] is True and body["runtime"] == ""
+    assert [o["value"] for o in body["options"]] == ["qwen-plus"]
+    assert body["description"]
+    channel_status = {c["value"]: c["status"] for c in body["channel_options"]}
+    assert channel_status["lmstudio"] == "available"
+    assert channel_status["docker"] == "pending"
+
+
+def test_models_get_status_local_mode(monkeypatch):
+    """GET /models/text（local 来源）：source=local、channel=runtime、本地标识、ready=探针结果。"""
+    from qed_engine.services.llm import runtimes as llm_runtimes
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    monkeypatch.setenv("QED_LOCAL_RUNTIME", "lmstudio")
+    monkeypatch.setattr(llm_runtimes.get_runtime("lmstudio"), "probe", lambda s, model="": True)
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/models/text")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["channel"] == "lmstudio" and body["runtime"] == "lmstudio"
+    assert body["model"] == "qwen3.8-27b"
+    assert body["ready"] is True
+    assert body["source"] == "local"
+    assert set(o["value"] for o in body["options"]) == {"qwen3.8-27b", "qwen3.5-9b"}
+
+
+def test_models_get_unknown_slot_404(monkeypatch):
+    """GET /models/bogus → 404。"""
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/models/bogus")
+    assert resp.status_code == 404
+
+
+def test_models_get_embedding_source_local_pending(monkeypatch):
+    """GET /models/embedding：来源固定 api，本地部署待上线（status=pending）。"""
+    monkeypatch.setenv("QED_API_SELECT", "api")
+    monkeypatch.setenv("API_KEY", "sk-test")
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/models/embedding")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "api" and body["channel"] == "direct"
+    sources = {o["value"]: o["status"] for o in body["source_options"]}
+    assert sources == {"local": "pending", "api": "available"}
+
+
+def test_models_select_writes_manifest(monkeypatch, tmp_path):
+    """POST /models/text/select：写运行态 manifest.active（合并已有字段）。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/text/select", json={"model": "qwen3.5-9b"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "selected"
+    manifest = tmp_path / "qwen" / "manifest.json"
+    assert json.loads(manifest.read_text(encoding="utf-8"))["active"] == "qwen3.5-9b"
+
+
+def test_models_select_writes_source_and_runtime(monkeypatch, tmp_path):
+    """POST /models/text/select（v3）：写 source / runtime / active 三字段。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    client = _client(monkeypatch)
+    resp = client.post(
+        "/api/v1/models/text/select",
+        json={"source": "local", "runtime": "lmstudio", "model": "qwen3.8-27b"},
+    )
+    assert resp.status_code == 200
+    data = json.loads((tmp_path / "qwen" / "manifest.json").read_text(encoding="utf-8"))
+    assert data == {"source": "local", "runtime": "lmstudio", "active": "qwen3.8-27b"}
+
+
+def test_models_select_invalid_source_422(monkeypatch, tmp_path):
+    """POST /models/text/select：非法 source / 三项全空 → 422。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    client = _client(monkeypatch)
+    assert client.post("/api/v1/models/text/select", json={"source": "bogus"}).status_code == 422
+    assert client.post("/api/v1/models/text/select", json={}).status_code == 422
+
+
+def test_models_start_409_by_slot_source_manifest(monkeypatch, tmp_path):
+    """槽位来源运行态（manifest.source=api）→ 启停 409（即使全局 QED_API_SELECT=local）。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    (tmp_path / "qwen").mkdir(parents=True)
+    (tmp_path / "qwen" / "manifest.json").write_text(
+        json.dumps({"source": "api"}), encoding="utf-8")
+    client = _client(monkeypatch)
+    assert client.post("/api/v1/models/text/start").status_code == 409
+
+
+def test_models_select_unknown_identity_404(monkeypatch, tmp_path):
+    """POST /models/text/select：未知身份 → 404（不写文件）。"""
+    from qed_engine.services.llm import registry as llm_registry
+
+    monkeypatch.setattr(llm_registry, "MANIFEST_ROOT", tmp_path)
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/text/select", json={"model": "bogus"})
+    assert resp.status_code == 404
+    assert not (tmp_path / "qwen" / "manifest.json").exists()
+
+
+def test_models_select_embedding_404(monkeypatch):
+    """POST /models/embedding/select：向量槽位无运行态 manifest → 404。"""
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/embedding/select", json={"model": "text-embedding-v4"})
+    assert resp.status_code == 404
+
+
+def test_monitor_slot_text_endpoint(monkeypatch):
+    """GET /monitor/text：槽位泛化探针透传（runtime/reachable/models）。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(
+        control, "probe_slot",
+        lambda settings, slot: {"slot": slot, "runtime": "lmstudio", "reachable": True,
+                                 "base_url": "http://127.0.0.1:1234/v1",
+                                 "models": ["qwen3.8-27b"], "reason": ""},
+    )
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/monitor/text")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slot"] == "text" and body["runtime"] == "lmstudio" and body["reachable"] is True
+
+
+def test_monitor_slot_unknown_404(monkeypatch):
+    """GET /monitor/bogus → 404。"""
+    client = _client(monkeypatch)
+    resp = client.get("/api/v1/monitor/bogus")
+    assert resp.status_code == 404

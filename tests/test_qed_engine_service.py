@@ -2,7 +2,7 @@
 模块职责：守护 scripts/qed_engine_service.py（8900 后端生命周期脚本）契约——
 PID 文件路径、serve 命令、health 探测端口、--mode api|local 与子命令结构。
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 被测代码：scripts/qed_engine_service.py
 """
 

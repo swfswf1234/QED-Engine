@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-14
+最后更新：2026-09-20
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -17,7 +17,7 @@
 
 | 服务 | 仓库 | 端口 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——**左树右对照单视图**：书目树+解析进度 → 原页图+块级渲染与判定，2026-08-18 重构轮；原「原始文档对照」并入其右侧）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007）；**控制台 LLM 改造（ARCH-016，2026-08-20）**：四服务卡后 GPU 总览条 + 依赖组件三卡（MySQL/文字模型/图像模型，置灰 + 测试按钮）+ 「模型调用记录」检索页（`#/admin/llm-calls`） |
+| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——**单屏「左书目树（纯选择）+ 右对照工作台」**：原页图 vs 解析还原对照、bbox 双向联动、块编辑+判定、单页/全本解析+进度、连续滚动、URL 恢复（2026-09-20 ARCH-020-G 定档，取代历轮左树进度/两级列表形态）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007）；**控制台 LLM 改造（ARCH-016，2026-08-20）**：四服务卡后 GPU 总览条 + 依赖组件三卡（MySQL/文字模型/图像模型，置灰 + 测试按钮）+ 「模型调用记录」检索页（`#/admin/llm-calls`） |
 | QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、qwen、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发。**2026-08-17：服务注册表扩为四单元（新增 web/8903）、tracker/web/axiom 三单元均走生命周期脚本（axiom 由 Popen 切换，REQ-039）、脚本单元停止/重启语义修复、serve_web.py 切 web-ui/dist**。**LLM 网关与模型管理（ARCH-016，2026-08-20 实施完成）**：三项目密钥约定（各 `.env` 自持 `API_KEY`，旧变量降级别名，`QED_API_SELECT` 选模式）+ 8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）+ 本地模型生命周期脚本（scripts/text-model/ + scripts/image-model/）+ 资源互斥（QED_RESOURCE_GUARD）+ qed_llm_calls 调用记录（单表三项目可写）；`--mode（api 或 local）` 启停。**密钥收敛（2026-08-20
   用户裁决）**：逐厂商 key（QWEN/DEEPSEEK/GLM_API_KEY）已取消，单一 `API_KEY` + `QED_API_PROVIDER`
   （qwen/deepseek/glm，默认 qwen）选厂商，`/config/keys` 改返回 `{provider, configured}` |
@@ -30,8 +30,8 @@
   （多 Agent），规划中（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
   覆盖数学与计算机科学（AI 方向）双核心领域，当前以高等数学起步；资料类型含教材、
   习题集、论文、博客与官方文档，后续随需求扩展。
-- **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（左树进度 + 原页 bbox 对比 +
-  块级编辑：判定/备注/文字/范围，设计见 [parsing-ui.md](../design/parsing-ui.md)；探索方向见
+- **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（单屏左书树纯选择 + 右对照
+  工作台：原页 bbox 联动 + 块级编辑：判定/备注/文字/范围，设计见 [parsing-ui.md](../design/parsing-ui.md)；探索方向见
   [document-chunking-recall.md](../design/document-chunking-recall.md)）。
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
   （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented）；注册表含 config/
@@ -114,7 +114,7 @@
   （V2-003~007，V2-003 误建产物已登记移交 REQ-036，2026-08-16 亡羊补牢——根仓库侧不再
   写子项目代码）**，服务建立后即可 C 组第一阶段联调，第二阶段待 v2 契约冻结 REQ-034 承接）；
   各服务独立开发阶段，验收窗口见矩阵文档。
-- 进行中：**第三轮主线·解析联调轮（ARCH-020，2026-09-14 重构）**——「文档解析管理」初版
+- 已完成（Partial 收口，2026-09-20）：**第三轮主线·解析联调轮（ARCH-020，2026-09-14 重构）**——「文档解析管理」初版
   模块设计定型：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 确立**模型生命周期归
   8900、解析管线归 Axiom-Flow（引擎适配器直连模型服务）**；设计正文两份
   [解析管理 UI 设计](../design/parsing-ui.md)（左树进度 + 原页 bbox 对比 +
@@ -126,6 +126,25 @@
   实现拆 ARCH-020-B/C/D（8900/8902/8903），验收 ARCH-020-E，数据操作
   （qed 统一 + axiom/xqfm 删除 + dataset 清理）为 ARCH-020-F。
   旧形态（REQ-034/042、af_block_reviews、`dataset/axiom-flow/`）随重构取代。
+  **2026-09-20 联调最小打通轮完成**：8900 单向追 8902 v2 契约（/review 门面转 /edit、sync
+  file_path、parse-jobs engine/`id`/progress 对象、page_no 与 image_url 补写、树 domain 空
+  课程回退），qed 库 af_* 四表已迁移（alembic 20260917_0001）；E2E 实证 sync（4 本
+  file_path 非空）→ ingest（486 页）→ 页图代理 → 树/前端渲染全通；**剩余阻塞**：REQ-075
+  扩充——8902 MinerU 引擎轮询 `/get_task_results` 对容器 3.4.4（实际 `/tasks/{id}/result`）
+  404，解析产物待其对齐后 ARCH-020-E 方可验收。**2026-09-20 ARCH-020-C 收尾**：af_* 四表已落地
+  （迁移 20260917_0001），根仓库 [数据库总纲](../architecture/database-design.md) af_* 转正
+  （规划→已落地），REQ-027 关闭（以迁移落地为回执）；当前聚焦两份设计文档
+  （[parsing-ui](../design/parsing-ui.md) / [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）
+  随联调与实现持续优化至初版（发现偏差续登 [design-bugfix-log](../plans/design-bugfix-log.md)）。
+  **2026-09-20 解析界面四轮收口（UI 展示轮 → WB 重设计 → D 实现 → G 单屏回调，全部关闭归档）**：
+  最终形态定档**单屏「左书目树（纯选择）+ 右对照工作台」**——bbox 双向联动、块编辑+判定、
+  单页/全本解析+进度、连续滚动、URL `?book&page` 恢复全保留；界面全中文（「ingest」→
+  「书页入库」、顶部单一「刷新」含同步书目）；两级列表态（BookList/BookTable）退役删除。
+  四份计划壳并入 [parsing-ui.md](../design/parsing-ui.md) 后归档 `history/plans/2026-09/`。
+  **遗留**：REQ-080（产物版本划分）与 REQ-081（bbox 坐标钳位缺陷）待 Axiom-Flow 回执，
+  回执后按 §13 复测对照对齐；ARCH-020-E 端到端验收仍阻塞于 REQ-075（Rudin b05/b11 尚未入库）。
+  **2026-09-20 主线收口（用户裁决 Partial）**：B/C/D 与界面四轮全部关闭归档（见
+  [completed.md](completed.md)），E/F/REQ-075/080/081/PLAN-044 留 todo 独立跟踪。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
   文档基线之上的主线推进为**课程收集主线（ARCH-002）**——QED-Tracker QED-019（01 数学分析
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与
@@ -133,8 +152,8 @@
 - 2026-08-14（二十二期续）：主界面**学习中心框架**已搭——领域→课程→章节/知识点浏览
   （数学试点，章节空态等解析产物管线，学习功能现状文档更新 Partially Implemented）；
   管理后台树加载加固（loadTree 全函数 try/catch + 离线横幅 + 自动重试，杜绝无限转圈/空白）。
-- 待开始：REQ-018 人工评审优化（QED-020 已实现待 8901 重启回执）；REQ-022/023 治理契约对齐；
-  REQ-026/027 数据库设计确认（设计文档已建，待子项目评审执行）。
+- 待开始：REQ-018 人工评审优化（QED-020 已实现待 8901 重启回执）。（原「REQ-022/023 治理契约
+  对齐」「REQ-026/027 数据库设计确认」均已关闭，见 [completed.md](completed.md)。）
 - 详情见[任务台账](todo.md)。
 
 ## 维护规则

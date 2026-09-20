@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { App as AntApp, ConfigProvider } from 'antd';
@@ -47,9 +47,69 @@ const servicesFixture = {
 
 const dbFixture = { reachable: true, reason: '', checked_at: '2026-08-16T10:00:00' };
 
+// 槽位状态 fixtures（PLAN-046 v3 五字段卡：GET /models/{slot}；select 键须排在槽位键前——mockApi 按 includes 先命中先匹配）
+const SOURCE_OPTIONS = [
+  { value: 'local', label: '本地部署', status: 'available' },
+  { value: 'api', label: 'API 调用', status: 'available' },
+];
+const EMBEDDING_SOURCE_OPTIONS = [
+  { value: 'local', label: '本地部署', status: 'pending' },
+  { value: 'api', label: 'API 调用', status: 'available' },
+];
+const slotTextLocal = {
+  slot: 'text', source: 'local', channel: 'lmstudio', runtime: 'lmstudio',
+  identity: 'qwen3.8-27b', model: 'qwen3.8-27b', provider: 'lmstudio',
+  base_url: 'http://127.0.0.1:5001/v1',
+  description: 'Qwen3.8 27B，本机 LM Studio 已下载',
+  ready: false, availability: '未就绪',
+  source_options: SOURCE_OPTIONS,
+  channel_options: [
+    { value: 'default', label: '默认', status: 'available' },
+    { value: 'lmstudio', label: 'LM Studio', status: 'available' },
+    { value: 'docker', label: 'Docker', status: 'pending' },
+    { value: 'llamacpp', label: 'llama.cpp', status: 'pending' },
+  ],
+  options: [
+    { value: 'qwen3.8-27b', label: 'qwen3.8-27b', description: 'Qwen3.8 27B，本机 LM Studio 已下载' },
+    { value: 'qwen3.5-9b', label: 'qwen3.5-9b', description: 'Qwen3.5 9B，轻量本地模型' },
+  ],
+  notes: [], error: '',
+};
+const slotVisionLocal = {
+  slot: 'vision', source: 'local', channel: 'docker', runtime: 'docker',
+  identity: 'mineru', model: 'mineru', provider: 'mineru', base_url: 'http://127.0.0.1:5002',
+  description: 'MinerU 文档解析模型，本机 Docker 已部署',
+  ready: false, availability: '未就绪',
+  source_options: SOURCE_OPTIONS,
+  channel_options: [
+    { value: 'default', label: '默认', status: 'available' },
+    { value: 'lmstudio', label: 'LM Studio', status: 'pending' },
+    { value: 'docker', label: 'Docker', status: 'available' },
+    { value: 'llamacpp', label: 'llama.cpp', status: 'pending' },
+  ],
+  options: [{ value: 'mineru', label: 'mineru', description: 'MinerU 文档解析模型，本机 Docker 已部署' }],
+  notes: [], error: '',
+};
+const slotEmbeddingApi = {
+  slot: 'embedding', source: 'api', channel: 'direct', runtime: '',
+  identity: 'text-embedding-v4', model: 'text-embedding-v4', provider: 'qwen',
+  description: '通义文本向量模型 v4', ready: true, availability: '可用',
+  source_options: EMBEDDING_SOURCE_OPTIONS, channel_options: [],
+  options: [{ value: 'text-embedding-v4', label: 'text-embedding-v4', description: '通义文本向量模型 v4' }],
+  notes: [], error: '',
+};
+const slotRoutes = {
+  '/models/text/select': { name: 'text', status: 'selected' },
+  '/models/vision/select': { name: 'vision', status: 'selected' },
+  '/models/text': slotTextLocal,
+  '/models/vision': slotVisionLocal,
+  '/models/embedding': slotEmbeddingApi,
+};
+
 const baseRoutes = {
   '/services': servicesFixture,
   '/config/database': dbFixture,
+  ...slotRoutes,
 };
 
 function renderConsole() {
@@ -69,11 +129,20 @@ function getDepCard(title: string): HTMLElement {
   return screen.getByText(title, { selector: '.ant-card-head-title span' }).closest('.ant-card') as HTMLElement;
 }
 
+/** 点击 antd Select 下拉选项（下拉 portal 中选项内容节点可能与其他节点同文，优先取 option-content） */
+async function pickSelectOption(text: string) {
+  const matches = await screen.findAllByText(text);
+  const target = matches.find((el) => el.className.includes('ant-select-item-option-content')) ?? matches[matches.length - 1];
+  await userEvent.setup().click(target);
+}
+
 describe('控制台 Console（Phase 2）', () => {
   beforeEach(() => {
     useRuntimeStore.setState({
       services: [], dbStatus: null, loading: false, error: null, dbError: null,
-      gpu: null, gpuError: null, qwen: null, qwenError: null, mineru: null, mineruError: null,
+      gpu: null, gpuError: null,
+      slots: { text: null, vision: null, embedding: null },
+      slotErrors: { text: null, vision: null, embedding: null },
       keys: null, modelsConfig: null, testing: null, operating: null,
     });
   });
@@ -114,10 +183,11 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.getByText('资源监控')).toBeInTheDocument();
     expect(screen.queryByText('服务监控')).not.toBeInTheDocument();
     expect(screen.queryByText('本地模型')).not.toBeInTheDocument();
-    // 基础设施区：元数据库卡；资源监控区：LLM/OCR 模型卡
+    // 基础设施区：元数据库卡；资源监控区：文字/图像/向量模型三卡（PLAN-046）
     expect(getDepCard('元数据库')).toBeInTheDocument();
-    expect(getDepCard('LLM 模型')).toBeInTheDocument();
-    expect(getDepCard('OCR 模型')).toBeInTheDocument();
+    expect(getDepCard('文字模型')).toBeInTheDocument();
+    expect(getDepCard('图像模型')).toBeInTheDocument();
+    expect(getDepCard('向量模型')).toBeInTheDocument();
     // 状态与原因
     await waitFor(() => {
       expect(screen.getByText(/离线（未启动）/)).toBeInTheDocument();
@@ -344,12 +414,10 @@ describe('控制台 Console（Phase 2）', () => {
         sys_memory_percent: 45,
         reason: '',
       },
-      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
-      '/monitor/mineru': { reachable: false, port: 8002, reason: 'mineru docker 容器未启动' },
+      ...slotRoutes,
     };
     mockApi(routes);
     renderConsole();
-    // GPU 状态卡标题
     expect(await screen.findByText('GPU 状态')).toBeInTheDocument();
     expect(screen.queryByText(/资源总览/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服务监控/)).not.toBeInTheDocument();
@@ -373,8 +441,6 @@ describe('控制台 Console（Phase 2）', () => {
   it('GPU 全量内存占比饼图：模型占用/其他/空闲 三色切片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/qwen': { reachable: false, reason: '未启动' },
-      '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
         name: 'RTX 4080',
@@ -412,8 +478,6 @@ describe('控制台 Console（Phase 2）', () => {
   it('显存占用 ≥95%：无警告 Alert（已移除进程清单与警告功能）', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/qwen': { reachable: false, reason: '未启动' },
-      '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
         name: 'RTX 4080',
@@ -468,8 +532,6 @@ describe('控制台 Console（Phase 2）', () => {
   it('WDDM 模式（每进程显存 [N/A]=null）：饼图退化为模型占用/空闲两片', async () => {
     const gpuRoutes = {
       ...baseRoutes,
-      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
-      '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': {
         available: true,
         name: 'NVIDIA GeForce RTX 4080',
@@ -502,166 +564,204 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.queryByText('非模型任务')).not.toBeInTheDocument();
   });
 
-  it('基础设施（元数据库）+ 模型卡（LLM/OCR）结构化字段：来源/模型/可达/备注；测试动作点亮', async () => {
+  it('槽位卡五字段（PLAN-046 v3）：来源/模型/渠道/可用/备注；验证按钮点亮；local 模式启停', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
       '/monitor/gpu': { available: false, reason: '未检测到显卡' },
-      '/monitor/qwen': { reachable: false, reason: '超时' },
-      '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
+      ...slotRoutes,
       '/database/test': { reachable: true, reason: '' },
       '/llm/test/text': { ok: true, detail: '模型响应正常' },
       '/llm/test/vision': { ok: true, detail: '识别成功' },
+      '/llm/test/embedding': { ok: true, detail: 'ok：2 vectors' },
     };
     mockApi(routes);
     renderConsole();
-    // 三卡齐备
+    // 四卡齐备
     expect(await getDepCard('元数据库')).toBeInTheDocument();
     const dbCard = getDepCard('元数据库');
-    const textCard = getDepCard('LLM 模型');
-    const visionCard = getDepCard('OCR 模型');
-    // 等三路探测数据落库
+    const textCard = getDepCard('文字模型');
+    const visionCard = getDepCard('图像模型');
+    const embeddingCard = getDepCard('向量模型');
+    // 等四路数据落库
     await waitFor(() => {
       const s = useRuntimeStore.getState();
       expect(s.dbStatus).not.toBeNull();
-      expect(s.qwen).not.toBeNull();
-      expect(s.mineru).not.toBeNull();
+      expect(s.slots.text).not.toBeNull();
+      expect(s.slots.vision).not.toBeNull();
+      expect(s.slots.embedding).not.toBeNull();
     });
-    // 字段行·来源：三卡均「本地」
-    expect(within(dbCard).getByText('本地')).toBeInTheDocument();
-    expect(within(textCard).getByText('本地')).toBeInTheDocument();
-    expect(within(visionCard).getByText('本地')).toBeInTheDocument();
-    // 字段行·模型：LLM 显示探测到的模型名或「未加载」；OCR 显示 MinerU
-    expect(within(textCard).getByText('未加载')).toBeInTheDocument();
-    expect(within(visionCard).getByText('MinerU')).toBeInTheDocument();
-    // 可达四态
+    // 字段行·来源：local 卡显示「本地部署」；api 卡（向量）显示「API 调用」
+    expect(within(textCard).getByText('本地部署')).toBeInTheDocument();
+    expect(within(embeddingCard).getByText('API 调用')).toBeInTheDocument();
+    // 字段行·渠道：local=渠道下拉（当前 runtime）；api=直连
     expect(within(dbCard).getByText('在线 · 未验证')).toBeInTheDocument();
-    expect(within(textCard).getByText('离线')).toBeInTheDocument();
-    expect(within(visionCard).getByText('离线')).toBeInTheDocument();
-    // 备注
-    expect(within(dbCard).getByText('—')).toBeInTheDocument();
-    expect(within(textCard).getByText('超时')).toBeInTheDocument();
-    expect(within(visionCard).getByText('mineru docker 容器未启动')).toBeInTheDocument();
+    expect(within(textCard).getByText('LM Studio')).toBeInTheDocument();
+    expect(within(visionCard).getByText('Docker')).toBeInTheDocument();
+    expect(within(embeddingCard).getByText('直连')).toBeInTheDocument();
+    // 字段行·模型：身份（下拉选中值 / 只读显示）
+    expect(within(textCard).getByText('qwen3.8-27b')).toBeInTheDocument();
+    expect(within(visionCard).getByText('mineru')).toBeInTheDocument();
+    expect(within(embeddingCard).getByText('text-embedding-v4')).toBeInTheDocument();
+    // 字段行·可用：local 未就绪（探针未通过）；api 已配置 → 可用（选择器避开同文案字段标签）
+    expect(within(textCard).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
+    expect(within(visionCard).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
+    expect(within(embeddingCard).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    // 备注：身份一句话介绍
+    expect(within(textCard).getByText('Qwen3.8 27B，本机 LM Studio 已下载')).toBeInTheDocument();
+    // 启停按钮仅 local 来源渲染；向量卡无启停
+    expect(within(textCard as HTMLElement).getByRole('button', { name: /启\s*动/ })).toBeInTheDocument();
+    expect(within(visionCard as HTMLElement).getByRole('button', { name: /启\s*动/ })).toBeInTheDocument();
+    expect(within(embeddingCard as HTMLElement).queryByRole('button', { name: /启\s*动/ })).not.toBeInTheDocument();
     // 元数据库「测试」→ POST /database/test → 已验证在线
-    const callsBefore = mockFetch.mock.calls.length;
     await userEvent.setup().click(within(dbCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(dbCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
     expect(within(dbCard as HTMLElement).getByText('连接正常')).toBeInTheDocument();
-    expect(String(mockFetch.mock.calls[callsBefore][0])).toContain('/database/test');
-    // LLM 模型「测试」→ POST /llm/test/text；探测离线 → 可达保持离线
+    // 文字模型「验证」→ POST /llm/test/text → 可用行转「可用」
     const callsBeforeText = mockFetch.mock.calls.length;
-    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
-    expect(await within(textCard as HTMLElement).findByText(/^最近测试通过：模型响应正常$/)).toBeInTheDocument();
-    expect(within(textCard as HTMLElement).getByText('离线')).toBeInTheDocument();
+    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /验\s*证/ }));
     expect(String(mockFetch.mock.calls[callsBeforeText][0])).toContain('/llm/test/text');
-    // OCR 模型「测试」→ POST /llm/test/vision
-    const callsBeforeVision = mockFetch.mock.calls.length;
-    await userEvent.setup().click(within(visionCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
-    expect(await within(visionCard as HTMLElement).findByText(/^最近测试通过：识别成功$/)).toBeInTheDocument();
-    expect(within(visionCard as HTMLElement).getByText('离线')).toBeInTheDocument();
-    expect(String(mockFetch.mock.calls[callsBeforeVision][0])).toContain('/llm/test/vision');
+    await waitFor(() => {
+      expect(within(textCard as HTMLElement).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    });
+    // 向量模型「验证」→ POST /llm/test/embedding
+    const callsBeforeEmb = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(embeddingCard as HTMLElement).getByRole('button', { name: /验\s*证/ }));
+    expect(String(mockFetch.mock.calls[callsBeforeEmb][0])).toContain('/llm/test/embedding');
   });
 
-  it('依赖卡可达四态·验证失败分支：测试失败 → 验证失败 + 备注为失败原因', async () => {
+  it('槽位级选择·模型：下拉选择 → POST /models/{slot}/select {model} → 重拉槽位状态', async () => {
+    mockApi(baseRoutes);
+    renderConsole();
+    const textCard = getDepCard('文字模型');
+    // 等槽位状态落库（下拉渲染当前身份 qwen3.8-27b）
+    await within(textCard as HTMLElement).findByText('qwen3.8-27b');
+    // 打开下拉（antd v5 在 jsdom 下需 mousedown .ant-select-selector 才展开）
+    fireEvent.mouseDown(within(textCard as HTMLElement).getByText('qwen3.8-27b').closest('.ant-select-selector')!);
+    await pickSelectOption('qwen3.5-9b');
+    // POST select 后重拉 GET /models/text（fetchSlots）
+    await waitFor(() => {
+      const selectCalls = mockFetch.mock.calls.filter((c) => String(c[0]).includes('/models/text/select'));
+      expect(selectCalls.length).toBeGreaterThan(0);
+    });
+    const selectCall = mockFetch.mock.calls.find((c) => String(c[0]).includes('/models/text/select'))!;
+    expect(String(selectCall[1]?.body ?? '')).toContain('qwen3.5-9b');
+    expect(messageSpies.success).toHaveBeenCalledWith(expect.stringContaining('已切换为 qwen3.5-9b'));
+    await waitFor(() => {
+      const getCalls = mockFetch.mock.calls.filter(
+        (c) => String(c[0]).includes('/models/text') && !String(c[0]).includes('select'),
+      );
+      expect(getCalls.length).toBeGreaterThan(1); // fetchAll 一次 + fetchSlots 一次
+    });
+  });
+
+  it('槽位级选择·来源：下拉切换 → POST /models/{slot}/select {source}', async () => {
+    mockApi(baseRoutes);
+    renderConsole();
+    const textCard = getDepCard('文字模型');
+    await within(textCard as HTMLElement).findByText('本地部署');
+    fireEvent.mouseDown(within(textCard as HTMLElement).getByText('本地部署').closest('.ant-select-selector')!);
+    await pickSelectOption('API 调用');
+    await waitFor(() => {
+      const call = mockFetch.mock.calls.find((c) => String(c[0]).includes('/models/text/select'));
+      expect(call).toBeTruthy();
+      expect(String(call![1]?.body ?? '')).toContain('api');
+    });
+  });
+
+  it('槽位卡·验证失败：可用行转「不可用」；备注仍为模型介绍', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
-      '/monitor/mineru': { reachable: false, port: 8002, reason: '' },
-      '/config/keys': { provider: 'qwen', configured: true, mode: 'local' },
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/text/select': { name: 'text', status: 'selected' },
+      '/models/text': { ...slotTextLocal, ready: true, availability: '可用' },
+      '/models/vision': slotVisionLocal,
+      '/models/embedding': slotEmbeddingApi,
       '/llm/test/text': { ok: false, detail: '鉴权失败' },
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('LLM 模型');
-    // 初始：可达但未验证，备注空 → —
-    expect(await within(textCard as HTMLElement).findByText('在线 · 未验证')).toBeInTheDocument();
-    expect(within(textCard as HTMLElement).getAllByText('—').length).toBeGreaterThanOrEqual(1);
-    // 点击测试 → 失败分支：可达=验证失败（红），备注=detail
-    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
-    expect(await within(textCard as HTMLElement).findByText('验证失败')).toBeInTheDocument();
-    expect(within(textCard as HTMLElement).getByText('鉴权失败')).toBeInTheDocument();
+    const textCard = getDepCard('文字模型');
+    expect(await within(textCard as HTMLElement).findByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /验\s*证/ }));
+    await waitFor(() => {
+      expect(within(textCard as HTMLElement).getByText('不可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    });
+    // 备注保持模型介绍（不被测试结论覆盖）
+    expect(within(textCard as HTMLElement).getByText('Qwen3.8 27B，本机 LM Studio 已下载')).toBeInTheDocument();
   });
 
-  it('api 模式：模型卡显示云端模型名（/config/models），不显示本地探测离线（模式感知，2026-08-24）', async () => {
+  it('api 来源：槽位卡显示「直连」与 api 模型名（无本地启停按钮）', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      // Qwen / MinerU 均未启动——api 模式下不应把它们显示为模型卡的「离线」
-      '/monitor/qwen': { reachable: false, reason: '未启动' },
-      '/monitor/mineru': { reachable: false, reason: 'mineru docker 容器未启动' },
-      '/config/keys': { provider: 'qwen', configured: true, mode: 'api' },
-      '/config/models': {
-        default: { model: 'qwen3.8-27b', provider: 'qwen', configured: true },
-        ocr: { model: 'qwen-vl-plus', provider: 'qwen', configured: true },
-        embedding: { model: 'text-embedding-v4', provider: 'qwen', configured: true },
-      },
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/text': { ...slotTextLocal, source: 'api', channel: 'direct', runtime: '', provider: 'qwen',
+        identity: 'qwen-plus', model: 'qwen-plus', description: '通义千问 Plus，云端通用文本模型',
+        ready: true, availability: '可用',
+        options: [{ value: 'qwen-plus', label: 'qwen-plus', description: '通义千问 Plus，云端通用文本模型' }] },
+      '/models/vision': { ...slotVisionLocal, source: 'api', channel: 'direct', runtime: '', provider: 'qwen',
+        identity: 'qwen-vl-plus', model: 'qwen-vl-plus', description: '通义千问 VL Plus，云端视觉模型',
+        ready: true, availability: '可用' },
+      '/models/embedding': slotEmbeddingApi,
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('LLM 模型');
-    const visionCard = getDepCard('OCR 模型');
-    // 模型名来自 /config/models
-    expect(await within(textCard as HTMLElement).findByText('qwen3.8-27b')).toBeInTheDocument();
-    expect(await within(visionCard as HTMLElement).findByText('qwen-vl-plus')).toBeInTheDocument();
-    // 可达初始：云端 · 未验证（而非本地探测的「离线」）
-    expect(within(textCard as HTMLElement).getByText('云端 · 未验证')).toBeInTheDocument();
-    expect(within(visionCard as HTMLElement).getByText('云端 · 未验证')).toBeInTheDocument();
+    const textCard = getDepCard('文字模型');
+    const visionCard = getDepCard('图像模型');
+    // 渠道=直连；模型名=api 模型
+    expect(await within(textCard as HTMLElement).findByText('直连')).toBeInTheDocument();
+    expect(within(visionCard as HTMLElement).getByText('直连')).toBeInTheDocument();
+    expect(within(textCard as HTMLElement).getByText('qwen-plus')).toBeInTheDocument();
+    expect(within(visionCard as HTMLElement).getByText('qwen-vl-plus')).toBeInTheDocument();
+    // 可用：API_KEY 已配置（fixture ready=true）→ 可用
+    expect(within(textCard as HTMLElement).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    // api 来源无启停按钮（仅验证）
+    expect(within(textCard as HTMLElement).queryByRole('button', { name: /启\s*动/ })).not.toBeInTheDocument();
+    expect(within(visionCard as HTMLElement).queryByRole('button', { name: /停\s*止/ })).not.toBeInTheDocument();
   });
 
-  it('local 模式陈旧 outcome 守卫：探测转离线后，「已验证在线」不得残留', async () => {
+  it('验证结论在槽位状态刷新后清空：可用行回落探针判定（防陈旧结论残留）', async () => {
     const routes = {
       '/services': servicesFixture,
       '/config/database': dbFixture,
-      '/monitor/qwen': { reachable: true, base_url: 'http://127.0.0.1:5001/v1', models: ['qwen7b'], reason: '' },
-      '/monitor/mineru': { reachable: false, reason: '未启动' },
       '/monitor/gpu': { available: false, reason: '未检测到显卡' },
-      '/config/keys': { provider: 'qwen', configured: true, mode: 'local' },
+      '/models/text/select': { name: 'text', status: 'selected' },
+      '/models/text': { ...slotTextLocal, ready: true, availability: '可用' },
+      '/models/vision': slotVisionLocal,
+      '/models/embedding': slotEmbeddingApi,
       '/llm/test/text': { ok: true, detail: 'OK' },
     };
     mockApi(routes);
     renderConsole();
-    const textCard = getDepCard('LLM 模型');
-    // 测试通过 → 已验证在线
-    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
-    expect(await within(textCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
-    // Qwen 转为离线（模拟服务停止后刷新）
+    const textCard = getDepCard('文字模型');
+    // 等槽位状态落库再交互（避免落库重渲染吞掉点击）
+    await waitFor(() => {
+      expect(useRuntimeStore.getState().slots.text).not.toBeNull();
+    });
+    // 验证通过 → 可用
+    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /验\s*证/ }));
+    await waitFor(() => {
+      expect(within(textCard as HTMLElement).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
+    });
+    // 模型探针转未就绪（模拟服务停止后刷新）→ 验证结论清空 → 未就绪
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/monitor/qwen')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ reachable: false, reason: '未启动' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      if (url.includes('/config/keys')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ provider: 'qwen', configured: true, mode: 'local' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      if (url.includes('/services')) {
-        return Promise.resolve(
-          new Response(JSON.stringify(servicesFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      if (url.includes('/config/database')) {
-        return Promise.resolve(
-          new Response(JSON.stringify(dbFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      if (url.includes('/monitor/gpu')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ available: false, reason: '未检测到显卡' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      if (url.includes('/monitor/mineru')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ reachable: false, reason: '未启动' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-        );
-      }
-      return Promise.reject(new TypeError(`no route: ${url}`));
+      const payload = url.includes('/models/text') ? { ...slotTextLocal, ready: false }
+        : url.includes('/models/vision') ? slotVisionLocal
+        : url.includes('/models/embedding') ? slotEmbeddingApi
+        : url.includes('/services') ? servicesFixture
+        : url.includes('/config/database') ? dbFixture
+        : null;
+      if (payload === null) return Promise.reject(new TypeError(`no route: ${url}`));
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
     });
     await useRuntimeStore.getState().fetchAll();
-    // 可达回落为离线（probe 赢过陈旧 outcome）；备注保留最近测试结论
-    expect(within(textCard as HTMLElement).getByText('离线')).toBeInTheDocument();
-    expect(within(textCard as HTMLElement).getByText(/^最近测试通过：/)).toBeInTheDocument();
+    await waitFor(() => {
+      const card = getDepCard('文字模型');
+      expect(within(card).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
+    });
   });
 });

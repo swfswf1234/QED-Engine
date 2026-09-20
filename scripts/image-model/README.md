@@ -1,6 +1,6 @@
 # 本地图像模型（MinerU）
 
-MinerU 服务由 QED-Engine 管理（WSL Docker 容器，端口 8002）。本目录集中管理其生命周期与模型。
+MinerU 服务由 QED-Engine 管理（WSL Docker 容器，端口 5002）。本目录集中管理其生命周期与模型。
 
 ## model/ 目录（仓库根，git 忽略）
 
@@ -14,7 +14,7 @@ MinerU 服务由 QED-Engine 管理（WSL Docker 容器，端口 8002）。本目
 ## 生命周期
 
 ```bash
-# 启动 / 停止 / 重启 / 状态（健康探测 http://127.0.0.1:8002/health）
+# 启动 / 停止 / 重启 / 状态（健康探测 http://127.0.0.1:5002/health）
 python scripts/image-model/qed_mineru_service.py start
 python scripts/image-model/qed_mineru_service.py stop
 python scripts/image-model/qed_mineru_service.py restart
@@ -39,7 +39,7 @@ python scripts/image-model/infra-up.ps1             # WSL 启动容器（挂载 
 - `compose.yaml`：mineru-api 单体（内嵌 vLLM + hybrid-engine），`MINERU_MODEL_SOURCE=local`；
   卷挂载 `../../model/mineru` → `/root/mineru_models`
 - `infra-up.ps1` / `infra-down.ps1` / `infra-status.ps1`：WSL 容器启停（含 keepalive 防挂起）
-- 健康端点 `GET http://127.0.0.1:8002/health`（MinerU 实际路径）
+- 健康端点 `GET http://127.0.0.1:5002/health`（MinerU 实际路径）
 - 资源互斥（QED_RESOURCE_GUARD）：启动 MinerU 前先停 Qwen（4080 16GB 显存约束，见
   model_manager.py）
 - **GPU 掉线恢复**：容器内 `nvidia-smi` 报 `GPU access blocked by the operating system`

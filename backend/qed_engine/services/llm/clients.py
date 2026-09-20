@@ -4,7 +4,7 @@
 RuntimeError（中文原因 + 状态码），由 gateway 层捕获并记录。
 
 设计关联（DesignRef）：docs/design/llm-gateway.md
-实现状态：In Progress
+实现状态：Current
 关联测试：tests/test_llm_clients.py
 """
 
@@ -114,16 +114,21 @@ def qwen_chat(
     model: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
     max_tokens: int | None = None,
+    api_key: str = "",
 ) -> str:
     """Qwen 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。
 
+    api_key 为 LM Studio API 认证 token（W7 实测：本机开启认证需 Bearer；空=不带头）。
     max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
     """
     own = client is None
     http = client or httpx.Client(timeout=timeout)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         if not model:
-            response = http.get(f"{base_url.rstrip('/')}/models")
+            response = http.get(f"{base_url.rstrip('/')}/models", headers=headers)
             if response.status_code != 200:
                 raise RuntimeError(f"Qwen 模型列表获取失败：HTTP {response.status_code}")
             models = [item.get("id", "") for item in response.json().get("data", []) if isinstance(item, dict)]
@@ -133,12 +138,7 @@ def qwen_chat(
         payload: dict = {"model": model, "messages": messages}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        data = _post_json(
-            http,
-            f"{base_url.rstrip('/')}/chat/completions",
-            {"Content-Type": "application/json"},
-            payload,
-        )
+        data = _post_json(http, f"{base_url.rstrip('/')}/chat/completions", headers, payload)
         return _extract_content(data)
     finally:
         if own:
@@ -181,6 +181,37 @@ def provider_vision_chat(
             payload,
         )
         return _extract_content(data)
+    finally:
+        if own:
+            http.close()
+
+
+def provider_embeddings(
+    api_key: str,
+    model: str,
+    input_texts: list[str],
+    client: httpx.Client | None = None,
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[list[float]]:
+    """多厂商向量化（OpenAI 兼容 /embeddings）：返回向量列表，顺序与 input 一致。
+
+    响应按 index 排序后抽取 embedding（2026-09-16 PLAN-046：/llm/embedding 数据源）。
+    """
+    own = client is None
+    http = client or httpx.Client(timeout=timeout)
+    try:
+        data = _post_json(
+            http,
+            f"{base_url.rstrip('/')}/embeddings",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            {"model": model, "input": input_texts},
+        )
+        try:
+            items = sorted(data["data"], key=lambda item: item["index"])
+            return [item["embedding"] for item in items]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("向量响应格式异常（缺 data[].embedding）") from exc
     finally:
         if own:
             http.close()

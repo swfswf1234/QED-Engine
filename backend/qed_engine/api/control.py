@@ -28,16 +28,21 @@ from qed_engine.api.schemas import (
     HealthResponse,
     KeysResponse,
     LlmCallResponse,
+    LlmEmbeddingRequest,
+    LlmEmbeddingResponse,
     LlmTestResponse,
     LlmTextRequest,
     LlmVisionRequest,
     LogsResponse,
     MineruStatus,
     ModelRoute,
+    ModelSelectRequest,
     ModelsResponse,
     QwenStatus,
     ReviewCallRequest,
     ReviewCallResponse,
+    SlotMonitorResponse,
+    SlotStatus,
 )
 from qed_engine.config import Settings
 
@@ -48,8 +53,16 @@ from qed_engine.services.llm import call_log as llm_call_log
 from qed_engine.services.llm import clients as llm_clients
 from qed_engine.services.llm import gateway as llm_gateway
 from qed_engine.services.llm import model_manager as mm
+from qed_engine.services.llm import registry as llm_registry
+from qed_engine.services.llm import runtimes as llm_runtimes
 from qed_engine.services.log_viewer import LogError, read_log
-from qed_engine.services.monitor import probe_gpu, probe_memory, probe_mineru, probe_qwen
+from qed_engine.services.monitor import (
+    probe_gpu,
+    probe_memory,
+    probe_mineru,
+    probe_qwen,
+    probe_slot,
+)
 from qed_engine.services.service_manager import (
     ServiceError,
     get_specs,
@@ -143,16 +156,19 @@ def restart_service(name: str) -> ActionResponse:
     return _service_call(_run)
 
 
-# --- 本地模型端点族（Task 5，2026-09-06）---
-# 路径用模型名：/models/{qwen|mineru}。api 模式本地模型无启停语义 → 409；未知 name → 404。
-# 状态探测复用 /monitor/lmstudio、/monitor/mineru，不新增状态端点。动作经 model_manager.operate_model
-# （资源互斥含：start/restart 前先停对方，见 model_manager.py）。
+# --- 本地模型端点族（Task 5，2026-09-06；PLAN-046 槽位化泛化 + v3 五字段卡）---
+# 路径用槽位名：/models/{text|vision}（2026-09-16），旧名 qwen/mineru 经 SLOT_ALIASES
+# 兼容（deprecated）。槽位来源（manifest.source > QED_API_SELECT）= api 时本地模型无启停
+# 语义 → 409；未知槽位 → 404。GET /models/{slot} 为控制台五字段卡数据源
+# （来源/渠道/身份/备注/可用性 + 三个下拉）；POST /models/{slot}/select 写运行态
+# manifest source/runtime/active。动作经 model_manager.operate_model（单活仲裁，见 model_manager.py）。
 
 
-def _require_local_mode(settings: Settings) -> None:
-    """api 模式下本地模型不支持启停（仅测试）→ 409。"""
-    if settings.qed_api_select != "local":
-        raise HTTPException(status_code=409, detail="当前为 api 模式，本地模型仅支持测试")
+def _require_local_source(settings: Settings, name: str) -> None:
+    """槽位来源 = api 时本地模型不支持启停（仅测试）→ 409（v3：按槽位生效来源判定）。"""
+    slot = mm.SLOT_ALIASES.get(name, name)
+    if slot in mm.SLOTS and llm_registry.configured_source(settings, slot) != "local":
+        raise HTTPException(status_code=409, detail="该槽位为 api 来源，本地模型仅支持测试")
 
 
 def _model_action(fn):
@@ -165,11 +181,11 @@ def _model_action(fn):
 
 @router.post("/models/{name}/start", response_model=ActionResponse)
 def model_start(name: str, request: Request) -> ActionResponse:
-    """启动本地模型（name=qwen/mineru）；api 模式 409；互斥见 model_manager。"""
+    """启动本地模型槽位（name=text/vision；旧名 qwen/mineru 过渡）；槽位来源 api → 409。"""
     settings = request.app.state.settings
 
     def _run():
-        _require_local_mode(settings)
+        _require_local_source(settings, name)
         mm.operate_model(name, "start", settings)
         return ActionResponse(name=name, status="starting")
 
@@ -178,11 +194,11 @@ def model_start(name: str, request: Request) -> ActionResponse:
 
 @router.post("/models/{name}/stop", response_model=ActionResponse)
 def model_stop(name: str, request: Request) -> ActionResponse:
-    """停止本地模型；api 模式 409。"""
+    """停止本地模型槽位（lmstudio=卸载模型保留 server；docker=停脚本）；槽位来源 api → 409。"""
     settings = request.app.state.settings
 
     def _run():
-        _require_local_mode(settings)
+        _require_local_source(settings, name)
         mm.operate_model(name, "stop", settings)
         return ActionResponse(name=name, status="stopping")
 
@@ -191,15 +207,86 @@ def model_stop(name: str, request: Request) -> ActionResponse:
 
 @router.post("/models/{name}/restart", response_model=ActionResponse)
 def model_restart(name: str, request: Request) -> ActionResponse:
-    """重启本地模型（先停后启，互斥见 model_manager）；api 模式 409。"""
+    """重启本地模型槽位（先停后启，单活仲裁见 model_manager）；槽位来源 api → 409。"""
     settings = request.app.state.settings
 
     def _run():
-        _require_local_mode(settings)
+        _require_local_source(settings, name)
         mm.operate_model(name, "restart", settings)
         return ActionResponse(name=name, status="starting")
 
     return _model_action(_run)
+
+
+@router.post("/models/{name}/select", response_model=ActionResponse)
+def model_select(name: str, payload: ModelSelectRequest, request: Request) -> ActionResponse:
+    """槽位运行态选择（控制台五字段卡）：写 manifest source / runtime / active（至少一项）。
+
+    text/vision 槽位支持（经旧名别名）；embedding 无运行态 manifest → 404；
+    未知槽位/身份 → 404；source/runtime 非法取值或三项全空 → 422。
+    """
+
+    def _run():
+        slot = mm.SLOT_ALIASES.get(name, name)
+        if payload.source is None and payload.runtime is None and payload.model is None:
+            raise HTTPException(status_code=422, detail="至少提供 source / runtime / model 之一")
+        if payload.source is not None and payload.source not in llm_registry.SOURCES:
+            raise HTTPException(
+                status_code=422, detail=f"未知来源：{payload.source}（仅支持 api / local）")
+        if payload.runtime is not None and payload.runtime not in (*llm_registry.LOCAL_RUNTIMES, "default"):
+            raise HTTPException(
+                status_code=422, detail=f"未知本地渠道：{payload.runtime}（仅支持 lmstudio / llamacpp / docker / default）")
+        llm_registry.set_manifest_state(
+            slot, source=payload.source, runtime=payload.runtime, active=payload.model)
+        return ActionResponse(name=slot, status="selected")
+
+    return _model_action(_run)
+
+
+@router.get("/models/{name}", response_model=SlotStatus)
+def model_status(name: str, request: Request) -> SlotStatus:
+    """槽位状态（控制台五字段卡数据源）：来源 / 渠道 / 身份 / 备注 / 可用性 / 三个下拉。
+
+    api 来源 ready=API_KEY 已配置、渠道=direct；local 来源 ready=绑定模型探针就绪。
+    未知槽位 → 404。
+    """
+    settings = request.app.state.settings
+    slot = mm.SLOT_ALIASES.get(name, name)
+    if slot not in llm_registry.SLOTS:
+        raise HTTPException(status_code=404, detail=f"未知模型槽位：{name}（支持 text / vision / embedding）")
+    resolved = llm_registry.resolve(settings)[slot]
+    ident = llm_registry.IDENTITIES.get(resolved.identity)
+    source = llm_registry.configured_source(settings, slot)
+    if source == "api":
+        runtime = ""
+        ready = settings.api_configured
+        model_options = llm_registry.slot_model_options(slot, "api")
+    else:
+        runtime = llm_registry.slot_runtime(settings, slot)
+        binding = llm_registry.local_binding(settings, slot)
+        ready = bool(binding) and llm_runtimes.get_runtime(binding[0]).probe(settings, binding[1])
+        model_options = llm_registry.slot_model_options(slot, "local", runtime)
+    if resolved.error:
+        availability = "不可用"
+    elif ready:
+        availability = "可用"
+    else:
+        availability = "未就绪"
+    return SlotStatus(
+        slot=slot, source=source,
+        channel="direct" if source == "api" else runtime,
+        runtime=runtime, identity=resolved.identity, model=resolved.model,
+        provider=resolved.provider, base_url=resolved.base_url,
+        description=ident.description if ident else "",
+        ready=ready, availability=availability,
+        source_options=llm_registry.slot_source_options(slot),
+        channel_options=llm_registry.slot_channel_options(slot),
+        options=[
+            {"value": i.name, "label": i.name, "description": i.description}
+            for i in model_options
+        ],
+        notes=resolved.notes, error=resolved.error,
+    )
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -272,6 +359,10 @@ def gateway_call_vision(settings, **kwargs):
     return llm_gateway.call_vision(settings, **kwargs)
 
 
+def gateway_call_embedding(settings, **kwargs):
+    return llm_gateway.call_embedding(settings, **kwargs)
+
+
 def gateway_search_calls(settings, **kwargs):
     return llm_call_log.search_calls(settings, **kwargs)
 
@@ -334,6 +425,24 @@ def llm_test_vision(request: Request) -> LlmTestResponse:
     result = gateway_call_vision(resolved, image_base64=base64.b64encode(tiny_png).decode(), prompt="识别图片")
     return LlmTestResponse(ok=result["success"], detail=(result["error"] or "")[:200] or result["reply"][:200],
                            call_id=result["call_id"])
+
+
+@router.post("/llm/embedding", response_model=LlmEmbeddingResponse)
+def llm_embedding(request: Request, payload: LlmEmbeddingRequest) -> LlmEmbeddingResponse:
+    """向量模型调用（PLAN-046 新增）：input 文本列表 → embeddings（顺序一致），记录落 qed_llm_calls。"""
+    if not payload.input:
+        raise HTTPException(status_code=422, detail="input 不能为空")
+    resolved: Settings = request.app.state.settings
+    return LlmEmbeddingResponse(**gateway_call_embedding(resolved, input_texts=payload.input))
+
+
+@router.post("/llm/test/embedding", response_model=LlmTestResponse)
+def llm_test_embedding(request: Request) -> LlmTestResponse:
+    """向量模型测试（控制台测试按钮）：小 input 真实调用，成功/失败 + 原因。"""
+    resolved: Settings = request.app.state.settings
+    result = gateway_call_embedding(resolved, input_texts=["测试"])
+    detail = result["error"] or f"ok：{len(result['embeddings'])} vectors"
+    return LlmTestResponse(ok=result["success"], detail=detail[:200], call_id=result["call_id"])
 
 
 @router.get("/llm/calls", response_model=CallsResponse)
@@ -482,8 +591,17 @@ def monitor_qwen(request: Request) -> QwenStatus:
 
 @router.get("/monitor/mineru", response_model=MineruStatus)
 def monitor_mineru() -> MineruStatus:
-    """mineru 解析服务（8002）健康探测。"""
+    """mineru 解析服务（5002）健康探测（旧名，deprecated → /monitor/vision）。"""
     return MineruStatus(**probe_mineru())
+
+
+@router.get("/monitor/{slot}", response_model=SlotMonitorResponse)
+def monitor_slot(slot: str, request: Request) -> SlotMonitorResponse:
+    """槽位泛化探针（PLAN-046）：text 按当前 runtime 探 OpenAI 兼容端点（LM Studio /
+    llama-server），vision 探 MinerU，embedding 无本地 runtime。未知槽位 → 404。"""
+    if slot not in ("text", "vision", "embedding"):
+        raise HTTPException(status_code=404, detail=f"未知模型槽位：{slot}（支持 text / vision / embedding）")
+    return SlotMonitorResponse(**probe_slot(request.app.state.settings, slot))
 
 
 @router.post("/self-restart")
