@@ -1,248 +1,316 @@
 /**
- * 文档解析管理 store（左树右对照 + 书目同步 + 块判定）
- * - 数据源：/parsing/tree（左侧树聚合：8900 共享表领域课程 + 8902 书目）、
- *   /books/sync（同步已验证书目）、/books/{id}/pages/{no}（单页 blocks）、
- *   /books/{id}/pages/{no}/blocks/{index}/review（判定）
- * - 独立降级：8900 不可达 → 整体错误；8902 离线（503）→ 视图级降级提示，互不拖累
- * - ARCH-020：左侧树数据源从 /parsing/tree 获取，8902 离线时仍显示领域→课程（无书目）
+ * 文档解析管理 store（G 轮单屏：左书目树纯选择 + 右对照工作台）
+ * 设计：docs/design/parsing-ui.md §4（2026-09-20 单屏回调定稿）
+ * - 数据源：/parsing/tree（左树）、/books + /books/sync（顶部单一「刷新」含同步书目）、
+ *   /books/{id}/ingest、/books/{id}/pages/{no}、/edit（块编辑门面）、
+ *   /parse-jobs（单页/全本 + 轮询）
+ * - 独立降级：8900 不可达 → error（整体）；8902 离线（503）→ dataError（视图级），互不拖累
  */
 import { create } from 'zustand';
 import {
-  getBookManifest, getBookPage, getParsingTree, putBlockReview, syncBooks,
+  createParseJob, getBook, getBookPage, getPageEdits, getParsingTree, getParseJob,
+  ingestBook as apiIngestBook, listBooks, putBlockEdit, syncBooks,
 } from '../api/axiom';
 import { ApiError } from '../api/client';
-import type { Block, BlockReview, BookMeta, ManifestEntry, PageData, ParsingTreeNode } from '../api/axiom';
+import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode } from '../api/axiom';
 
-/** 从 manifest 推导已解析页数（p<编号>.md 计数；af_books 带 pages_done 后切换上游字段） */
-export function countParsedPages(manifest: ManifestEntry[]): number {
-  return manifest.filter((m) => /p\d+\.md$/i.test(m.path)).length;
-}
-
-export interface ParsingBook extends BookMeta {
-  /** 已解析页数（af_books.pages_done 优先；否则 manifest 推导） */
-  pages_done: number;
-  /** 进度推导失败时为 true（manifest 不可达且无上游字段） */
-  progressUnknown?: boolean;
-}
-
-// Re-export ParsingTreeNode from api/axiom
 export type { ParsingTreeNode } from '../api/axiom';
 
-/** 领域/课程兜底名（af_books 冗余字段缺失时用） */
-export function fallbackName(key: string, label: string): string {
-  return key || label;
-}
-
-/** 构建左树：af_books 冗余课程字段（domain_id/course_id/course_name）优先；
- * 契约冻结前 /books 无课程字段 → 全部归「未分课程」单组 */
-export function buildParsingTree(books: ParsingBook[]): ParsingTreeNode[] {
-  const withCourse = books.filter((b) => b.course_id);
-  if (withCourse.length === 0 && books.length === 0) return [];
-  if (withCourse.length === 0) {
-    return [{
-      key: 'ungrouped',
-      type: 'domain',
-      title: '未分课程',
-      children: books.map((b) => ({
-        key: `book:${b.book_id}`,
-        type: 'book' as const,
-        title: b.display_title || b.title || b.book_id,
-        book: b,
-      })),
-    }];
-  }
-  // 领域 → 课程 → 书目（DOMAIN 顺序：出现顺序）
-  const domains = new Map<string, ParsingTreeNode>();
-  for (const b of withCourse) {
-    const domainId = b.domain_id || 'other';
-    if (!domains.has(domainId)) {
-      domains.set(domainId, { key: `domain:${domainId}`, type: 'domain', title: domainId, domainId, children: [] });
-    }
-    const domain = domains.get(domainId)!;
-    const courseKey = `${domainId}:${b.course_id}`;
-    let courseNode = domain.children!.find((c) => c.key === courseKey);
-    if (!courseNode) {
-      courseNode = {
-        key: courseKey,
-        type: 'course',
-        title: b.course_name || b.course_id || '',
-        courseId: b.course_id,
-        children: [],
-      };
-      domain.children!.push(courseNode);
-    }
-    courseNode.children!.push({
-      key: `book:${b.book_id}`,
-      type: 'book',
-      title: b.display_title || b.title || b.book_id,
-      book: b,
-    });
-  }
-  return [...domains.values()];
-}
-
-export interface ParsingStore {
-  /** 左侧树数据（ARCH-020：从 /parsing/tree 获取） */
-  tree: ParsingTreeNode[];
-  treeLoading: boolean;
-  treeError: string | null;
-  /** 书目列表（兼容旧逻辑） */
-  books: ParsingBook[];
+export type ScrollMode = 'single' | 'continuous';
+export type RenderMode = 'stream' | 'layout';
+/** 单页加载态（连续滚动模式多页缓存） */
+export interface PageEntry {
+  data: PageData | null;
+  /** 该页已有解析产物（页数据 200；404=未解析，非错误） */
+  parsed: boolean;
   loading: boolean;
-  /** 整体错误（8900 不可达） */
   error: string | null;
-  /** 8902 数据错误（503 等） */
-  dataError: string | null;
-  /** 同步状态 */
-  syncing: boolean;
-  syncMessage: string | null;
-  syncError: string | null;
-  lastSyncedAt: string | null;
-  /** 对照视图：选中书 + 选中页 + 页数据 + 清单 */
-  compareBookId: string | null;
-  comparePageNo: number | null;
-  pageData: PageData | null;
-  pageLoading: boolean;
-  pageError: string | null;
-  manifest: ManifestEntry[];
-  /** 块判定缓存：`${book}:${page}:${index}` → 判定 */
-  blockReviews: Record<string, BlockReview>;
-  reviewSubmitting: boolean;
-  /** 获取左侧树（ARCH-020 新增） */
-  fetchTree: () => Promise<void>;
-  fetchBooks: (syncFirst?: boolean) => Promise<void>;
-  openCompare: (bookId: string) => Promise<void>;
-  loadPage: (bookId: string, pageNo: number) => Promise<void>;
-  /** 块判定提交（verdict: ok 一致 / bad 不一致） */
-  submitReview: (bookId: string, pageNo: number, blockIndex: number, blockType: string, verdict: 'ok' | 'bad', note?: string) => Promise<void>;
-  clearCompare: () => void;
 }
+
+export const editKey = (bookId: string, pageNo: number, blockIndex: number) =>
+  `${bookId}:${pageNo}:${blockIndex}`;
+
+const EMPTY_PAGE: PageEntry = { data: null, parsed: false, loading: false, error: null };
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export const useParsingStore = create<ParsingStore>((set, get) => ({
-  tree: [],
-  treeLoading: false,
-  treeError: null,
-  books: [],
-  loading: false,
-  error: null,
-  dataError: null,
-  syncing: false,
-  syncMessage: null,
-  syncError: null,
-  lastSyncedAt: null,
-  compareBookId: null,
-  comparePageNo: null,
-  pageData: null,
-  pageLoading: false,
-  pageError: null,
-  manifest: [],
-  blockReviews: {},
-  reviewSubmitting: false,
+/** 错误归类：offline=8900 不可达（整体错误）；503=8902/上游不可用（数据降级）；其余=普通错误 */
+function classifyError(e: unknown): { error: string | null; dataError: string | null } {
+  if (e instanceof ApiError && e.status === 503) return { error: null, dataError: errText(e) };
+  return { error: errText(e), dataError: null };
+}
 
-  fetchTree: async () => {
-    if (get().treeLoading) return;
-    set({ treeLoading: true, treeError: null });
-    const [rawTree, err] = await getParsingTree()
-      .then((t) => [t, null] as const)
-      .catch((e) => [null, e] as const);
-    // 8900 不可达 → 整体错误；8902 离线 → 数据源级降级（树仍返回领域→课程，书目为空）
-    const isUpstream = err instanceof ApiError && err.kind === 'http';
-    // 从树中提取所有书目（用于 openCompare 等操作），同时转换类型
-    const books: ParsingBook[] = [];
-    const convertTree = (nodes: ParsingTreeNode[]): ParsingTreeNode[] => {
-      return nodes.map((node) => {
-        if (node.type === 'book' && node.book) {
-          const book: ParsingBook = {
-            ...node.book,
-            pages_done: node.book.pages_done ?? 0,
-          };
-          books.push(book);
-          return { ...node, book };
-        }
-        if (node.children) {
-          return { ...node, children: convertTree(node.children) };
-        }
-        return node;
-      });
-    };
-    const tree = rawTree ? convertTree(rawTree) : [];
-    set({
-      tree,
-      books,
-      treeError: err && !isUpstream ? errText(err) : null,
-      error: err && !isUpstream ? errText(err) : null,
-      dataError: err ? errText(err) : null,
-    });
-    set({ treeLoading: false });
-  },
+export interface ParsingStore {
+  // 书目数据（标题行同步/刷新；树数据经 fetchTree 单拉）
+  books: BookMeta[];
+  booksLoading: boolean;
+  tree: ParsingTreeNode[];
+  treeLoading: boolean;
+  treeError: string | null;
+  // 全局降级
+  error: string | null;
+  dataError: string | null;
+  syncing: boolean;
+  syncMessage: string | null;
+  syncError: string | null;
+  // 对照工作台选中（右栏；树点击/URL 恢复写入）
+  compareBookId: string | null;
+  compareBook: BookMeta | null;
+  comparePageNo: number;
+  pages: Record<number, PageEntry>;
+  selectedBlock: number;
+  editMode: boolean;
+  // 工作台视图选项（§7 顶栏；engine 不设选择，走服务端默认；G 轮裁决无视图模式切换）
+  scrollMode: ScrollMode;
+  renderMode: RenderMode;
+  syncScroll: boolean;
+  zoom: number;
+  // 解析任务
+  activeJob: ParseJob | null;
+  jobError: string | null;
+  ingestBusy: Record<string, boolean>;
+  // 编辑
+  edits: Record<string, BlockEdit>;
+  editSubmitting: boolean;
+  // 动作
+  fetchBooks: (syncFirst?: boolean) => Promise<void>;
+  fetchTree: () => Promise<void>;
+  openWorkbench: (bookId: string, pageNo?: number, seed?: BookMeta) => Promise<void>;
+  loadPage: (pageNo: number) => Promise<void>;
+  ensurePage: (pageNo: number) => Promise<void>;
+  gotoPage: (delta: number) => void;
+  setScrollMode: (m: ScrollMode) => void;
+  setRenderMode: (m: RenderMode) => void;
+  setSyncScroll: (on: boolean) => void;
+  setZoom: (z: number) => void;
+  selectBlock: (index: number) => void;
+  setEditMode: (on: boolean) => void;
+  ingestBook: (bookId: string) => Promise<void>;
+  createParseJob: (pages?: number[], bookId?: string) => Promise<void>;
+  submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
+  clearCompare: () => void;
+}
 
-  fetchBooks: async (syncFirst = true) => {
-    // ARCH-020：fetchBooks 保留兼容，但优先使用 fetchTree
-    if (get().loading) return;
-    set({ loading: true, error: null, dataError: null });
-    // 同步已验证书目（前端触发，REQ-042 用户裁决）——失败不阻塞列表展示
-    if (syncFirst && !get().syncing) {
-      set({ syncing: true, syncError: null });
-      const [sync, syncErr] = await syncBooks()
-        .then((s) => [s, null] as const)
-        .catch((e) => [null, e] as const);
-      set({
-        syncing: false,
-        syncMessage: sync ? `已同步 ${sync.synced} 本新书目（更新 ${sync.updated}）` : null,
-        syncError: syncErr ? errText(syncErr) : null,
-        lastSyncedAt: sync ? new Date().toISOString() : get().lastSyncedAt,
-      });
-    }
-    // ARCH-020：直接调用 fetchTree 替代旧的 listBooks 逻辑
-    await get().fetchTree();
-    set({ loading: false });
-  },
+/** 任务轮询令牌（新任务/退出工作台即作废） */
+let pollToken = 0;
 
-  openCompare: async (bookId) => {
-    set({ compareBookId: bookId, comparePageNo: 1, pageData: null, pageError: null });
-    const [manifest, err] = await getBookManifest(bookId)
-      .then((m) => [m, null] as const)
-      .catch((e) => [null, e] as const);
-    set({ manifest: manifest ?? [], pageError: err ? errText(err) : null });
-    void get().loadPage(bookId, 1);
-  },
+export const useParsingStore = create<ParsingStore>((set, get) => {
+  const setPage = (pageNo: number, patch: Partial<PageEntry>) =>
+    set((s) => ({ pages: { ...s.pages, [pageNo]: { ...EMPTY_PAGE, ...s.pages[pageNo], ...patch } } }));
 
-  loadPage: async (bookId, pageNo) => {
-    if (get().pageLoading) return;
-    set({ pageLoading: true, pageError: null, comparePageNo: pageNo });
+  /** 拉取一页（404=未解析不算错误）；连续模式预取与单页共用 */
+  const fetchPage = async (bookId: string, pageNo: number) => {
+    setPage(pageNo, { loading: true, error: null });
     const [data, err] = await getBookPage(bookId, pageNo)
       .then((d) => [d, null] as const)
       .catch((e) => [null, e] as const);
-    set({
-      pageData: data ?? get().pageData,
-      pageError: err ? errText(err) : null,
+    const unparsed = err instanceof ApiError && err.status === 404;
+    setPage(pageNo, {
+      data: data ?? null,
+      parsed: Boolean(data),
+      loading: false,
+      error: err && !unparsed ? errText(err) : null,
     });
-    set({ pageLoading: false });
-  },
+  };
 
-  submitReview: async (bookId, pageNo, blockIndex, blockType, verdict, note = '') => {
-    if (get().reviewSubmitting) return;
-    set({ reviewSubmitting: true });
-    const key = `${bookId}:${pageNo}:${blockIndex}`;
-    const [review, err] = await putBlockReview(bookId, pageNo, blockIndex, verdict, note)
-      .then((r) => [r, null] as const)
-      .catch((e) => [null, e] as const);
-    set({
-      reviewSubmitting: false,
-      blockReviews: err
-        ? get().blockReviews
-        : { ...get().blockReviews, [key]: { ...review, block_type: blockType } as BlockReview },
-      pageError: err ? `判定提交失败：${errText(err)}` : get().pageError,
-    });
-  },
+  /** 轮询至任务终态：完成即刷新当前页 + 回写行进度 */
+  const pollJob = async (jobId: string) => {
+    const token = ++pollToken;
+    for (;;) {
+      const job = await getParseJob(jobId).catch(() => null);
+      if (token !== pollToken || !job) return;
+      set({ activeJob: job });
+      if (job.status === 'completed' || job.status === 'failed') {
+        if (job.status === 'failed') set({ jobError: job.error ?? job.progress?.error ?? '解析任务失败' });
+        const s = get();
+        if (s.compareBookId) {
+          const detail = await getBook(s.compareBookId).catch(() => null);
+          if (token !== pollToken) return;
+          if (detail) set({ compareBook: detail, books: s.books.map((b) => (b.book_id === s.compareBookId ? { ...b, ...detail } : b)) });
+          void fetchPage(s.compareBookId, s.comparePageNo);
+        }
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+      if (token !== pollToken) return;
+    }
+  };
 
-  clearCompare: () => {
-    set({ compareBookId: null, comparePageNo: null, pageData: null, pageError: null, manifest: [] });
-  },
-}));
+  return {
+    books: [],
+    booksLoading: false,
+    tree: [],
+    treeLoading: false,
+    treeError: null,
+    error: null,
+    dataError: null,
+    syncing: false,
+    syncMessage: null,
+    syncError: null,
+    compareBookId: null,
+    compareBook: null,
+    comparePageNo: 1,
+    pages: {},
+    selectedBlock: -1,
+    editMode: false,
+    scrollMode: 'single',
+    renderMode: 'stream',
+    syncScroll: true,
+    zoom: 100,
+    activeJob: null,
+    jobError: null,
+    ingestBusy: {},
+    edits: {},
+    editSubmitting: false,
 
-export type { Block };
+    fetchBooks: async (syncFirst = false) => {
+      if (get().booksLoading) return;
+      set({ booksLoading: true });
+      if (syncFirst) {
+        set({ syncing: true, syncError: null, syncMessage: null });
+        const [sync, syncErr] = await syncBooks().then((r) => [r, null] as const).catch((e) => [null, e] as const);
+        set({
+          syncing: false,
+          syncMessage: sync ? `已同步 ${sync.synced} 本新书目（更新 ${sync.updated}）` : null,
+          syncError: syncErr ? errText(syncErr) : null,
+        });
+      }
+      const [rows, err] = await listBooks().then((r) => [r, null] as const).catch((e) => [null, e] as const);
+      set({
+        books: rows ?? get().books,
+        ...(err ? classifyError(err) : { error: null, dataError: null }),
+        booksLoading: false,
+      });
+    },
+
+    fetchTree: async () => {
+      if (get().treeLoading) return;
+      set({ treeLoading: true, treeError: null });
+      const [raw, err] = await getParsingTree().then((t) => [t, null] as const).catch((e) => [null, e] as const);
+      set({
+        tree: raw ?? [],
+        ...(err ? { treeError: errText(err), ...classifyError(err) } : {}),
+        treeLoading: false,
+      });
+    },
+
+    openWorkbench: async (bookId, pageNo = 1, seed) => {
+      ++pollToken; // 作废旧任务轮询
+      set({
+        compareBookId: bookId,
+        compareBook: seed ?? get().books.find((b) => b.book_id === bookId) ?? null,
+        comparePageNo: pageNo,
+        pages: {},
+        selectedBlock: -1,
+        activeJob: null,
+        jobError: null,
+        edits: {},
+      });
+      const detail = await getBook(bookId).catch(() => null);
+      if (detail && get().compareBookId === bookId) set({ compareBook: detail });
+      await get().loadPage(pageNo);
+    },
+
+    loadPage: async (pageNo) => {
+      const { compareBookId, pages } = get();
+      if (!compareBookId) return;
+      const entry = pages[pageNo];
+      if (entry?.loading) return;
+      set({ comparePageNo: pageNo, selectedBlock: -1 });
+      await fetchPage(compareBookId, pageNo);
+      if (get().compareBookId === compareBookId) {
+        const list = await getPageEdits(compareBookId, pageNo).catch(() => null);
+        if (list && get().compareBookId === compareBookId && get().comparePageNo === pageNo) {
+          set((s) => {
+            const edits = { ...s.edits };
+            for (const e of list) edits[editKey(compareBookId, pageNo, e.block_index)] = e;
+            return { edits };
+          });
+        }
+      }
+    },
+
+    ensurePage: async (pageNo) => {
+      const { compareBookId, pages } = get();
+      if (!compareBookId) return;
+      if (pages[pageNo]) return;
+      setPage(pageNo, EMPTY_PAGE); // 占位防并发重复拉取
+      await fetchPage(compareBookId, pageNo);
+    },
+
+    gotoPage: (delta) => {
+      const s = get();
+      const total = s.compareBook?.page_count ?? 1;
+      const next = Math.min(Math.max(s.comparePageNo + delta, 1), Math.max(total, 1));
+      if (next !== s.comparePageNo) void s.loadPage(next);
+    },
+
+    setScrollMode: (m) => set({ scrollMode: m }),
+    setRenderMode: (m) => set({ renderMode: m }),
+    setSyncScroll: (on) => set({ syncScroll: on }),
+    setZoom: (z) => set({ zoom: z }),
+    selectBlock: (index) => set({ selectedBlock: index }),
+    setEditMode: (on) => set({ editMode: on, selectedBlock: on ? get().selectedBlock : -1 }),
+
+    ingestBook: async (bookId) => {
+      if (get().ingestBusy[bookId]) return;
+      set((s) => ({ ingestBusy: { ...s.ingestBusy, [bookId]: true }, jobError: null }));
+      const [res, err] = await apiIngestBook(bookId).then((r) => [r, null] as const).catch((e) => [null, e] as const);
+      set((s) => ({ ingestBusy: { ...s.ingestBusy, [bookId]: false } }));
+      if (err) {
+        set({ jobError: `书页入库失败：${errText(err)}` });
+        return;
+      }
+      set((s) => ({
+        books: s.books.map((b) => (b.book_id === bookId ? { ...b, ...(res as object) } : b)),
+        compareBook: s.compareBook?.book_id === bookId ? { ...s.compareBook, ...(res as object) } : s.compareBook,
+      }));
+      if (get().compareBookId === bookId) {
+        set({ pages: {} });
+        await get().loadPage(get().comparePageNo);
+      }
+    },
+
+    createParseJob: async (pages, bookIdArg) => {
+      const s = get();
+      const bookId = bookIdArg ?? s.compareBookId;
+      if (!bookId) return;
+      if (s.activeJob && (s.activeJob.status === 'queued' || s.activeJob.status === 'running')) return;
+      set({ jobError: null });
+      const [job, err] = await createParseJob(bookId, pages)
+        .then((r) => [r, null] as const)
+        .catch((e) => [null, e] as const);
+      if (err || !job) {
+        set({ jobError: `解析任务提交失败：${errText(err)}` });
+        return;
+      }
+      set({ activeJob: job });
+      void pollJob(String(job.id));
+    },
+
+    submitEdit: async (blockIndex, input) => {
+      const s = get();
+      const bookId = s.compareBookId;
+      const pageNo = s.comparePageNo;
+      if (!bookId || s.editSubmitting) return false;
+      set({ editSubmitting: true });
+      const [record, err] = await putBlockEdit(bookId, pageNo, blockIndex, input)
+        .then((r) => [r, null] as const)
+        .catch((e) => [null, e] as const);
+      set({ editSubmitting: false });
+      if (err) {
+        set({ jobError: `编辑保存失败：${errText(err)}` });
+        return false;
+      }
+      set((st) => ({ edits: { ...st.edits, [editKey(bookId, pageNo, blockIndex)]: record! } }));
+      return true;
+    },
+
+    clearCompare: () => {
+      ++pollToken;
+      set({ compareBookId: null, compareBook: null, pages: {}, selectedBlock: -1, activeJob: null, comparePageNo: 1 });
+    },
+  };
+});

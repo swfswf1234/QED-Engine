@@ -2,24 +2,29 @@
 
 前端（8903）只连 8900（ADR 0007）：解析进度与文档解析管理（左树右对照）数据统一由
 本模块暴露，内部经 clients/axiom_client.py 适配 8902。契约按 Axiom-Flow
-8902-integration-contract.md（V2-007 冻结草案）与 af-books-sync.md（REQ-042 同步开发）：
-GET /books、GET /books/{id}/pages/{no}、GET /books/{id}/manifest、POST /parse-jobs、
-GET /parse-jobs/{id}、POST /books/sync（聚合 8901 verified 书籍转发 8902 upsert）、
-PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（块判定）、
+docs/architecture/api.md（v2 冻结契约）与其 REQ-001（8900 侧适配）：
+GET /books、GET /books/{id}（单本详情）、GET /books/{id}/file（源 PDF inline 流，数据根边界校验）、
+GET /books/{id}/pages/{no}（8900 补写 page_no、重写 image_url 为 8900 代理绝对地址）、
+GET /books/{id}/manifest、POST /parse-jobs（engine 字段）、GET /parse-jobs/{id}、
+POST /books/sync（聚合 8901 verified 书籍，按 BookSyncItem 形状转发 8902 upsert）、
+PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（8900 对前端保持 /review 门面与
+BlockReview 响应形状，内部转 8902 /edit + 页级 /edits 过滤）、
 GET /parsing/tree（左侧树聚合：8900 共享表领域课程 + 8902 书目）。
 
 错误映射：8902 返回 4xx（400 参数非法 / 404 book/page 不存在）→ 同码透传 detail；
 连接失败/5xx → 503 + 明确提示（前端据此降级显示，独立性铁律：8902 离线不破坏其他界面）。
 /books/sync 同时依赖 8901（取数）：8901 不可达 → 503 + 「QED-Tracker 服务不可达」提示。
 
-设计关联（DesignRef）：docs/architecture/api-contracts.md（8902 契约草案事实源：
-Axiom-Flow docs/design/8902-integration-contract.md）、docs/design/af-books-sync.md
-实现状态：Current（契约草案阶段；V2-007 冻结后按回执微调）
+设计关联（DesignRef）：docs/architecture/api-contracts.md（8902 透传组事实源：
+Axiom-Flow docs/architecture/api.md）
+实现状态：Current（联调对齐轮：/edit 门面、BookSyncItem、engine/id/progress、page_no 补写）
 关联测试：tests/test_api.py
 """
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from qed_engine.clients.axiom_client import AxiomClient, AxiomError
 from qed_engine.clients.tracker_client import TrackerClient, TrackerError
@@ -33,12 +38,21 @@ _UPSTREAM_UNAVAILABLE = 503
 class ParseJobCreateBody(BaseModel):
     book_id: str
     pages: list[int] | None = None
-    strategy: str = "hybrid"
+    engine: str = "mineru"
 
 
 class BlockReviewBody(BaseModel):
     verdict: str = Field(pattern="^(ok|bad)$")
     note: str = Field(default="", max_length=1000)
+
+
+class BlockEditBody(BaseModel):
+    """块编辑（/edit 门面，设计 parsing-ui §5 目标形态）：verdict 可选（仅文字/范围修正时省略）。"""
+
+    verdict: str | None = Field(default=None, pattern="^(ok|bad)$")
+    note: str = Field(default="", max_length=1000)
+    corrected_text: str | None = Field(default=None, max_length=20000)
+    corrected_bbox: list[int] | None = Field(default=None, min_length=4, max_length=4)
 
 
 def _axiom(request: Request) -> AxiomClient:
@@ -58,11 +72,24 @@ def _call(request: Request, fn, *args, **kwargs):
         ) from exc
 
 
+def _normalize_authors(raw: list) -> list[dict]:
+    """8901 qt_books.authors 归一化为 8902 Author 对象形状（历史数据可能是字符串列表）。"""
+    result: list[dict] = []
+    for a in raw:
+        if isinstance(a, str):
+            result.append({"name": a, "role": ""})
+        elif isinstance(a, dict):
+            result.append({"name": a.get("name") or "", "role": a.get("role") or ""})
+    return result
+
+
 def _verified_books_from_tracker(request: Request) -> list[dict]:
-    """聚合 8901 已验证（verified）书籍，归一化为 af_books 同步 payload。
+    """聚合 8901 已验证（verified）书籍，归一化为 8902 BookSyncItem payload。
 
     取数：/knowledge 列表 + 逐行 /knowledge/{id} 详情（书籍在详情内，书目少可 N+1）；
     课程名经 /catalogs/math-qe 映射（缺失时回退 course_id 原文）。
+    file_path = 8901 file_path（数据根相对路径，8902 importer 同语义；兼容旧键 relative_path）；
+    BookSyncItem 无 sha256/page_count 字段，不发送。
     8901 不可达（list_knowledge 失败）→ TrackerError → 503 由调用方映射。
     """
     tracker: TrackerClient = request.app.state.tracker_client
@@ -96,10 +123,8 @@ def _verified_books_from_tracker(request: Request) -> list[dict]:
                     "title": b.get("title") or "",
                     "part": b.get("part") or "",
                     "display_title": b.get("display_title") or "",
-                    "authors": b.get("authors") or [],
-                    "sha256": b.get("sha256") or "",
-                    "relative_path": b.get("relative_path") or "",
-                    "page_count": b.get("page_count"),
+                    "authors": _normalize_authors(b.get("authors") or []),
+                    "file_path": b.get("file_path") or b.get("relative_path") or "",
                 }
             )
     return books
@@ -112,6 +137,37 @@ def _verified_books_from_tracker(request: Request) -> list[dict]:
 def list_books(request: Request) -> list:
     """书目列表（含解析进度与课程归属；8902 改读 af_books，REQ-042）。"""
     return _call(request, _axiom(request).list_books)
+
+
+@router.get("/books/{book_id}")
+def get_book(book_id: str, request: Request) -> dict:
+    """单本详情（8902 BookOut：file_path/ingest_status 等，前端据此决定 PDF 直显还是降级）。"""
+    return _call(request, _axiom(request).get_book, book_id)
+
+
+@router.get("/books/{book_id}/file")
+def get_book_file(book_id: str, request: Request) -> FileResponse:
+    """源 PDF 流（原始文件优先直显）：af_books.file_path 数据根相对路径 → inline 返回。
+
+    数据根边界：解析后路径必须仍在 data_root_path 内（`../` 穿越 → 400 阻止）；
+    file_path 未登记或磁盘文件缺失 → 404（前端降级提示）；8902 离线 → 503。
+    """
+    book = _call(request, _axiom(request).get_book, book_id)
+    rel = (book or {}).get("file_path") or ""
+    if not rel:
+        raise HTTPException(status_code=404, detail="该书目未登记源文件路径（file_path 为空）")
+    root = Path(request.app.state.settings.data_root_path).resolve()
+    path = Path(rel)
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve()
+    if not path.is_relative_to(root):
+        raise HTTPException(status_code=400, detail="源文件路径越出数据根边界")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"源文件不存在：{rel}")
+    return FileResponse(
+        path, media_type="application/pdf", content_disposition_type="inline", filename=path.name
+    )
 
 
 @router.post("/books/sync")
@@ -132,8 +188,19 @@ def sync_books(request: Request) -> dict:
 
 @router.get("/books/{book_id}/pages/{page_no}")
 def get_book_page(book_id: str, page_no: int, request: Request) -> dict:
-    """单页完整数据（原页图 URL + markdown + blocks，文档解析管理对照主数据源）。"""
-    return _call(request, _axiom(request).get_book_page, book_id, page_no)
+    """单页完整数据（文档解析管理对照主数据源）。
+
+    8902 PageData 无 page_no 且 image_url 是 8902 相对路径：8900 补写 page_no，
+    并把 image_url 重写为本服务页图代理端点的绝对地址（ADR 0007：浏览器只连 8900；
+    生产 serve_web.py 不代理 /api，相对路径在生产必断）。
+    """
+    data = _call(request, _axiom(request).get_book_page, book_id, page_no)
+    if isinstance(data, dict):
+        data["page_no"] = page_no
+        data["image_url"] = str(
+            request.url_for("get_book_page_image", book_id=book_id, page_no=page_no)
+        )
+    return data
 
 
 @router.get("/books/{book_id}/manifest")
@@ -158,7 +225,19 @@ def get_book_page_image(book_id: str, page_no: int, request: Request) -> Respons
     return Response(content=content, media_type=media_type)
 
 
-# --- 块判定（文档解析管理对照标注，REQ-042） ---
+# --- 块判定（文档解析管理对照标注；8900 /review 门面 → 8902 /edit + /edits，REQ-001） ---
+
+
+def _review_from_edit(record: dict) -> dict:
+    """EditRecord → 前端 BlockReview 形状（保持 8903 契约不变，联调最小改动）。"""
+    return {
+        "verdict": record.get("verdict") or "",
+        "note": record.get("note") or "",
+        "block_type": record.get("block_type") or "",
+        "book_id": record.get("book_id") or "",
+        "page_no": record.get("page_no"),
+        "block_index": record.get("block_index"),
+    }
 
 
 @router.put("/books/{book_id}/pages/{page_no}/blocks/{block_index}/review")
@@ -169,22 +248,58 @@ def put_block_review(
     body: BlockReviewBody,
     request: Request,
 ) -> dict:
-    """块判定（一致 ok / 不一致 bad + 备注；upsert af_block_reviews）。"""
-    return _call(
+    """块判定（一致 ok / 不一致 bad + 备注；8902 upsert af_block_edits，重复覆盖）。"""
+    record = _call(
         request,
-        _axiom(request).review_block,
+        _axiom(request).edit_block,
         book_id,
         page_no,
         block_index,
         body.verdict,
         body.note,
     )
+    return _review_from_edit(record)
 
 
 @router.get("/books/{book_id}/pages/{page_no}/blocks/{block_index}/review")
 def get_block_review(book_id: str, page_no: int, block_index: int, request: Request) -> dict:
-    """查询块判定（对照视图回显；无判定 → 8902 404 透传）。"""
-    return _call(request, _axiom(request).get_block_review, book_id, page_no, block_index)
+    """查询块判定（对照视图回显）：8902 无单块端点，取页级 /edits 过滤；无记录 → 404。"""
+    edits = _call(request, _axiom(request).get_page_edits, book_id, page_no)
+    for record in edits or []:
+        if record.get("block_index") == block_index:
+            return _review_from_edit(record)
+    raise HTTPException(status_code=404, detail=f"块判定记录不存在：block_index={block_index}")
+
+
+# --- /edit 门面与 ingest（ARCH-020-B 前置并入 D 轮，2026-09-20） ---
+
+
+@router.post("/books/{book_id}/ingest")
+def ingest_book(book_id: str, request: Request) -> dict:
+    """ingest 透传（PDF→页图渲染，不调模型）：列表态「ingest」按钮与工作台引导的硬依赖。"""
+    return _call(request, _axiom(request).ingest_book, book_id)
+
+
+@router.put("/books/{book_id}/pages/{page_no}/blocks/{block_index}/edit")
+def put_block_edit(book_id: str, page_no: int, block_index: int, body: BlockEditBody, request: Request) -> dict:
+    """块编辑门面（8902 /edit 原样语义）：判定/备注/文字修正/范围修正，返回 EditRecord。"""
+    return _call(
+        request,
+        _axiom(request).edit_block,
+        book_id,
+        page_no,
+        block_index,
+        body.verdict,
+        body.note,
+        body.corrected_text,
+        body.corrected_bbox,
+    )
+
+
+@router.get("/books/{book_id}/pages/{page_no}/edits")
+def get_page_edits(book_id: str, page_no: int, request: Request) -> list:
+    """页级块编辑记录列表（EditRecord[]，编辑态独立刷新）。"""
+    return _call(request, _axiom(request).get_page_edits, book_id, page_no)
 
 
 # --- 解析任务 ---
@@ -192,8 +307,8 @@ def get_block_review(book_id: str, page_no: int, block_index: int, request: Requ
 
 @router.post("/parse-jobs", status_code=202)
 def create_parse_job(body: ParseJobCreateBody, request: Request) -> dict:
-    """提交解析任务（book_id、pages、strategy）；返回任务状态（queued）。"""
-    return _call(request, _axiom(request).create_parse_job, body.book_id, body.pages, body.strategy)
+    """提交解析任务（book_id、pages、engine）；返回 8902 ParseJob 原样（主键 id、progress 对象）。"""
+    return _call(request, _axiom(request).create_parse_job, body.book_id, body.pages, body.engine)
 
 
 @router.get("/parse-jobs/{job_id}")
@@ -236,15 +351,16 @@ def get_parsing_tree(request: Request) -> list:
 
 def _build_parsing_tree(domains_with_courses: list, books: list) -> list:
     """构建左侧树结构：领域→课程→书目。"""
-    # 按 domain_id + course_id 索引书目
+    # 按 domain_id + course_id 索引书目；domain 为空（8901 知识行无领域）另建
+    # course_id 单键回退索引（课程 id 全库唯一）。
     books_by_course: dict[str, list[dict]] = {}
+    books_by_course_only: dict[str, list[dict]] = {}
     for book in books:
-        domain_id = book.get("domain_id", "")
-        course_id = book.get("course_id", "")
-        key = f"{domain_id}:{course_id}"
-        if key not in books_by_course:
-            books_by_course[key] = []
-        books_by_course[key].append(book)
+        domain_id = book.get("domain_id") or ""
+        course_id = book.get("course_id") or ""
+        books_by_course.setdefault(f"{domain_id}:{course_id}", []).append(book)
+        if not domain_id:
+            books_by_course_only.setdefault(course_id, []).append(book)
 
     result = []
     for domain in domains_with_courses:
@@ -260,7 +376,7 @@ def _build_parsing_tree(domains_with_courses: list, books: list) -> list:
         for course in domain.get("courses", []):
             course_id = course.get("course_id", "")
             course_key = f"{domain_id}:{course_id}"
-            course_books = books_by_course.get(course_key, [])
+            course_books = books_by_course.get(course_key) or books_by_course_only.get(course_id, [])
 
             course_node = {
                 "key": f"course:{course_key}",

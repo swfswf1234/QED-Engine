@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-14
+最后更新：2026-09-20
 确认状态：暂定
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
@@ -58,15 +58,27 @@
 │                                     # 使用，不参与自动清理）
 └── parsed/                           # 解析产物区（写入方 Axiom-Flow）
     └── <domain_id>/<course_id>/<book_id>/   # book_id 同源 qt_books（如 mathanalysis-b05）
+        └── versions/<job_id>/        # 按解析版本划分（约定见下）
 ```
+
+- **解析版本划分（2026-09-20 界面优化轮约定，实施方 Axiom-Flow，REQ-080）**：同一书目每次
+  解析 job 的产物按版本独立落盘，互不覆盖——
+  - 版本目录：`parsed/<domain>/<course>/<book_id>/versions/<job_id>/`，内含该版本完整产物
+    （页图 `pages/`、blocks、markdown、manifest.json）；job 完成校验通过后原子写入。
+  - **当前版视图**：`<book_id>/` 根目录即当前生效版本（读取方——8902 页/块/manifest 端点、
+    8900 代理、前端——只认根目录，路径与端点契约不变）；新版本生效时原子切换，`af_parse_jobs`
+    记录生效版本指向。
+  - 历史版本保留供对比与回滚；旧版本清理属 D 类数据操作（备份 + 用户确认），不自动删除。
+  - domain 为空时省略层级（现状 `parsed/linear_algebra/…` 即此形态），版本化规则不受影响。
 
 - **教程层的论文/相关资料类别由数据库表达**：教程（qt_knowledge）下的论文/延展资料是
   `qt_books` 行（kind=paper/blog/other）挂该 knowledge_id；界面按类别分组展示、无内容不显示
   该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB，
   ARCH-013 裁决；2026-08-23 ARCH-019 裁决收敛）。
 - **废弃目录**：早期「项目子域」方案目录 `dataset/axiom-flow/`、`dataset/qed-tracker/`
-  （含 `meta/` JSON 遗留）不再属于本布局；物理清理（备份后删除）由 ARCH-020-F（D 类数据操作）
-  执行，本文件只定义目标结构。
+  （含 `meta/` JSON 遗留）不再属于本布局；**已于 2026-09-20 物理清理**（ARCH-020-F，D 类
+  数据操作：备份至 `backups/2026-09-20-arch020f/` 并逐字节校验后删除，`.gitkeep` 骨架同批
+  git rm，用户当次裁决批准）。
 - `parsed/<domain>/<course>/<book_id>/` 内部产物格式（页图/Markdown/blocks.json/manifest）
   见 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
 
@@ -108,5 +120,6 @@
 - Axiom-Flow 产物落点：ARCH-020 重构（2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）
   定为 `<root>/parsed/<domain>/<course>/<book_id>/`；其仓库内 `data/` 为过渡期工作目录，
   迁移后退役（Axiom-Flow 侧文档承接）。
-- 遗留目录 `dataset/axiom-flow/`、`dataset/qed-tracker/` 与 `raw/math.rar`、`tmp/参考书籍/`
-  的物理清理属 ARCH-020-F（D 类数据操作，备份后执行）。
+- 遗留目录 `dataset/axiom-flow/`、`dataset/qed-tracker/` 已清理（2026-09-20，见上「废弃目录」）；
+  `raw/math.rar`、`tmp/参考书籍/`、`tmp/qed-tracker/downloads/` 残留 `.download` 经用户裁决
+  **保留不动**（参考书籍待用户自行整理），其后续处理不再属 ARCH-020-F 范围。

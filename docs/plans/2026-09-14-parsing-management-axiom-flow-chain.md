@@ -2,7 +2,7 @@
 
 状态：In Progress
 任务类型：A
-最后更新：2026-09-14
+最后更新：2026-09-20
 关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）
 关联设计：[dataset-conventions.md](../design/dataset-conventions.md)（数据根三区）、
 [local-model-management.md](../design/local-model-management.md)（模型生命周期与槽位）、
@@ -21,7 +21,9 @@ Axiom-Flow（解析管线）、本地模型服务（MinerU 等）三方的职责
 
 1. 三方职责边界无歧义：模型选择/预处理/后处理在 Axiom-Flow，模型运维在 8900；
 2. 全链路数据流闭环：同步 → ingest → 解析（逐页/全本）→ 对照 → 编辑；
-3. 解析产物格式（`parsed/` 布局 + 统一 blocks schema）与 `af_*` 四表 DDL 冻结；
+3. 解析产物格式（`parsed/` 布局 + 统一 blocks schema）与 `af_*` 四表 DDL 冻结——**af_* 四表
+   已达成**（2026-09-20：迁移 `20260917_0001` 本机 qed 库落地，与本节 DDL 逐列一致，REQ-027
+   关闭；产物布局版本划分约定另由 REQ-080 承接）；
 4. 8902 API 契约冻结（数据查询 / 解析结果与对照两组）；
 5. Axiom-Flow 不感知模型（引擎可配置）；8900 离线时 Axiom-Flow 仍可解析；
 6. 至少完成一个教程（Rudin）端到端解析并经用户确认。
@@ -40,7 +42,7 @@ ingest、解析编排、引擎适配、产物落盘、对照供给、编辑落�
 
 1. [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 已 Accepted；
 2. QED-Tracker 8901 提供 verified 书目（`qt_books`，`file_path` 为数据根相对路径）；
-3. MinerU 容器可用（`scripts/image-model/`，端口 8002）；
+3. MinerU 容器可用（`scripts/image-model/`，端口 5002）；
 4. `qed` 库为主库（`QED_DB_NAME=qed`）。
 
 ## 工作项（设计正文）
@@ -51,7 +53,7 @@ ingest、解析编排、引擎适配、产物落盘、对照供给、编辑落�
 | --- | --- |
 | 8900 后端 | ① 前端唯一入口（ADR 0007）：Axiom 数据域适配透传 8902；② 共享表读取（领域→课程，`GET /parsing/tree`）；③ **OCR 模型生命周期**：模型槽位、`/models/{name}` 启停、探针、资源互斥；④ 控制台依赖组件展示。`/llm/vision` 降级为控制台测试与通用视觉用途 |
 | 8902 Axiom-Flow | **完整解析管线**：af_books 同步/CRUD、ingest（PDF→页图）、解析编排（任务/页状态/重试/质量信号）、**引擎适配器**（直连模型服务）、后处理归一化、产物落盘（`parsed/`）、对照数据供给、人工编辑落库 |
-| 本地模型服务 | MinerU 容器 8002（现成）；PaddleOCR-VL 服务（预留）；云端 qwen-vl（api 档位） |
+| 本地模型服务 | MinerU 容器 5002（现成）；PaddleOCR-VL 服务（预留）；云端 qwen-vl（api 档位） |
 
 参考范式（RAGFlow `deepdoc`、Docling `DocumentConverter` + 统一文档模型、MinerU 自身）：
 **统一中间表示 + 可插拔引擎适配器 + 页级增量处理**。
@@ -99,7 +101,10 @@ sequenceDiagram
 
 - `source_file`：源 PDF 的数据根相对路径（同源 `qt_books.file_path`），源 PDF 只读不复制；
 - 页图渲染与产物落盘在 Axiom-Flow（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 决定 2）；
-- 目录结构遵循 [dataset-conventions.md](../design/dataset-conventions.md)（`parsed/` 区写入方 Axiom-Flow）。
+- 目录结构遵循 [dataset-conventions.md](../design/dataset-conventions.md)（`parsed/` 区写入方 Axiom-Flow）；
+- **解析版本划分（2026-09-20 用户裁决登记）**：每次解析 job 产物原子独立落
+  `<book_id>/versions/<job_id>/`，book_id 根目录保持「当前生效版本」视图（读取方与端点契约
+  不变），实施方 Axiom-Flow（REQ-080），约定正文见 [dataset-conventions.md](../design/dataset-conventions.md)。
 
 ### 4. 统一 blocks schema（页级）
 
@@ -128,6 +133,11 @@ sequenceDiagram
 - 人工编辑不入文件（文件为模型产物事实源），由 `af_block_edits` 覆盖层承载，API 返回时合并。
 
 ### 5. 数据库表（`qed` 库，`af_*` 命名空间，Axiom-Flow Alembic 建表维护）
+
+> **落地状态（2026-09-20）**：四表已随 Axiom-Flow 迁移 `20260917_0001_create_af_tables.py`
+> 在本机 qed 库 `alembic upgrade head` 建表（ARCH-020-C 收尾，E2E ingest 486 页实证），
+> 列/默认值/注释/PK/UNIQUE/索引与下方 DDL 一致；结构事实源为 Axiom-Flow
+> `docs/architecture/database-design.md`，根仓库总纲已转正（规划→已落地）。
 
 ```sql
 CREATE TABLE af_books (

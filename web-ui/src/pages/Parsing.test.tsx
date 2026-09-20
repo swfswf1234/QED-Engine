@@ -18,44 +18,25 @@ const DOMAIN_ID = 'test-domain';
 const DOMAIN_TITLE = '测试领域';
 const COURSE_A_ID = 'test-course-a';
 const COURSE_A_TITLE = '测试课程A';
-const COURSE_B_ID = 'test-course-b';
-const COURSE_B_TITLE = '测试课程B';
 
-/** 无课程归属的树（全部归入一个兜底域） */
-const treeUngroupedFixture = [
-  {
-    key: `domain:ungrouped`,
-    type: 'domain',
-    title: '未分课程',
-    domainId: 'ungrouped',
-    children: [
-      {
-        key: 'course:ungrouped:',
-        type: 'course',
-        title: '',
-        courseId: '',
-        domainId: 'ungrouped',
-        children: [
-          {
-            key: `book:${BOOK_A}`,
-            type: 'book',
-            title: TITLE_A,
-            book: { book_id: BOOK_A, title: TITLE_A, author: 'Author Alpha', page_count: 20, sha256: 'sha-a', strategy: 'local' },
-          },
-          {
-            key: `book:${BOOK_B}`,
-            type: 'book',
-            title: TITLE_B,
-            book: { book_id: BOOK_B, title: TITLE_B, author: 'Author Beta', page_count: 15, sha256: 'sha-b', strategy: 'hybrid' },
-          },
-        ],
-      },
-    ],
-  },
-];
+const bookA = (extra: Record<string, unknown> = {}) => ({
+  book_id: BOOK_A, title: TITLE_A, display_title: TITLE_A, author: 'Author Alpha',
+  page_count: 20, sha256: 'sha-a', strategy: 'local',
+  file_path: 'raw/test/alpha.pdf', ingest_status: 'ingested',
+  domain_id: DOMAIN_ID, course_id: COURSE_A_ID, course_name: COURSE_A_TITLE,
+  ...extra,
+});
 
-/** 有课程归属的树（领域→课程→书目） */
-const treeGroupedFixture = [
+const bookB = (extra: Record<string, unknown> = {}) => ({
+  book_id: BOOK_B, title: TITLE_B, display_title: TITLE_B, author: 'Author Beta',
+  page_count: 15, sha256: 'sha-b', strategy: 'hybrid',
+  file_path: 'raw/test/beta.pdf', ingest_status: 'none',
+  ...extra,
+});
+
+const booksFixture = [bookA(), bookB()];
+
+const treeFixture = [
   {
     key: `domain:${DOMAIN_ID}`,
     type: 'domain',
@@ -69,48 +50,9 @@ const treeGroupedFixture = [
         courseId: COURSE_A_ID,
         domainId: DOMAIN_ID,
         children: [
-          {
-            key: `book:${BOOK_A}`,
-            type: 'book',
-            title: TITLE_A,
-            book: { book_id: BOOK_A, title: TITLE_A, author: 'Author Alpha', page_count: 20, sha256: 'sha-a', strategy: 'local', domain_id: DOMAIN_ID, course_id: COURSE_A_ID, course_name: COURSE_A_TITLE },
-          },
+          { key: `book:${BOOK_A}`, type: 'book', title: TITLE_A, book: bookA() },
+          { key: `book:${BOOK_B}`, type: 'book', title: TITLE_B, book: bookB() },
         ],
-      },
-      {
-        key: `course:${DOMAIN_ID}:${COURSE_B_ID}`,
-        type: 'course',
-        title: COURSE_B_TITLE,
-        courseId: COURSE_B_ID,
-        domainId: DOMAIN_ID,
-        children: [
-          {
-            key: `book:${BOOK_B}`,
-            type: 'book',
-            title: TITLE_B,
-            book: { book_id: BOOK_B, title: TITLE_B, author: 'Author Beta', page_count: 15, sha256: 'sha-b', strategy: 'hybrid', domain_id: DOMAIN_ID, course_id: COURSE_B_ID, course_name: COURSE_B_TITLE },
-          },
-        ],
-      },
-    ],
-  },
-];
-
-/** 8902 离线降级树（领域→课程存在，书目为空） */
-const treeDegradedFixture = [
-  {
-    key: `domain:${DOMAIN_ID}`,
-    type: 'domain',
-    title: DOMAIN_TITLE,
-    domainId: DOMAIN_ID,
-    children: [
-      {
-        key: `course:${DOMAIN_ID}:${COURSE_A_ID}`,
-        type: 'course',
-        title: COURSE_A_TITLE,
-        courseId: COURSE_A_ID,
-        domainId: DOMAIN_ID,
-        children: [],
       },
     ],
   },
@@ -124,216 +66,248 @@ const pageFixture = {
     page: 1,
     source: 'mock-source',
     blocks: [
-      { type: 'heading', bbox: [0, 0, 0, 0], level: 1, text: 'Test Heading' },
-      { type: 'paragraph', bbox: [0, 0, 0, 0], text: 'Test paragraph content.' },
-      { type: 'formula', bbox: [0, 0, 0, 0], latex: 'x^2+y^2=1' },
+      { type: 'heading', bbox: [50, 40, 744, 80], level: 1, text: 'Test Heading' },
+      { type: 'paragraph', bbox: [50, 100, 744, 200], text: 'Test paragraph content.' },
+      { type: 'formula', bbox: [150, 220, 640, 280], latex: 'x^2+y^2=1' },
     ],
   },
 };
 
-// ── 工具函数 ─────────────────────────────────────────────────────────
+/** store 复位到初始态（单屏：左树 + 右对照） */
+const resetStore = () =>
+  useParsingStore.setState({
+    books: [], booksLoading: false,
+    tree: [], treeLoading: false, treeError: null,
+    error: null, dataError: null,
+    syncing: false, syncMessage: null, syncError: null,
+    compareBookId: null, compareBook: null, comparePageNo: 1,
+    pages: {}, selectedBlock: -1, editMode: false,
+    scrollMode: 'single', renderMode: 'stream', syncScroll: true,
+    zoom: 100,
+    activeJob: null, jobError: null, ingestBusy: {},
+    edits: {}, editSubmitting: false,
+  });
 
-function mockApi(routes: Array<{ method?: string; match: string; body: unknown }>) {
+/** 基础路由：books 列表 + 树 + A 书第 1 页 */
+function mockBase() {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
-    const hit = routes.find((r) => (r.method ?? 'GET') === method && url.includes(r.match));
-    if (!hit) return Promise.reject(new TypeError(`no route: ${method} ${url}`));
-    return Promise.resolve(
-      new Response(JSON.stringify(hit.body), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    );
+    if (method === 'GET' && url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+    if (method === 'GET' && url.includes(`/books/${BOOK_A}/pages/1/edits`)) return Promise.resolve(json([]));
+    if (method === 'GET' && url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+    if (method === 'GET' && new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+    if (method === 'GET' && /\/books(\?|$)/.test(url)) return Promise.resolve(json(booksFixture));
+    return Promise.reject(new TypeError(`no route: ${method} ${url}`));
   });
 }
 
-/** 等待 store 中 tree 加载完成（不依赖 DOM 渲染） */
-async function waitForTreeLoaded() {
-  await waitFor(() => {
-    expect(useParsingStore.getState().tree.length).toBeGreaterThan(0);
-  });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+function renderP() {
+  return render(
+    <MemoryRouter>
+      <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
+    </MemoryRouter>,
+  );
 }
 
 // ── 测试 ─────────────────────────────────────────────────────────────
 
-describe('文档解析管理 Parsing（#/admin/parsing）', () => {
+describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照）', () => {
   beforeEach(() => {
-    useParsingStore.setState({
-      tree: [], treeLoading: false, treeError: null,
-      books: [], loading: false, error: null, dataError: null,
-      syncing: false, syncMessage: null, syncError: null, lastSyncedAt: null,
-      compareBookId: null, comparePageNo: null, pageData: null, pageLoading: false, pageError: null, manifest: [],
-      blockReviews: {}, reviewSubmitting: false,
-    });
+    resetStore();
+    sessionStorage.clear();
   });
 
-  it('进入加载树 → store 有树 + 书目 + 左树领域名渲染', async () => {
-    mockApi([
-      { match: '/parsing/tree', body: treeUngroupedFixture },
-      { match: `/books/${BOOK_A}/pages/1`, body: pageFixture },
-      { match: `/books/${BOOK_B}/pages/1`, body: pageFixture },
-    ]);
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    await waitForTreeLoaded();
-    // store 验证：树和书目均正确加载
-    const state = useParsingStore.getState();
-    expect(state.tree).toHaveLength(1);
-    expect(state.books).toHaveLength(2);
-    expect(state.books[0].book_id).toBe(BOOK_A);
-    expect(state.books[1].book_id).toBe(BOOK_B);
-    // DOM 验证：左树领域名渲染
-    expect(screen.getByText('未分课程')).toBeInTheDocument();
-  });
-
-  it('课程字段就绪 → store 中树结构为领域→课程→书目', async () => {
-    mockApi([
-      { match: '/parsing/tree', body: treeGroupedFixture },
-      { match: `/books/${BOOK_A}/pages/1`, body: pageFixture },
-      { match: `/books/${BOOK_B}/pages/1`, body: pageFixture },
-    ]);
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    await waitForTreeLoaded();
-    // store 验证：树结构为 1 个领域 → 2 个课程 → 各 1 本书
-    const state = useParsingStore.getState();
-    expect(state.tree).toHaveLength(1);
-    expect(state.tree[0].children).toHaveLength(2);
-    expect(state.tree[0].children![0].children).toHaveLength(1);
-    expect(state.tree[0].children![1].children).toHaveLength(1);
-    expect(state.tree[0].children![0].children![0].book?.book_id).toBe(BOOK_A);
-    expect(state.tree[0].children![1].children![0].book?.book_id).toBe(BOOK_B);
-    // DOM 验证：领域名和课程名渲染
-    expect(screen.getByText(DOMAIN_TITLE)).toBeInTheDocument();
+  it('落地单屏：左树渲染领域/课程/书目 + 右侧空态引导，无列表/筛选/引擎选择', async () => {
+    mockBase();
+    renderP();
+    expect(await screen.findByText('文档解析管理')).toBeInTheDocument();
+    // 左树：领域 → 课程（默认展开）→ 书目
+    expect(await screen.findByText(DOMAIN_TITLE)).toBeInTheDocument();
     expect(screen.getByText(COURSE_A_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(COURSE_B_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(TITLE_A)).toBeInTheDocument();
+    expect(screen.getByText(TITLE_B)).toBeInTheDocument();
+    // 右侧未选中：引导空态
+    expect(screen.getByText('从左侧书目树选择一本书，开始原文与解析文档对照')).toBeInTheDocument();
+    // G 轮裁决：无列表态/筛选行/引擎下拉/返回按钮
+    expect(screen.queryByRole('button', { name: '进入对照' })).toBeNull();
+    expect(screen.queryByLabelText('书名关键词')).toBeNull();
+    expect(screen.queryByLabelText('解析引擎')).toBeNull();
+    expect(screen.queryByText('返回列表')).toBeNull();
+    // BUGFIX-007：单一「刷新」（含同步书目），不再单列「同步书目」按钮
+    expect(screen.queryByRole('button', { name: /同步书目/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /刷\s*新/ })).toBeInTheDocument();
   });
 
-  it('8902 离线 → /parsing/tree 优雅降级：领域课程存在 + 书目为空', async () => {
-    // 后端 /parsing/tree 在 8902 离线时仍返回 200（领域→课程+空书目），不触发 dataError
-    mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/parsing/tree')) {
-        return Promise.resolve(new Response(JSON.stringify(treeDegradedFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      return Promise.resolve(new Response(JSON.stringify({ detail: 'service unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
-    });
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    await waitForTreeLoaded();
-    // store 验证：领域→课程结构存在，书目为空
-    const state = useParsingStore.getState();
-    expect(state.tree).toHaveLength(1);
-    expect(state.tree[0].children).toHaveLength(1);
-    expect(state.tree[0].children![0].children).toHaveLength(0);
-    expect(state.books).toHaveLength(0);
-    // DOM 验证：领域名和课程名渲染（树因 tree 非空而渲染）
-    expect(screen.getByText(DOMAIN_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(COURSE_A_TITLE)).toBeInTheDocument();
-    // 无整体错误（/parsing/tree 返回 200，error 和 dataError 均为 null）
-    expect(state.error).toBeNull();
-    expect(state.dataError).toBeNull();
-  });
-
-  it('对照：自动选中第一本 + 加载第 1 页（原页图 + 块级渲染）', async () => {
-    mockApi([
-      { match: '/parsing/tree', body: treeUngroupedFixture },
-      { match: `/books/${BOOK_A}/pages/1`, body: pageFixture },
-      { match: `/books/${BOOK_B}/pages/1`, body: pageFixture },
-    ]);
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    // 自动选中第一本书
-    await waitFor(() => {
-      expect(useParsingStore.getState().compareBookId).toBe(BOOK_A);
-    });
-    // 右侧对照：原页图 + 3 个块（BlockView 渲染，非 Ant Tree）
+  it('点击树书目 → 右栏对照呈现原页图 + 解析块', async () => {
+    mockBase();
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
     expect(await screen.findByAltText('第 1 页原图')).toBeInTheDocument();
     expect(await screen.findByText('#1 · 标题')).toBeInTheDocument();
     expect(screen.getByText('#2 · 段落')).toBeInTheDocument();
     expect(screen.getByText('#3 · 公式')).toBeInTheDocument();
+    expect(screen.queryByText('返回列表')).toBeNull();
+    expect(useParsingStore.getState().compareBookId).toBe(BOOK_A);
   });
 
-  it('块判定：点击块 → 弹层 → 点「不一致」→ PUT review 落库', async () => {
-    let putCalled = false;
+  it('已 ingest 未解析（页数据 404）→ 原页图占满 + 解析栏空态引导', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.match(/\/pages\/1(\?|$)/)) return Promise.resolve(json({ detail: '页产物不存在' }, 404));
+      if (url.includes(`/books/${BOOK_A}`)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: GET ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
+    expect(await screen.findByAltText('第 1 页原图')).toBeInTheDocument();
+    // §8 态分流 2：未解析 → 解析栏整体隐藏（误导性空态不呈现）
+    expect(screen.queryByText('解析结果')).toBeNull();
+    expect(screen.queryByText('该页暂无解析块（可用顶栏「解析本页」）')).toBeNull();
+    // 未解析不算错误
+    await waitFor(() => {
+      expect(useParsingStore.getState().pages[1]?.parsed).toBe(false);
+    });
+    expect(useParsingStore.getState().pages[1]?.error).toBeNull();
+  });
+
+  it('未入库有 file_path → iframe 直显源 PDF + 入库引导', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.match(/\/pages\/1\/edits/)) return Promise.resolve(json([]));
+      if (url.match(/\/pages\/1(\?|$)/)) return Promise.resolve(json({ detail: '页产物不存在' }, 404));
+      if (new RegExp(`/books/${BOOK_B}(\\?|$)`).test(url)) return Promise.resolve(json(bookB()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: GET ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_B);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_B));
+    const frame = (await screen.findByTitle('原始 PDF')) as HTMLIFrameElement;
+    expect(frame.src).toContain(`/books/${BOOK_B}/file`);
+    expect(screen.getByText('尚未书页入库，直显原始 PDF（入库后才能逐页对照）')).toBeInTheDocument();
+  });
+
+  it('8902 离线（/books 503）→ 黄色降级横幅 + 树仍显示领域课程', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/books')) {
+        return Promise.resolve(new Response(JSON.stringify({ detail: 'service unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return Promise.reject(new TypeError(`no route: GET ${url}`));
+    });
+    renderP();
+    expect(await screen.findByText('Axiom-Flow 数据不可达')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(useParsingStore.getState().dataError).not.toBeNull();
+      expect(useParsingStore.getState().error).toBeNull();
+    });
+    expect(screen.getByText(DOMAIN_TITLE)).toBeInTheDocument();
+  });
+
+  it('块编辑：开编辑模式 → 点块 → 弹层 → 「不一致」PUT /edit 落库回显', async () => {
+    let putUrl = '';
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       const method = (init?.method ?? 'GET').toUpperCase();
-      if (method === 'PUT' && url.includes('/blocks/1/review')) {
-        putCalled = true;
-        return Promise.resolve(new Response(JSON.stringify({ review_id: 'r1', book_id: BOOK_A, page_no: 1, block_index: 1, block_type: 'paragraph', verdict: 'bad', note: '' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      if (method === 'PUT' && url.includes('/blocks/1/edit')) {
+        putUrl = url;
+        return Promise.resolve(json({
+          edit_id: 'e1', book_id: BOOK_A, page_no: 1, block_index: 1,
+          block_type: 'paragraph', verdict: 'bad', note: '', corrected_text: null, corrected_bbox: null,
+        }));
       }
-      if (url.includes('/parsing/tree')) {
-        return Promise.resolve(new Response(JSON.stringify(treeUngroupedFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      if (url.includes(`/books/${BOOK_A}/pages/1`)) {
-        return Promise.resolve(new Response(JSON.stringify(pageFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      if (url.includes(`/books/${BOOK_B}/pages/1`)) {
-        return Promise.resolve(new Response(JSON.stringify(pageFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+      if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
       return Promise.reject(new TypeError(`no route: ${method} ${url}`));
     });
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    // 等待块渲染（BlockView，非 Ant Tree）
-    await screen.findByText('#2 · 段落');
+    renderP();
+    await screen.findByText(TITLE_A);
     const user = userEvent.setup();
-    // 点击第 2 块（段落）→ 打开 Popover
+    await user.click(screen.getByText(TITLE_A));
+    await screen.findByText('#2 · 段落');
+    // 开编辑模式（Switch 用 aria-label 定位）
+    await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
     await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
-    // 点击「不一致」按钮
     await user.click(await screen.findByRole('button', { name: /不一致/ }));
-    // PUT 已调用
+    await waitFor(() => expect(putUrl).not.toBe(''));
+    expect(putUrl).toContain(`/books/${BOOK_A}/pages/1/blocks/1/edit`);
     await waitFor(() => {
-      expect(putCalled).toBe(true);
+      expect(useParsingStore.getState().edits[`${BOOK_A}:1:1`]?.verdict).toBe('bad');
     });
-    // store 中判定已回显
-    expect(useParsingStore.getState().blockReviews[`${BOOK_A}:1:1`]?.verdict).toBe('bad');
-    // DOM 中块上 Tag 回显
     expect((await screen.findAllByText('不一致')).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('8900 不可达（offline）→ 整体错误横幅', async () => {
-    mockFetch.mockRejectedValue(new TypeError('fetch failed'));
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    expect(await screen.findByText('解析数据获取失败')).toBeInTheDocument();
+  it('版式模式同样可弹编辑层（回归：layout 分支曾缺 Popover）', async () => {
+    let putUrl = '';
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'PUT' && url.includes('/blocks/1/edit')) {
+        putUrl = url;
+        return Promise.resolve(json({
+          edit_id: 'e1', book_id: BOOK_A, page_no: 1, block_index: 1,
+          block_type: 'paragraph', verdict: 'bad', note: '', corrected_text: null, corrected_bbox: null,
+        }));
+      }
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+      if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: ${method} ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
+    await screen.findByText('Test paragraph content.');
+    await user.click(screen.getByText('版式'));
+    await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
+    await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
+    await user.click(await screen.findByRole('button', { name: /不一致/ }));
+    await waitFor(() => expect(putUrl).not.toBe(''));
   });
 
-  it('默认展开：第一个领域 + 其下所有课程 + 书目可见', async () => {
-    mockApi([
-      { match: '/parsing/tree', body: treeGroupedFixture },
-      { match: `/books/${BOOK_A}/pages/1`, body: pageFixture },
-      { match: `/books/${BOOK_B}/pages/1`, body: pageFixture },
-    ]);
-    render(
-      <MemoryRouter>
-        <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
-      </MemoryRouter>,
-    );
-    await waitForTreeLoaded();
-    // DOM 验证：第一个领域展开（展开态 class）
-    const domainNode = document.querySelector('.dl-tree-domain');
-    expect(domainNode).not.toBeNull();
-    expect(domainNode!.classList.contains('expanded')).toBe(true);
-    // DOM 验证：课程名可见（说明课程也展开了）
-    expect(screen.getByText(COURSE_A_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(COURSE_B_TITLE)).toBeInTheDocument();
-    // DOM 验证：书名可见（说明课程树也展开了；书名同时出现在左树和右侧对照标题，用 getAllByText）
-    expect(screen.getAllByText(TITLE_A).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(TITLE_B).length).toBeGreaterThanOrEqual(1);
+  it('「解析本页」→ POST /parse-jobs pages:[n] + 轮询进度', async () => {
+    let posted: { pages?: number[] } | null = null;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'POST' && url.includes('/parse-jobs')) {
+        posted = JSON.parse(String(init?.body));
+        return Promise.resolve(json({ id: 'j1', book_id: BOOK_A, status: 'running', progress: { parsed: 0, total: 1 } }));
+      }
+      if (method === 'GET' && url.includes('/parse-jobs/j1')) {
+        return Promise.resolve(json({ id: 'j1', book_id: BOOK_A, status: 'completed', progress: { parsed: 1, total: 1 } }));
+      }
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+      if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: ${method} ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
+    await screen.findByText('#2 · 段落');
+    await user.click(screen.getByText('解析本页'));
+    await waitFor(() => expect(posted).not.toBeNull());
+    expect(posted!.pages).toEqual([1]);
+    await waitFor(() => {
+      expect(useParsingStore.getState().activeJob?.status).toBe('completed');
+    });
   });
+
 });
