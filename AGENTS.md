@@ -115,6 +115,7 @@ QED-Engine/            # 本仓库（git：QED-Engine）
   - 通用保留：`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`dispatching-parallel-agents`、`requesting-code-review`、`receiving-code-review`。
   - 已停用：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`using-superpowers`、`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
 - **工具链**：默认开发 agent 提示与技能在全局 `~/.config/opencode/`（见其 `README.md`）；技能只做薄触发与指路，正文以本仓库 docs 为准。
+- **Qoder 侧工具层**：技能在项目 `.qoder/skills/`（与 opencode 同源移植 + Qoder 适配，另含 `qed-frontend-check` 浏览器验证技能）；权限边界在 `.qoder/settings.json`（复刻只读放行 / git 写与 rm·mv 询问 / `dataset/**` 写入拦截）；GitHub MCP 配在 user 全局 `~/.qoder/settings.json`（OAuth，密钥不落盘）。正文仍以本仓库 docs 为准。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
 - **跨项目协作**：规则见[跨项目协作规范](docs/standards/cross-project-collaboration.md)。
   核心要点：① 根仓库 agent 在子项目工作区只读+写文档，不得产生代码改动；② 子项目 git
