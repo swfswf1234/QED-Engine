@@ -8,6 +8,20 @@ import { CaretRightFilled } from '@ant-design/icons';
 import { useParsingStore, type ParsingTreeNode } from '../../stores/parsing';
 import '../../downloads.css';
 
+/**
+ * 解析管理书目展示名（口径同 Downloads bookDisplayName）：
+ * display_title 非空则直接用（其契约= title + part）；否则 title + part 空格连接，
+ * 保证「微积分学教程 Vol.1/2/3」等同名多卷在左树/顶栏可区分。
+ */
+export function parsingBookLabel(book?: {
+  display_title?: string; title?: string; part?: string; book_id?: string;
+}): string {
+  return book?.display_title
+    || [book?.title, book?.part].filter(Boolean).join(' ')
+    || book?.book_id
+    || '';
+}
+
 /** 默认展开第一个领域及其全部课程 */
 function useDefaultExpansion(tree: ParsingTreeNode[]) {
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
@@ -98,7 +112,7 @@ export default function BookTree() {
                                 >
                                   <span className="dl-tree-caret dl-tree-caret-disabled" />
                                   <span className="dl-tree-name">
-                                    {bookNode.book?.display_title || bookNode.book?.title || bookNode.book?.book_id || bookNode.title}
+                                    {parsingBookLabel(bookNode.book) || bookNode.title}
                                   </span>
                                 </div>
                               ))}

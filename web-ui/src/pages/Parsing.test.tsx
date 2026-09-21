@@ -141,6 +141,25 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     expect(screen.getByRole('button', { name: /刷\s*新/ })).toBeInTheDocument();
   });
 
+  it('同名多卷：display_title 为空时左树按 title + part 拼接区分卷标识', async () => {
+    const volTitle = '微积分学教程';
+    const mk = (id: string, part: string) => ({
+      key: `book:${id}`, type: 'book', title: volTitle,
+      book: bookA({ book_id: id, display_title: '', title: volTitle, part }),
+    });
+    const tree = [{
+      ...treeFixture[0],
+      children: [{ ...treeFixture[0].children![0], children: [mk('vol-1', 'Vol.1'), mk('vol-2', 'Vol.2')] }],
+    }];
+    mockFetch.mockImplementation((url: string) =>
+      url.includes('/parsing/tree')
+        ? Promise.resolve(json(tree))
+        : Promise.reject(new TypeError(`no route: ${url}`)));
+    renderP();
+    expect(await screen.findByText('微积分学教程 Vol.1')).toBeInTheDocument();
+    expect(screen.getByText('微积分学教程 Vol.2')).toBeInTheDocument();
+  });
+
   it('点击树书目 → 右栏对照呈现原页图 + 解析块', async () => {
     mockBase();
     renderP();

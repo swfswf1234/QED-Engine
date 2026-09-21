@@ -11,6 +11,7 @@ import { Button, InputNumber, Progress, Segmented, Slider, Space, Switch, Tag, T
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { editKey, useParsingStore } from '../../stores/parsing';
 import type { BookMeta } from '../../api/axiom';
+import { parsingBookLabel } from './BookTree';
 
 const { Text } = Typography;
 
@@ -59,7 +60,7 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
       <Space wrap size={8}>
-        <Text strong style={{ fontSize: 15 }}>{book.display_title || book.title || book.book_id}</Text>
+        <Text strong style={{ fontSize: 15 }}>{parsingBookLabel(book) || book.book_id}</Text>
         <Space size={4}>
           <Button size="small" icon={<LeftOutlined />} aria-label="上一页" disabled={pageNo <= 1} onClick={() => gotoPage(-1)} />
           <InputNumber
