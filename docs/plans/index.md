@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-21
+最后更新：2026-09-22
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -25,6 +25,7 @@
 
 ### ARCH-020 解析联调轮（2026-09-14）
 - PLAN-044（文档解析管理·与 Axiom-Flow 交互全链路），状态见任务台账
+- [b05 全本解析止血与根治轮（b05-fullbook-remediation）](2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048，In Progress，挂 ARCH-020-E），状态见任务台账
 
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent

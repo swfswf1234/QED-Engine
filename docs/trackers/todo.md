@@ -1,7 +1,7 @@
 ﻿# 任务台账
 
 状态：Current
-最后更新：2026-09-21
+最后更新：2026-09-22
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -12,39 +12,22 @@
 
 推进顺序：准备（前端设计定稿已完成，晋升 design/parsing-ui.md；MinerU 模型已部署）→ 实现（ARCH-020-B/C/D）→ 验收（ARCH-020-E）→ 数据操作（ARCH-020-F）。
 **2026-09-20 主线收口（Partial，用户裁决）**：实现面 B/C/D 与四轮界面迭代（UI/WB/G）全部
-关闭归档；本区仅存续项独立跟踪——E（Rudin 端到端验收，阻塞于 REQ-075/080/081 回执）、
+关闭归档；本区仅存续项独立跟踪——E（Rudin 端到端验收；**2026-09-21 Axiom-Flow 回执批次已全部消化**：REQ-075/080/081/083 关闭见 completed.md，E 当前仅剩 b05 全本重跑成功 + 用户确认解析效果）、
 F（axiom/xqfm 库删除剩余）、PLAN-044（剩余端点与联调承载）。
 
 #### 准备（第一步）
 
 | ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- |
-| PLAN-044 | 支线 | 高 | In Progress | [文档解析管理·与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md) | 8902 契约冻结 + 端到端验收；定稿后与 design/parsing-ui.md 合并评估归属（parsing-flow 位） |
-
-#### 实现
-
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
-| --- | --- | --- | --- | --- | --- |
-| REQ-080 | 支线 | 高 | 待开始 | **请求：Axiom-Flow**——解析产物按版本划分实施：每次解析 job 产物原子独立落 `parsed/<domain>/<course>/<book_id>/versions/<job_id>/`（页图/blocks/markdown/manifest 全套），book_id 根目录保持「当前生效版本」视图（读取方与端点契约不变），`af_parse_jobs` 记录生效版本指向；约定正文见 [dataset 目录约定](../design/dataset-conventions.md) | 2026-09-20 用户裁决登记（现状为重复解析覆盖落盘，无版本留痕）；**2026-09-21 根仓库侧实测准备完成**：`qed_test` 已全量镜像 `qed` 13 表（逐表行数核验全等；旧库备份 `backend/database/backups/qed_test-premirror-20260921-105718.sql`）、`dataset/parsed/` 4 本旧代际产物全清（约 1.7GB，raw 与 backups 不动）；对方确认约定并实施回执后关闭 |
-| REQ-081 | 支线 | 高 | 待开始 | **请求：Axiom-Flow**——MinerU 解析块 bbox 坐标失真（前端对照框与原页文字不对齐）：`GET /books/linearalgebra-b01/pages/7` 实测 `image_size=[1241,1755]`（与 PNG 实际像素一致，展示侧 1:1 换算无缩放），但 7 块中：全部段落块 `x1` 恒等于 1241（图像右边缘精确值）、块 4/5/6 `y1` 恒等于 1755（底边），块 4 高仅 3px（长段落）、页码块 1×1、块 0「序」为贴右缘 1px 细条——典型「坐标越界后被夹取」特征，缺陷在解析落库前的坐标换算/来源空间判定环节（嫌疑路径：`src/axiom_flow/normalize/blocks.py:56-70` `scale_bbox` 夹取、`src/axiom_flow/engines/mineru.py:114-123,165` `page_size` 提取与按页配对、`orchestrator/pipeline.py:85` 几何基准）；请贵方对 b01 p7 复现并判定 content_list bbox 实际坐标空间 vs `pdf_info.page_size` 是否错配 | 2026-09-20 用户浏览器对照发现选框不齐，根仓库按「诊断三必查」取证：①页数据 JSON 实测（上述值）；②PNG IHDR 实测 1241×1755 与声明一致；③前端 PageImagePane 仅按自然尺寸百分比定位、无二次缩放。b01 当前仅 2 页产物（p7 实证、其余页 pending），样本有限，请对方补全诊断；对方修复回执后根仓库以 §13 验收复测；**2026-09-21 根仓库侧实测准备完成**：`qed_test` 13 表全量镜像 + `dataset/parsed/` 旧代际产物全清（与 REQ-080 同批，见其证据列），§13 复测待对方重解析新版本数据 |
-| REQ-083 | 支线 | 高 | 待开始 | **请求：Axiom-Flow**——`POST /books/sync` 的 `BookSyncItem.file_path` 白名单正则 `RELATIVE_PATH_PATTERN`（`src/axiom_flow/schemas.py:33,317`，字符类 `\w . - _`）不吃**全角标点**：`（）：` 为 Unicode Ps/Pe/Po 非词字符，中文文件名（个人图书馆常态）含全角标点即 422，且 body 列表校验全有或全无导致**整批书目同步失败**（单条违规殃及全量）。请放宽段字符类为「排除危险字符」式（保持防遍历：`/` `\` 前导 `.` `..` 与半角盘符 `:` 仍拒——全角 `：` 与半角 `:` 不同字符，放宽不引入盘符风险），并补「全角标点路径 422 不触发」契约测试 | 2026-09-21 书目同步 422 实录：`body[5]/body[16]` 两本（mathanalysis-b17 含 `（）`、probability-b03 含 `：`）整批失败，af_books 停 4/17；根仓库已走改名止血（全角→`_`/`-`，qt_books 两库同步更新 + 复通实测 synced 13/updated 4、af_books 17=verified 17 全等），止血属数据侧妥协，**对方放宽回执后关闭** |
+| PLAN-044 | 支线 | 高 | In Progress | [文档解析管理·与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md) | 8902 契约冻结 + 端到端验收；定稿后与 design/parsing-ui.md 合并评估归属（parsing-flow 位）；**2026-09-21 对方 REQ-001 复核材料读取登记（锚点 `95e1d37`）**：8902 af_* 新契约 + 版本布局回执已由本轮联调承接（生效指针/versions 语义/端点契约零变化见 REQ-080 行与 [api-contracts.md](../architecture/api-contracts.md)），对方关闭等用户转达 |
 
 #### 验收与数据
 
 | ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-020-E | 支线 | 高 | 待开始 | 联调验收：Rudin 教程（mathanalysis-b05 + b11）端到端解析 | 用户确认解析效果；**前置阻塞**：REQ-075（8902 解析产物缺失，页数据/块判定 E2E 暂无法跑通；2026-09-20 已验证 202 受理/id/progress 对象/终态 failed 语义与 4xx 透传正常）；同轮承载解析 UI 暂缓增强（bbox 拖拽缩放手柄、失败页重解析按钮、任务中心抽屉、页内搜索、质量信号展示——待 8902 页级失败清单与 running jobs 数据源确认后排期） |
+| ARCH-020-E | 支线 | 高 | 进行中 | 联调验收：Rudin 教程（mathanalysis-b05 + b11）端到端解析 | 用户确认解析效果；**前置更新 2026-09-21**：REQ-075 已关闭（对方 `/tasks` 对齐回执 + 本仓库 b05 两页样本解析实测 completed，约 2.7 分钟、blocks/quality 健康，见 completed.md）；**09-21 全本失败归因收口（修正早前「提交/受理阶段未收到任务」的判断）**：根因 = **全本（pages:null）走整本单任务而单次调用 deadline 固定 `AXIOM_OCR_TIMEOUT=600s`**（`engines/mineru.py _run`、`orchestrator/pipeline.py:390`），b05 实测 hybrid 后端第 1 窗口（64 页）即超 10 分钟 ⇒ 凡 >~60 页全本必 failed（早前两次失败其一撞容器重启、其一撞超时墙，殊途同归）；页区间任务逐页原子（每页各 600s + 重试 1 次 + 页级失败不杀 job + 续跑），不受影响；**方案 A 止血已执行（用户裁决 A+B）**：b05 以 `pages:[1..317]` 逐页路径重跑（job `7af72c68180e`，实测 18 页/3 分钟 ≈ 6 页/分、进度实时、预计约 1 小时），根治项转 REQ-086；REQ-080/081 已同日关闭（见 completed.md）；b11 经用户裁决本轮不含；同轮承载解析 UI 暂缓增强（bbox 拖拽缩放手柄、失败页重解析按钮、任务中心抽屉、页内搜索、质量信号展示——待 8902 页级失败清单与 running jobs 数据源确认后排期；**承载 [PLAN-048](../plans/2026-09-21-arch020e-b05-fullbook-remediation.md)**（09-22 建壳：W2 止血已完成 312/317、W3 补跑续传待执行） |
+| REQ-086 | 支线 | 高 | 进行中 | **请求：Axiom-Flow**——全本解析按窗口分块提交 + 超时按块计（根治「整本单任务 × 600s 墙」）：现状 `pages:null` 全本走 `parse_document` 整本一次 `POST /tasks`，提交→轮询→取结果共用单一 `AXIOM_OCR_TIMEOUT`（`engines/mineru.py:318-323`、`pipeline.py:389-390`），而 MinerU 侧本就按 `processing_window_size=64` 分批推理 ⇒ 317 页书第 1 窗口即超 600s，全本必失败且**进度恒为 0、容器抖动整本归零**；请改为：① 全本 job 内部按页窗口（建议 50~64 页/次，带 `start_page_id/end_page_id`）分块串行提交，每块完成即写页产物 + 刷 `progress.parsed`（复用现有 `_handle`/续跑机制，页语义与激活门槛不变）；② deadline 按块计（每块独立 `ocr_timeout`），抖动/单块失败只损失该块，配合既有页级重试与 `_resumed_pages` 实现断点续跑；③ 契约测试补「全本 job 进度单调递增、单块失败不置整本 failed（有重试）」两条 | 2026-09-21 用户裁决登记（A 止血 + B 根治同轮）；取证：`_failed_0a543bc67ae7` 版本目录 + 容器日志（15:00:50 窗口 1/5 起跑、15:10:43 job `MinerU 解析超时（>600s）`）；对照实况 = 逐页路径 `7af72c68180e` 6 页/分正常推进；**下一条件**：对方回执（实施或替代方案）⇒ 根仓库以 b05/b11 全本复测关闭 |
 | ARCH-020-F | 支线 | 中 | 进行中 | 数据操作（D 类）：qed 统一 + axiom/xqfm 库删除 + dataset 物理清理（axiom-flow/qed-tracker/math.rar/参考书籍） | 备份 + 演练 + 用户确认；**2026-09-20 dataset 清理已执行（用户裁决范围＝仅退役目录+meta 死数据）**：`dataset/axiom-flow/`、`dataset/qed-tracker/`（meta 11 JSON+marker）备份至 `dataset/backups/2026-09-20-arch020f/` 逐字节校验后删除，两 `.gitkeep` git rm 暂存（未提交）；math.rar（666MB）、tmp/参考书籍（1.2GB，用户自整理）、tmp 残留 `.download` 均保留不动；**剩余**：axiom/xqfm 库删除与 qed 统一待后续；**2026-09-20 移交登记**：QED-Tracker `config.py` `state_dir`（指向 `qed-tracker/meta/`）全仓库零消费者属死代码，请其随清理轮删除（Grep 证据见 [展示优化轮计划](../history/plans/2026-09/2026-09-20-parsing-display-round.md) W4） |
-| REQ-057 | 支线 | 中 | 进行中 | **请求：QED-Tracker / Axiom-Flow**——ADR 0011 规则同步回执（2026-08-23 用户指令同步，根仓库 agent 直接执行文档改动）：QED-Tracker 已完成（已建 `docs/adr/0003-pending-design-location.md` + adr/index 登记 + documentation.md design/plans 两行修订 + tests/test_documentation.py 白名单补 1 行，验证通过）；Axiom-Flow 已建文档但未审阅（已建 `docs/adr/0002-pending-design-location.md` + adr/index + documentation.md 两行修订，验证通过但未审阅） | Axiom-Flow 需完成文档审阅后回执关闭 |
-| REQ-036 | 支线 | 高 | 待开始 | v2 服务建设与 V2-003 移交审阅（请求：Axiom-Flow，C 组联调前置）：① V2-003 ingest 代码已由根仓库侧误建在对方工作区（未提交，81 passed + ruff clean，含单元测试与文档同步）——请审阅后自行提交或调整；② V2-004/005/007（orchestrator / MinerU 接入 / API v1）按对方 todo 推进，8902 API 服务建立后回执根仓库（C 组第一阶段联调与 REQ-034 前置解除） | 2026-08-16 登记（亡羊补牢：误产生的代码改动登记移交，对方审阅后自行提交；V2 联调前置已在对方 todo 标注）；**对方承接回执后关闭** |
-
-### 模型注册表与三接口统一轮（ARCH-023，2026-09-21 主线关闭，Achieved）
-
-#### 存续连带项（证据见 [completed.md](completed.md) 与 history/plans/2026-09/ 计划壳）
-
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
-| --- | --- | --- | --- | --- | --- |
-| REQ-075 | 支线 | 高 | 进行中 | **请求：Axiom-Flow**——MinerU 直连配置同步（根仓库 2026-09-16 变更：端口 8002→5002、变量 `QED_MINERU_URL`→`QED_OCR_MODEL_URL`）：引擎适配器改读新键与新端口（其 `AXIOM_MINERU_URL` 兜底映射同步），并更新其 operations/development/model-integration 文档与 smoke 脚本；**2026-09-20 联调扩充**：其 `engines/mineru.py` 轮询 `GET /get_task_results/{task_id}` 在 MinerU 3.4.4 容器 404（该版本仅提供 `/file_parse`、`/tasks`、`/tasks/{task_id}`、`/tasks/{task_id}/result`、`/health`），需按新版异步 API 对齐端点路径 | 根 .env **不保留旧键别名**；其对齐前 Axiom-Flow 解析直连失效（风险已声明）；**2026-09-20 E2E 实证**：5002 /health 正常、任务受理 queued→running→failed（error=「MinerU 结果查询失败：HTTP 404」，af_pages p3 failed 同因）；**2026-09-21 根仓库侧复核**：5002 容器经 `/models/vision/start` 可拉起、`/health` 200，新键新端口链路就绪；对方回执后关闭 |
 
 ### 第四轮主线·探索轮（ARCH-021）
 
