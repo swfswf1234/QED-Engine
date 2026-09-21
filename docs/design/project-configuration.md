@@ -2,8 +2,8 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-16
-确认状态：暂定
+最后更新：2026-09-21
+确认状态：已确认
 关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`、`scripts/`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](../architecture/api-contracts.md)）
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)
@@ -12,32 +12,24 @@
 
 本标准是三个项目协同的**配置唯一事实源**，规定：
 
-1. **.env 与密钥**：API key、模型选择、模型来源与服务端口如何配置。**2026-08-26 起
-   回归「根 `.env` 唯一事实源」**（用户裁决，修订 2026-08-20「密钥按项目分置」方向）：
-   统一使用 `QED_API_SELECT`（来源选择）+ `API_KEY`（唯一密钥）+ `QED_API_PROVIDER`
-   （厂商选择）三个核心变量，公共变量只在仓库根 `.env` 维护一份。
+1. **.env 与密钥**：API key、模型选择、模型来源与服务端口如何配置。**根 `.env` 为
+   唯一事实源**：统一使用 `QED_API_SELECT`（来源选择）+ `API_KEY`（唯一密钥）+
+   `QED_API_PROVIDER`（厂商选择）三个核心变量，公共变量只在仓库根 `.env` 维护一份。
 2. **脚本目录**：根仓库 `scripts/` 的布局与各脚本职责（见下方「脚本目录管理」节）。
-
-修订动机（实测教训）：① QED-Engine 后端原 `env_file=".env"` 相对 CWD 解析——脚本启动
-（cwd=仓库根）读根 .env、手动 `cd backend` 启动读 backend/.env（不存在），同一服务两种
-启动方式读到不同配置，密钥空/数据库不可达；② 三个 .env 并存导致 API_KEY/QED_DB_* 等
-公共键三处手工同步，漂移风险已现实存在。
 
 现状与分工：QED-Engine 后端 env_file 绝对定位仓库根（任何 CWD 一致）；子项目解析器
 本就「CWD 起向上走查父目录 .env 兜底」，天然兼容根 .env——各自 `.env` 中与根重复的
-公共键经请求精简删除（QED-Tracker 见任务台账请求条目；Axiom-Flow 并入 REQ-003），
-仅保留真正私有键。`scripts/load-env.ps1` 过渡映射层已于 2026-08-17 退役删除。
+公共键不保留，仅留真正私有键（精简进度见任务台账）。
 
 模型网关、本地模型生命周期与资源互斥见 [llm-gateway.md](llm-gateway.md)
-（Accepted，2026-08-20）；本文件只定义跨项目变量、映射与脚本目录布局。
+（Accepted）；本文件只定义跨项目变量、映射与脚本目录布局。
 
-## 变量总表（2026-09-16 v4 四段式）
+## 变量总表（四段式）
 
-> **2026-09-16 用户裁决（配置中心四段式）**：`.env` 按 **① 全局配置 / ② API 调用配置 /
-> ③ 本地模型配置 / ④ 元数据库配置** 四段组织；根仓库本地模型私有变量统一命名
-> （`QED_LOCAL_RUNTIME` / `QED_MODEL_URL` / `QED_OCR_MODEL_URL` / `QED_LMSTUDIO_TOKEN` /
-> `QED_RESOURCE_GUARD`），**删除** `QED_LMSTUDIO_URL` / `QED_QWEN_URL` / `QED_MINERU_URL`
-> （文字模型地址合并为 `QED_MODEL_URL`）；图像模型端口 **8002 → 5002**。
+> `.env` 按 **① 全局配置 / ② API 调用配置 / ③ 本地模型配置 / ④ 元数据库配置** 四段组织；
+> 根仓库本地模型私有变量统一命名（`QED_LOCAL_RUNTIME` / `QED_MODEL_URL` /
+> `QED_OCR_MODEL_URL` / `QED_LMSTUDIO_TOKEN` / `QED_RESOURCE_GUARD`），文字模型地址合并为
+> `QED_MODEL_URL`；图像模型端口 **5002**。
 
 ### 一、全局配置
 
@@ -45,7 +37,7 @@
 | --- | --- | --- | --- |
 | `QED_API_SELECT` | 默认模型来源 | `api` | `api`（默认，API key 调用）/ `local`（本地模型）/ `qed-engine`（仅子项目，经 8900 网关）；**槽位未选择时的默认来源**（槽位级运行态 `manifest.source` 优先） |
 | `QED_LLM_GATEWAY_URL` | 网关地址 | `http://127.0.0.1:8900` | 子项目 `qed-engine` 模式读取；api/local 模式忽略 |
-| `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉/向量上游透传（REQ-061：原 60s 硬编码导致长生成 ReadTimeout）；按需调大 |
+| `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉/向量上游透传；按需调大 |
 | `QED_DATA_ROOT` | 三项目统一数据根目录 | `<进程工作目录>/dataset/` | 解析优先级：**真实环境变量 > 自身 `.env` > 向上走查父目录 `.env` > 内置默认**；顶层布局 `raw\|tmp\|parsed/<领域>/<课程>/`（派生路径表见 [dataset-conventions.md](dataset-conventions.md)）；推荐 `D:\coding\QED-Engine\dataset` |
 | `QED_PROXY` | 本地代理 | 空 | 污染/限流的 archive.org、openlibrary.org 走代理（Clash 默认混合端口 `http://127.0.0.1:7890`） |
 
@@ -66,11 +58,11 @@
 | `API_KEY` | 唯一供应商密钥 | 空 | **唯一密钥变量**（逐厂商 key 已取消，无别名回退）；根 `.env` 维护一份，子项目经向上查找兜底；local 模式直连供应商用 |
 | `QED_MODEL` | 文字槽位身份 | `qwen-plus` | 注册表身份名（见 [llm-gateway.md](llm-gateway.md)）；api 来源解析厂商模型，local 来源由控制台 `manifest.active` 覆盖 |
 | `QED_OCR_MODEL` | 图像槽位身份 | `qwen-vl-plus` | 同上；deepseek 无视觉（`/config/models` 显示「（无视觉）」）；映射：Axiom-Flow 读 `AXIOM_VISION_MODEL` |
-| `QED_EMBEDDING_MODEL` | 向量槽位身份 | `text-embedding-v4` | 三项目检索与知识库共用（RAG 轮启用）；本轮保持推荐值 |
+| `QED_EMBEDDING_MODEL` | 向量槽位身份 | `text-embedding-v4` | 三项目检索与知识库共用（RAG 轮启用） |
 | `AXIOM_API_KEY` | Axiom-Flow 旧变量（别名） | 空 | Axiom-Flow 侧保留兼容，由其执行侧按自身门禁决定退役 |
 | `DASHSCOPE_API_KEY` | QED-Tracker 旧变量（别名） | 空 | QED-Tracker 侧保留兼容，由其执行侧按自身门禁决定退役 |
 
-**身份语义（2026-09-16 v3：值不分 api/local + 槽位级运行态）**：三个槽位变量值为**模型身份名**
+**身份语义（值不分 api/local + 槽位级运行态）**：三个槽位变量值为**模型身份名**
 （注册表身份目录见 [llm-gateway.md](llm-gateway.md)），不区分 api/local 两套；身份 → api 引用 /
 本地引用的映射归注册表（`registry.resolve`：`manifest.active` > `.env` 身份变量 > 槽位默认）。
 **来源与本地渠道同样支持槽位级运行态**（`manifest.source` / `manifest.runtime`，控制台选择写入，
@@ -78,7 +70,7 @@
 `QED_LOCAL_RUNTIME` 仅作槽位未选择时的默认值。api-only 身份在 api 来源按身份解析，本地身份在
 api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 
-**单线路策略（2026-08-09 用户裁决 + 2026-08-20 收敛）**：单 key（`API_KEY`）+ `QED_API_PROVIDER`
+**单线路策略**：单 key（`API_KEY`）+ `QED_API_PROVIDER`
 选厂商；**当前只启用 qwen 线路**（三用途：主对话/OCR/Embedding）。deepseek/glm 已在
 `backend/qed_engine/services/llm/clients.py` 的 `PROVIDERS` 注册表预留（含厂商地址与默认模型），
 **启用时验证真实可用性**后切换 `QED_API_PROVIDER`；备选线路变量（`GLM_MODEL`/`GLM_OCR_MODEL`/
@@ -90,11 +82,11 @@ api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 | --- | --- | --- | --- |
 | `QED_LOCAL_RUNTIME` | 默认本地渠道 | `lmstudio` | `lmstudio`（半托管，默认）/ `llamacpp`（llama-server）/ `docker`（MinerU）；**槽位未选择渠道时的默认值**（`manifest.runtime` 优先）；runtime 同化语义见 [local-model-management.md](local-model-management.md) |
 | `QED_MODEL_URL` | 文字模型地址 | `http://127.0.0.1:5001/v1` | 文字槽位本地端点（OpenAI 兼容）；lmstudio 与 llamacpp **共用**（本机同为 5001）；LM Studio 端口以 `lms server status` 为准 |
-| `QED_OCR_MODEL_URL` | 图像模型地址 | `http://127.0.0.1:5002` | 图像槽位本地端点（MinerU 容器，健康端点 `/health`）；**2026-09-16 端口 8002 → 5002**（compose 与探针同步） |
+| `QED_OCR_MODEL_URL` | 图像模型地址 | `http://127.0.0.1:5002` | 图像槽位本地端点（MinerU 容器，健康端点 `/health`） |
 | `QED_LMSTUDIO_TOKEN` | LM Studio API 认证 token | 空 | 仅 lmstudio 渠道需鉴权（REST v0 与 OpenAI 调用均需 Bearer）；其余渠道留空。**密钥类，只存 .env，勿入库/日志** |
 | `QED_RESOURCE_GUARD` | 单活仲裁开关 | `true` | 启动任一本地模型前先停其他在跑本地槽位（4080 16GB 显存约束，本地同时最多一个模型进 GPU）；`false` 时跳过 |
 
-### 四、元数据库配置（MySQL 8，qed 库；2026-08-04 用户裁决）
+### 四、元数据库配置（MySQL 8，qed 库）
 
 | 变量 | 用途 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -111,7 +103,7 @@ api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 
 ## 强制规则
 
-- 密钥**根 `.env` 唯一事实源**（2026-08-26 用户裁决）：公共键（`API_KEY`、`QED_DB_*`、
+- 密钥**根 `.env` 唯一事实源**：公共键（`API_KEY`、`QED_DB_*`、
   来源/网关变量等）只在仓库根 `.env` 维护一份，各 `.env` 不入库；`.env.example` 入库存模板，
   只放占位空值。子项目经「向上走查父目录 .env」由根兜底，自身 `.env` 仅存真正私有键
   （QED-Tracker / Axiom-Flow 参照执行，请求 REQ-043 / REQ-044）。
@@ -125,8 +117,7 @@ api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 
 ## 脚本目录管理
 
-根仓库 `scripts/` 集中存放服务生命周期与本地模型编排脚本（2026-08-20 起，MinerU 编排自
-Axiom-Flow 迁入）：
+根仓库 `scripts/` 集中存放服务生命周期与本地模型编排脚本：
 
 ```
 scripts/
@@ -162,5 +153,4 @@ scripts/
 
 - 修改 `.env.example` 或本表后，人工核对变量名一致（脚本 `check-env-consistency` 或人工对照）。
 - 配置中心变更后：`pytest tests -q` 全绿、`ruff check src tests` 无错误、8900 端口五接口 200。
-- 密钥与模型真实可用性以各服务实际调用为准（`scripts/check_api_keys.py` 已于 2026-08-17 退役；
-  glm 曾返 429 余额不足属账户状态，不影响降级运行）。
+- 密钥与模型真实可用性以各服务实际调用为准。

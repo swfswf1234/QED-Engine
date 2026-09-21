@@ -4,7 +4,7 @@
 任务类型：A
 最后更新：2026-09-10
 关联 ADR：`../history/adr/v0.1/0011-pending-design-location.md`（不确定文档暂居 plans/，设计确定后晋升 design/）、`../history/adr/v0.1/0012-ai-development-conduct.md`（REQ-070 重组轮置空依据）
-关联设计：`../design/downloads-flow.md`（知识探索已实现设计）、`../design/downloads-ui.md`（知识探索 UI）、`../design/document-chunking-recall.md`（切分与召回草案）、`../standards/doc-governance.md`（晋升规则）
+关联设计：`../design/downloads-flow.md`（知识探索已实现设计）、`../design/downloads-ui.md`（知识探索 UI）、`2026-08-18-document-chunking-recall.md`（切分与召回草案）、`../standards/doc-governance.md`（晋升规则）
 关联 Tracker：docs/trackers/todo.md（REQ-070-LEARN 登记）
 归档判定：Retain（课程学习/课后练习设计确定后按 ADR 0011 晋升 `design/`，本现状壳届时退役）
 
@@ -44,7 +44,7 @@ REQ-070 设计文档体系重组轮将 design/ 固定为五组语义名文档集
 领域探索（探索状态机六值唯一口径、右侧四层展示、8900 五态门面与终态写点矩阵）已实现
 （2026-09-08），设计固定于 `../design/downloads-flow.md`（后台全链路）与
 `../design/downloads-ui.md`（UI 设计）；文档切分与召回方向为独立草案
-`../design/document-chunking-recall.md`（Draft，解析管理闭环后启动）。
+`2026-08-18-document-chunking-recall.md`（Blocked，解析管理闭环后启动）。
 
 ### 2. 课程学习——框架已搭，工具链方向已定，设计待细化
 

@@ -3,7 +3,7 @@
 设计状态：Accepted
 实现状态：In Progress
 最后更新：2026-09-10
-确认状态：暂定
+确认状态：已确认
 关联代码：`web-ui/`（React 重构版，已接管 8903；后端三服务代码见各自契约文档）
 关联测试：`tests/contract/test_design_documents.py`
 关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0003-shared-qed-database-independence.md`、`../history/adr/v0.1/0005-control-center-service-hosting.md`

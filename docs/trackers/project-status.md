@@ -32,7 +32,7 @@
   习题集、论文、博客与官方文档，后续随需求扩展。
 - **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（单屏左书树纯选择 + 右对照
   工作台：原页 bbox 联动 + 块级编辑：判定/备注/文字/范围，设计见 [parsing-ui.md](../design/parsing-ui.md)；探索方向见
-  [document-chunking-recall.md](../design/document-chunking-recall.md)）。
+  [document-chunking-recall 草案](../plans/2026-08-18-document-chunking-recall.md)）。
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
   （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented）；注册表含 config/
   tracker/axiom/**web** 四单元，8900 重启经 /self-restart、8903 前端启停经
@@ -42,6 +42,12 @@
 
 ## 当前主线
 
+- 已完成：**design/ 文档整合轮（PLAN-047，2026-09-21）**——design/ 13 份去过程化：修订
+  blockquote / 演进节 / 轮次标签 / 冒烟证据全部剥离（文末一行「关联计划」溯源），重点四份
+  （parsing-ui / admin-console / llm-gateway / local-model-management）设计态重写，
+  document-chunking-recall 草案按 ADR 0011 移回 plans/ 壳承载（REQ-082，Blocked），
+  design/index 三处状态矛盾修正；契约 63 + 全量 500 + ruff 全绿；用户终验裁决
+  design/ 全部 12 份「确认状态」晋升「已确认」（2026-09-21）。
 - 已完成：**模型注册表与三接口统一轮（ARCH-023 / PLAN-046，2026-09-21 冒烟收口关闭）**——
   `services/llm/registry.py` 身份目录（text/vision/embedding 三槽位，含 2026-09-21 用户裁决
   新增云端身份 `deepseek-v4-flash-0731`）+ `runtimes/` 本地形态统一（LM Studio 半托管 /

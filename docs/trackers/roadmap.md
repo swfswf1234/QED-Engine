@@ -17,7 +17,7 @@
 | 第四轮主线：Axiom-Flow 探索轮 | 与 Axiom-Flow 联调探索：RAG + 知识图谱 + chat 问答，确保课程效果，成熟后作为课程学习部分（完成一个教程）；learning/ 学习探索同步启动（QED-Engine 独有） | ARCH-021 |
 | 第五轮主线：学习中心轮 | QED-Engine 同步学习：知识探索、课程学习和课后练习，直至用户学完一个教程 | ARCH-022 |
 | QED-Engine 前端 | 学习界面（知识点解析、练习、温故知新）与管理界面（解析进度、原始文档对照、追溯）；学习中心同时是 **AI 技术学习实践场**（LangChain / 多 Agent 构建 / 向量库与 RAG（切片、BM25、rerank）/ 知识图谱） | REQ-006 |
-| **探索（文档切分与召回）** | 替换原始文档对照的管理界面：块级切分校验 → 对话式召回验证（BM25 先行 → 向量库混合检索）→ 知识单元产出，为学习中心问答铺底座；方向设计见 [document-chunking-recall.md](../design/document-chunking-recall.md)（2026-08-18 登记，第四轮主线启动） | ARCH-021、PLAN-044 |
+| **探索（文档切分与召回）** | 替换原始文档对照的管理界面：块级切分校验 → 对话式召回验证（BM25 先行 → 向量库混合检索）→ 知识单元产出，为学习中心问答铺底座；方向设计见 [document-chunking-recall 草案](../plans/2026-08-18-document-chunking-recall.md)（2026-08-18 登记，第四轮主线启动；REQ-082 承载） | ARCH-021、PLAN-044 |
 | Axiom-Flow 对齐 | 端口 8902、数据目录指向根 dataset/parsed、直读 QED_* 变量、af_* 四表定义确认（af_books/af_parse_jobs/af_pages/af_block_edits；**2026-09-20 已落地建表，REQ-027 关闭**） | PLAN-044、ARCH-020-E |
 | QED-Tracker | 学习方向驱动的自主检索与课程收集深化（以其自身 roadmap 为准；服务化 8901 已完成，后续为 LLM 筛选评估与版本核对） | REQ-046 |
 | 模型统一配置预留（AGENT / MCP 反代面） | 未来 AGENT、MCP 等统一配置以模型注册表（`services/llm/registry.py` 身份目录）为同一事实源；8900 反代各厂商/本地模型服务面为预留方向（2026-09-21 ARCH-023 收口时登记，本轮不实现，见 [llm-gateway.md](../design/llm-gateway.md)） | REQ-046 |

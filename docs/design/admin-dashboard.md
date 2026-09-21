@@ -2,18 +2,19 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
-确认状态：暂定
+最后更新：2026-09-21
+确认状态：已确认
 关联代码：`web-ui/src/pages/Dashboard.tsx`、`web-ui/src/stores/dashboard.ts`、`web-ui/src/components/EChart.tsx`、`web-ui/src/stores/runtime.ts`（后端透传端点见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Dashboard.test.tsx`、`web-ui/src/stores/dashboard.aggregate.test.ts`
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)
 关联设计：[前端架构](../architecture/frontend-architecture.md)、[数据库总纲](../architecture/database-design.md)
-来源：[仪表盘（Dashboard）设计快照](../history/plans/2026-09/2026-09-01-dashboard-design-snapshot.md)（2026-09-07 晋升）
+关联计划：[dashboard-design-snapshot](../history/plans/2026-09/2026-09-01-dashboard-design-snapshot.md)（来源快照）；
+界面演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 目标与成功标准
 
-记录仪表盘界面（`#/admin/dashboard`）的当前确定设计。
-2026-09-07 用户裁决：文档下载进度重构为**三行图表 + 四统计数字**。
+记录仪表盘界面（`#/admin/dashboard`）的当前确定设计：文档下载进度为
+**三行图表 + 四统计数字** 结构。
 
 成功标准：
 1. 服务在线情况 + 统计数字 + 三行图表（领域/课程/书籍）结构完整记录
@@ -31,7 +32,7 @@
 - 定位：**只读数据看板**——服务在线情况 + 统计数字 + 三行图表，不含操作按钮
 - 与控制台的区别：仪表盘只展示数据，控制台含启停/测试操作
 
-## 二、布局结构（2026-09-07）
+## 二、布局结构
 
 ### 区域 1：服务在线情况
 
@@ -89,7 +90,7 @@
 
 - 每个领域一张饼图卡片，按 3 列换行
 - 数据来源：`knowledge` details 中的 `books[]`，按 `domain_id` 分组
-- 饼图状态（**5 态**，对齐书籍生命周期 QED-060，与 `downloads-ui.md` §3.2 筛选档一致）：
+- 饼图状态（**5 态**，对齐书籍生命周期 QED-060，与 `downloads-ui.md` §2.2 筛选档一致）：
 
 | 状态 | 颜色 | 计算逻辑 |
 | --- | --- | --- |

@@ -2,26 +2,26 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-20
-确认状态：暂定
+最后更新：2026-09-21
+确认状态：已确认
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
 关联测试：无（子项目各自契约测试守护其数据根行为）
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、
 [ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)（元数据入 DB 与表命名空间）、
-[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow）；
-本规范由 [计划 2026-08-arch019-data-foundation](../history/plans/2026-08/2026-08-arch019-data-foundation.md)
-设计正文经用户评审确定后迁入（2026-08-23，ADR 0011 流程）。
+[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow）
+关联计划：[arch019-data-foundation](../history/plans/2026-08/2026-08-arch019-data-foundation.md)（来源计划）；
+目录约定演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 目的与边界
 
-根 `dataset/` 是三个项目共享的**数据资料目录**（2026-08-16 用户裁决，ARCH-013 新模式）：
+根 `dataset/` 是三个项目共享的**数据资料目录**：
 
 - **数据资料（文件）**：原始数据（下载的 PDF/快照）与**整理后的数据资料**（Axiom-Flow
   解析产物——知识探索、课程学习、课后练习的数据输入），全部不入版本控制。
 - **元数据默认存数据库**（MySQL `qed` 库）：登记、状态、进度、评价、课程体系、任务记录等
   一律入 DB（表命名空间与所有权见 [../architecture/database-design.md](../architecture/database-design.md)），dataset 内
-  不再维护 JSON 状态事实源（`meta/` 退役，存量迁移归档见 [REQ-032](../trackers/todo.md)）。
+  不再维护 JSON 状态事实源（`meta/` 退役，存量迁移归档见 [REQ-032](../trackers/completed.md)）。
 
 > **探索产物 JSON 例外（REQ-078）**：QED-Tracker 探索管线的领域/课程知识 JSON
 > （`raw/<domain_id>/domains.json`、`raw/<domain_id>/<course_id>/tutorials.json`；中间态
@@ -29,11 +29,10 @@
 > JSON 状态事实源」的**例外**——状态事实源仍在 DB，JSON 只作知识正本与重导入输入。
 > 跨项目口径经 REQ-078 确认后冻结。
 
-模型为**统一数据根 + 内容类型顶层**（2026-08-23 ARCH-019 用户评审确定）：三项目经
+模型为**统一数据根 + 内容类型顶层**：三项目经
 `QED_DATA_ROOT`（变量定义见 [project-configuration.md](project-configuration.md)）
 指向同一物理目录，顶层按内容类型组织（`raw/` 原始区、`tmp/` 临时区、`parsed/` 整理后数据
-资料），第二层为领域、第三层为课程。废弃早期"meta/ JSON 状态"、"资源登记双写"与
-"项目子域"（`qed-tracker/`、`axiom-flow/` 子目录）方案。
+资料），第二层为领域、第三层为课程。
 
 > **规则与结构的边界**：数据根边界、`tmp/` 生命周期、原子落盘、`raw/` 不可变与测试隔离等
 > **规则**以[临时目录与数据存储规范](../standards/storage-conventions.md)为准；本文件只维护
@@ -53,7 +52,7 @@
 ├── tmp/                              # 临时区（终态文件不保留，任务结束清理；按项目分桶）
 │   ├── qed-tracker/downloads/<task-id>.part
 │   ├── axiom-flow/<job-id>/          # Axiom-Flow 解析中间产物（模型调用暂存等）
-│   └── exploration/<对象名>探索.txt   # 探索发起文档（2026-08-23 ARCH-019 新增：用户手写
+│   └── exploration/<对象名>探索.txt   # 探索发起文档（用户手写
 │                                     # 领域/课程探索参考，如「高等数学探索.txt」；可反复
 │                                     # 使用，不参与自动清理）
 └── parsed/                           # 解析产物区（写入方 Axiom-Flow）
@@ -61,7 +60,7 @@
         └── versions/<job_id>/        # 按解析版本划分（约定见下）
 ```
 
-- **解析版本划分（2026-09-20 界面优化轮约定，实施方 Axiom-Flow，REQ-080）**：同一书目每次
+- **解析版本划分（实施方：Axiom-Flow）**：同一书目每次
   解析 job 的产物按版本独立落盘，互不覆盖——
   - 版本目录：`parsed/<domain>/<course>/<book_id>/versions/<job_id>/`，内含该版本完整产物
     （页图 `pages/`、blocks、markdown、manifest.json）；job 完成校验通过后原子写入。
@@ -73,12 +72,7 @@
 
 - **教程层的论文/相关资料类别由数据库表达**：教程（qt_knowledge）下的论文/延展资料是
   `qt_books` 行（kind=paper/blog/other）挂该 knowledge_id；界面按类别分组展示、无内容不显示
-  该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB，
-  ARCH-013 裁决；2026-08-23 ARCH-019 裁决收敛）。
-- **废弃目录**：早期「项目子域」方案目录 `dataset/axiom-flow/`、`dataset/qed-tracker/`
-  （含 `meta/` JSON 遗留）不再属于本布局；**已于 2026-09-20 物理清理**（ARCH-020-F，D 类
-  数据操作：备份至 `backups/2026-09-20-arch020f/` 并逐字节校验后删除，`.gitkeep` 骨架同批
-  git rm，用户当次裁决批准）。
+  该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB）。
 - `parsed/<domain>/<course>/<book_id>/` 内部产物格式（页图/Markdown/blocks.json/manifest）
   见 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
 
@@ -90,7 +84,6 @@
 | `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*`（ARCH-020 四表） |
 | `tmp/<project>/…` | 各写入方自用 | — | 下载/解析中间产物，任务结束清理，不跨项目读取 |
 | `tmp/exploration/` | 用户手工维护 | QED-Tracker（LLM 探索输入，经 ref_doc_path） | 探索发起文档（`<对象名>探索.txt`），用户资产不自动清理 |
-| ~~`qed-tracker/meta/`~~ | — | — | **退役**（2026-08-16）：JSON 不再作为元数据事实源，存量迁移归档（REQ-032） |
 
 ## 强制规则
 
@@ -108,18 +101,3 @@
   "任务 → 文件"跳转。
 - **元数据入 DB**：登记顺序先落盘后登记（`raw/` → DB），失败可重放（幂等）；DB 为
   元数据唯一事实源（统一数据库契约见 [../architecture/database-design.md](../architecture/database-design.md)）。
-
-## 现状与差距
-
-- **存量迁移已执行**（2026-08-23，方案 A 移动）：旧 `qed-tracker/raw/books/math-qe/<course>/`
-  → `raw/math/<course>/`，旧 `books/inbox/`、`exercises/inbox/`、`papers/<year>/` 类无课程
-  归属存量 → `raw/math/_general/`（清单与 sha256 比对留档 `backups/db/`，git 忽略）；旧
-  `tmp/` 清空不迁移；DB 五表同批备份后清空重走一轮。
-- QED-Tracker 落盘拼装改造为共享布局、`QED_DATA_ROOT` 映射接入属其侧请求（REQ-055 同批）；
-  改造前其新下载仍写旧布局则视为缺陷。
-- Axiom-Flow 产物落点：ARCH-020 重构（2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）
-  定为 `<root>/parsed/<domain>/<course>/<book_id>/`；其仓库内 `data/` 为过渡期工作目录，
-  迁移后退役（Axiom-Flow 侧文档承接）。
-- 遗留目录 `dataset/axiom-flow/`、`dataset/qed-tracker/` 已清理（2026-09-20，见上「废弃目录」）；
-  `raw/math.rar`、`tmp/参考书籍/`、`tmp/qed-tracker/downloads/` 残留 `.download` 经用户裁决
-  **保留不动**（参考书籍待用户自行整理），其后续处理不再属 ARCH-020-F 范围。

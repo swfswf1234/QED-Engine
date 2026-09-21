@@ -32,7 +32,7 @@ F（axiom/xqfm 库删除剩余）、PLAN-044（剩余端点与联调承载）。
 
 | ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-020-E | 支线 | 高 | 待开始 | 联调验收：Rudin 教程（mathanalysis-b05 + b11）端到端解析 | 用户确认解析效果；**前置阻塞**：REQ-075（8902 解析产物缺失，页数据/块判定 E2E 暂无法跑通；2026-09-20 已验证 202 受理/id/progress 对象/终态 failed 语义与 4xx 透传正常） |
+| ARCH-020-E | 支线 | 高 | 待开始 | 联调验收：Rudin 教程（mathanalysis-b05 + b11）端到端解析 | 用户确认解析效果；**前置阻塞**：REQ-075（8902 解析产物缺失，页数据/块判定 E2E 暂无法跑通；2026-09-20 已验证 202 受理/id/progress 对象/终态 failed 语义与 4xx 透传正常）；同轮承载解析 UI 暂缓增强（bbox 拖拽缩放手柄、失败页重解析按钮、任务中心抽屉、页内搜索、质量信号展示——待 8902 页级失败清单与 running jobs 数据源确认后排期） |
 | ARCH-020-F | 支线 | 中 | 进行中 | 数据操作（D 类）：qed 统一 + axiom/xqfm 库删除 + dataset 物理清理（axiom-flow/qed-tracker/math.rar/参考书籍） | 备份 + 演练 + 用户确认；**2026-09-20 dataset 清理已执行（用户裁决范围＝仅退役目录+meta 死数据）**：`dataset/axiom-flow/`、`dataset/qed-tracker/`（meta 11 JSON+marker）备份至 `dataset/backups/2026-09-20-arch020f/` 逐字节校验后删除，两 `.gitkeep` git rm 暂存（未提交）；math.rar（666MB）、tmp/参考书籍（1.2GB，用户自整理）、tmp 残留 `.download` 均保留不动；**剩余**：axiom/xqfm 库删除与 qed 统一待后续；**2026-09-20 移交登记**：QED-Tracker `config.py` `state_dir`（指向 `qed-tracker/meta/`）全仓库零消费者属死代码，请其随清理轮删除（Grep 证据见 [展示优化轮计划](../history/plans/2026-09/2026-09-20-parsing-display-round.md) W4） |
 | REQ-057 | 支线 | 中 | 进行中 | **请求：QED-Tracker / Axiom-Flow**——ADR 0011 规则同步回执（2026-08-23 用户指令同步，根仓库 agent 直接执行文档改动）：QED-Tracker 已完成（已建 `docs/adr/0003-pending-design-location.md` + adr/index 登记 + documentation.md design/plans 两行修订 + tests/test_documentation.py 白名单补 1 行，验证通过）；Axiom-Flow 已建文档但未审阅（已建 `docs/adr/0002-pending-design-location.md` + adr/index + documentation.md 两行修订，验证通过但未审阅） | Axiom-Flow 需完成文档审阅后回执关闭 |
 | REQ-036 | 支线 | 高 | 待开始 | v2 服务建设与 V2-003 移交审阅（请求：Axiom-Flow，C 组联调前置）：① V2-003 ingest 代码已由根仓库侧误建在对方工作区（未提交，81 passed + ruff clean，含单元测试与文档同步）——请审阅后自行提交或调整；② V2-004/005/007（orchestrator / MinerU 接入 / API v1）按对方 todo 推进，8902 API 服务建立后回执根仓库（C 组第一阶段联调与 REQ-034 前置解除） | 2026-08-16 登记（亡羊补牢：误产生的代码改动登记移交，对方审阅后自行提交；V2 联调前置已在对方 todo 标注）；**对方承接回执后关闭** |
@@ -49,7 +49,8 @@ F（axiom/xqfm 库删除剩余）、PLAN-044（剩余端点与联调承载）。
 
 | ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-021 | 主线 | 高 | 待开始 | 第四轮主线：与 Axiom-Flow 联调探索——RAG + 知识图谱 + chat 问答，确保课程效果，成熟后作为课程学习部分（完成一个教程）；learning/ 学习探索同步启动（QED-Engine 独有） | 前置：第三轮主线（ARCH-020）解析效果确认；探索设计见 [design/document-chunking-recall.md](../design/document-chunking-recall.md) |
+| ARCH-021 | 主线 | 高 | 待开始 | 第四轮主线：与 Axiom-Flow 联调探索——RAG + 知识图谱 + chat 问答，确保课程效果，成熟后作为课程学习部分（完成一个教程）；learning/ 学习探索同步启动（QED-Engine 独有） | 前置：第三轮主线（ARCH-020）解析效果确认；探索设计见 [文档切分与召回草案](../plans/2026-08-18-document-chunking-recall.md)（REQ-082） |
+| REQ-082 | 支线 | 中 | Blocked | [文档切分与召回草案（document-chunking-recall）](../plans/2026-08-18-document-chunking-recall.md) | 待评审设计随 plans/ 壳承载（ADR 0011）；恢复条件与阻塞证据见壳「阻塞与恢复」节（ARCH-020-E 验收 + ARCH-021 启动评审） |
 
 ### 第五轮主线·学习中心轮（ARCH-022）
 
