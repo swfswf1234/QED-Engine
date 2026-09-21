@@ -250,3 +250,13 @@ model/
    1234，本机为 5001，经 `QED_MODEL_URL` 配置）；本机开启 API token 认证，经
    `QED_LMSTUDIO_TOKEN` 带 Bearer。`lms` CLI 不在 PATH 时 start 报明确原因（半托管降级为
    探活 + 调用）。
+9. **MinerU 单实例与解析在飞约定（REQ-085，2026-09-21 边界审核）**：本机只有一个 MinerU
+   容器（5002，生命周期归本设计 docker runtime）。**解析调用唯一链路** = 8902 Axiom-Flow
+   引擎适配器直连（ADR 0014）；8900 侧仅两类非解析访问：健康探测（`/monitor/vision`、
+   `/llm/test/vision`，只读 `/health`）与控制台「视觉模型调用」的 local 直连。**8900 不做
+   「解析在飞」硬互斥**（用户裁决 2026-09-21）：同刻单解析由 Axiom-Flow ARCH-017 占用闸门
+   与 MinerU 自身队列保障；运维约定为 8902 有 `queued`/`running` 任务时不重启/换起 vision
+   槽位——容器重启会把两仓库的在飞任务一并误判为失败（R1 窗口实证）。
+10. **控制台视觉直连仍走 MinerU 旧同步协议**：`clients.mineru_parse` 用
+    `/file_parse` + `/get_task_results`（新异步 `/tasks` 协议归 Axiom-Flow，REQ-075 对齐）；
+    3.4.4 实测旧路由仍在（405/带参 404，未摘除），若引擎未来移除旧端点，本链路需同步对齐。

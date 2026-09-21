@@ -228,6 +228,11 @@ def mineru_parse(
     """MinerU 文档解析：POST /file_parse（multipart）→ 轮询 /get_task_results → markdown。
 
     轮询超时抛 RuntimeError；解析失败（state=fail）抛 RuntimeError（附原因）。
+
+    端点版本注记（2026-09-21 审核）：本函数走 MinerU **旧同步协议**，仅服务 8900 控制台
+    「视觉模型调用」local 直连；解析主链路的 MinerU 访问唯一归 Axiom-Flow 新异步 `/tasks`
+    协议（REQ-075，见 local-model-management.md 约束 9/10）。MinerU 3.4.4 实测旧路由仍在，
+    若引擎摘除需同步对齐本函数。
     """
     own = client is None
     http = client or httpx.Client(timeout=30.0)
