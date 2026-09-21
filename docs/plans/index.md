@@ -25,7 +25,7 @@
 
 ### ARCH-020 解析联调轮（2026-09-14）
 - PLAN-044（文档解析管理·与 Axiom-Flow 交互全链路），状态见任务台账
-- [b05 全本解析止血与根治轮（b05-fullbook-remediation）](2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048，In Progress，挂 ARCH-020-E），状态见任务台账
+- [b05 全本解析止血与根治轮（b05-fullbook-remediation）](2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048，Blocked（W4 验收等用户裁决或 REQ-087 回执），挂 ARCH-020-E），状态见任务台账
 
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
