@@ -1,7 +1,7 @@
 # 设计类小修与 bug 修复台账（design-bugfix-log）
 
 状态：Current（长期滚动台账）
-最后更新：2026-09-20
+最后更新：2026-09-21
 关联任务：REQ-069（见 [todo.md](../trackers/todo.md)）
 
 > **定位声明**：本文档是**长期滚动台账**，不是一次性计划——**不随任务完成归档**
@@ -140,4 +140,41 @@
   改为「身份 api 引用 > `.env` 已注册 api 身份 > 厂商默认」；llm-gateway.md 同步两处。
   冒烟复测：text select api → notes「回退 .env 配置 deepseek-v4-flash-0731」→ `POST /llm/text`
   真实返回（call_id 43）；vision 保持 local 在跑（混合场景成立）。门禁 500 passed + 契约 63 + ruff。
+- **状态**：已修复（2026-09-21）
+
+### BUGFIX-009：解析管理左树/顶栏书目名不带卷标识，同名多卷无法区分
+
+- **发现日期**：2026-09-21（实测准备窗口用户反馈）
+- **设计文档**：`../design/parsing-ui.md`（§5 书节点展示名、§6 顶栏书名）
+- **问题与根因**：`af_books.part` 有卷信息（Vol.1/2/3、上册/下册，b12-16 两组同名）且
+  8900 `/parsing/tree` 原样透传（实测），但前端两处消费点（BookTree 节点名、ParseToolbar
+  标题）都写 `display_title || title`，而 `display_title` 因上游 qt_books 无此列恒为空串
+  → 恒落到裸 title，同名多卷不可区分；api/axiom.ts 注释声明「展示名 = title + part」从未落地。
+- **修复与验证**：前端最小改（零后端/契约改动）：BookTree.tsx 新增 `parsingBookLabel`
+  （display_title 非空直用，否则 title+part 空格连接，口径同 Downloads bookDisplayName），
+  BookTree/ParseToolbar 两点接入；axiom.ts 类型补 `part?: string`；Parsing.test.tsx 新增多卷
+  用例（微积分学教程 Vol.1/Vol.2 区分）。vitest 9 passed + tsc 干净 + 浏览器实测见当次记录。
+- **状态**：已修复（2026-09-21）
+
+### BUGFIX-010：模型启停同步阻塞击穿前端超时（启停/开书/书页入库三连超时同源根因）
+
+- **发现日期**：2026-09-21（实测准备窗口用户反馈：图像模型启动超时、解析管理开书超时、书页入库「请求超时（8000ms）」但服务端最终成功）
+- **设计文档**：`../design/local-model-management.md`（端点契约）、`../architecture/api-contracts.md`（/models/{name}/*、/books/{id}/ingest）、`../design/parsing-ui.md`（接口表）
+- **问题与根因**：三处超时同一分层缺陷——① `POST /models/{slot}/start` 契约本意「派发即返回
+  starting，收敛由前端轮询 ready 判定」（api-contracts.md 早已如此规定），但实现同步调
+  `operate_model`，lmstudio 加载等待循环（`_run_lms` timeout=600 + 轮询 sleep）把 HTTP 请求
+  挂起分钟级 → 前端 8s 请求超时 + 15s 收敛窗口双重击穿；② 前端 `POLL_TIMEOUT_MS=15s` 由
+  /services 与模型槽位共用，模型加载天然远超；③ 书页入库 8903（默认 8s）＜ 8900→8902
+  （httpx 30s）＜ 8902 实际渲染（分钟级）三层错配，前端先报超时、服务端后台其实成功。
+  「打开书目超时」为启停阻塞占用后端线程窗口期的连带症状（空载实测 9–75ms，非独立缺陷）。
+- **修复与验证**：2026-09-21 用户批准 F1–F4。TDD 先行（Task 5 六用例改异步语义 + 新增
+  派发即返回/同槽位 409/后台异常清 in-flight 三用例，7 红 → 实现 → 绿）：control.py
+  `_dispatch_model_op` 槽位校验与 in-flight 登记同步完成（未知 404 语义保持），操作本体进
+  守护线程，异常仅记日志；同槽位进行中 → 409。前端 runtime.ts 新增 `MODEL_POLL_TIMEOUT_MS`
+  =300s 仅用于 operateModel 收敛（/services 保持 15s）；ingest 超时分层 8903=300s
+  （axiom.ts `INGEST_TIMEOUT_MS`）/ 8900→8902 单请求 300s（axiom_client，客户端默认 30s 不变）。
+  实测（8900 经 /self-restart 加载新码）：`POST /models/text/start` 4ms 返回 starting、
+  进行中再发 restart → 409「操作进行中」、~18s 收敛 ready、收敛后 stop 200（in-flight 释放）；
+  控制台 UI 图像模型「启动」点击 → 轮询收敛「可用」，网络全 200 全走 8900。书页入库 300s
+  窗口未做分钟级实跑（仅分层放宽，判据低风险）。
 - **状态**：已修复（2026-09-21）

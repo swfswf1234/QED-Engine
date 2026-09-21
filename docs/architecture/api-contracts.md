@@ -575,7 +575,7 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `GET /books/{id}/pages/{no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
 | `GET /books/{id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
 | `GET /books/{id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（ARCH-020-D 实施，工作台/列表 ingest 按钮硬依赖） | AxiomClient.ingest_book |
+| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（ARCH-020-D 实施，工作台/列表 ingest 按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s | AxiomClient.ingest_book |
 | `PUT /books/{id}/pages/{no}/blocks/{index}/edit` | **块编辑门面（目标形态）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
 | `GET /books/{id}/pages/{no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
 | `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**8900 门面**：前端契约保持 /review，内部转 8902 `PUT …/blocks/{index}/edit` | AxiomClient.edit_block |
@@ -669,13 +669,16 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 - **槽位来源 = api（`manifest.source` > `QED_API_SELECT`）→ 409**（云端无启停语义，仅测试）；
   来源 = local 允许启停（v3：按槽位生效来源判定，取代 v2 全局模式判定）。
-- 未知 `name` → 404。
-- 状态收敛由前端轮询 `GET /models/{slot}` 的 `ready` 字段判定（v2；已取代旧版 `/monitor/{slot}` 轮询）。
+- 未知 `name` → 404（槽位校验同步完成）。
+- **派发即返回**：启停操作在 8900 后台线程执行（local 模型加载可达分钟级），HTTP 响应不被
+  操作本体阻塞；同槽位已有操作进行中 → 409（槽位级 in-flight 互斥，操作结束自动释放）。
+- 状态收敛由前端轮询 `GET /models/{slot}` 的 `ready` 字段判定（v2；已取代旧版 `/monitor/{slot}` 轮询；
+  轮询窗口模型侧为 300s）。
 
 ### POST /api/v1/models/{name}/stop
 
 停止本地模型槽位（lmstudio=卸载模型保留 server；docker=停生命周期脚本）；
-槽位来源 = api → 409；未知 name 404。
+槽位来源 = api → 409；未知 name 404；派发即返回 + in-flight 409（同 start）。
 
 ```json
 {"name": "vision", "status": "stopping"}
@@ -683,7 +686,8 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### POST /api/v1/models/{name}/restart
 
-重启本地模型槽位（先停后启，单活仲裁经 model_manager）；槽位来源 = api → 409；未知 name 404。
+重启本地模型槽位（先停后启，单活仲裁经 model_manager）；槽位来源 = api → 409；未知 name 404；
+派发即返回 + in-flight 409（同 start）。
 
 ```json
 {"name": "text", "status": "starting"}

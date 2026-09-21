@@ -31,8 +31,10 @@ export interface BookMeta {
   course_id?: string;
   course_name?: string;
   knowledge_id?: string;
-  /** 展示名 = title + part（qt_books 同源） */
+  /** 展示名 = title + part（qt_books 同源；当前恒空，空时前端按 title+part 组合） */
   display_title?: string;
+  /** 卷标识（空=单卷本；上册/下册；Vol.1/2/3；同名多卷的区分依据） */
+  part?: string;
   /** 解析进度（af_books 自持字段，REQ-042） */
   parse_status?: string; // pending / parsing / completed / failed
   pages_done?: number;
@@ -200,9 +202,12 @@ export function getBookManifest(bookId: string, opts?: ApiRequestOptions): Promi
   return api.get<ManifestEntry[]>(`/books/${bookId}/manifest`, opts);
 }
 
+/** ingest 请求超时：PDF→页图渲染分钟级（8900→8902 同层放宽到 300s，见 axiom_client）。 */
+export const INGEST_TIMEOUT_MS = 300_000;
+
 /** POST /api/v1/books/{id}/ingest：ingest 透传（PDF→页图渲染，不调模型；工作台/列表 ingest 按钮） */
 export function ingestBook(bookId: string, opts?: ApiRequestOptions): Promise<IngestResult> {
-  return api.post<IngestResult>(`/books/${bookId}/ingest`, undefined, opts);
+  return api.post<IngestResult>(`/books/${bookId}/ingest`, undefined, { timeoutMs: INGEST_TIMEOUT_MS, ...opts });
 }
 
 /** PUT /api/v1/books/{id}/pages/{no}/blocks/{i}/edit：块编辑门面（判定/备注/文字修正/范围修正） */

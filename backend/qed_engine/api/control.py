@@ -15,6 +15,8 @@ tests/test_llm_endpoints.py
 
 import base64
 import binascii
+import logging
+import threading
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -161,7 +163,9 @@ def restart_service(name: str) -> ActionResponse:
 # 兼容（deprecated）。槽位来源（manifest.source > QED_API_SELECT）= api 时本地模型无启停
 # 语义 → 409；未知槽位 → 404。GET /models/{slot} 为控制台五字段卡数据源
 # （来源/渠道/身份/备注/可用性 + 三个下拉）；POST /models/{slot}/select 写运行态
-# manifest source/runtime/active。动作经 model_manager.operate_model（单活仲裁，见 model_manager.py）。
+# manifest source/runtime/active。动作经 model_manager.operate_model（单活仲裁，见 model_manager.py），
+# **后台线程派发、立即返回**（BUGFIX-010：模型加载可达分钟级，同步阻塞会击穿前端超时；
+# 契约本意即派发即返回 starting，收敛由前端轮询 ready 判定）。同槽位操作进行中 → 409。
 
 
 def _require_local_source(settings: Settings, name: str) -> None:
@@ -172,21 +176,59 @@ def _require_local_source(settings: Settings, name: str) -> None:
 
 
 def _model_action(fn):
-    """执行模型动作并映射 ValueError（未知 name/op）→ 404。"""
+    """执行模型动作并映射 ValueError（未知 name/op）→ 404、_ModelOpBusy（同槽位进行中）→ 409。"""
     try:
         return fn()
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except _ModelOpBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+LOG = logging.getLogger("qed_engine.llm")
+
+_MODEL_OP_LOCK = threading.Lock()
+_MODEL_OP_INFLIGHT: set[str] = set()
+
+
+class _ModelOpBusy(Exception):
+    """槽位已有操作进行中（路由层映射 409）。"""
+
+
+def _dispatch_model_op(settings: Settings, name: str, op: str) -> None:
+    """槽位启停后台派发：槽位校验与 in-flight 登记同步完成，操作本体进守护线程。
+
+    未知槽位抛 ValueError（路由映射 404，不进入后台）；同槽位并发操作抛 _ModelOpBusy
+    （409）。后台异常只记日志——响应已发出，前端以轮询 GET /models/{slot} ready 收敛判成败。
+    """
+    slot = mm.SLOT_ALIASES.get(name, name)
+    if slot not in mm.SLOTS:
+        raise ValueError(f"未知模型槽位：{name}（支持 text / vision，旧名 qwen / mineru 过渡期可用）")
+    with _MODEL_OP_LOCK:
+        if slot in _MODEL_OP_INFLIGHT:
+            raise _ModelOpBusy(f"槽位 {slot} 操作进行中，请等待收敛后再试")
+        _MODEL_OP_INFLIGHT.add(slot)
+
+    def _run() -> None:
+        try:
+            mm.operate_model(name, op, settings)
+        except Exception:
+            LOG.exception("模型槽位操作后台失败：%s %s", slot, op)
+        finally:
+            with _MODEL_OP_LOCK:
+                _MODEL_OP_INFLIGHT.discard(slot)
+
+    threading.Thread(target=_run, daemon=True, name=f"model-op-{slot}-{op}").start()
 
 
 @router.post("/models/{name}/start", response_model=ActionResponse)
 def model_start(name: str, request: Request) -> ActionResponse:
-    """启动本地模型槽位（name=text/vision；旧名 qwen/mineru 过渡）；槽位来源 api → 409。"""
+    """启动本地模型槽位（name=text/vision；旧名 qwen/mineru 过渡）；槽位来源 api → 409；派发即返回。"""
     settings = request.app.state.settings
 
     def _run():
         _require_local_source(settings, name)
-        mm.operate_model(name, "start", settings)
+        _dispatch_model_op(settings, name, "start")
         return ActionResponse(name=name, status="starting")
 
     return _model_action(_run)
@@ -194,12 +236,12 @@ def model_start(name: str, request: Request) -> ActionResponse:
 
 @router.post("/models/{name}/stop", response_model=ActionResponse)
 def model_stop(name: str, request: Request) -> ActionResponse:
-    """停止本地模型槽位（lmstudio=卸载模型保留 server；docker=停脚本）；槽位来源 api → 409。"""
+    """停止本地模型槽位（lmstudio=卸载模型保留 server；docker=停脚本）；槽位来源 api → 409；派发即返回。"""
     settings = request.app.state.settings
 
     def _run():
         _require_local_source(settings, name)
-        mm.operate_model(name, "stop", settings)
+        _dispatch_model_op(settings, name, "stop")
         return ActionResponse(name=name, status="stopping")
 
     return _model_action(_run)
@@ -207,12 +249,12 @@ def model_stop(name: str, request: Request) -> ActionResponse:
 
 @router.post("/models/{name}/restart", response_model=ActionResponse)
 def model_restart(name: str, request: Request) -> ActionResponse:
-    """重启本地模型槽位（先停后启，单活仲裁见 model_manager）；槽位来源 api → 409。"""
+    """重启本地模型槽位（先停后启，单活仲裁见 model_manager）；槽位来源 api → 409；派发即返回。"""
     settings = request.app.state.settings
 
     def _run():
         _require_local_source(settings, name)
-        mm.operate_model(name, "restart", settings)
+        _dispatch_model_op(settings, name, "restart")
         return ActionResponse(name=name, status="starting")
 
     return _model_action(_run)

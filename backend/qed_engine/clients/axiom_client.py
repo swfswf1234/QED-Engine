@@ -99,8 +99,11 @@ class AxiomClient:
         return self._request("POST", f"{API_PREFIX}/books/sync", json=books)
 
     def ingest_book(self, book_id: str) -> dict:
-        """ingest（PDF→页图渲染 + book.json，不调模型）。返回 {book_id,page_count,sha256,ingest_status}。"""
-        return self._request("POST", f"{API_PREFIX}/books/{book_id}/ingest")
+        """ingest（PDF→页图渲染 + book.json，不调模型）。返回 {book_id,page_count,sha256,ingest_status}。
+
+        大书页图渲染可达分钟级 → 单请求超时放宽 300s（客户端默认 30s 不变）。
+        """
+        return self._request("POST", f"{API_PREFIX}/books/{book_id}/ingest", timeout=300.0)
 
     def edit_block(
         self,

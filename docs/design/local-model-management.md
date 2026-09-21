@@ -95,11 +95,16 @@ def operate_model(slot: str, op: str) -> dict:
 
 | 端点 | 语义 | 非 200 分支 |
 | --- | --- | --- |
-| `POST /models/{slot}/start` | 启动本地模型（槽位来源 = local） | 槽位来源 api → 409；未知 slot → 404 |
+| `POST /models/{slot}/start` | 启动本地模型（槽位来源 = local），**派发即返回** | 槽位来源 api → 409；未知 slot → 404；同槽位操作进行中 → 409 |
 | `POST /models/{slot}/stop` | 停止本地模型 | 同上 |
 | `POST /models/{slot}/restart` | 重启本地模型 | 同上 |
 | `POST /models/{slot}/select` | 写运行态 `manifest`：`{source?, runtime?, model?}`（至少一项；`{model}` 向后兼容） | 未知槽位/身份/runtime、embedding 写运行态 → 404 |
 | `GET /models/{slot}` | 槽位状态：来源 / 渠道 / 身份 / 模型 / 可用性 / 备注 / 选项 | 未知 slot → 404 |
+
+- **启停派发即返回**：端点把 `operate_model` 放入后台守护线程后立即返回
+  `starting`/`stopping`——local 模型加载可达分钟级，响应不阻塞。槽位级 in-flight 互斥：
+  同槽位操作进行中再发 → 409（操作结束自动释放）；后台异常只进日志，成败由前端轮询
+  `ready` 收敛判定（窗口 `MODEL_POLL_TIMEOUT_MS` = 300s）。
 
 - **来源判定按槽位生效值**：槽位来源（`manifest.source` > 全局 `QED_API_SELECT`）为 `api`
   时启停端点返回 409（「该槽位为 api 来源，本地模型仅支持测试」）；为 `local` 时允许启停。

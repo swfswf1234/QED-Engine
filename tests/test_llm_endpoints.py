@@ -7,6 +7,8 @@
 """
 
 import json
+import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -247,22 +249,121 @@ def test_llm_calls_review_not_found(monkeypatch):
     assert resp.json()["detail"] == "记录不存在"
 
 
-# --- Task 5: /models/{name} 模型端点族 ---
+# --- Task 5: /models/{name} 模型端点族（start/stop/restart 异步：派发即返回，收敛由前端轮询 ready） ---
+
+
+def _patch_operate(monkeypatch, mm, *, gate=None):
+    """替换 mm.operate_model：记录 (name, op) 并置 entered；gate 给定时阻塞到测试放行（模拟慢操作）。
+
+    返回 (calls, entered, settle)；settle() 放行 gate 并等槽位 in-flight 标记清空，
+    保证后台线程不在测试间泄漏到下一用例。
+    """
+    from qed_engine.api import control as c
+
+    calls = []
+    entered = threading.Event()
+
+    def fake(name, op, settings, **kw):
+        calls.append((name, op))
+        entered.set()
+        if gate is not None:
+            assert gate.wait(10), "慢操作未被测试放行"
+
+    monkeypatch.setattr(mm, "operate_model", fake)
+
+    def settle():
+        assert entered.wait(10), "后台操作未被调用"
+        if gate is not None:
+            gate.set()
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            with c._MODEL_OP_LOCK:
+                if not c._MODEL_OP_INFLIGHT:
+                    return
+            time.sleep(0.01)
+        raise AssertionError("槽位 in-flight 标记未清理")
+
+    return calls, entered, settle
 
 
 def test_models_start_text_local(monkeypatch):
-    """POST /models/qwen/start（local 模式）：model_manager.operate_model 被调用，返回 starting。"""
+    """POST /models/qwen/start（local 模式）：立即返回 starting，operate_model 后台被调用。"""
     from qed_engine.services.llm import model_manager as mm
 
     monkeypatch.setenv("QED_API_SELECT", "local")
-    calls = []
-    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    calls, _entered, settle = _patch_operate(monkeypatch, mm)
     client = _client(monkeypatch)
     resp = client.post("/api/v1/models/qwen/start")
     assert resp.status_code == 200
     assert resp.json()["name"] == "qwen"
     assert resp.json()["status"] == "starting"
+    settle()
     assert calls == [("qwen", "start")]
+
+
+def test_models_start_returns_before_slow_operate(monkeypatch):
+    """慢启动不阻塞端点：operate_model 未完（gate 未放行）时 POST 已返回 200 starting。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    gate = threading.Event()
+    calls, _entered, settle = _patch_operate(monkeypatch, mm, gate=gate)
+    client = _client(monkeypatch)
+    resp = client.post("/api/v1/models/qwen/start")  # 同步实现会挂到 gate 超时 → 此断言即红
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "starting"
+    assert not gate.is_set()  # 返回时后台操作仍未完成 → 证明派发即返回
+    settle()
+
+
+def test_models_duplicate_start_inflight_409(monkeypatch):
+    """同槽位操作进行中再发 → 409（in-flight 互斥），前一操作结束后可再次派发。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    gate = threading.Event()
+    _calls, _entered, settle = _patch_operate(monkeypatch, mm, gate=gate)
+    client = _client(monkeypatch)
+    resp1 = client.post("/api/v1/models/text/start")
+    assert resp1.status_code == 200
+    resp2 = client.post("/api/v1/models/text/restart")
+    assert resp2.status_code == 409
+    assert "进行中" in resp2.json()["detail"]
+    settle()
+    resp3 = client.post("/api/v1/models/text/stop")
+    assert resp3.status_code == 200
+    settle()
+
+
+def test_models_operate_error_clears_inflight(monkeypatch):
+    """后台操作抛异常：端点已返回不受影响，in-flight 标记仍清理，后续操作可派发。"""
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    state = {"n": 0}
+    done = threading.Event()
+
+    def flaky(name, op, settings, **kw):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("启动失败")
+        done.set()
+
+    monkeypatch.setattr(mm, "operate_model", flaky)
+    client = _client(monkeypatch)
+    resp1 = client.post("/api/v1/models/text/start")
+    assert resp1.status_code == 200  # 异常发生在后台，不影响响应
+    # 等第一轮 in-flight 清理（异常路径 finally 也要清）
+    settle_deadline = time.monotonic() + 10.0
+    from qed_engine.api import control as c
+    while time.monotonic() < settle_deadline:
+        with c._MODEL_OP_LOCK:
+            if not c._MODEL_OP_INFLIGHT:
+                break
+        time.sleep(0.01)
+    resp2 = client.post("/api/v1/models/text/stop")
+    assert resp2.status_code == 200
+    assert done.wait(10)
 
 
 def test_models_api_mode_rejects(monkeypatch):
@@ -275,7 +376,7 @@ def test_models_api_mode_rejects(monkeypatch):
 
 
 def test_models_unknown_name_404(monkeypatch):
-    """POST /models/unknown/start：404（model_manager 抛 ValueError）。"""
+    """POST /models/unknown/start：404（槽位校验同步完成，不经后台线程）。"""
     monkeypatch.setenv("QED_API_SELECT", "local")
     client = _client(monkeypatch)
     resp = client.post("/api/v1/models/unknown/start")
@@ -287,12 +388,12 @@ def test_models_stop_mineru_local(monkeypatch):
     from qed_engine.services.llm import model_manager as mm
 
     monkeypatch.setenv("QED_API_SELECT", "local")
-    calls = []
-    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    calls, _entered, settle = _patch_operate(monkeypatch, mm)
     client = _client(monkeypatch)
     resp = client.post("/api/v1/models/mineru/stop")
     assert resp.status_code == 200
     assert resp.json()["status"] == "stopping"
+    settle()
     assert calls == [("mineru", "stop")]
 
 
@@ -301,12 +402,12 @@ def test_models_restart_text_local(monkeypatch):
     from qed_engine.services.llm import model_manager as mm
 
     monkeypatch.setenv("QED_API_SELECT", "local")
-    calls = []
-    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    calls, _entered, settle = _patch_operate(monkeypatch, mm)
     client = _client(monkeypatch)
     resp = client.post("/api/v1/models/qwen/restart")
     assert resp.status_code == 200
     assert resp.json()["status"] == "starting"
+    settle()
     assert calls == [("qwen", "restart")]
 
 
@@ -315,11 +416,11 @@ def test_models_start_slot_name(monkeypatch):
     from qed_engine.services.llm import model_manager as mm
 
     monkeypatch.setenv("QED_API_SELECT", "local")
-    calls = []
-    monkeypatch.setattr(mm, "operate_model", lambda name, op, settings, **kw: calls.append((name, op)))
+    calls, _entered, settle = _patch_operate(monkeypatch, mm)
     client = _client(monkeypatch)
     resp = client.post("/api/v1/models/text/start")
     assert resp.status_code == 200
+    settle()
     assert calls == [("text", "start")]
 
 

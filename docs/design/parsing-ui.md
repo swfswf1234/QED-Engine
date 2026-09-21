@@ -134,7 +134,7 @@ interface ParsingStore {
 | 同步书目 | `POST /books/sync` | `SyncResult`；成功后重拉 `GET /books` + 树（顶部「刷新」按钮） |
 | 书目树数据 | `GET /parsing/tree` | `ParsingTreeNode[]`（领域→课程→书三级；8902 离线 → 仅领域→课程） |
 | 打开书目 | `GET /books/{id}` | `BookMeta`（`ingest_status`/`parse_status`/`pages_done`） |
-| 书页入库（ingest） | `POST /books/{id}/ingest` | `{book_id,page_count,sha256,ingest_status}`（8900 透传 8902） |
+| 书页入库（ingest） | `POST /books/{id}/ingest` | `{book_id,page_count,sha256,ingest_status}`（8900 透传 8902）；页图渲染分钟级 → 请求超时 8903/8900→8902 均 300s |
 | 载入页 | `GET /books/{id}/pages/{no}` | `{blocks, markdown, image_url, edits}`（edits 已合并）；404=未解析 |
 | 原页图 | `GET /books/{id}/pages/{no}/image` | `image/png`（8900 代理，浏览器只连 8900） |
 | 解析本页/全本/失败页 | `POST /parse-jobs` | `202` `{book_id, pages?}`（单页=`pages:[n]`，全本=省略 pages；engine 不选=服务端默认） |
@@ -161,6 +161,9 @@ interface ParsingStore {
 - **只做选择**：点书名片段 → `openWorkbench(book_id)`，右侧对照区切换；当前选中书高亮；
   无状态 Tag、无进度徽标、无筛选行、无搜索框（侧栏保持干净）；
 - 树样式沿用 `downloads.css` 的 `dl-tree-*` 类（与文档下载管理左树同风格）；
+- **书节点展示名**（`parsingBookLabel`，顶栏§6 同用）：`display_title` 非空直用（其契约= title + part），
+  否则 `title + ' ' + part` 空格连接——保证「微积分学教程 Vol.1/2/3」「数分习题课讲义 上/下册」等
+  同名多卷可区分（口径同下载管理 `bookDisplayName`）；
 - 默认展开：第一个领域 + 其下所有课程；
 - 「刷新」（含同步书目）按钮放在**页面顶部标题行**（不属于树本体）。
 
@@ -168,7 +171,7 @@ interface ParsingStore {
 
 一行内完成（选中书后常驻；**无 engine/模型选择**——引擎固定服务端默认）：
 
-- **书名** ＋ **页码导航**：输入框「n / 总页数」（数字 + Enter 跳页）＋上一页/下一页按钮；
+- **书名**（§5 `parsingBookLabel` 口径，带卷标识）＋ **页码导航**：输入框「n / 总页数」（数字 + Enter 跳页）＋上一页/下一页按钮；
   键盘 `←`/`→` 翻页（编辑弹层打开时禁用）；连续滚动模式下页码随视口联动显示；
 - **滚动模式** Segmented：`单页`（默认，翻页式）｜`连续`（整本书纵向页流，见 §7）；
   单页模式两列各自滚动 + **滚动同步** Switch；

@@ -25,9 +25,11 @@ import type {
   DatabaseStatus, GpuStatus, KeysStatus, SlotName, SlotStatus, SlotSelectPatch, ModelSlot, ModelOp, ServiceStatus,
 } from './index';
 
-/** 过渡态收敛轮询参数（对齐后端 TRANSITION_WINDOW=15s） */
+/** 过渡态收敛轮询参数（/services 对齐后端 TRANSITION_WINDOW=15s） */
 export const POLL_INTERVAL_MS = 1000;
 export const POLL_TIMEOUT_MS = 15000;
+/** 模型槽位启停收敛窗口：local 模型加载可达分钟级（lmstudio 加载等待），5 分钟兜底 */
+export const MODEL_POLL_TIMEOUT_MS = 300_000;
 
 /** /services 为本地脚本查询，短超时即可（长超时会拖慢整页感知） */
 export const SERVICES_TIMEOUT_MS = 5000;
@@ -346,9 +348,10 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       };
     }
     // 槽位收敛：start/restart 目标 = /models/{slot}.ready（local 绑定模型探针就绪），stop = 未就绪
+    // 端点派发即返回（BUGFIX-010），加载在后台进行 → 用模型专用长窗口
     const targetReady = op !== 'stop';
     return new Promise<OperateResult>((resolve) => {
-      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      const deadline = Date.now() + MODEL_POLL_TIMEOUT_MS;
       const poll = async () => {
         try {
           let ready: boolean;
@@ -370,7 +373,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
           set({ operating: null, loading: false });
           resolve({
             name: slot, op, success: false, status: 'timeout',
-            reason: `收敛超时（${POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
+            reason: `收敛超时（${MODEL_POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
           });
         } catch (err) {
           set({ operating: null, loading: false });
