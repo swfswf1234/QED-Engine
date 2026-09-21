@@ -1,14 +1,14 @@
 # 模型注册表与三接口统一轮（llm-registry-unification）
 
-状态：In Progress
+状态：Closed（2026-09-21 关闭归档）
 （2026-09-16 用户确认设计 v2 并授权开工；工作区遗留已提交 10fe43b，W1 起实施；
 同日**用户确认设计 v3（控制台模型卡优化）并授权文档先行**——反转 v2 第二轮裁决 #5/#6）
 任务类型：B
 （任务类型注记：B 确定性实现——设计与三轮关键裁决已由用户 2026-09-16 确认，无 C 类实验内容）
-最后更新：2026-09-16
-关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（维持不推翻）、ADR 0011（待评审设计随本计划承载，确定后迁 design/）
-关联设计：[llm-gateway.md](../design/llm-gateway.md)、[local-model-management.md](../design/local-model-management.md)、[admin-console.md](../design/admin-console.md)、[api-contracts.md](../architecture/api-contracts.md)、[project-configuration.md](../design/project-configuration.md)（评审通过后由本计划工作项修订）
-关联 Tracker：PLAN-046（本计划）、ARCH-023（主线），镜像见 [docs/trackers/todo.md](../trackers/todo.md)
+最后更新：2026-09-21
+关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（维持不推翻）、ADR 0011（待评审设计随本计划承载，确定后迁 design/）
+关联设计：[llm-gateway.md](../../../design/llm-gateway.md)、[local-model-management.md](../../../design/local-model-management.md)、[admin-console.md](../../../design/admin-console.md)、[api-contracts.md](../../../architecture/api-contracts.md)、[project-configuration.md](../../../design/project-configuration.md)（评审通过后由本计划工作项修订）
+关联 Tracker：PLAN-046（本计划）、ARCH-023（主线），镜像见 [docs/trackers/todo.md](../../../trackers/todo.md)
 归档判定：Retain（设计事实并入上述两份 design/ 文档后，计划壳归档 history/plans/2026-09/）
 
 ## 背景与用户裁决（2026-09-16）
@@ -265,3 +265,27 @@ call_log provider 取值扩为 qwen/deepseek/glm/lmstudio/llamacpp/mineru/gatewa
 - 关闭条件：成功标准 6 条全达成 + 用户冒烟验收确认。
 - 收尾：设计事实并入 llm-gateway.md / local-model-management.md（两份文档刷新「最后更新」与状态），
   completed.md 登记，计划壳按 Retain 归档 history/plans/2026-09/，roadmap 补 AGENT/MCP 反代预留方向。
+
+## W7/W10 冒烟与收口（2026-09-21，本计划终局）
+
+- **W10 五字段卡（浏览器实测，8903 dist 9-20 22:15）**：来源/渠道/模型三下拉齐全；
+  渠道四项（默认/LM Studio 可用、Docker/llama.cpp「待上线」置灰）；模型下拉按来源×渠道过滤
+  （local 仅 qwen3.8-27b/qwen3.5-9b）；验证按钮正负路径均真（LM Studio 未起→「不可用」，
+  向量卡→「验证通过」）；请求全部仅指向 8900。视口隐藏无法截图，交互证据为 a11y 快照 + DOM 读取。
+- **W7-1 文字链路**：`/models/text/start` 半托管拉起 server + 加载 qwen3.5-9b → 首测 401，
+  根因 8900 启动快照早于 `.env` 修改（既有已知坑），`/self-restart` 后探针可用，
+  `/llm/text` 真实生成「2」（call_id 40）。附注：思考型模型 `max_tokens=80` 会被推理 token
+  吃满返回空 reply（机制正常，属模型行为），400 预算下正常。
+- **W7-2 单活互斥**：双向验证——text restart 时守卫先停 vision（MinerU 停），vision start
+  时 text 被卸载（ready false）；`QED_RESOURCE_GUARD` 语义与 §互斥 设计一致。
+- **W7-3 embedding**：向量卡「验证」→ 通义 text-embedding-v4 真实调用通过。
+- **W7-4 混合**：首轮发现 qwen-plus 403（key 未开通）→ 用户裁决「就是要用 deepseek 模型」→
+  [BUGFIX-008](../../../plans/design-bugfix-log.md)：身份表补 `deepseek-v4-flash-0731` + api 回退链插入
+  `.env` 已注册身份一段（TDD 3 红→绿）；复测 text=api 走 DashScope 托管 deepseek 成功
+  （call_id 43），vision 同时保持 local 在跑——混合场景成立。
+- **终态**：text source=local（LM Studio server 保留、模型已卸载，互斥下由 vision 占卡）、
+  vision docker 在跑（5002 healthy）、embedding api 可用。
+- **门禁**：`pytest tests -q` **500 passed**；`tests/contract` 63 passed；`ruff` 全绿；
+  本轮无前端改动（tsc/vitest/build 沿用 2026-09-20 收口结果：192 passed + 构建通过）。
+- **关闭**：成功标准全达成（W1–W10），2026-09-21 用户授权收口，计划壳归档
+  `../history/plans/2026-09/`。

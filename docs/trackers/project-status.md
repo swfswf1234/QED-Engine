@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-20
+最后更新：2026-09-21
 关联代码：无（状态快照，不映射具体模块）
 关联测试：无
 关联 ADR：无
@@ -36,11 +36,22 @@
 - **控制中心**：后台运行控制——**8900 服务域 /services 启停托管已实装（2026-08-11，ADR 0007 轮）**
   （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented）；注册表含 config/
   tracker/axiom/**web** 四单元，8900 重启经 /self-restart、8903 前端启停经
-  `scripts/qed_web_service.py`（2026-08-17）；**本地模型可操作**——MinerU 容器已部署
-  （2026-09-14，`QED_API_SELECT=local`），控制台依赖卡可启停/观测；向量库只进规划不展示。
+  `scripts/qed_web_service.py`（2026-08-17）；**本地模型可操作**——控制台槽位卡五字段
+  （来源/渠道/模型/备注/可用）启停/观测/验证，注册表统一身份与 runtime 路由
+  （2026-09-21 ARCH-023 收口，见 [llm-gateway.md](../design/llm-gateway.md)）；向量库只进规划不展示。
 
 ## 当前主线
 
+- 已完成：**模型注册表与三接口统一轮（ARCH-023 / PLAN-046，2026-09-21 冒烟收口关闭）**——
+  `services/llm/registry.py` 身份目录（text/vision/embedding 三槽位，含 2026-09-21 用户裁决
+  新增云端身份 `deepseek-v4-flash-0731`）+ `runtimes/` 本地形态统一（LM Studio 半托管 /
+  Docker / llama.cpp 待上线）+ 四段式 env（`QED_LOCAL_RUNTIME`/`QED_MODEL_URL`/
+  `QED_OCR_MODEL_URL`/`QED_LMSTUDIO_TOKEN`/`QED_RESOURCE_GUARD`）+ 槽位级来源/渠道运行态
+  （manifest `source`/`runtime`）+ 控制台五字段卡；`/models`、`/monitor` 端点槽位化。
+  W7 真实冒烟四项全绿（LM Studio 文字链路、单活互斥双向、embedding api、text=api 混合，
+  api 回退链尊重 `.env` 收 BUGFIX-008）+ W10 浏览器交互实测；设计事实并入
+  [llm-gateway.md](../design/llm-gateway.md) 与 [local-model-management.md](../design/local-model-management.md)，
+  壳归档 history/plans/2026-09/。未来 AGENT/MCP 统一配置以同一注册表为准（roadmap 预留）。
 - 已完成：**本地模型部署轮（PLAN-045，2026-09-14）**——MinerU 去模型化镜像重建 +
   `model/mineru/` 卷挂载 + `/root/mineru.json` 路径校准（`MINERU_MODELS_DIR` 无效）+
   健康探针端点校准（`/health`，非 `/api/v1/health`）+ 8900 集成（`/monitor/mineru`、

@@ -1,13 +1,15 @@
 # 已关闭任务台账
 
 状态：Current
-最后更新：2026-09-20
+最后更新：2026-09-21
 
 本文件登记已关闭任务（终态时从[任务台账](todo.md)原子移除并移入本表）。关闭结果枚举：
 Achieved（达成）/ Rejected（未采纳）/ Partial（部分达成）/ Not Applicable（不适用）。
 
 | ID | 类型 | 任务 | 关闭结果 | 证据 |
 | --- | --- | --- | --- | --- |
+| ARCH-023 | 主线 | 模型注册表与三接口统一轮（ARCH-023）：以模型注册表为核心统一 text/vision/embedding 三槽位的身份目录、本地 runtime（LM Studio/Docker/llama.cpp）半托管启停探针、槽位级来源渠道选择与单活资源互斥，控制台五字段卡承载 | Achieved | 2026-09-21 冒烟收口关闭：W10 控制台五字段卡浏览器交互实测（来源/渠道/模型下拉联动、验证按钮、单活互斥表现，流量全走 8900；未做截图级视觉验证，viewport 隐藏）；W7 真实链路冒烟四项全绿——LM Studio 文字 local 链路（401 经 self-restart 修 .env 快照后 call_id 40）、text↔vision 单活互斥双向验证、embedding api 直通、text=api 混合（qwen-plus 403 → 用户裁决「就是要用的deepseek模型」→ 注册 deepseek-v4-flash-0731 身份 + api 回退链尊重 .env，BUGFIX-008，call_id 43 复测通过）。终态探针：text local（vision 持有单活）· vision local ready · embedding api ready。设计事实并入 [llm-gateway.md](../design/llm-gateway.md) 与 [local-model-management.md](../design/local-model-management.md)；REQ-075 复核项留 todo |
+| PLAN-046 | Plan | [模型注册表与三接口统一轮（llm-registry-unification）](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)：registry/runtimes 落地 + 四段式 env + 控制台三卡（设计 v2/v3 用户裁决） | Achieved | 2026-09-21 关闭（随 ARCH-023 主线收口）：W1–W9 实现落地（W1–W9 提交 c4f6846），W7/W10 冒烟全绿（见 ARCH-023 行），api 回退链修订 BUGFIX-008；门禁全绿：后端全量 500 passed · 契约 63 passed · ruff clean（web 面沿用 09-20：tsc · vitest 192 · build）；计划壳归档 history/plans/2026-09/ |
 | ARCH-020 | 主线 | 第三轮主线·解析联调轮（文档解析管理）：模型生命周期归 8900、解析管线归 Axiom-Flow、前端对比编辑闭环；与 Axiom-Flow 联调直至用户确认 | Partial | 2026-09-20 用户裁决**收口关闭**：实现面全落地——B（8900 适配+探针）、C（8902 四表+管线，见对应关闭行）、D 与四轮界面迭代（UI/WB/G，单屏「左树纯选择+右对照工作台」定档，四壳归档 history/plans/2026-09/），8900↔8902 契约断裂六处修复 E2E 实证（sync 4 本/ingest 486 页/页图代理/树/渲染），前端经用户多轮浏览器复审；**未达成**：E 验收（Rudin mathanalysis-b05+b11 端到端）——实测两目标书未入 af_books、b01 parse failed，阻塞于 REQ-075（进行中）与 REQ-080/081（待 Axiom-Flow 回执）；**存续项**：E/F/REQ-075/080/081/PLAN-044 留 todo 独立跟踪，todo 节首已加收口注记 |
 | ARCH-020-B | 支线 | 8900：OCR 模型生命周期泛化（引擎槽位/探针）+ Axiom 适配层扩展（books CRUD/ingest/edits/parsing-tree） | Achieved | 2026-09-20 实测核验关闭：`api/axiom.py` 端点族全在位（/books、/books/{id}、/file、/books/sync、pages、manifest、image、ingest、edit/edits 门面、parse-jobs 202、parsing/tree）；`/models/{text,vision,embedding}` 与 `/monitor/mineru` 探针实发 200（ARCH-020 准备轮+PLAN-045 落地泛化）；ingest 透传+/edit 门面 W0 TDD 在案；根全量 pytest 498 + 契约 63 + ruff 绿。剩余 PATCH/DELETE/chunks 不属 B 任务面，由 PLAN-044 承载 |
 | ARCH-020-C | 支线 | 8902：af_* 四表建表 + sync/CRUD/ingest + 引擎适配器 + 编排 + 产物落盘（parsed 区） | Achieved | 2026-09-20 用户裁定收尾：Axiom-Flow release@a5d2e96 交付；本机 qed 库 `alembic upgrade head`（20260917_0001，af_books/af_parse_jobs/af_pages/af_block_edits，用户批准执行）；E2E ingest 486 页通过；根仓库 [database-design.md](../architecture/database-design.md) af_* 转正、REQ-027 以迁移落地为回执关闭；8900 门面 `/models/*`、`/monitor/mineru`、`/parsing/tree`、页数据实测 200。b01 parse failed/38 页属 REQ-075/081 解析侧后续问题，不改 C 交付定性 |

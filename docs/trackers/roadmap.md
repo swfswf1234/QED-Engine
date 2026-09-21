@@ -1,7 +1,7 @@
 # 能力路线图
 
 状态：Current
-最后更新：2026-09-14
+最后更新：2026-09-21
 
 本文件只描述无执行状态的后续能力方向，不含任务排期。执行任务登记在[任务台账](todo.md)。
 五轮主线（2026-08-20 用户设计，ARCH-018 已完成、ARCH-019~022 已登记 todo）：第一轮架构确定 →
@@ -20,6 +20,7 @@
 | **探索（文档切分与召回）** | 替换原始文档对照的管理界面：块级切分校验 → 对话式召回验证（BM25 先行 → 向量库混合检索）→ 知识单元产出，为学习中心问答铺底座；方向设计见 [document-chunking-recall.md](../design/document-chunking-recall.md)（2026-08-18 登记，第四轮主线启动） | ARCH-021、PLAN-044 |
 | Axiom-Flow 对齐 | 端口 8902、数据目录指向根 dataset/parsed、直读 QED_* 变量、af_* 四表定义确认（af_books/af_parse_jobs/af_pages/af_block_edits；**2026-09-20 已落地建表，REQ-027 关闭**） | PLAN-044、ARCH-020-E |
 | QED-Tracker | 学习方向驱动的自主检索与课程收集深化（以其自身 roadmap 为准；服务化 8901 已完成，后续为 LLM 筛选评估与版本核对） | REQ-046 |
+| 模型统一配置预留（AGENT / MCP 反代面） | 未来 AGENT、MCP 等统一配置以模型注册表（`services/llm/registry.py` 身份目录）为同一事实源；8900 反代各厂商/本地模型服务面为预留方向（2026-09-21 ARCH-023 收口时登记，本轮不实现，见 [llm-gateway.md](../design/llm-gateway.md)） | REQ-046 |
 | 文档治理 | 标准/ADR/计划/台账与契约测试持续演进，三仓库文档体系对齐（以 QED-Engine 为范本，ADR 0010；**子项目对齐已完成**——REQ-048/049 → V2-015/QED-039 回执，REQ-022/023 治理契约对齐落地） | REQ-002、REQ-050 |
 
 ## 原则

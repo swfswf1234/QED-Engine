@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-20
+最后更新：2026-09-21
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -16,9 +16,6 @@
 
 ## 活跃计划
 
-### ARCH-023 模型注册表与三接口统一轮（2026-09-16）
-- PLAN-046（模型注册表与三接口统一轮），状态见任务台账
-
 ### 现状承载（2026-09-10）
 - REQ-070-LEARN（学习功能现状），状态见任务台账
 
@@ -30,6 +27,7 @@
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
 
 ## 已归档计划（2026-09）
+- [模型注册表与三接口统一轮（llm-registry-unification）](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（PLAN-046 / ARCH-023，Achieved 2026-09-21：registry/runtimes + 四段式 env + 控制台三卡 W1~W9 落地，W7/W10 真实冒烟全绿（含 BUGFIX-008 api 回退链尊重 .env）；设计事实并入 [design/llm-gateway.md](../design/llm-gateway.md) 与 [design/local-model-management.md](../design/local-model-management.md)，壳归档）
 - [解析界面单屏回调轮（parsing-sidebar-single-view）](../history/plans/2026-09/2026-09-20-parsing-sidebar-single-view.md)（ARCH-020-G，Achieved 2026-09-20：单屏「左树纯选择+右对照」定档，R1~R5 全段+复审修正 BUGFIX-007；裁决并入 [design/parsing-ui.md](../design/parsing-ui.md)，壳归档）
 - [解析界面工作台重设计轮（parsing-workbench-redesign）](../history/plans/2026-09/2026-09-20-parsing-workbench-redesign.md)（ARCH-020-WB，Partial 2026-09-20：设计并入 parsing-ui.md、D 轮实现成果保留；两级界面形态被 G 轮裁决取代，壳归档）
 - [解析界面展示优化轮（parsing-display-round）](../history/plans/2026-09/2026-09-20-parsing-display-round.md)（ARCH-020-UI，Achieved 2026-09-20：大屏/A4 基准/原始文件优先并入 parsing-ui.md（BUGFIX-006），产物版本划分归 dataset-conventions/REQ-080；壳归档）

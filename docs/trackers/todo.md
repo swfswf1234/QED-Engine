@@ -1,7 +1,7 @@
 ﻿# 任务台账
 
 状态：Current
-最后更新：2026-09-20
+最后更新：2026-09-21
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -37,13 +37,13 @@ F（axiom/xqfm 库删除剩余）、PLAN-044（剩余端点与联调承载）。
 | REQ-057 | 支线 | 中 | 进行中 | **请求：QED-Tracker / Axiom-Flow**——ADR 0011 规则同步回执（2026-08-23 用户指令同步，根仓库 agent 直接执行文档改动）：QED-Tracker 已完成（已建 `docs/adr/0003-pending-design-location.md` + adr/index 登记 + documentation.md design/plans 两行修订 + tests/test_documentation.py 白名单补 1 行，验证通过）；Axiom-Flow 已建文档但未审阅（已建 `docs/adr/0002-pending-design-location.md` + adr/index + documentation.md 两行修订，验证通过但未审阅） | Axiom-Flow 需完成文档审阅后回执关闭 |
 | REQ-036 | 支线 | 高 | 待开始 | v2 服务建设与 V2-003 移交审阅（请求：Axiom-Flow，C 组联调前置）：① V2-003 ingest 代码已由根仓库侧误建在对方工作区（未提交，81 passed + ruff clean，含单元测试与文档同步）——请审阅后自行提交或调整；② V2-004/005/007（orchestrator / MinerU 接入 / API v1）按对方 todo 推进，8902 API 服务建立后回执根仓库（C 组第一阶段联调与 REQ-034 前置解除） | 2026-08-16 登记（亡羊补牢：误产生的代码改动登记移交，对方审阅后自行提交；V2 联调前置已在对方 todo 标注）；**对方承接回执后关闭** |
 
-### 模型注册表与三接口统一轮（ARCH-023，与 ARCH-020 并行）
+### 模型注册表与三接口统一轮（ARCH-023，2026-09-21 主线关闭，Achieved）
+
+#### 存续连带项（证据见 [completed.md](completed.md) 与 history/plans/2026-09/ 计划壳）
 
 | ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-023 | 主线 | 高 | 待开始 | 模型注册表与三接口统一轮：三类模型（文字/图像/向量）一条管线，/llm/text、/llm/vision、/llm/embedding 三接口透明服务三项目；统一注册表（槽位级 source）+ 本地三部署形态同化（LM Studio 半托管 / llama.cpp / docker）+ 本地单活互斥泛化 | **2026-09-16 用户三裁决**：槽位级 source（QED_API_SELECT 退化批量默认）+ LM Studio 半托管 + 全量一轮；文本链路优先保证完整可用；ADR 0014 维持；计划评审通过后进入实现 |
-| PLAN-046 | 支线 | 高 | In Progress | [模型注册表与三接口统一轮（llm-registry-unification）](../plans/2026-09-16-llm-registry-unification.md) | **2026-09-16 用户确认设计 v2 并授权开工**；工作区遗留已提交 10fe43b（72 files，413 pytest + ruff + 契约 63 绿）；二轮裁决：env 收敛 + 模型身份不分 api/local + 渠道全局模式 + 控制台渠道/可用状态/模型下拉；**同日 v3 裁决（控制台模型卡优化）**：反转二轮 #5/#6——来源/渠道槽位级可切换（写 manifest source/runtime）、渠道四项（默认/LM Studio/Docker/llama.cpp 待上线）、可用探针+验证按钮；**同日第四轮裁决（配置中心四段式）**：`.env` 按 全局/API/本地模型/元数据库 四段组织，本地变量统一 `QED_LOCAL_RUNTIME`/`QED_MODEL_URL`/`QED_OCR_MODEL_URL`/`QED_LMSTUDIO_TOKEN`/`QED_RESOURCE_GUARD`，MinerU 端口 8002→5002；**文档先行中，用户检验后进入代码轮** |
-| REQ-075 | 支线 | 高 | 进行中 | **请求：Axiom-Flow**——MinerU 直连配置同步（根仓库 2026-09-16 变更：端口 8002→5002、变量 `QED_MINERU_URL`→`QED_OCR_MODEL_URL`）：引擎适配器改读新键与新端口（其 `AXIOM_MINERU_URL` 兜底映射同步），并更新其 operations/development/model-integration 文档与 smoke 脚本；**2026-09-20 联调扩充**：其 `engines/mineru.py` 轮询 `GET /get_task_results/{task_id}` 在 MinerU 3.4.4 容器 404（该版本仅提供 `/file_parse`、`/tasks`、`/tasks/{task_id}`、`/tasks/{task_id}/result`、`/health`），需按新版异步 API 对齐端点路径 | 根 .env **不保留旧键别名**；其对齐前 Axiom-Flow 解析直连失效（风险已声明）；**2026-09-20 E2E 实证**：5002 /health 正常、任务受理 queued→running→failed（error=「MinerU 结果查询失败：HTTP 404」，af_pages p3 failed 同因）；对方回执后关闭 |
+| REQ-075 | 支线 | 高 | 进行中 | **请求：Axiom-Flow**——MinerU 直连配置同步（根仓库 2026-09-16 变更：端口 8002→5002、变量 `QED_MINERU_URL`→`QED_OCR_MODEL_URL`）：引擎适配器改读新键与新端口（其 `AXIOM_MINERU_URL` 兜底映射同步），并更新其 operations/development/model-integration 文档与 smoke 脚本；**2026-09-20 联调扩充**：其 `engines/mineru.py` 轮询 `GET /get_task_results/{task_id}` 在 MinerU 3.4.4 容器 404（该版本仅提供 `/file_parse`、`/tasks`、`/tasks/{task_id}`、`/tasks/{task_id}/result`、`/health`），需按新版异步 API 对齐端点路径 | 根 .env **不保留旧键别名**；其对齐前 Axiom-Flow 解析直连失效（风险已声明）；**2026-09-20 E2E 实证**：5002 /health 正常、任务受理 queued→running→failed（error=「MinerU 结果查询失败：HTTP 404」，af_pages p3 failed 同因）；**2026-09-21 根仓库侧复核**：5002 容器经 `/models/vision/start` 可拉起、`/health` 200，新键新端口链路就绪；对方回执后关闭 |
 
 ### 第四轮主线·探索轮（ARCH-021）
 
