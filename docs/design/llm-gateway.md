@@ -2,12 +2,12 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-16
+最后更新：2026-09-21
 确认状态：暂定
 关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/registry.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/call_log.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（v2 新增的 registry.py 与 runtimes/ 已随 PLAN-046 落地；`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，`model_manager.py` 与本地模型生命周期操作归 [local-model-management.md](local-model-management.md)，本设计只在正文引用）
 关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_registry.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_qwen_service.py`、`tests/test_qed_mineru_service.py`
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
-关联计划：[2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)（PLAN-046，v2 修订来源）
+关联计划：[2026-09-16-llm-registry-unification](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（PLAN-046，v2/v3 修订来源；2026-09-21 关闭归档）
 
 > **解析路径变更（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
 > 文档解析管线归 Axiom-Flow 并经引擎适配器**直连本地模型服务**，不再经本网关；本网关的
@@ -187,6 +187,7 @@ QED_EMBEDDING_MODEL=text-embedding-v4   # 向量槽位身份
 | 槽位 | 身份 | 备注（description，控制台一句话） | api 引用 | 本地引用（runtime: 标识） |
 | --- | --- | --- | --- | --- |
 | `text` | `qwen-plus` | 通义千问 Plus，云端通用文本模型 | qwen@dashscope | 无 |
+| `text` | `deepseek-v4-flash-0731` | DeepSeek V4 Flash（0731），DashScope 兼容模式托管 | qwen@dashscope | 无 |
 | `text` | `qwen3.8-27b` | Qwen3.8 27B，本机 LM Studio 已下载 | 无 | lmstudio: qwen3.8-27b |
 | `text` | `qwen3.5-9b` | Qwen3.5 9B，轻量本地模型 | 无 | lmstudio: qwen/qwen3.5-9b |
 | `vision` | `qwen-vl-plus` | 通义千问 VL Plus，云端视觉模型 | qwen@dashscope | 无 |
@@ -209,7 +210,9 @@ QED_EMBEDDING_MODEL=text-embedding-v4   # 向量槽位身份
 **解析规则**（`registry.resolve(settings)`，gateway / model_manager / 端点层统一消费）：
 
 1. 身份取值优先级：`manifest.active`（运行态，控制台选择）> `.env` 身份变量 > 槽位默认身份。
-2. `api` 来源：身份的 api 引用；无 api 引用 → 回退槽位厂商默认模型（告警一次，不阻断）。
+2. `api` 来源：身份的 api 引用；无 api 引用 → 回退 `.env` 身份变量对应的已注册 api 身份
+   （2026-09-21 冒烟裁决：本机 key 开通 `deepseek-v4-flash-0731`，回退链须尊重 `.env` 配置）>
+   槽位厂商默认模型（告警一次，不阻断）。
 3. `local` 来源：身份的本地引用（按生效 runtime 匹配）；身份无该 runtime 引用 → 回退槽位默认
    本地身份（告警一次，不阻断）；**槽位无本地候选（embedding）→ 来源固定 `api`**，不随全局
    `QED_API_SELECT=local` 切换（解析恒成功，避免必失败槽位）。

@@ -125,3 +125,19 @@
   `syncing`，tooltip 说明同步语义）；vitest 断言同步。tsc + vitest + build +
   `pytest tests/contract -q` 结果见当次门禁输出。
 - **状态**：已修复（2026-09-20）
+
+### BUGFIX-008：注册表 api 回退链丢弃 `.env` 已配置云模型（W7-4 冒烟发现）
+
+- **发现日期**：2026-09-21（PLAN-046 W7/W10 冒烟轮）
+- **设计文档**：`../design/llm-gateway.md`（身份目录表、解析规则第 2 条）
+- **问题与根因**：本机 dashscope key 实际开通的云端文字模型为 `deepseek-v4-flash-0731`
+  （`.env` `QED_MODEL` 已配置、`/config/models` default 一致），但注册表身份目录只收录
+  `qwen-plus`；text 槽位运行态身份为本地身份（无 api 引用）时，api 回退链「身份 → 厂商默认
+  qwen-plus」**跳过了 `.env` 配置**，导致 text=api 冒烟实际调用 qwen-plus 返回 HTTP 403
+  （key 无该模型权限）。机制全部正常（解析/透传/落日志），缺的是身份条目与回退链一段。
+- **修复与验证**：2026-09-21 用户裁决「就是要用 deepseek 模型」。TDD 先行（3 红→实现→绿）：
+  `registry.py` 身份表补 `deepseek-v4-flash-0731`（api=qwen@dashscope）；`_resolve_api` 回退链
+  改为「身份 api 引用 > `.env` 已注册 api 身份 > 厂商默认」；llm-gateway.md 同步两处。
+  冒烟复测：text select api → notes「回退 .env 配置 deepseek-v4-flash-0731」→ `POST /llm/text`
+  真实返回（call_id 43）；vision 保持 local 在跑（混合场景成立）。门禁 500 passed + 契约 63 + ruff。
+- **状态**：已修复（2026-09-21）

@@ -369,6 +369,7 @@ def test_models_get_status_api_mode(monkeypatch):
     """GET /models/text（api 来源）：source=api、channel=direct、厂商/模型/options；ready=API_KEY。"""
     monkeypatch.setenv("QED_API_SELECT", "api")
     monkeypatch.setenv("API_KEY", "sk-test")
+    monkeypatch.setenv("QED_MODEL", "")
     client = _client(monkeypatch)
     resp = client.get("/api/v1/models/text")
     assert resp.status_code == 200
@@ -376,7 +377,7 @@ def test_models_get_status_api_mode(monkeypatch):
     assert body["slot"] == "text" and body["source"] == "api" and body["channel"] == "direct"
     assert body["model"] == "qwen-plus" and body["provider"] == "qwen"
     assert body["ready"] is True and body["runtime"] == ""
-    assert [o["value"] for o in body["options"]] == ["qwen-plus"]
+    assert [o["value"] for o in body["options"]] == ["qwen-plus", "deepseek-v4-flash-0731"]
     assert body["description"]
     channel_status = {c["value"]: c["status"] for c in body["channel_options"]}
     assert channel_status["lmstudio"] == "available"

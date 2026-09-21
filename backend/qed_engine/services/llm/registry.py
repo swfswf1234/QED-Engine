@@ -69,6 +69,12 @@ IDENTITIES: dict[str, Identity] = {
     for i in (
         Identity("qwen-plus", "text", "通义千问 Plus，云端通用文本模型", api=("qwen", "qwen-plus")),
         Identity(
+            "deepseek-v4-flash-0731",
+            "text",
+            "DeepSeek V4 Flash（0731），DashScope 兼容模式托管（本机 key 实际开通）",
+            api=("qwen", "deepseek-v4-flash-0731"),
+        ),
+        Identity(
             "qwen3.8-27b",
             "text",
             "Qwen3.8 27B，本机 LM Studio 已下载",
@@ -272,7 +278,7 @@ def _api_base_url(provider: str, slot: str) -> str | None:
 
 
 def _resolve_api(slot: str, ident: Identity, settings: Settings) -> Resolved:
-    """api 渠道解析：身份 api 引用（厂商+模型）优先；缺引用回退 QED_API_PROVIDER 厂商默认模型。
+    """api 渠道解析：身份 api 引用（厂商+模型）优先；缺引用回退 .env 已注册 api 身份 > 厂商默认模型。
 
     回退时 identity 同步回退到「该厂商默认模型的 api 身份」（若目录中存在），使控制台模型下拉
     选中值与 options 一致、备注与生效模型一致（如 qwen3.5-9b → qwen-plus）。
@@ -284,6 +290,15 @@ def _resolve_api(slot: str, ident: Identity, settings: Settings) -> Resolved:
         if base_url is None:
             return Resolved(slot, "api", ident.name, provider, "",
                             error=f"厂商 {provider} 无该槽位（{slot}）api 端点")
+        # 回退链第一段（2026-09-21 冒烟裁决）：.env 身份变量为已注册 api 身份时优先其引用
+        env_value = str(getattr(settings, SLOT_ENV_FIELDS[slot], "") or "")
+        env_ident = IDENTITIES.get(env_value)
+        if env_ident and env_ident.slot == slot and env_ident.api and env_ident.name != ident.name:
+            e_provider, e_model = env_ident.api
+            e_base_url = _api_base_url(e_provider, slot)
+            if e_base_url is not None:
+                return Resolved(slot, "api", env_ident.name, e_provider, e_model, e_base_url,
+                                notes=[f"身份 {ident.name} 无 api 引用，回退 .env 配置 {e_model}"])
         model = spec.get("vision_default_model" if slot == "vision" else "text_default_model") or ""
         fallback = next((i for i in slot_identities(slot) if i.api == (provider, model)), ident)
         return Resolved(slot, "api", fallback.name, provider, model, base_url,

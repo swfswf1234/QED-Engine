@@ -262,7 +262,7 @@ Browser (8903)
 - 2026-09-16：**模型注册表统一轮（PLAN-046，v2）**——四区收敛为三区（GPU + 三槽位卡合并为
   资源监控区），ModelCard → SlotCard（渠道/可用字段 + local 模式模型下拉），Store 槽位化
   （slots/slotErrors 取代 qwen/mineru 探针），fetchAll 七路并行（三槽位 + keys），见
-  [2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)。
+  [2026-09-16-llm-registry-unification](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)。
 - 2026-09-16：**模型卡优化（PLAN-046，v3）**——SlotCard 五字段（来源/模型/渠道/可用/备注），
   来源与渠道槽位级可切换（写 manifest source/runtime/active），模型下拉按来源 × 渠道过滤，
   可用行探针自动判定 + 验证按钮真实调用，同上计划。

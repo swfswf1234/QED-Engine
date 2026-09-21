@@ -2,13 +2,13 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-16
+最后更新：2026-09-21
 确认状态：暂定
 关联代码：`backend/qed_engine/services/llm/model_manager.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。v2 新增的 services/llm/registry.py 主登记见 llm-gateway.md、runtimes/ 适配器见本设计「槽位与 runtime」节，均已在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
 关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
 关联设计：[llm-gateway.md](llm-gateway.md)（网关/调用记录/全局模式/身份目录——分工见下）、[admin-console.md](admin-console.md)（控制台四区）、[dataset-conventions.md](dataset-conventions.md)（数据目录约定）
-关联计划：[2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)（PLAN-046，本轮 v2 修订来源）、[2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)（晋升来源）
+关联计划：[2026-09-16-llm-registry-unification](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（PLAN-046，本轮 v2/v3 修订来源；2026-09-21 冒烟收口关闭归档）、[2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)（晋升来源）
 
 > **v2 修订（2026-09-16，PLAN-046）**：本地部署形态泛化为 **runtime 同化**——LM Studio（半托管）/
 > llama.cpp / docker 三种形态统一为「本地模型」语义（启停/探针/调用一致，为后续 AGENT、MCP
@@ -284,4 +284,4 @@ model/
 - 2026-09-16：**模型注册表与三接口统一轮（PLAN-046，v2）**——runtime 同化（LM Studio 半托管 /
   llama.cpp / docker 统一语义）、`QED_LOCAL_RUNTIME` 唯一全局变量、单活互斥泛化、
   manifest.active 升级运行态事实源（控制台模型下拉）、端点槽位化 + 旧名别名，
-  见 [2026-09-16-llm-registry-unification](../plans/2026-09-16-llm-registry-unification.md)。
+  见 [2026-09-16-llm-registry-unification](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)。

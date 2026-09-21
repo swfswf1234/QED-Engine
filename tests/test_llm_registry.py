@@ -58,6 +58,15 @@ def test_slot_identities_carry_metadata():
     assert registry.IDENTITIES["qwen-plus"].api == ("qwen", "qwen-plus")
 
 
+def test_identity_deepseek_v4_flash_registered():
+    """2026-09-20 冒烟裁决：dashscope 兼容模式托管的 deepseek-v4-flash-0731 为正式 api 身份。"""
+    ident = registry.IDENTITIES["deepseek-v4-flash-0731"]
+    assert ident.slot == "text"
+    assert ident.api == ("qwen", "deepseek-v4-flash-0731")
+    assert ident.local is None or "lmstudio" not in (ident.local or {})
+    assert ident.description
+
+
 # ---------- manifest.active 运行态 ----------
 
 
@@ -124,9 +133,13 @@ def test_configured_identity_env_beats_default(tmp_path):
 
 
 def test_configured_identity_unknown_falls_back_to_default(tmp_path):
-    """manifest.active / env 值为未知身份（如历史 deepseek-v4-flash-0731）→ 回退槽位默认。"""
+    """manifest.active / env 值为未知身份 → 回退槽位默认（deepseek-v4-flash-0731 已转正为身份）。"""
     _write_manifest(tmp_path, "qwen", {"active": "not-a-known-identity"})
     settings = _settings(qed_model="deepseek-v4-flash-0731")
+    assert registry.configured_identity(settings, "text", tmp_path) == "deepseek-v4-flash-0731"
+    (tmp_path / "qwen" / "manifest.json").write_text(
+        json.dumps({"active": "still-unknown"}), encoding="utf-8")
+    settings = _settings(qed_model="also-not-a-known-identity")
     assert registry.configured_identity(settings, "text", tmp_path) == "qwen-plus"
 
 
@@ -149,6 +162,18 @@ def test_resolve_api_local_identity_falls_back_with_note(tmp_path):
     results = registry.resolve(_settings(qed_model="qwen3.8-27b"), tmp_path)
     text = results["text"]
     assert (text.identity, text.provider, text.model) == ("qwen-plus", "qwen", "qwen-plus")
+    assert text.notes and "回退" in text.notes[0]
+
+
+def test_resolve_api_fallback_prefers_env_identity(tmp_path):
+    """身份无 api 引用时的回退链第一段：.env 身份变量为已注册 api 身份 → 用其引用（2026-09-20 裁决）。"""
+    _write_manifest(tmp_path, "qwen", {"active": "qwen3.5-9b", "source": "api"})
+    results = registry.resolve(_settings(qed_model="deepseek-v4-flash-0731"), tmp_path)
+    text = results["text"]
+    assert (text.identity, text.provider, text.model) == (
+        "deepseek-v4-flash-0731", "qwen", "deepseek-v4-flash-0731")
+    assert text.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert text.error == ""
     assert text.notes and "回退" in text.notes[0]
 
 
@@ -346,7 +371,7 @@ def test_slot_channel_options_derived_from_registry():
 def test_slot_model_options_filtered_by_source_and_runtime():
     """模型下拉按来源 × 渠道过滤：api → api 身份；local → 该 runtime 本地身份。"""
     api_names = [i.name for i in registry.slot_model_options("text", "api")]
-    assert api_names == ["qwen-plus"]
+    assert api_names == ["qwen-plus", "deepseek-v4-flash-0731"]
     local_names = [i.name for i in registry.slot_model_options("text", "local", "lmstudio")]
     assert set(local_names) == {"qwen3.8-27b", "qwen3.5-9b"}
     assert registry.slot_model_options("text", "local", "docker") == []
