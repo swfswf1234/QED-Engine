@@ -59,7 +59,7 @@ OOM，需按批次控量；③ 现有探针全为按需单发，无持续监测�
 
 1. **分级探测**：T1 HTTP 存活（复用 `probe_slot`）→ T2 GPU 可见性（vision：`docker exec mineru-api nvidia-smi -L`；text：LM Studio/llama-server 侧显存加载态）→ T3 功能性小调用仅手动「验证」按钮，不进轮询。
 2. **状态机防抖**：ready/degraded/down 连续 N 次（暂定 3）同向探测才翻转；翻转写结构化日志（事件账 v1 用 8900 日志，不建新表），仪表盘取最后翻转时刻与原因。
-3. **受控恢复**（用户裁决 2026-09-23）：翻转至 down/degraded 且**非在飞**时自动 `operate_model(slot, 'restart')`，带退避、连续 3 次救不活降级为纯告警；**在飞只告警不碰**——在飞判据＝8902 有 queued/running 任务（查询失败/离线按保守「非在飞」放行，与已知约束 9 运维约定并行）；GPU blocked 恢复手段＝`docker restart mineru-api`（已知约束 7 实证）。
+3. **受控恢复**（用户裁决 2026-09-23）：翻转至 down/degraded 且**非在飞**时自动 `operate_model(slot, 'restart')`，带退避、连续 3 次救不活降级为纯告警；**在飞只告警不碰**——在飞判据＝8902 有 queued/running 任务（实施定稿 2026-09-23：8902 离线＝不可能在飞→放行；其余查询失败保守按在飞；与已知约束 9 运维约定并行）；GPU blocked 恢复手段＝`docker restart mineru-api`（已知约束 7 实证）。
 4. **水位门**：启动本地模型前查空闲显存 < 阈值（暂定 12GB）→ 拒绝启动并记事件（防「挤着起→秒死」循环）。
 5. **掉线诊断包**：翻转至 down 时自动采集 docker events（近 10min）+ mineru 日志尾 + WSL `dmesg` OOM 痕迹，落运行日志目录供 S3 定谳。
 
@@ -94,10 +94,10 @@ embedding 本地化。
 | W0 | DeepTutor 本地模型管理只读调研：其监督/恢复/事件细节 → 吸收/拒绝判定表回写本壳 | 只读 `D:\coding\demo_program\DeepTutor` | **已收口 2026-09-23**：其不管理本地模型进程（只发现/探活/诊断）；判定见下「W0 调研判定」 |
 | W1 | `GET /models/{slot}` 扩展：`gpu_visible` / `degraded` 归并、`last_flip`（supervisor 内存态；无 supervisor 时回退探针态）（TDD） | 根 8900 | **已实施 2026-09-23**：新增 health_state/health_reason/gpu_visible/last_flip 四字段（availability 语义不变，控制台零影响），定向 11 + 相邻 181 全绿；真机生效需 8900 重启加载（并入 W4 浏览器实测） |
 | W2 | supervisor 骨架：分级探测 T1+T2、状态机防抖、事件日志（假 runtime 注入单测） | 根 8900 `services/llm/supervisor.py` | **逻辑层已实施 2026-09-23**（T1 复用 probe_slot / T2 `wsl -e docker exec nvidia-smi -L` fail-closed；防抖 N=3；翻转事件日志；`QED_MODEL_SUPERVISOR` 开关默认开）；真机观测演练随 W3；维护职责声明（本模块只维护模型服务本身、不含 prompt）已落 code-map 与 local-model-management 分工边界节（2026-09-23） |
-| W3 | 受控恢复：非在飞自动重启 + 退避（≤3 次）+ 在飞只告警 + 掉线诊断包采集；真机杀容器演练 | 根 8900 | 待开始（前置 W2 + 容器可起） |
+| W3 | 受控恢复：非在飞自动重启 + 退避（≤3 次）+ 在飞只告警 + 掉线诊断包采集；真机杀容器演练 | 根 8900 | **逻辑层已实施 2026-09-23**：退避节拍＝非就绪每 4 tick（≈2min）评估一次、上限 3 次后放弃转纯告警、翻回 ready 重置预算；在飞门双路（REQ-088 列表端点——对方未提交码则 404/405 回退书目级 active_job_id；8902 离线放行、其余查询失败保守在飞）；诊断包＝非就绪翻转采 docker events（10min）+日志尾 2000+nvidia-smi。假 runtime 注入单测：test_llm_supervisor 25 例全绿、非契约全量 466 例全绿。真机杀容器演练后置（前置条件 2：Docker Desktop 起待用户） |
 | W4 | 仪表盘「本地模型状况」卡（本壳界面设计落地，含 local/api 两态显隐实测） | 根 8903 | **已实施 2026-09-23**：LocalModelStatus 卡 + Dashboard 30s 轮询（隐藏页暂停）；tsc/vitest 26 文件 209 例/build 全绿；浏览器实测（8900 已重启加载 W1 字段）local 态单卡真实渲染「图像模型 掉线 · Docker · 显存 5.9/16 GiB · 翻转于 17:42:20」，请求全指 8900 无新报错；api 态显隐与轮询 hidden 跳过由单测覆盖（隐身视口不能观察活轮询、截图不可得） |
 | W5 | 批次与水位：根 `.env` `AXIOM_PARSE_WINDOW_SIZE=50`（已配置，生效随对方换码）+ 启动前显存水位门（阈值暂定 12GB，W0 后可调） | 根 8900 + `.env` | 部分进行（.env 已配；水位门待开始） |
-| W6 | 掉线根因定谳：实采 ≥1 次掉线诊断包 → 三类假设裁决 → 处置回写 local-model-management.md 已知约束节 | 根（证据） | 待开始（前置 W3） |
+| W6 | 掉线根因定谳：实采 ≥1 次掉线诊断包 → 三类假设裁决 → 处置回写 local-model-management.md 已知约束节 | 根（证据） | 待开始（采集代码已随 W3 逻辑层就绪；实采需真机掉线/杀容器演练，前置条件 2） |
 
 ## W0 调研判定（2026-09-23，DeepTutor 只读调研收口）
 

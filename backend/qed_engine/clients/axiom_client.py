@@ -156,6 +156,21 @@ class AxiomClient:
         """任务状态与进度（queued/running/completed/failed）。"""
         return self._request("GET", f"{API_PREFIX}/parse-jobs/{job_id}")
 
+    def list_parse_jobs(
+        self,
+        status: list[str] | None = None,
+        book_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """任务列表（REQ-088：status 过滤 + active 标记；8902 旧码无此端点抛 404）。"""
+        params: dict = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+        if book_id:
+            params["book_id"] = book_id
+        return self._request("GET", f"{API_PREFIX}/parse-jobs", params=params)
+
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         try:
             response = self._client.request(method, path, **kwargs)

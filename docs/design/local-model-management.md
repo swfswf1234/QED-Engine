@@ -215,6 +215,29 @@ model/
 - 来源/渠道（api/local）语义与调用拓扑见 [llm-gateway.md](llm-gateway.md)：`api` 来源不启动任何
   本地模型；`local` 来源文字走槽位渠道所选 runtime、图像走 MinerU。
 
+## 健康监督与受控恢复（supervisor）
+
+`services/llm/supervisor.py` 随 app 建起守护线程（`QED_MODEL_SUPERVISOR=true` 默认开；测试进程注入
+false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复；api 来源槽位跳过不探测。监督器只观测、
+告警与重启模型服务本身，不触碰 prompt 与业务参数（见「分工边界」维护职责条）。
+
+- **T1 存活**：复用 `monitor.probe_slot`（5s 预算），失败记 down。
+- **T2 GPU 可见性**：仅 docker 渠道槽位（当前 vision）——`wsl -e docker exec mineru-api nvidia-smi -L`；
+  T1 绿且 T2 确认不可见 → **degraded**（「活着但废了」，即已知约束 7 的 GPU blocked 形态）；
+  探测异常按不可见处理（fail-closed）。
+- **状态机防抖**：翻转需连续 3 次同向观测，初始观测即时定态；翻转写结构化事件日志
+  （`模型监督事件 slot=… frm->to reason=…`），经 `GET /models/{slot}` 的 health_state/health_reason/
+  gpu_visible/last_flip 供给仪表盘状况卡。
+- **受控恢复**：槽位处于 down/degraded 期间每 4 个 tick（约 2min）派发一次
+  `operate_model(slot, "restart")`（独立线程执行，不阻塞 tick）；连续 ≤3 次仍救不活 → 放弃转纯告警
+  （WARNING「模型恢复放弃」），翻回 ready 即重置预算。
+- **在飞门（与已知约束 9 运维约定并行）**：解析在飞时跳过重启只告警。判据仅 vision 适用：
+  8902 `GET /api/v1/parse-jobs?status=queued,running`（REQ-088；旧码无端点 404/405 回退书目级
+  active_job_id 判定）；8902 连接失败＝不可能有解析在跑 → 不在飞放行；其余查询失败保守按在飞
+  （宁可不重启，不可杀在飞解析）。
+- **掉线诊断包**：翻转至非就绪时对 docker 渠道槽位采集 docker events（近 10min）、mineru-api 日志尾
+  （2000 行）与容器内 GPU 可见性，落运行日志（单段截断、内存有界），供掉线根因定谳取证。
+
 ## 关键组件文件
 
 | 文件 | 职责 |
@@ -222,7 +245,7 @@ model/
 | `backend/qed_engine/services/llm/registry.py` | 身份目录 + 槽位解析（主登记见 llm-gateway.md） |
 | `backend/qed_engine/services/llm/runtimes/` | runtime 同化适配器：lmstudio（半托管）/ llamacpp / docker |
 | `backend/qed_engine/services/llm/model_manager.py` | operate_model(slot, op) + ensure_local_ready（单活互斥） |
-| `backend/qed_engine/services/llm/supervisor.py` | 健康监督：T1/T2 分级探测 + 防抖状态机 + 翻转事件（/models/{slot} health_* 字段供给） |
+| `backend/qed_engine/services/llm/supervisor.py` | 健康监督与受控恢复：T1/T2 分级探测 + 防抖状态机 + 翻转事件（/models/{slot} health_* 字段供给）+ 在飞门/退避重启/掉线诊断包 |
 | `backend/qed_engine/api/control.py` | /models/{slot}/{start\|stop\|restart\|select}、GET /models/{slot} 端点（409/404 语义） |
 | `scripts/text-model/qed_qwen_service.py` | llamacpp runtime 生命周期脚本（start/stop/restart/status + 健康探测） |
 | `scripts/image-model/qed_mineru_service.py` | docker runtime（MinerU）生命周期脚本（infra-*.ps1 编排） |
