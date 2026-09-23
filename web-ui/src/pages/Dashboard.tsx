@@ -5,6 +5,7 @@ import {
 import { ReloadOutlined, CloudServerOutlined, DatabaseOutlined, FileSearchOutlined } from '@ant-design/icons';
 import type { EChartsCoreOption } from 'echarts/core';
 import EChart from '../components/EChart';
+import LocalModelStatus from '../components/dashboard/LocalModelStatus';
 import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
 import { useRuntimeStore, withWebServiceFallback } from '../stores/runtime';
@@ -98,10 +99,23 @@ export default function Dashboard() {
     knowledge, details, courseSystem, loading, error, dataError, courseError, fetchAll,
   } = useDashboardStore();
   const services = useRuntimeStore((s) => s.services);
+  const fetchSlots = useRuntimeStore((s) => s.fetchSlots);
+  const fetchGpu = useRuntimeStore((s) => s.fetchGpu);
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
+
+  // 状况卡数据保鲜（ARCH-028 W4）：30s 轮询槽位 + GPU（不发 /services，零额外请求契约维持）；
+  // 页面隐藏暂停（下次可见即随定时器恢复）
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      void fetchSlots();
+      void fetchGpu();
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [fetchSlots, fetchGpu]);
 
   const domainProgress = useMemo(() => buildDomainProgress(courseSystem), [courseSystem]);
   const courseProgress = useMemo(() => buildCourseProgress(courseSystem, details), [courseSystem, details]);
@@ -148,6 +162,9 @@ export default function Dashboard() {
           ))}
         </Row>
       </Card>
+
+      {/* 区域1.2：本地模型状况（ARCH-028；全 api 来源时整卡隐藏） */}
+      <LocalModelStatus />
 
       {/* 区域1.5：统计数字 */}
       <Card size="small" style={{ marginBottom: 16 }}>

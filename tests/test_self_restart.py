@@ -140,6 +140,8 @@ def _client(monkeypatch):
     from qed_engine.services.llm import call_log as llm_call_log
 
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
+    # 监督器关闭：不建常驻探测线程（隔离铁律；逻辑由 test_llm_supervisor.py 覆盖）
+    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
     # 隔离 create_app() 启动自检（真实 .env 密钥/数据库不可控，同 test_api.py 模式）：
     # 探测与建表全 mock，避免真实网络请求与真实 CREATE TABLE 副作用
     monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))

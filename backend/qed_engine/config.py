@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     qed_lmstudio_token: SecretStr = SecretStr("")
     # 资源互斥开关（默认开）：单活仲裁，启动一方本地模型前先停其他在跑本地模型（4080 16GB 约束）
     qed_resource_guard: bool = True
+    # 本地模型监督器开关（ARCH-028：分级探测/防抖状态机/事件账；false=不建监督器，健康字段留空）
+    qed_model_supervisor: bool = True
     # LLM 网关地址（子项目 qed-engine 模式读取；api/local 模式忽略）
     qed_llm_gateway_url: str = "http://127.0.0.1:8900"
     # LLM 上游调用超时秒数（QED_LLM_TIMEOUT 可覆盖；REQ-061：原 60s 硬编码导致长生成 ReadTimeout）

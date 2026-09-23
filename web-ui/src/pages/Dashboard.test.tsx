@@ -216,4 +216,42 @@ describe('仪表盘 Dashboard（三行图表重构）', () => {
       expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
     });
   });
+
+  it('状况卡保鲜轮询：30s tick 调 fetchSlots+fetchGpu；document.hidden 时跳过', async () => {
+    mockApi({
+      '/courses': courseSystemFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+    });
+    const original = {
+      fetchSlots: useRuntimeStore.getState().fetchSlots,
+      fetchGpu: useRuntimeStore.getState().fetchGpu,
+    };
+    const slotsSpy = vi.fn().mockResolvedValue(undefined);
+    const gpuSpy = vi.fn().mockResolvedValue(undefined);
+    useRuntimeStore.setState({ fetchSlots: slotsSpy, fetchGpu: gpuSpy });
+    const ticks: (() => void)[] = [];
+    const intervalSpy = vi.spyOn(window, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+      if (ms === 30_000) ticks.push(fn);
+      return 0 as unknown as NodeJS.Timeout;
+    }) as typeof window.setInterval);
+    try {
+      renderDashboard();
+      await screen.findByText('仪表盘');
+      expect(ticks).toHaveLength(1);
+      ticks[0]();
+      expect(slotsSpy).toHaveBeenCalledTimes(1);
+      expect(gpuSpy).toHaveBeenCalledTimes(1);
+      // 隐藏页跳过（浏览器实测中隐身视口 document.hidden=true 即此分支）
+      Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+      ticks[0]();
+      expect(slotsSpy).toHaveBeenCalledTimes(1);
+      Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+      ticks[0]();
+      expect(slotsSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      intervalSpy.mockRestore();
+      useRuntimeStore.setState(original);
+    }
+  });
 });

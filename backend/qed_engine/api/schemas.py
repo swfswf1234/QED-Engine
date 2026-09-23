@@ -34,6 +34,8 @@ class KeysResponse(BaseModel):
     configured: bool
     # 运行模式：api（云端厂商）/ local（本地 Qwen / MinerU）；前端依赖卡模式感知用
     mode: str = "api"
+    # 单活互斥开关（ARCH-028 W4：仪表盘状况卡单卡/双卡渲染判据；纯配置回显）
+    resource_guard: bool = True
 
 
 class DatabaseResponse(BaseModel):
@@ -175,6 +177,11 @@ class SlotStatus(BaseModel):
     description: str = ""
     ready: bool = False
     availability: str = ""
+    # 监督器健康观测（ARCH-028 W1；supervisor 关闭/未观测时 state=""、gpu_visible=None）
+    health_state: str = ""            # ready | degraded | down | ""
+    health_reason: str = ""
+    gpu_visible: bool | None = None   # T2 容器内 GPU 可见性（不适用= None）
+    last_flip: str = ""               # 最后状态翻转 ISO 时刻
     source_options: list[SourceOption] = []
     channel_options: list[ChannelOption] = []
     options: list[SlotOption] = []

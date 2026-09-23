@@ -76,6 +76,8 @@ export interface KeysStatus {
   configured: boolean;
   /** 运行模式：api（云端厂商）/ local（本地 Qwen / MinerU） */
   mode: 'api' | 'local';
+  /** 单活互斥开关（ARCH-028：仪表盘状况卡单卡/双卡渲染判据；旧后端未下发按 true 兜底） */
+  resource_guard?: boolean;
 }
 
 // --- 槽位契约类型（PLAN-046 模型统一注册：三槽位单管道，控制台三卡数据源） ---
@@ -140,6 +142,14 @@ export interface SlotStatus {
   ready: boolean;
   /** 可用性文本：可用 / 不可用 / 未就绪 */
   availability?: string;
+  /** 监督器健康观测（ARCH-028 W1）：ready | degraded | down | ''（未观测，回退 ready 推导） */
+  health_state?: string;
+  /** 观测失败/降级原因（状况卡 tooltip） */
+  health_reason?: string;
+  /** T2 容器内 GPU 可见性（不适用=null；false → degraded） */
+  gpu_visible?: boolean | null;
+  /** 最后状态翻转 ISO 时刻 */
+  last_flip?: string;
   /** 来源下拉数据源 */
   source_options?: SlotSourceOption[];
   /** 渠道下拉数据源（待上线置灰） */

@@ -39,6 +39,9 @@ def _mock_startup_side_effects(monkeypatch):
     monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
     monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
     monkeypatch.setattr(llm_call_log, "ensure_table", lambda settings: None)
+    # 监督器关闭：真实 .env 为 local 模式，不建常驻探测线程（隔离铁律；
+    # 装配行为由 test_llm_supervisor.py::test_create_app_wires_supervisor_by_default 覆盖）
+    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
 
 
 @pytest.fixture(autouse=True)

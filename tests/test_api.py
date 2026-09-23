@@ -45,6 +45,8 @@ def _client(
     monkeypatch.setenv("API_KEY", api_key)
     monkeypatch.setenv("QED_API_PROVIDER", provider)
     monkeypatch.setenv("QED_API_SELECT", mode)
+    # 监督器关闭：测试不建常驻探测线程（隔离铁律，行为逻辑由 test_llm_supervisor.py 覆盖）
+    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
     monkeypatch.setenv("QED_MODEL", "qwen-plus")
     monkeypatch.setenv("QED_OCR_MODEL", "qwen-vl-plus")
     monkeypatch.setenv("QED_EMBEDDING_MODEL", "text-embedding-v4")
@@ -100,7 +102,7 @@ def test_keys_status(monkeypatch):
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"provider": "qwen", "configured": True, "mode": "api"}
+    assert body == {"provider": "qwen", "configured": True, "mode": "api", "resource_guard": True}
     assert "sk-qwen" not in response.text
 
 
@@ -109,7 +111,7 @@ def test_keys_unconfigured(monkeypatch):
     client = _client(monkeypatch)
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
-    assert response.json() == {"provider": "qwen", "configured": False, "mode": "api"}
+    assert response.json() == {"provider": "qwen", "configured": False, "mode": "api", "resource_guard": True}
 
 
 def test_keys_glm_provider(monkeypatch):
@@ -117,7 +119,7 @@ def test_keys_glm_provider(monkeypatch):
     client = _client(monkeypatch, api_key="sk-glm", provider="glm")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
-    assert response.json() == {"provider": "glm", "configured": True, "mode": "api"}
+    assert response.json() == {"provider": "glm", "configured": True, "mode": "api", "resource_guard": True}
 
 
 def test_keys_local_mode(monkeypatch):
@@ -125,7 +127,15 @@ def test_keys_local_mode(monkeypatch):
     client = _client(monkeypatch, api_key="sk-local", mode="local")
     response = client.get("/api/v1/config/keys")
     assert response.status_code == 200
-    assert response.json() == {"provider": "qwen", "configured": True, "mode": "local"}
+    assert response.json() == {"provider": "qwen", "configured": True, "mode": "local", "resource_guard": True}
+
+
+def test_keys_resource_guard_off(monkeypatch):
+    """QED_RESOURCE_GUARD=false 下发：仪表盘状况卡据此渲染双卡并列（ARCH-028 W4 显隐判据）。"""
+    monkeypatch.setenv("QED_RESOURCE_GUARD", "false")
+    client = _client(monkeypatch, api_key="sk-local", mode="local")
+    body = client.get("/api/v1/config/keys").json()
+    assert body["resource_guard"] is False
 
 
 def test_cors_allowlist_covers_all_services(monkeypatch):

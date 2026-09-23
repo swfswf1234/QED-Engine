@@ -314,6 +314,10 @@ def model_status(name: str, request: Request) -> SlotStatus:
         availability = "可用"
     else:
         availability = "未就绪"
+    # 监督器健康观测（ARCH-028 W1）：availability 语义不变（控制台零改动），
+    # degraded 等新态由 health_state 承载（仪表盘状况卡消费）
+    supervisor_obj = getattr(request.app.state, "model_supervisor", None)
+    snap = supervisor_obj.snapshot(slot) if supervisor_obj is not None else {}
     return SlotStatus(
         slot=slot, source=source,
         channel="direct" if source == "api" else runtime,
@@ -321,6 +325,8 @@ def model_status(name: str, request: Request) -> SlotStatus:
         provider=resolved.provider, base_url=resolved.base_url,
         description=ident.description if ident else "",
         ready=ready, availability=availability,
+        health_state=snap.get("state", ""), health_reason=snap.get("reason", ""),
+        gpu_visible=snap.get("gpu_visible"), last_flip=snap.get("last_flip", ""),
         source_options=llm_registry.slot_source_options(slot),
         channel_options=llm_registry.slot_channel_options(slot),
         options=[
@@ -370,6 +376,7 @@ def keys(request: Request) -> KeysResponse:
         provider=resolved.qed_api_provider,
         configured=resolved.api_configured,
         mode=resolved.qed_api_select,
+        resource_guard=resolved.qed_resource_guard,
     )
 
 

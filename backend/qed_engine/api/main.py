@@ -110,6 +110,15 @@ def create_app(
     app.include_router(axiom_router)
     from qed_engine.api.domain_explore import router as domain_explore_router
     from qed_engine.api.explore import router as explore_router
+    from qed_engine.services.llm import supervisor as llm_supervisor
+
+    # 本地模型监督器（ARCH-028）：观测型常驻线程（先等一个周期再首探测）；
+    # QED_MODEL_SUPERVISOR=false 或测试注入关闭时不建（健康字段留空）
+    if resolved.qed_model_supervisor:
+        app.state.model_supervisor = llm_supervisor.ModelSupervisor(resolved)
+        app.state.model_supervisor.start()
+    else:
+        app.state.model_supervisor = None
 
     app.include_router(explore_router)
     app.include_router(domain_explore_router)
