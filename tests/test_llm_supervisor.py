@@ -408,3 +408,38 @@ def test_inflight_server_error_conservative_true():
 def test_inflight_text_slot_always_false():
     sup = _sup_with_client(_StubAxiomClient(jobs={"jobs": [{"id": 1}]}))
     assert sup._default_is_inflight("text") is False
+
+
+# --- W3 真机观测补充：事件账落点（create_app 必须给 qed_engine logger 挂 INFO handler） ---
+
+
+def _marked_handlers():
+    import logging
+
+    return [h for h in logging.getLogger("qed_engine").handlers
+            if getattr(h, "qed_engine_stream", False)]
+
+
+def test_create_app_wires_event_log_handler_once(monkeypatch):
+    from qed_engine.api import control as api_control
+    from qed_engine.api.main import create_app
+
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    create_app(Settings(_env_file=None, qed_model_supervisor=False))
+    create_app(Settings(_env_file=None, qed_model_supervisor=False))
+    handlers = _marked_handlers()
+    assert len(handlers) == 1, "幂等：多次 create_app 仍恰有一个事件账 handler"
+    assert handlers[0].level <= __import__("logging").INFO
+
+
+def test_supervisor_info_line_reaches_stderr(capsys, monkeypatch):
+    from qed_engine.api import control as api_control
+    from qed_engine.api.main import create_app
+
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    create_app(Settings(_env_file=None, qed_model_supervisor=False))
+    supervisor.LOG.info("模型监督事件 slot=test-emit")
+    captured = capsys.readouterr()
+    assert "slot=test-emit" in captured.err, "INFO 事件行不得被静默丢弃（事件账 v1 走 8900 日志）"

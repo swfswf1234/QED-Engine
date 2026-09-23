@@ -11,6 +11,7 @@ database 端点只读启动快照）。
 """
 
 import logging
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,25 @@ from qed_engine.services.llm import call_log as llm_call_log
 from qed_engine.services.service_manager import configure as configure_services
 
 logger = logging.getLogger("qed_engine")
+
+
+def _ensure_event_log_handler() -> None:
+    """事件账落点（ARCH-028 真机观测 2026-09-23）：uvicorn 不给 root 挂 handler，
+
+    qed_engine.* 的 INFO 日志（模型监督事件/恢复尝试/掉线诊断包）会被 logging 兜底
+    静默丢弃（lastResort 只放 WARNING+ 进 stderr）。幂等挂 stderr INFO handler——
+    8900 由服务托管启动时 stderr 并入 logs/config.log，事件账 v1「走 8900 日志」由此成立。
+    每次 create_app 重建 handler 并绑定当前 sys.stderr（测试 capsys 依赖该语义）。
+    """
+    eng = logging.getLogger("qed_engine")
+    for h in list(eng.handlers):
+        if getattr(h, "qed_engine_stream", False):
+            eng.removeHandler(h)
+    h = logging.StreamHandler(sys.stderr)
+    h.setLevel(logging.INFO)
+    h.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
+    h.qed_engine_stream = True
+    eng.addHandler(h)
 
 
 def _startup_db_check(settings: Settings) -> dict:
@@ -58,6 +78,7 @@ def create_app(
 ) -> FastAPI:
     """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。"""
     # 配置 qed_engine.services 日志级别：探测失败等诊断信息需要 DEBUG 可见
+    _ensure_event_log_handler()
     logging.getLogger("qed_engine.services").setLevel(logging.DEBUG)
     resolved = settings or Settings()
 
