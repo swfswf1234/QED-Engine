@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-23
+最后更新：2026-09-24
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -29,14 +29,13 @@
 - ARCH-027 主链任务行承载壳（课程注册·链路编译·判分推进，含 L1~L9/R1 判定表与模块壳一览），状态见任务台账
 - ARCH-027-M1~M4 模块任务行各配固定壳（学习面 UI 与渲染基线 / 练习与复习 / 本地模型适配层 / 知识探索），状态见任务台账
 
-### ARCH-020 解析联调轮（2026-09-14）
-- PLAN-044（文档解析管理·与 Axiom-Flow 交互全链路），状态见任务台账
-
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
 
 ## 已归档计划（2026-09）
+- 设计文档结构契约轮（design-doc-structure-contract）（PLAN-053 / ARCH-029，Achieved 2026-09-24：按归档判定 Delete 移除——规范正文并入 [ADR 0017](../adr/0017-design-doc-structure-contract.md) 与 [doc-governance.md](../standards/doc-governance.md)「设计文档结构契约」节，六篇现状以各自文档为准，关闭证据见 completed.md ARCH-029 行）
+- [文档解析管理·与 Axiom-Flow 交互全链路（parsing-flow）](../history/plans/2026-09/2026-09-14-parsing-management-axiom-flow-chain.md)（PLAN-044，Achieved 2026-09-23：用户裁决晋升收口——**独立晋升 [design/parsing-flow.md](../design/parsing-flow.md)**（与 parsing-ui.md 合并评估裁决＝不合并、互链分工）；af_* 全量 DDL 根侧快照吸收版本作用域与结局分列迁移演进；剩余端点（GET /parse-jobs 列表）实现与登记随收口并入；Retain 归档）
 - [根仓库前端（8903）渲染优化滚动记录（web-ui-rendering-optimization）](../history/plans/2026-09/2026-09-22-web-ui-rendering-optimization.md)（PLAN-051 / ARCH-026，Not Applicable 2026-09-22：2026-09-22 并轮裁决——渲染线成为学习设计轮 W1 前置（2026-09-23 重划后由 M1 学习面 UI 与渲染基线壳承接），壳 Superseded；登记表为空、无遗留条目迁入；Retain 归档）
 - [learning/ 类目退役改造计划（learning-retirement）](../history/plans/2026-09/2026-09-22-learning-retirement.md)（PLAN-052 / REQ-090，Achieved 2026-09-22：ADR 0015 类目退役——docs/learning/ 8 份文件整体删除、doc-governance 三条目与契约目录清单摘除、现行引用改道正式稳定文档；Retain 归档）
 - [b05 全本解析止血与根治轮（b05-fullbook-remediation）](../history/plans/2026-09/2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048 / ARCH-020-E，Completed 2026-09-22：600s 墙根因取证 + 逐页止血 312/317 + 补跑证伪 + 空白页判失败根因（REQ-087 登记）；用户裁决**部分验收**收口 E，验收实测证据全在壳内 W4 行）

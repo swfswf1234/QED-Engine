@@ -1,13 +1,13 @@
 # 文档解析管理·与 Axiom-Flow 交互全链路
 
-状态：In Progress
+状态：Closed（2026-09-23 设计晋升 [parsing-flow.md](../../../design/parsing-flow.md)，收口记录见 completed.md）
 任务类型：A
-最后更新：2026-09-20
-关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）
-关联设计：[dataset-conventions.md](../design/dataset-conventions.md)（数据根三区）、
-[local-model-management.md](../design/local-model-management.md)（模型生命周期与槽位）、
-[llm-gateway.md](../design/llm-gateway.md)（网关与调用记录）、
-[解析管理 UI 设计](../design/parsing-ui.md)（界面消费）
+最后更新：2026-09-23
+关联 ADR：[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）
+关联设计：[dataset-conventions.md](../../../design/dataset-conventions.md)（数据根三区）、
+[local-model-management.md](../../../design/local-model-management.md)（模型生命周期与槽位）、
+[llm-gateway.md](../../../design/llm-gateway.md)（网关与调用记录）、
+[解析管理 UI 设计](../../../design/parsing-ui.md)（界面消费）
 关联 Tracker：docs/trackers/todo.md（PLAN-044）
 归档判定：Retain（设计确定后按 ADR 0011 晋升 `design/`；本轮暂留 `plans/`）
 
@@ -34,13 +34,13 @@ Axiom-Flow（解析管线）、本地模型服务（MinerU 等）三方的职责
 ingest、解析编排、引擎适配、产物落盘、对照供给、编辑落库；`qed` 库 `af_*` 表；
 `QED_DATA_ROOT/parsed` 产物布局；引擎适配（MinerU / PaddleOCR-VL / qwen-vl）。
 
-**非目标**：前端界面（见[解析管理 UI 设计](../design/parsing-ui.md)）；
+**非目标**：前端界面（见[解析管理 UI 设计](../../../design/parsing-ui.md)）；
 切分与召回（探索轮）；Milvus 向量库；`axiom`/`xqfm` 库删除与 dataset 物理清理
 （D 类数据操作，另立计划）。
 
 ## 前置条件
 
-1. [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 已 Accepted；
+1. [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 已 Accepted；
 2. QED-Tracker 8901 提供 verified 书目（`qt_books`，`file_path` 为数据根相对路径）；
 3. MinerU 容器可用（`scripts/image-model/`，端口 5002）；
 4. `qed` 库为主库（`QED_DB_NAME=qed`）。
@@ -100,11 +100,11 @@ sequenceDiagram
 ```
 
 - `source_file`：源 PDF 的数据根相对路径（同源 `qt_books.file_path`），源 PDF 只读不复制；
-- 页图渲染与产物落盘在 Axiom-Flow（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 决定 2）；
-- 目录结构遵循 [dataset-conventions.md](../design/dataset-conventions.md)（`parsed/` 区写入方 Axiom-Flow）；
+- 页图渲染与产物落盘在 Axiom-Flow（[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 决定 2）；
+- 目录结构遵循 [dataset-conventions.md](../../../design/dataset-conventions.md)（`parsed/` 区写入方 Axiom-Flow）；
 - **解析版本划分（2026-09-20 用户裁决登记）**：每次解析 job 产物原子独立落
   `<book_id>/versions/<job_id>/`，book_id 根目录保持「当前生效版本」视图（读取方与端点契约
-  不变），实施方 Axiom-Flow（REQ-080），约定正文见 [dataset-conventions.md](../design/dataset-conventions.md)。
+  不变），实施方 Axiom-Flow（REQ-080），约定正文见 [dataset-conventions.md](../../../design/dataset-conventions.md)。
 
 ### 4. 统一 blocks schema（页级）
 
@@ -209,7 +209,7 @@ CREATE TABLE af_block_edits (
 
 - 同步幂等键 `book_id`；`af_books` 为快照语义，qt_books 变更/删除不影响已同步行；
 - 进度自持：`ingest_status`/`parse_status`/`pages_done` 由 Axiom-Flow 维护；
-- 共享 `qed_*` 表只读；表结构变更先登记 [database-design.md](../architecture/database-design.md)。
+- 共享 `qed_*` 表只读；表结构变更先登记 [database-design.md](../../../architecture/database-design.md)。
 
 ### 6. 8902 API 契约（Axiom-Flow 事实源）
 
@@ -248,7 +248,7 @@ CREATE TABLE af_block_edits (
   `paddleocr`）；`GET /monitor/mineru` 等探针；模型槽位 `model/mineru/`（PaddleOCR-VL 预留
   `model/paddleocr-vl/`）+ `manifest.json`；资源互斥 `QED_RESOURCE_GUARD`。
 - 规划中的 8900/8902 端点（本表所列）在实现前只登记于本设计文档；`api-contracts.md` 以
-  「规划契约」非解析表登记，实施后转正（见 [code-document-traceability.md](../standards/code-document-traceability.md)）。
+  「规划契约」非解析表登记，实施后转正（见 [code-document-traceability.md](../../../standards/code-document-traceability.md)）。
 
 ### 8. 引擎适配（模型无感知）
 
@@ -265,7 +265,7 @@ CREATE TABLE af_block_edits (
 - 8902 离线 → 8900 返回 503，前端降级显示；配置域不受影响；
 - 8901 离线 → `POST /books/sync` 返回 503（取数失败），其余端点不受影响；
 - 模型服务离线 → 解析任务 `failed`（`error` 记原因），只读端点正常；
-- 8900 离线 → 前端错误横幅；Axiom-Flow 可经脚本手动启停模型并独立解析（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 决定 5）。
+- 8900 离线 → 前端错误横幅；Axiom-Flow 可经脚本手动启停模型并独立解析（[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 决定 5）。
 
 ## 验证与验收
 
@@ -278,11 +278,45 @@ CREATE TABLE af_block_edits (
 
 ## 回滚
 
-- 设计文档回滚：删除本文件与[解析管理 UI 设计](../design/parsing-ui.md)，
-  恢复 [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 前的模型形态；
+- 设计文档回滚：删除本文件与[解析管理 UI 设计](../../../design/parsing-ui.md)，
+  恢复 [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 前的模型形态；
 - 实施回滚：`af_*` 表 Alembic 降级；8902 端点移除；`parsed/` 产物为可再生数据，可清理。
 
 ## 关闭与归档
 
 关闭条件：设计经用户确认 + 端到端验收通过 + 契约冻结；按 ADR 0011 评估晋升 `design/`
 （解析管理设计位），届时现状壳退役。归档至 `history/plans/2026-09/`。
+
+### 收尾裁决记录（2026-09-23，PLAN-044 关闭）
+
+- **晋升落位**：设计正文独立晋升 [design/parsing-flow.md](../../../design/parsing-flow.md)，
+  **不与 [parsing-ui.md](../../../design/parsing-ui.md) 合并**（用户裁决）——两文档分别对应
+  [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 的「后端全链路」与
+  「界面消费」两侧，互链不互抄；design/ 按模块划分，parsing-ui 已 267 行且在实现中，
+  合并只会产出一篇超长文档。
+- **DDL 快照**：根侧 `parsing-flow.md` §5 保留**全量现行 `af_*` DDL 快照**（用户裁决），
+  按其 `20260917_0001` → `20260920_0002`（版本作用域：`active_job_id` 生效指针、`job_id`
+  入 `af_pages` 主键与 `af_block_edits` 唯一键、`engine` 去默认）→ `20260921_0001`
+  （结局分列：`last_parse_result`、`failed_pages`、`parse_status` 收窄为纯进度）三段迁移
+  重建；壳内本节初版 DDL 就此成为历史，不再维护（结构事实源仍是 Axiom-Flow
+  `docs/architecture/database-design.md`）。
+- **成功标准判定**：六条中第 3 条（产物格式与 `af_*` DDL 冻结）在壳内已标 **af_* 四表已达成**
+  （2026-09-20 迁移落地 + REQ-027 关闭）；第 6 条端到端验收由 ARCH-020-E 部分验收关闭承接
+  （2026-09-22 用户裁决，b05 生效版经 8903 工作台实测），本任务据此判定收口。
+- **并发改动并存（重要）**：收尾期间工作区并存另一会话的未提交改动（`GET /api/v1/parse-jobs`
+  列表端点及其 8900 实现、前端在飞任务恢复、资源水位卡、`/logs?lines` 与
+  `resource-peak` 文档登记等）。本次文档回链与快照一律以**当前工作区实况**为基线书写，
+  但不认领上述代码改动，其门禁红项亦不代其修复。
+- **门禁实跑基线（2026-09-23，收尾后）**：契约 5 failed / 58 passed · 后端全量 527 passed /
+  5 failed · ruff 1 条 B008（`api/axiom.py:319` 的 `Query()` 默认值）· web 面 build 通过 +
+  vitest 27 文件 216 passed · `docs/` 全量相对链接核验 0 断链。
+- **5 条契约红项逐条归因（全属并行线，本任务不动）**：① `tests/test_llm_supervisor.py`
+  未入 code-map 映射；② `services/llm/supervisor.py` 头部 DesignRef 与映射表不一致；
+  ③ `2026-09-23-local-model-stability-round.md` 缺「目标与成功标准」节；④ 根测试面清单
+  未收录 `test_llm_supervisor.py`；⑤ todo 的 ARCH-028 行标题与该壳 H1 尾括号不一致——五条同源于
+  ARCH-028 在飞批次。
+- **本任务自身引入的红项已清零**：`parsing-flow.md` 初稿把 `api/axiom.py`、`axiom_client.py`
+  写进「关联代码」，与 code-map 中二者 DesignRef=`api-contracts.md` 冲突（契约测试要求模块
+  唯一归属），已改为登记 8902 侧实现路径 + 注明 8900 适配层映射归属；roadmap「Axiom-Flow
+  对齐」行曾引用已关闭的 PLAN-044，已改挂 ARCH-025。
+- **git**：按 AGENTS.md 写操作纪律，本任务未执行 commit/push，改动全部留在工作区待用户指令。

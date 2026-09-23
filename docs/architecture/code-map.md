@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-14
+最后更新：2026-09-23
 确认状态：已确认
 维护位置：`docs/architecture/code-map.md`
 关联代码：受管模块清单
@@ -31,9 +31,9 @@
 | `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | catalogs/tasks/三表契约归 8900，内部经 tracker_client.py 适配 8901。 |
 | `backend/qed_engine/api/explore.py` | 数据域·探索会话路由 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | /explore-sessions 五端点，取代旧 explore-runs 透传。 |
 | `backend/qed_engine/api/domain_explore.py` | 数据域·领域探索五态门面路由 | Current | `docs/design/downloads-flow.md` | `tests/test_domain_explore.py` | 五端点委托 8901 原生任务链：task_id 登记、courses.json→课程行桥接、explore_pending 合成与离线降级（PLAN-034 已落地）。 |
-| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/单本详情/PDF 流/pages/manifest/parse-jobs/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；`GET /books/{id}/file` 为 8900 本地端点（af_books.file_path 数据根相对路径 + 边界校验，见 [dataset 目录约定](../design/dataset-conventions.md)）；ARCH-020-D 已实施 `POST /books/{id}/ingest` 透传 + 块编辑门面 `PUT …/blocks/{i}/edit`/`GET …/pages/{no}/edits`（/review 门面过渡保留）；剩余 PATCH/DELETE/chunks 见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md）。 |
+| `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/单本详情/PDF 流/pages/manifest/parse-jobs（含 `GET /parse-jobs` 列表透传，前端重开工作台恢复在飞任务）/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；`GET /books/{id}/file` 为 8900 本地端点（af_books.file_path 数据根相对路径 + 边界校验，见 [dataset 目录约定](../design/dataset-conventions.md)）；含 `POST /books/{id}/ingest` 透传 + 块编辑门面 `PUT …/blocks/{i}/edit`/`GET …/pages/{no}/edits`（/review 门面过渡保留）；剩余规划透传 PATCH/DELETE/versions/chunks 见 [api-contracts.md](api-contracts.md) §④ 规划契约。 |
 | `backend/qed_engine/clients/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/cross-project-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/三表，transport 可注入。 |
-| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/单本详情(get_book)/ingest_book/pages/manifest/parse-jobs/sync/edit（engine/id/progress 对象按 8902 v2 契约；edit_block verdict 可选支持部分修正），transport 可注入；/review 门面内部转 /edit，ARCH-020-D 前端已直连 /edit。 |
+| `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/单本详情(get_book)/ingest_book/pages/manifest/parse-jobs（含列表 list_parse_jobs）/sync/edit（engine/id/progress 对象按 8902 v2 契约；edit_block verdict 可选支持部分修正），transport 可注入；/review 门面内部转 /edit。 |
 
 ### 服务层·控制域
 

@@ -12,7 +12,7 @@
 | 标准 | 治理对象 | 权威产物 | 自动门禁 |
 | --- | --- | --- | --- |
 | [任务生命周期](task-lifecycle.md) | 任务分类、计划准入、tracker 状态、实施门禁与关闭交付 | 计划正文及 tracker | `tests/contract/test_plan_governance.py`、`tests/contract/test_tracker_governance.py` |
-| [文档治理规范](doc-governance.md) | 文档分类与事实边界、确认状态、文档生命周期、任务与文档绑定、写作命名索引元数据、归档与删除 | 当前文档树及 History | `tests/contract/test_document_structure.py`、`tests/contract/test_markdown_links.py`、`tests/contract/test_standard_governance.py` |
+| [文档治理规范](doc-governance.md) | 文档分类与事实边界、设计文档结构契约、确认状态、文档生命周期、任务与文档绑定、写作命名索引元数据、归档与删除 | 当前文档树及 History | `tests/contract/test_document_structure.py`、`tests/contract/test_markdown_links.py`、`tests/contract/test_standard_governance.py` |
 | [ADR 治理规范](adr-governance.md) | ADR 准入、全局编号、元数据、状态、取代关系与归档路径 | ADR 正文及 ADR index | `tests/contract/test_adr_governance.py` |
 | [文档与代码双向追溯规范](code-document-traceability.md) | code-map、模块 DesignRef 和语义同步门禁 | `docs/architecture/code-map.md` | `tests/contract/test_code_document_mapping.py`、`tests/contract/test_api_endpoint_inventory.py` |
 | [代码规范](code-standards.md) | 代码风格、命名、类型与错误处理、日志、依赖声明、前后端分层与允许/禁止清单 | 受管源码与工具配置（`pyproject.toml`、`tsconfig`） | `tests/contract/test_code_standards_governance.py` |

@@ -2,12 +2,12 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-20
-需求方：QED-Tracker（课程体系 `qed_domain`/`qed_course`，REQ-026/QED-031）、QED-Engine（LLM 调用记录 `qed_llm_calls`，ARCH-016）、Axiom-Flow（解析管理 `af_*` 四表，ARCH-020）
+最后更新：2026-09-23
+需求方：QED-Tracker（课程体系 `qed_domain`/`qed_course`）、QED-Engine（LLM 调用记录 `qed_llm_calls`）、Axiom-Flow（解析管理 `af_*` 四表）
 确认状态：暂定
 关联代码：`.env.example`（`QED_DB_*` 变量模板）
 关联测试：`tests/contract/test_architecture_documents.py`、`tests/test_llm_call_log.py`
-关联 ADR：`docs/history/adr/v0.1/0003-shared-qed-database-independence.md`、`docs/history/adr/v0.1/0009-shared-qed-tables.md`（2026-08-16：新增 `qed_*` 共享表族，部分补充 0003）、`docs/history/adr/v0.1/0010-documentation-versioning.md`、`docs/adr/0014-parsing-ownership-and-model-boundary.md`
+关联 ADR：`docs/history/adr/v0.1/0003-shared-qed-database-independence.md`、`docs/history/adr/v0.1/0009-shared-qed-tables.md`（新增 `qed_*` 共享表族，部分补充 0003）、`docs/history/adr/v0.1/0010-documentation-versioning.md`、`docs/adr/0014-parsing-ownership-and-model-boundary.md`
 
 > 本文件是 **QED-Engine 的固定数据库设计文档（总纲）**（ADR 0010）：只登记共享 `qed` 库的
 > 命名空间隔离规则、表清单总览与跨项目契约要点；**qt_*/af_* 部分置空，指向子项目各自的
@@ -20,17 +20,14 @@
 本文件是根仓库对共享 MySQL `qed` 库的**登记与指引**：只维护命名空间隔离规则、表清单总览与
 跨项目契约要点。共享表 `qed_*` 的**结构事实源仍在 QED-Tracker**（其 Alembic 建表维护，
 根仓库仅登记同步）；`qt_*` 属 QED-Tracker、`af_*` 属 Axiom-Flow，根仓库不复制其表结构定义。
-QED-Tracker 侧已回执（REQ-026 关闭，2026-08-16）：其 `docs/architecture/database-shared-tables.md`
-（`qed_*`）与 `database-private-tables.md`（`qt_*`）为 qed 库全部表**唯一事实源**。Axiom-Flow 侧 af_*
-表定义确认经 [REQ-027](../trackers/completed.md) 关闭（2026-09-20 用户裁决：以其迁移落地为回执，见
-[已关闭台账](../trackers/completed.md)）；**ARCH-020 重构（2026-09-14）**将 af_* 重定义为四表
-（af_books / af_parse_jobs / af_pages / af_block_edits），设计见
-[与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)，
-Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源（四表已随其迁移
-`20260917_0001` 于 2026-09-20 在本机 qed 库落地）。
+QED-Tracker 侧 `docs/architecture/database-shared-tables.md`（`qed_*`）与
+`database-private-tables.md`（`qt_*`）为 qed 库全部表**唯一事实源**；Axiom-Flow 侧
+`docs/architecture/database-design.md` 为 `af_*` 四表（af_books / af_parse_jobs / af_pages /
+af_block_edits）结构事实源，设计正文见
+[文档解析管理·全链路设计](../design/parsing-flow.md)。
 跨项目对接语义见[三项目对接规范](../design/cross-project-contracts.md)。
 
-**数据边界新模式（2026-08-16 用户裁决，ARCH-013）**：dataset 只管理数据资料（原始数据 +
+**数据边界**：dataset 只管理数据资料（原始数据 +
 整理后解析产物，见 [dataset-conventions.md](../design/dataset-conventions.md)）；**元数据默认存数据库**
 ——登记、状态、进度、评价、课程体系、任务记录等一律入本库，`meta/` JSON 不再作为事实源
 （退役，REQ-032）。
@@ -39,14 +36,15 @@ Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源（四表
 
 - MySQL 8，库名 `qed`，三个项目共用同一实例与库——独立性铁律的明确例外（[ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md)）。
 - 表命名空间隔离：QED-Tracker 使用 `qt_*` 前缀，Axiom-Flow 使用 `af_*` 前缀；互不读取对方表。
-- **共享 `qed_*` 前缀表族**（2026-08-16，[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md) 补充 0003）：
+- **共享 `qed_*` 前缀表族**（[ADR 0009](../history/adr/v0.1/0009-shared-qed-tables.md) 补充 0003）：
   三项目共用的基础元数据；所有权 QED-Tracker（Alembic 建表维护），其他项目只读不写；
   schema 变更须先经根仓库登记（ADR 0009）。`qed_llm_calls` 例外：三项目均可写入调用记录，
   表结构由根仓库迁移定义后登记（所有权仍 QED-Tracker）。
 - 凭据与库名唯一事实源：根 `.env` 的 `QED_DB_*` 变量（见
   [project-configuration.md](../design/project-configuration.md) 统一数据库小节）。
-- 存量遗留库：`qed_test` 保留为**测试库**（隔离真实数据）；`axiom`（Axiom-Flow v1 运行库）与
-  `xqfm`（更早遗留）由 ARCH-020-F（D 类数据操作）备份后删除（2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）。
+- 存量库现状：MySQL 面**仅业务库 `qed` 与测试库 `qed_test`**（后者隔离真实数据，保留）；
+  遗留库已收敛清零（备份、还原演练与删除执行记录见
+  [completed.md](../trackers/completed.md) 数据操作行，决策 [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）。
 
 ## 表清单总览
 
@@ -59,10 +57,10 @@ Axiom-Flow `docs/architecture/database-design.md` 为其结构事实源（四表
 | `qt_books` | 私有 | QED-Tracker | 一册/一本书的选用态（candidate/decided/parallel/retired）+ 持有态（owned/missing）+ 下载生命周期（downloading/downloaded/verified/failed，QED-060） | QED-031 + QED-060 | QED-Tracker database-private-tables.md |
 | `qt_sources` | 私有 | QED-Tracker | 一次渠道尝试（外键挂 book_id），ok 标达成败 | QED-031，0014 重建 | QED-Tracker database-private-tables.md |
 | `qt_tasks` | 私有 | QED-Tracker | 一个后台任务记录（queued→running→succeeded/failed） | REQ-032，迁移 0016 建 | QED-Tracker database-private-tables.md |
-| `af_books` | 私有 | Axiom-Flow | 一册已验证书（qt_books 只读快照 + ingest/解析进度） | **已落地**（ARCH-020-C，迁移 20260917_0001，2026-09-20 本机 qed 库建表 + ingest E2E 实证） | Axiom-Flow database-design.md |
-| `af_parse_jobs` | 私有 | Axiom-Flow | 一次解析任务（逐页/全本，状态与进度） | **已落地**（同上） | Axiom-Flow database-design.md |
-| `af_pages` | 私有 | Axiom-Flow | 一页解析状态与质量信号 | **已落地**（同上） | Axiom-Flow database-design.md |
-| `af_block_edits` | 私有 | Axiom-Flow | 一次块级人工编辑（判定/备注/文字/范围） | **已落地**（同上） | Axiom-Flow database-design.md |
+| `af_books` | 私有 | Axiom-Flow | 一册已验证书（qt_books 只读快照 + ingest/解析进度 + 生效版本指针） | **已落地**（Axiom-Flow Alembic 建表维护） | Axiom-Flow database-design.md |
+| `af_parse_jobs` | 私有 | Axiom-Flow | 一次解析任务＝一个解析版本（逐页/全本，状态与进度） | **已落地**（同上） | Axiom-Flow database-design.md |
+| `af_pages` | 私有 | Axiom-Flow | 一页解析状态与质量信号（按解析版本作用域） | **已落地**（同上） | Axiom-Flow database-design.md |
+| `af_block_edits` | 私有 | Axiom-Flow | 一次块级人工编辑（判定/备注/文字/范围，绑定解析版本） | **已落地**（同上） | Axiom-Flow database-design.md |
 | 学习表族（规划） | 暂缓 | 待裁决 | 课程进度/练习记录/问答会话 | 规划，M2 里程碑启动时裁决 | 本文件「学习表族规划」节 |
 
 > **qt_*/af_* 部分置空**：QED-Engine 总纲不复制子项目表结构，一律指向子项目数据库文档。
@@ -212,7 +210,7 @@ QED-Engine 后端（`backend/qed_engine/services/llm/call_log.py` 幂等建表 +
 ## qt_*（QED-Tracker，私有）
 
 QED-Tracker 定义自身完整数据库定义（`docs/architecture/database-private-tables.md`（qt_*）与
-`database-shared-tables.md`（qed_*）唯一事实源，REQ-026 已回执；2026-08-20 起作为固定文档）。根仓库总纲不复制其结构。四张在用表：
+`database-shared-tables.md`（qed_*）为其结构唯一事实源）。根仓库总纲不复制其结构。四张在用表：
 
 - `qt_knowledge`：一套教程（tutorial）或课程延展资料归类（other_material），两态
   draft→confirmed（2026-09-03 重构，废弃由 notes 承载）。
@@ -226,23 +224,21 @@ QED-Tracker 定义自身完整数据库定义（`docs/architecture/database-priv
 ## af_*（Axiom-Flow，私有）
 
 Axiom-Flow 侧表结构由 Axiom-Flow `docs/architecture/database-design.md` 定义；根仓库只维护
-命名空间与敏感字段规则，不复制其结构。**ARCH-020 重构（2026-09-14）**将 af_* 重定义为四表
-（替代原 af_books/af_block_reviews 两表草案），**ARCH-020-C 已落地**（2026-09-20）：
+命名空间与敏感字段规则，不复制其结构。`af_*` 为四表：
 
 - `af_books`：一册已验证书（qt_books 只读快照：book_id/domain_id/course_id/course_name/
-  knowledge_id/title/part/display_title/authors/file_path + ingest_status/parse_status/pages_done）。
-- `af_parse_jobs`：一次解析任务（job_id/book_id/pages/engine/status/progress/error/时间戳）。
-- `af_pages`：一页解析状态（book_id+page_no PK；status/source/quality/error/parsed_at）。
-- `af_block_edits`：一次块级人工编辑（book_id/page_no/block_index 唯一；verdict/note/
-  corrected_text/corrected_bbox/时间戳）。
+  knowledge_id/title/part/display_title/authors/file_path + sha256/ingest_status/
+  parse_status/last_parse_result/pages_done + active_job_id 生效解析版本指针）。
+- `af_parse_jobs`：一次解析任务＝一个解析版本（job_id/book_id/pages/engine/status/progress/
+  failed_pages/error/source_sha256/page_count/时间戳）。
+- `af_pages`：一个解析版本一页的解析状态（book_id+job_id+page_no PK；status/source/
+  quality/error/parsed_at；`job_id='legacy'` 为根视图存量哨兵）。
+- `af_block_edits`：一次块级人工编辑，绑定其所属解析版本（book_id+job_id+page_no/
+  block_index 唯一；verdict/note/corrected_text/corrected_bbox/时间戳）。
 
-完整 DDL 与字段语义见[与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)
-§5 与 Axiom-Flow `docs/architecture/database-design.md`（结构事实源）；四表由 Axiom-Flow Alembic
-独立建表，迁移 `20260917_0001_create_af_tables.py` 已于 2026-09-20 在本机 qed 库
-`alembic upgrade head` 落地（列/默认值/注释/PK/UNIQUE/索引与设计逐列一致，E2E ingest 486 页实证）。
-REQ-027（af_* 定义确认回执）据此于 2026-09-20 用户裁决关闭。附带发现：Axiom-Flow 侧
-database-design.md 表清单状态列仍写「规划」（与其元数据 Implementation: Current 自相矛盾），
-2026-09-20 用户裁决暂不处理，待其 Phase B 文档重构轮自然覆盖。
+完整 DDL 与字段语义以 Axiom-Flow `docs/architecture/database-design.md` 为唯一事实源
+（根侧 DDL 快照已按 ADR 0017 删除，指针见[文档解析管理·全链路设计](../design/parsing-flow.md) §2）；
+四表由 Axiom-Flow Alembic 独立建表与维护。
 
 ## QED-Engine 学习表族（规划，暂缓）
 
@@ -256,7 +252,6 @@ database-design.md 表清单状态列仍写「规划」（与其元数据 Implem
 
 - `qed` 库由各项目 Alembic **独立初始化**自己的表，互不影响；`qed_*` 共享表由 QED-Tracker
   Alembic 建表与维护（`qed_llm_calls` 结构由根仓库迁移定义后登记，所有权仍 QED-Tracker）。
-  存量 `xqfm11` 库不迁移。
 - 新增表或共享字段变化：先更新本文件与对应契约，再实现迁移。
 
 ## 敏感字段规则

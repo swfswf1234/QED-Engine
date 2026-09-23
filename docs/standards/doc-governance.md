@@ -1,9 +1,9 @@
 # 文档治理规范
 
 状态：Current
-最后更新：2026-09-10
+最后更新：2026-09-23
 确认状态：已确认
-治理对象：文档分类与事实边界、确认状态、文档生命周期、任务与文档绑定、写作命名索引元数据、归档与删除
+治理对象：文档分类与事实边界、设计文档结构契约、确认状态、文档生命周期、任务与文档绑定、写作命名索引元数据、归档与删除
 依据 ADR：`../history/adr/v0.1/0001-root-contract-tests.md`、`../history/adr/v0.1/0010-documentation-versioning.md`、`../history/adr/v0.1/0011-pending-design-location.md`
 关联测试：`tests/contract/test_document_structure.py`、`tests/contract/test_markdown_links.py`、`tests/contract/test_standard_governance.py`
 
@@ -47,6 +47,26 @@
 `dataset/` 是下载内容与中间产物的存储目录（原始文档、解析产物等），数据文件本身不入库
 （见根 `.gitignore`）。目录结构见 [dataset 约束](../design/dataset-conventions.md)；数据根边界、
 `tmp/` 生命周期、原子落盘与测试隔离规则见[临时目录与数据存储规范](storage-conventions.md)。
+
+### 设计文档结构契约（ADR 0017）
+
+`design/` 模块设计文档正文按固定骨架组织，使读者打开即知「这是什么设计、目标是什么、
+边界是什么」：
+
+1. **§1 定位与目标**：是什么 / 为谁 / 解决什么 + 成功标准；「背景」与「定位」并入本节，
+   不再 blockquote 与专节并存；
+2. **§2 范围与非目标**：本档不管什么，逐条给出事实源改指指针；
+3. **§3..N 设计本体**：按设计对象自定（信息架构 / 状态机 / 数据流 / 交互 / 产物 schema…）；
+4. **状态与降级矩阵**：UI 与 flow 文档必备；
+5. **已知约束与维护规则**：置尾，可合并为一节。
+
+章节编号统一阿拉伯数字（`## 1. …`）；头部元数据契约不变（`test_design_documents.py` 守护）。
+
+**事实源唯一铁律**：design 文档可陈述**消费语义**（哪个动作调哪个端点、超时/轮询节奏、
+状态判据），但**不得复制维护端点表、DDL 或字段级契约**。契约形状事实源唯一：根侧
+surface 归 `architecture/api-contracts.md` / `architecture/database-design.md`，子项目侧归
+其仓库文档（如 Axiom-Flow `api.md` / `database-design.md` 与 Alembic），design 文档一律
+指针代替复制。新文档自起笔适用；存量六篇已按本契约梳理（2026-09-23 ARCH-029 轮）。
 
 ### 变更分级（AI 开发守则，ADR 0012）
 

@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
@@ -74,14 +74,14 @@
   `qt_books` 行（kind=paper/blog/other）挂该 knowledge_id；界面按类别分组展示、无内容不显示
   该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB）。
 - `parsed/<domain>/<course>/<book_id>/` 内部产物格式（页图/Markdown/blocks.json/manifest）
-  见 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
+  见 [文档解析管理·全链路设计](parsing-flow.md)。
 
 ## 契约
 
 | 子域 | 写入方 | 读取方 | 内容 |
 | --- | --- | --- | --- |
 | `raw/<domain>/<course>/` | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始数据（PDF/快照），保持来源完整性与校验信息；元数据（sha256/路径/状态）在 `qt_books` |
-| `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*`（ARCH-020 四表） |
+| `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*` 四表 |
 | `tmp/<project>/…` | 各写入方自用 | — | 下载/解析中间产物，任务结束清理，不跨项目读取 |
 | `tmp/exploration/` | 用户手工维护 | QED-Tracker（LLM 探索输入，经 ref_doc_path） | 探索发起文档（`<对象名>探索.txt`），用户资产不自动清理 |
 

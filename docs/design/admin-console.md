@@ -2,34 +2,49 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)
+关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
 关联设计：[service-hosting.md](service-hosting.md)（服务托管）、[local-model-management.md](local-model-management.md)（本地模型生命周期）、[llm-gateway.md](llm-gateway.md)（模型网关/调用记录）、[api-contracts](../architecture/api-contracts.md)（固定 API）
 关联计划：[PLAN-046](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（槽位卡定档来源）；
 界面演进经 git 历史与 `history/plans/` 各计划壳追溯
 
-## 背景与定位
+## 1. 定位与目标
 
-本文件定义 QED-Engine 管理后台两份 UI 设计：
+本文档定义 QED-Engine 管理后台两份 UI 设计：
 
 1. **控制台**（`#/admin`，AdminLayout 默认首页）：全局总览，两大职责——**服务生命周期
    管理** + **资源监控**，并提供本地模型生命周期的操作入口。
 2. **模型调用记录页**（`#/admin/llm-calls`）：`qed_llm_calls` 表的检索与审核界面。
 
-- 与仪表盘（Dashboard，只读）的区别：控制台含操作按钮（启停/重启/测试/模型操作）。
+- **目标**：控制中心的「启停托管、资源水位、模型槽位操作、调用审核」全部在一个可操作
+  界面完成，且任一依赖离线时界面可降级不白屏；
+- **成功标准**：四服务/MySQL/GPU/三模型槽位的当前态与可执行操作在控制台一屏可判；
+  调用记录页可按筛选定位任意一次调用并完成判定回写；操作均有防重入与收敛反馈。
+- 与仪表盘（Dashboard，只读看板）的区别：控制台含操作按钮（启停/重启/测试/模型操作）。
+
+## 2. 范围与非目标
+
+本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律）：
+
+| 内容 | 唯一事实源 |
+| --- | --- |
+| 服务托管细节（注册表/启停单元/生命周期脚本） | [service-hosting.md](service-hosting.md) |
+| 模型单活仲裁、启停与选择的后端行为 | [local-model-management.md](local-model-management.md) |
+| 网关路由、调用记录表结构与写入方 | [llm-gateway.md](llm-gateway.md) |
+| 控制域/网关端点路径与请求/响应形状（本档 §6 只登记消费链路） | [api-contracts.md](../architecture/api-contracts.md) |
+| 8903 全局信息架构与视觉基线 | [frontend-architecture.md](../architecture/frontend-architecture.md) |
+
 - 全部数据与操作**一律经 8900 聚合**（ADR 0007）：8901/8902 未启动时前端降级不白屏；
   8900 离线时前端用本地判定 + 错误横幅。
-- 服务托管细节（注册表/启停单元/生命周期脚本）归 [service-hosting.md](service-hosting.md)，
-  本文件只定义 UI 侧的三区结构、Store、API 链路与资源监控口径。
 
-## 三区结构
+## 3. 三区结构
 
 顺序固定：**服务管理 → 基础设施 → 资源监控（GPU 状态 + 文字/图像/向量三槽位卡）**。
 
-### 区 1：服务管理（四服务卡，ServiceCard）
+### 3.1 区 1：服务管理（四服务卡，ServiceCard）
 
 | 服务 | name | 端口 | 在线操作 | 离线操作 | 特殊逻辑 |
 | --- | --- | --- | --- | --- | --- |
@@ -42,7 +57,7 @@
 操作按钮（按上表规则动态渲染）。操作后前端轮询 `GET /services` 每 1 秒，最多 15 秒，
 直到状态收敛到目标态；`operating` 字段防重入，操作期间禁用其他按钮。
 
-### 区 2：基础设施（MySQL）
+### 3.2 区 2：基础设施（MySQL）
 
 | 组件 | origin 逻辑 | 探针端点 | 测试按钮 |
 | --- | --- | --- | --- |
@@ -50,7 +65,7 @@
 
 本期仅探测 + 测试（无启停）。
 
-### 区 3：资源监控（GpuOverview + SlotCard 三槽位卡）
+### 3.3 区 3：资源监控（GpuOverview + SlotCard 三槽位卡）
 
 展示 GPU 型号、VRAM 已用/总量、利用率、系统内存已用/总量、VRAM 构成饼图、进程列表。
 
@@ -88,12 +103,12 @@
 - 选择（来源/渠道/模型）均写运行态 `manifest.json`（`source`/`runtime`/`active`，重启保留）；
   渠道「待上线」置灰不可选；「默认」= 全局 `QED_API_SELECT` / `QED_LOCAL_RUNTIME` 默认值。
 
-## 模型调用记录页（`#/admin/llm-calls`）
+## 4. 模型调用记录页（`#/admin/llm-calls`）
 
 `qed_llm_calls` 表（三项目可写，见 [llm-gateway.md](llm-gateway.md)）
 的检索与审核界面；后端契约 `GET /llm/calls` + `PATCH /llm/calls/{id}/review`。
 
-### 筛选栏
+### 4.1 筛选栏
 
 | 筛选项 | 控件 | 说明 |
 | --- | --- | --- |
@@ -105,7 +120,7 @@
 
 「查询」应用草稿筛选并自动回第 1 页；「重置」清空草稿与生效筛选；页头「刷新」按钮带 loading。
 
-### 表格（9 列 + 展开列）
+### 4.2 表格（9 列 + 展开列）
 
 | 列 | 内容 |
 | --- | --- |
@@ -120,7 +135,7 @@
 
 展开图标置于表格末列；分页 `showTotal` 显示总数。
 
-### 展开行（详情）
+### 4.3 展开行（详情）
 
 - 元信息行：`task` / `step`（存在才显示）。
 - **Prompt / Response 区块**：JSON 可解析则缩进两格美化；超过 500 字或 10 行折叠为前 10 行
@@ -130,7 +145,7 @@
 - 底部操作行：端点、模板元信息 + **审核状态行内变更**（Select 仅提供 通过/驳回，
   经 `PATCH /llm/calls/{id}/review` 即时保存）+ 审核备注展示。
 
-### Store 与 API（useLlmCallsStore）
+### 4.4 Store 与 API（useLlmCallsStore）
 
 ```text
 State:  items / total / page / size / loading / error / filters
@@ -143,7 +158,7 @@ Actions:
 
 8900 不可达时整页 Alert（提示启动 8900 后刷新），独立于控制台全局错误。
 
-## Store 设计（useRuntimeStore）
+## 5. Store 设计（useRuntimeStore）
 
 ```text
 State:
@@ -180,30 +195,19 @@ options: {value,label,description}[]; notes?; error? }
 独立降级。`withWebServiceFallback()`：8900 离线时 `/services` 缺 `web` 条目时硬编码
 注入 8903 "online"，确保前端服务始终可见。
 
-## API 链路
+## 6. API 链路（消费要点）
 
-### 初始加载（fetchAll，7 并行）
+控制域端点路径与请求/响应形状以 [api-contracts.md](../architecture/api-contracts.md) 为
+唯一事实源（本档不复制维护）；此处只登记消费链路与节奏：
 
-| 前端调用 | 后端路由 | 方法 | 后端服务 |
-| --- | --- | --- | --- |
-| `listServices()` | `GET /services` | GET | `service_manager.get_specs()` + `service_status()` |
-| `getDatabaseStatus()` | `GET /config/database` | GET | `app.state.db_status`（启动快照） |
-| `monitorGpu()` | `GET /monitor/gpu` | GET | `monitor.probe_gpu()`（PDH + nvidia-smi）+ `probe_memory()` |
-| `getSlotStatus('text'\|'vision'\|'embedding')` ×3 | `GET /models/{slot}` | GET | `registry.resolve` + runtime 探针 |
-| `getKeys()` | `GET /config/keys` | GET | `app.state.settings` |
-
-### 操作
-
-| 操作 | 前端调用 | 后端路由 |
-| --- | --- | --- |
-| 服务启动/停止/重启 | `operateService(name, op)` | `POST /services/{name}/{start\|stop\|restart}` |
-| 8900 自重启 | `selfRestart()` | `POST /self-restart` |
-| 模型槽位启动/停止/重启 | `operateModel(slot, op)` | `POST /models/{slot}/{start\|stop\|restart}` |
-| 模型选择（来源/渠道/身份） | `selectModel(slot, patch)` | `POST /models/{slot}/select`（patch = `{source?, runtime?, model?}`） |
-| MySQL 测试 | `databaseTest()` | `POST /database/test` |
-| 文字/图像/向量模型测试 | `llmTestText()` / `llmTestVision()` / `llmTestEmbedding()` | `POST /llm/test/text`、`POST /llm/test/vision`、`POST /llm/test/embedding` |
-
-### 请求链路
+- **初始加载**：`fetchAll` 并行 7 请求——`/services`、`/config/database`、`/monitor/gpu`、
+  `/models/{slot}` ×3、`/config/keys`；per-field 错误独立降级（§5）；
+- **操作面**：服务启停重启（`/services/{name}/{op}`；8900 自身走 `/self-restart`）、模型槽位
+  启停重启（`/models/{slot}/{op}`）与选择（`/models/{slot}/select`）、MySQL 测试
+  （`/database/test`）、三槽位验证（`/llm/test/{slot}`）、调用记录检索与审核
+  （`/llm/calls`、`/llm/calls/{id}/review`）；启停类操作后 1s×15 轮询收敛，模型操作以
+  `ready` 达目标态为收敛判据；
+- **请求链路**（全部经 8900，ADR 0007）：
 
 ```text
 Browser (8903)
@@ -215,7 +219,7 @@ Browser (8903)
       └─ axiom.py: /parse-jobs（透传 8902）
 ```
 
-## 关键组件文件
+## 7. 关键组件文件
 
 | 文件 | 职责 |
 | --- | --- |
@@ -231,7 +235,7 @@ Browser (8903)
 | `backend/qed_engine/api/control.py` | 控制域路由（含 /models 端点族） |
 | `backend/qed_engine/services/monitor.py` | probe_gpu（PDH 集成）/probe_pdh/resolve_process_name |
 
-## 已知约束与约定
+## 8. 已知约束与约定
 
 1. **防重入**：`fetchAll`/`operate`/`operateModel`/`testing` 状态互斥，防止重复请求。
 2. **Modal.confirm 兼容**：React 19 下控制台使用受控 `<Modal>` 替代 `Modal.confirm`。
@@ -239,6 +243,8 @@ Browser (8903)
 4. **独立性铁律**：8901/8902 离线 → 降级提示不白屏；8900 离线 → 本地判定 + 错误横幅。
 5. **GPU 自动刷新**：60 秒间隔，操作期间暂停。
 6. **web 服务兜底**：`withWebServiceFallback()` 确保 8903 始终在服务列表中。
-7. **口径一致性**：指标行与进程/饼图显存口径不同（物理驻留 vs 分配），UI 以脚注说明来源；
-   利用率必须展示 `utilization_source` 上下文。
+7. **口径一致性**：指标行与进程/饼图显存口径不同（物理驻留 vs 分配），利用率必须展示
+   `utilization_source` 上下文（WDDM 下 nvidia-smi 利用率失真）。
 8. **全部经 8900**（ADR 0007）：前端不直连 8901/8902/本地模型端口/数据库。
+9. **维护规则**：端点增删与形状变化先落 [api-contracts.md](../architecture/api-contracts.md)，
+   本档 §6 只回核消费链路与收敛节奏是否仍成立。

@@ -22,7 +22,7 @@
   用户裁决）**：逐厂商 key（QWEN/DEEPSEEK/GLM_API_KEY）已取消，单一 `API_KEY` + `QED_API_PROVIDER`
   （qwen/deepseek/glm，默认 qwen）选厂商，`/config/keys` 改返回 `{provider, configured}` |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901 | 已服务化 | 发现/下载/校验/登记 + 资源状态机 + 后台任务轮询；全链路联调冒烟（QED-014）待开始 |
-| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902 | 已实现 | 完整解析管线（PDF ingest / 引擎适配器 / 归一化 / 编排 / 产物落盘）+ 对照数据供给 + 人工编辑落库；**模型生命周期归 8900、解析直连模型服务**（ARCH-020，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）；文档重构进行中（[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)） |
+| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902 | 已实现 | 完整解析管线（PDF ingest / 引擎适配器 / 归一化 / 编排 / 产物落盘）+ 对照数据供给 + 人工编辑落库；**模型生命周期归 8900、解析直连模型服务**（ARCH-020，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）；设计已晋升定档（[parsing-flow.md](../design/parsing-flow.md)） |
 
 ## 三中心定位
 
@@ -119,7 +119,7 @@
   **2026-09-11 收尾**：三门课下载闭环 + 浏览器验收通过；PLAN-022/037/038/039/040/041 与
   REQ-068-PLAN 全部关闭归档（[completed.md](completed.md)）；领域探索阶段 2 缺陷修正
   （`已生成` 可探索、离线添加领域 `未开始`、导入 409）；跨项目请求 REQ-075~079 用户确认完成。
-  下一步：**第三轮主线·解析联调轮（ARCH-020）**——与 Axiom-Flow 联调 local/api 模式。
+  其后的第三轮主线·解析联调轮（ARCH-020）已于 2026-09-23 全部收口（见下方专项条目与 completed.md）。
 - 已完成：**第一轮主线·文档规范与架构确定轮（ARCH-018，ADR 0010，2026-08-21 关闭）**——
   文档体系重构为「确定文档 / 相对确定 / 实时状态」三层：architecture/ 只放确定文档（总体架构
   four-service-architecture + 服务架构 frontend/backend-architecture + 固定 API 文档
@@ -171,13 +171,12 @@
   V2-003~007 全落地，误建 ingest 代码对方已审阅并自行提交（其 `d019777`，2026-08-20）；
   8902 API 经 ARCH-020-C/E 多轮真机联调；REQ-036 已 2026-09-21 收口，REQ-034 前置随其 09-14 Not Applicable 关闭而失效）；
   各服务独立开发阶段，验收窗口见矩阵文档。
-- 已完成（Partial 收口，2026-09-20）：**第三轮主线·解析联调轮（ARCH-020，2026-09-14 重构）**——「文档解析管理」初版
-  模块设计定型：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 确立**模型生命周期归
+- 已完成（2026-09-14 立项重构，**2026-09-23 全部收口归档**）：**第三轮主线·解析联调轮（ARCH-020）**——「文档解析管理」核心交付：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 确立**模型生命周期归
   8900、解析管线归 Axiom-Flow（引擎适配器直连模型服务）**；设计正文两份
   [解析管理 UI 设计](../design/parsing-ui.md)（左树进度 + 原页 bbox 对比 +
   块级编辑：判定/备注/文字/范围；PLAN-043 已晋升）与
-  [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（af_* 四表 +
-  8902 契约 + 产物布局）。  **本轮为文档重构**（Phase A 根仓库 / Phase B Axiom-Flow）；
+  [文档解析管理·全链路设计](../design/parsing-flow.md)（全链路数据流 +
+  产物布局 + 统一 blocks schema；PLAN-044 晋升；af_* 结构与 8902 契约事实源在 Axiom-Flow，指针见其 §2）。  **本轮为文档重构**（Phase A 根仓库 / Phase B Axiom-Flow）；
   实现按「准备 → 实现 → 验收」推进：准备 = [解析管理 UI 设计](../design/parsing-ui.md)（PLAN-043 已晋升）
   + MinerU 模型已部署（PLAN-045 已关闭）；
   实现拆 ARCH-020-B/C/D（8900/8902/8903），验收 ARCH-020-E，数据操作
@@ -191,7 +190,7 @@
   404，解析产物待其对齐后 ARCH-020-E 方可验收。**2026-09-20 ARCH-020-C 收尾**：af_* 四表已落地
   （迁移 20260917_0001），根仓库 [数据库总纲](../architecture/database-design.md) af_* 转正
   （规划→已落地），REQ-027 关闭（以迁移落地为回执）；当前聚焦两份设计文档
-  （[parsing-ui](../design/parsing-ui.md) / [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）
+  （[parsing-ui](../design/parsing-ui.md) / [parsing-flow](../design/parsing-flow.md)）
   随联调与实现持续优化至初版（发现偏差续登 [design-bugfix-log](../plans/design-bugfix-log.md)）。
   **2026-09-20 解析界面四轮收口（UI 展示轮 → WB 重设计 → D 实现 → G 单屏回调，全部关闭归档）**：
   最终形态定档**单屏「左书目树（纯选择）+ 右对照工作台」**——bbox 双向联动、块编辑+判定、
@@ -207,7 +206,8 @@
   实测通过关闭 E；全本激活根治留 REQ-087、分块提交留 REQ-086 独立跟踪；**2026-09-23
   REQ-086/087 收口（用户裁决 A＝以对方 PLAN-007 真机证据+回执关闭，Achieved 见 completed.md；
   根侧业务口径全本实测连带老代 `$$$` 产物数据侧自愈核验转后续观察项，挂 ARCH-028 首次真机演练）**；
-  第三轮存续项仅剩 F（axiom/xqfm 库删除）与 PLAN-044。
+  **同日 ARCH-020-F 收口（备份+还原演练后 DROP axiom/xqfm 已执行，Achieved 见 completed.md；根 `.env` `QED_DB_NAME=qed_test` 为演练期保留，用户裁决不动）**；
+  **第三轮全部收口（2026-09-23 PLAN-044 收口，设计晋升 [parsing-flow.md](../design/parsing-flow.md)，见 completed.md）**。
 - 进行中：8903 前端十五期（文档下载管理课程分页，ARCH-007，待用户浏览器验收后归档）；
   文档基线之上的主线推进为**课程收集主线（ARCH-002）**——QED-Tracker QED-019（01 数学分析
   闭环）与 QED-014 全链路联调冒烟待执行，回执后在 8903 展示验收；前端后续十六期与

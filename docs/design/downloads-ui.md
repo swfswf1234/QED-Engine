@@ -11,16 +11,40 @@
 `web-ui/src/pages/Downloads.test.tsx`、`web-ui/src/stores/downloads.test.ts`
 关联测试：`web-ui/` Vitest（downloads.test.ts / Downloads.test.tsx / DownloadsTree.state.test.tsx）、
 `tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
-关联 ADR：无（纯前端展示层，沿用 ADR 0007 唯一入口 8900 与 ADR 0008 React 选型）
+关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（唯一入口 8900）、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（React 选型）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
 关联设计：[downloads-flow.md](downloads-flow.md)（探索状态机与后端链路——本文件只管 UI，
 状态机/写点/降级链路以其为准）
 
-> **本文档定位**：文档下载管理页（`#/admin/downloads`）的 **UI 设计文档**——左树结构、
-> 右侧四层展示、筛选规则、弹窗、状态口径，以及异常与降级的**用户可见表现**（§4）。
-> 探索状态机、后端链路、写点矩阵与降级规则本身归 [downloads-flow.md](downloads-flow.md)；
-> 业务流程规则（课程收集五阶段）亦在其 §5。
+## 1. 定位与目标
 
-## 1. 左树结构（领域 → 课程 → 教程）
+本文档是文档下载管理页（`#/admin/downloads`）的 **UI 设计事实源**：左树结构、右侧
+四层展示、筛选与排序规则、弹窗、三层状态口径声明，以及异常与降级的**用户可见表现**。
+它回答的是「用户在下载管理页看到什么层级、能做什么操作、依赖离线时页面怎样表现」。
+
+- **目标**：领域→课程→教程→书目四层内容一屏可导航可维护，状态口径与后端状态机严格
+  对齐、互不混用；
+- **成功标准**：本页全部前端展示行为（含右键菜单门禁、筛选档、弹窗操作区、降级横幅）
+  均有唯一口径可查；任何 UI 改动不混用 §5 三个状态体系的字段来源。
+
+## 2. 范围与非目标
+
+**范围内**：本页全部前端展示层（树/卡片/弹窗/筛选/排序/样式/异常降级表现）。
+**非目标**：不涉及后端 8900/8901 改动；不请求 QED-Tracker 接口变更（教程命名由其数据侧
+执行，前端 name 空值兜底见 §7）；不拆分 en 套为独立教程行（排序规则已置组尾）。
+
+本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律）：
+
+| 内容 | 唯一事实源 |
+| --- | --- |
+| 探索状态机、终态写点矩阵、后端降级规则 | [downloads-flow.md](downloads-flow.md) |
+| 端点路径与请求/响应形状 | [api-contracts.md](../architecture/api-contracts.md)；8901 原生契约归 QED-Tracker `docs/architecture/api.md` |
+| 书籍状态机字段定义 | QED-Tracker `architecture/database-private-tables.md` |
+| 业务流程规则（课程收集五阶段） | [downloads-flow.md](downloads-flow.md) §6 |
+
+**跨项目协作**：教程命名规范（§7）为数据侧改动，按
+[跨项目协作规范](../standards/cross-project-collaboration.md) 登记请求，对方建计划承接。
+
+## 3. 左树结构（领域 → 课程 → 教程）
 
 ```
 ▸ <领域>（共享表领域清单，多领域；DomainCard 恒显不受筛选影响）
@@ -31,22 +55,22 @@
 ```
 
 - **领域**：来自 `GET /courses` 领域清单；名称/描述/阶段徽标/explore_pending 提示条由
-  DomainCard 呈现（右侧恒显，见 §2.1）；左树支持右键维护（编辑/删除/探索领域知识/
+  DomainCard 呈现（右侧恒显，见 §4.1）；左树支持右键维护（编辑/删除/探索领域知识/
   导入领域知识/添加课程）。右键菜单门禁：探索在 `未开始/已生成/待确认/失败`
   可用（`探索中` 除删除外全部禁用）；**添加课程在 `未开始`/`已生成` 禁用**，`待确认/已完成/失败` 可用。
 - **课程**：点击选中 + 联立筛选；右键菜单（编辑/删除/课程探索/导入教程，按探索状态禁用，
-  见 [downloads-flow.md](downloads-flow.md) §2.3 操作表）。
+  见 [downloads-flow.md](downloads-flow.md) §3.3 操作表）。
 - **教程**：叶子节点，只展示 名称 + 验收进度数字（`verified 数/总数`），不可点击展开；
   书籍明细只在右侧栏/弹窗查看。
 - 树宽拖拽（280–640px、localStorage）与默认展开/折叠状态保留。
 
-## 2. 右侧栏
+## 4. 右侧栏
 
-### 2.1 展示层级规范（领域/课程/教程/书目四层）
+### 4.1 展示层级规范（领域/课程/教程/书目四层）
 
 | 层 | 展示 | 承载 | 可用操作 |
 | --- | --- | --- | --- |
-| 领域 | 名称、描述、阶段徽标、explore_pending 提示条 | `DomainCard`（**无论筛选如何恒显**） | 探索/确认领域/确认课程（按 [downloads-flow.md](downloads-flow.md) §2 状态机）；失败态 danger 重试 |
+| 领域 | 名称、描述、阶段徽标、explore_pending 提示条 | `DomainCard`（**无论筛选如何恒显**） | 探索/确认领域/确认课程（按 [downloads-flow.md](downloads-flow.md) §3 状态机）；失败态 danger 重试 |
 | 课程 | 名称、描述 + **操作条：课程探索、导入教程** | 课程头（`dl-course-head`） | 编辑/删除（左树右键）；课程探索在 探索中/已完成 禁用 |
 | 教程 | 名称（`.dl-knowledge-name`）、状态、**进度（下载 x/y 本）**、详情 | 教程行 | 详情（弹窗）、自动下载（candidate/decided/failed 可用）、删除（`DELETE /knowledge/{id}`） |
 | 书目 | 书名、作者、语言、**版本标签**（中译本/英文版/苏版/其他，由 language 与书名/作者推导） | 书目卡（纯展示，无操作按钮） | 详情（弹窗：信息 + 下载信息 + 上传/验证/自动下载）；新增书目在**教程详情弹窗**内 |
@@ -73,7 +97,7 @@
 **统一上传原则**：领域 JSON / 课程 JSON / 书籍 PDF 三类入口一律用
 浏览器文件选择器，界面不出现文件路径输入框。书目卡**不显示 kind 标签**（与 roles 语义重复）。
 
-### 2.2 筛选规则
+### 4.2 筛选规则
 
 | 筛选项 | 规则 |
 | --- | --- |
@@ -95,7 +119,7 @@
 
 `parallel`（平行读物）不计入筛选，`retired`（退役）留痕隐藏。
 
-### 2.3 书籍排序（`sortBooks`，每教程行内）
+### 4.3 书籍排序（`sortBooks`，每教程行内）
 
 1. 组序：① 中文教材（language=zh 且 kind=textbook）→ ② 中文习题集（language=zh 且
    kind=exercise）→ ③ 其余（英文教材、配套资料、论文等）。
@@ -103,22 +127,22 @@
    排组首；答案册=99 排组尾。
 3. 同册数按 title 稳定序。
 
-## 3. 三层状态口径声明
+## 5. 三层状态口径声明
 
 下载管理页涉及三个状态体系，**层级不同、互不冲突**：
 
 | 口径 | 层级 | 值域 | 事实源 |
 | --- | --- | --- | --- |
-| 探索状态机（六值） | 领域/课程探索流程 | 未开始/已生成/探索中/待确认/已完成/失败 | [downloads-flow.md](downloads-flow.md) §2 |
-| 书籍状态机 | 单本书目选用 + 生命周期 | 选用 `candidate/decided/parallel/retired` + 生命周期 `downloading/downloaded/verified/failed`（UI 5 档见 §2.2） | QED-Tracker `architecture/database-private-tables.md`（QED-050-D/QED-060），8901 透传 |
+| 探索状态机（六值） | 领域/课程探索流程 | 未开始/已生成/探索中/待确认/已完成/失败 | [downloads-flow.md](downloads-flow.md) §3 |
+| 书籍状态机 | 单本书目选用 + 生命周期 | 选用 `candidate/decided/parallel/retired` + 生命周期 `downloading/downloaded/verified/failed`（UI 5 档见 §4.2） | QED-Tracker `architecture/database-private-tables.md`（QED-050-D/QED-060），8901 透传 |
 | 仪表盘统计四态 | 书籍获取进度派生统计 | missing→decided→downloading→owned（holding×status 派生） | [admin-dashboard.md](admin-dashboard.md) |
 
-流程筛选（§2.2）是书籍状态机在 UI 上的**分组视图**；仪表盘四态是 holding×status 的
+流程筛选（§4.2）是书籍状态机在 UI 上的**分组视图**；仪表盘四态是 holding×status 的
 **统计派生**。任何 UI 改动不得混用三者的字段来源。
 
-## 4. 异常与降级表现（用户可见行为）
+## 6. 状态与降级矩阵（异常与降级的用户可见表现）
 
-后端降级规则本身（8900 如何处理）见 [downloads-flow.md](downloads-flow.md) §4.4；
+后端降级规则本身（8900 如何处理）见 [downloads-flow.md](downloads-flow.md) §5.4；
 本节只规定**前端呈现**：
 
 | 场景 | 用户可见行为 |
@@ -131,19 +155,16 @@
 | API 失败 | toast 透出服务端 detail；乐观更新禁用，以服务端返回为准 |
 
 `explore_pending.kind` 值域（后端写点契约，事实源见
-[downloads-flow.md](downloads-flow.md) §4.4）：`review_results` / `name_confirmation` / `error`。
+[downloads-flow.md](downloads-flow.md) §5.4）：`review_results` / `name_confirmation` / `error`。
 
-## 5. 教程命名规范（跨项目，请求：QED-Tracker）
+## 7. 教程命名规范（跨项目，请求：QED-Tracker）
 
 - 规范：tutorial 教程 `name = 教程{set_no}：{书名}（{作者}）`（书名作者取自教材决定
   引用 `textbook_ref`；en 套为「教程en：…」）；other_material 归类名不加「教程N」前缀。
 - 前端兜底：`tutorialLabel` 在 name 为空时显示「教程{set_no}」。
-- 使用手册需包含课程收集五阶段说明（业务流程见 [downloads-flow.md](downloads-flow.md) §5）。
+- 使用手册需包含课程收集五阶段说明（业务流程见 [downloads-flow.md](downloads-flow.md) §6）。
 
-## 6. 范围与协作
+## 8. 已知约束与维护规则
 
-- **范围内**：本页全部前端展示层（树/卡片/弹窗/筛选/排序/样式/异常降级表现）。
-- **非目标**：不涉及后端 8900/8901 改动；不请求 QED-Tracker 接口变更（教程命名由其数据侧
-  执行，前端 name 原样展示）；不拆分 en 套为独立教程行（排序规则已置组尾）。
-- **跨项目协作**：教程命名规范为数据侧改动，按
-  [跨项目协作规范](../standards/cross-project-collaboration.md) 登记请求，对方建计划承接。
+- 状态口径变化（探索状态机、书籍状态机）先改各自事实源文档，本档 §5 声明表与 §4.2
+  筛选映射回核即可；端点形状变化归 api-contracts/QED-Tracker 契约，本档不复制。

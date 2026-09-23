@@ -5,7 +5,7 @@
 最后更新：2026-09-14
 关联 ADR：[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
 关联设计：[前端架构](../../../architecture/frontend-architecture.md)（8903 信息架构与视觉规范）、
-[与 Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（数据来源与端点契约）、
+[与 Axiom-Flow 交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md)（数据来源与端点契约）、
 [downloads-ui.md](../../../design/downloads-ui.md)（左树与状态点风格参照）
 关联 Tracker：docs/trackers/todo.md（PLAN-043）
 归档判定：Retain（与 PLAN-044 合并评估后按 ADR 0011 晋升 `design/`；本轮暂留 `plans/`）
@@ -32,7 +32,7 @@
 
 **非目标**：
 
-- 8900 / 8902 侧实现（见[与 Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）；
+- 8900 / 8902 侧实现（见[与 Axiom-Flow 交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md)）；
 - 切分与对话式召回（探索轮，见 [document-chunking-recall 草案](../2026-08/2026-08-18-document-chunking-recall.md)）；
 - 整书级质量报告、批量验收 UI（后续轮）；
 - 控制台模型启停 UI（归 [local-model-management.md](../../../design/local-model-management.md) / [admin-console.md](../../../design/admin-console.md)）。
@@ -41,7 +41,7 @@
 
 1. [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 已 Accepted；
 2. 8900 提供 `GET /parsing/tree` 与 8902 适配端点（`af_books` 读、`ingest`、`pages`、`edits`）；
-3. 8902 提供 af_books 与页/块数据（见[与 Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）；
+3. 8902 提供 af_books 与页/块数据（见[与 Axiom-Flow 交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md)）；
 4. 8900 的规划端点（`ingest`/`edit`/`edits`/`GET|PATCH|DELETE /books/{id}`）实施后转正
    （实施前前端按本设计对接，联调期允许后端先行）。
 
@@ -270,5 +270,5 @@ interface ParsingStore {
 ## 关闭与归档
 
 关闭条件：设计经用户评审确认 + 前端门禁全绿 + 浏览器验收通过。设计确定后与
-[与 Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md) 合并评估归属，
+[与 Axiom-Flow 交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md) 合并评估归属，
 按 ADR 0011 晋升 `design/`；计划壳按 Retain 归档 `history/plans/2026-09/`。

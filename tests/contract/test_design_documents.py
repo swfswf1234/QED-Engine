@@ -24,6 +24,7 @@ CURRENT_DOCUMENTS = {
     "admin-dashboard.md",
     "downloads-ui.md",
     "downloads-flow.md",
+    "parsing-flow.md",
     "parsing-ui.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}

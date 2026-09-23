@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：根 `.env.example`、`backend/qed_engine/config.py`、`backend/qed_engine/cli.py`、`scripts/`
 关联测试：`tests/test_config.py`、`tests/test_api.py`、`tests/test_cli.py`（见[配置中心 API 契约](../architecture/api-contracts.md)）
@@ -97,7 +97,9 @@ api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 | `QED_DB_PASSWORD` | 数据库密码 | 空 | 密钥类变量，绝不下发、不打印 |
 
 - 映射：Axiom-Flow `AXIOM_MYSQL_*`（存量别名，默认库名随之改为 `qed`，改造后别名退役）；QED-Tracker 服务化轮直接读取本组变量。
-- 存量库（Axiom-Flow `xqfm11`）不迁移、不改名；`qed` 库由各项目 Alembic 独立初始化（建表与迁移见各自仓库门禁）。
+- `qed` 库由各项目 Alembic 独立初始化自己的表，互不影响；库面统一现状：MySQL 上仅业务库
+  `qed` 与测试库 `qed_test`（隔离真实数据，保留），遗留库已收敛清零（执行与备份记录见
+  trackers/completed.md 数据操作行）。
 - 数据库配置状态由配置中心 `/config/database` 接口暴露（configured/reachable/reason，
   密码不下发），见[配置中心 API 契约](../architecture/api-contracts.md)。
 

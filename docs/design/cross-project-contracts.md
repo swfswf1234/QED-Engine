@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -25,12 +25,12 @@
 | --- | --- | --- |
 | QED-Tracker → Axiom-Flow | HTTP handoff：`axiom push`（默认 `http://127.0.0.1:8902`，8000 兼容保留） | 冻结（`QED_AXIOM_URL` 配置注入） |
 | QED-Tracker → dataset/raw | 已迁 `raw/<domain_id>/...`（QED-009 / ARCH-019）；探索产物与下载成品落 `raw/<domain_id>/<course_id>/` | 冻结（含 JSON 例外口径，REQ-078） |
-| Axiom-Flow → dataset/parsed | 产物写入自身 `data/`（过渡） | 写入 `<QED_DATA_ROOT>/parsed/<domain_id>/<course_id>/<book_id>/`（ARCH-020，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
+| Axiom-Flow → dataset/parsed | 写入 `<QED_DATA_ROOT>/parsed/<domain_id>/<course_id>/<book_id>/`（版本布局见 [dataset-conventions.md](dataset-conventions.md)） | 冻结（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
 | Axiom-Flow → 本地模型服务 | 解析经 8900 `/llm/vision` 网关（v0.1） | **直连本地模型服务**（引擎适配器，MinerU 5002 等）；8900 只负责模型生命周期与探针（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
 | QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 子项目直读根 `.env`（`load-env.ps1` 映射层已于 2026-08-17 退役） | 冻结（子项目直读 `QED_*` 变量） |
-| 三个项目 → MySQL | QED-Tracker 与 Axiom-Flow 均用 `qed` 库（ARCH-020 统一） | 统一 MySQL 8 `qed` 库：QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源；遗留 `qed_test`（测试库）、`axiom`/`xqfm` 库由 ARCH-020-F 清理 |
+| 三个项目 → MySQL | QED-Tracker 与 Axiom-Flow 均用 `qed` 库 | 冻结：统一 MySQL 8 `qed` 库，QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源；测试库 `qed_test` 隔离真实数据（遗留库已收敛清零） |
 | QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031；表结构见 QED-Tracker `docs/architecture/database-private-tables.md` 与 `database-shared-tables.md`） | **元数据默认存数据库**（meta/ JSON 退役，DB 为唯一事实源）；dataset/ 只管理数据资料文件 |
 
 ## 统一数据库（MySQL 8，qed 库）

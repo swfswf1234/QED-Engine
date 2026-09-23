@@ -219,3 +219,79 @@
   未入 code-map 与根测试清单、`2026-09-23-local-model-stability-round.md` 缺章节且与
   todo 标题不一致），零涉及本轮四个文档，见当次会话归因记录。
 - **状态**：已修复（2026-09-23）
+
+### BUGFIX-013：project-configuration 统一数据库小节存量库陈述过时且库名误记（ARCH-020-F 执行时同步）
+
+- **发现日期**：2026-09-23（ARCH-020-F 最后验证轮执行时）
+- **设计文档**：`../design/project-configuration.md`（统一数据库小节）
+- **问题与根因**：条文「存量库（Axiom-Flow `xqfm11`）不迁移、不改名」①与实际环境不符——
+  MySQL 实况库名为 `xqfm`（另有 `axiom`），从未存在 `xqfm11`（ADR 0003 原文即误记，历史 ADR
+  不改）；②该前瞻陈述随 ARCH-020-F 于 2026-09-23 执行完毕而过时，design/ 应只写设计态。
+- **修复与验证**：条文改写为设计态（`qed` 由各项目 Alembic 独立初始化；MySQL 现仅 `qed` 与
+  `qed_test`，遗留库收敛清零、记录指针在 trackers）；`architecture/database-design.md` 存量遗留库
+  条同步改执行态。验证：`SHOW DATABASES`＝qed/qed_test、8900 `/config/database` configured+reachable、
+  根全量 499 passed（当时 5 条契约失败均归 ARCH-028 并行线在飞项）。
+- **状态**：已修复（2026-09-23）
+
+### BUGFIX-014：解析本页/全本不防重复点击，重开工作台还可对服务端在飞任务重复建任务
+
+- **发现日期**：2026-09-23（用户人工解析验证期间指出：书页入库有防重，解析按钮没有）
+- **设计文档**：`../design/parsing-ui.md`（§4 任务轮询、§6 端点表）、`../architecture/api-contracts.md`（④ 透传组）
+- **问题与根因**：①`createParseJob` 无提交在途闸门——`activeJob` 要等 POST 返回才置位，
+  连点窗口内每次都发 `POST /parse-jobs`（书页入库有 `ingestBusy` 同型防护，解析按钮漏了）；
+  ②更深缺口：`openWorkbench` 无条件 `activeJob: null`（parsing.ts），重开/切书后再点即对
+  服务端**已在飞**的任务重复建任务，8902 `create_parse_job` 侧同样无在飞守卫——两个任务并行
+  压本地模型即显存爆表风险；且 8900 未代理 8902 的 `GET /parse-jobs` 列表端点，前端无从恢复。
+- **修复与验证**：①store 加 `jobSubmitting` 闸门 + 非终态 `activeJob` 拒绝再提交，
+  `ParseToolbar` 两按钮 `disabled` 并入该闸门（先红：连点复现双 POST）；②8900 新增
+  `GET /parse-jobs` 列表透传（`api/axiom.py`，`status` 用 `Query` 声明重复参数——
+  `list[str]` 裸注解会被 FastAPI 当 body 致过滤失效，先红后绿），web-ui `listParseJobs` +
+  `client.ts` params 支持数组重复参数；③`openWorkbench` 查该书 queued/running 任务，
+  `active` 优先回填 `activeJob` 并续轮询，端点不可用（旧码 404/离线）保守降级为不回填。
+  附：并行会话提交 ab85227 遗留 `Dashboard.test.tsx` `NodeJS.Timeout` 类型错（tsc -b 阻塞），
+  本会话做了唯一一处类型级单行修正（`ReturnType<typeof setInterval>`），特此归因披露。
+  门禁：`tests/test_api.py` 98 passed（含新代理先红后绿）· vitest 211 passed（新增连点防重 +
+  重开恢复两用例）· `tsc -b && vite build` exit=0（dist 已重建）。
+- **状态**：已修复（2026-09-23；浏览器实测：新 bundle 下列表请求
+  `GET /parse-jobs?book_id=…&status=queued&status=running` 在旧服务上按 405 静默降级（无错误横幅、
+  按钮态正确）；8900 由用户重启后同请求实测 200，重开恢复全链路生效，正路径另由 vitest 覆盖）
+
+### BUGFIX-015：解析页无显存/模型中断提醒，服务被打挂用户无感知（用户加需，非缺陷起因）
+
+- **发现日期**：2026-09-23（b05 全本解析被显存挤压打断——250/317 后模型容器掉线，
+  用户在解析页全程无提醒；同日用户加需弹窗告警）
+- **设计文档**：`../design/parsing-ui.md`（§2 组件树、§4 端点表、§9 状态与降级矩阵）
+- **问题与根因**：显存水位与模型槽健康仅在仪表盘被动可见；解析作业时用户停留在解析页，
+  模型服务被打挂（health_state=down）与显存 ≥95% 均无任何提醒，任务失败后才从错误条得知。
+- **修复与验证**：新增无界面组件 `web-ui/src/components/parsing/ResourceWatch.tsx`，挂载于
+  Parsing 页面容器：10s 轮询 `/monitor/gpu` + `/models/vision`——显存 ≥95% 弹常驻警告
+  （<90% 迟滞撤下复位）、`health_state=down` 按 `last_flip` 每事故弹一次错误弹窗，
+  notification key 去重、轮询失败静默。TDD：`ResourceWatch.test.tsx` 5 用例先行（jsdom 不触发
+  animationend，destroy 后弹窗永久停在 fade-leave DOM，可见性断言须排除 leave 态——判例记录）。
+  门禁：vitest 216 passed · `tsc -b && vite build` exit=0（dist 已重建）· 根 contracts 全量
+  见当次会话输出；浏览器实测：8900 重启（用户执行）后列表代理 200、ResourceWatch 10s 心跳
+  在飞、模型 21:25 恢复 ready 后无误弹（负路径实盘验证；正路径单测覆盖）。
+- **状态**：已修复（2026-09-23）
+
+### BUGFIX-016：解析管理文档族残留过程性记录与过时陈述（确定性梳理轮，随 ARCH-020 节清理）
+
+- **发现日期**：2026-09-23（用户在测试环境完成联调验证后下令完整收尾）
+- **设计文档**：`../design/parsing-ui.md`、`../design/parsing-flow.md`、
+  `../architecture/api-contracts.md` §④、`../architecture/database-design.md`、
+  `../architecture/backend-architecture.md`、`../architecture/code-map.md`、
+  `../design/cross-project-contracts.md`、`../design/dataset-conventions.md`、
+  `../design/project-configuration.md`
+- **问题与根因**：PLAN-047 去过程化裁决后，解析族文档仍残留轮次标签（ARCH-020-B/C/D/F、
+  PLAN-044 晋升注记、工单号引用）、时间线叙述（迁移序号链、收口日期串）与过时陈述
+  （backend-architecture「ARCH-020 规划」所列已实现项仍写「将扩展」、cross-project-contracts
+  parsed 现状列仍写过渡形态、database-design af_* 列清单停在旧版两表 PK 口径）；parsing-ui
+  模型离线降级行未区分提交期 503 不建任务与受理后 failed。
+- **修复与验证**：全部改写为设计态正文，过程事实由 git log / completed.md / history/plans
+  追溯；todo.md「第三轮主线·解析联调轮（ARCH-020）」整节移除（节内遗留观察项——根侧全本实测
+  与老代 `$$$` 产物自愈核验——落户 ARCH-028 行），REQ-046/047 证据列去时间线；
+  roadmap 第三轮行标已完成；project-status 过时「下一步」指针与收口态标签修正；
+  parsing-ui 实现状态 Implemented（design/index 同步）。门禁：根 `pytest tests -q`
+  527 passed · 6 failed 全部归因并行 ARCH-028 线在飞项（supervisor 注册/DesignRef/
+  滚动壳节/mirror 标题/monitor trust_env），本层文档契约（test_design_documents、
+  test_architecture_documents、链接门禁）全绿。
+- **状态**：已完成（2026-09-23）

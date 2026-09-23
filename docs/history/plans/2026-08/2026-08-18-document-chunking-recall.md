@@ -8,7 +8,7 @@
 关联设计：[学习功能现状](../../../plans/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
 chunking-notes / rag-notes 笔记（切分策略与召回链路；learning/ 类目已于 2026-09-22 退役
 [ADR 0015](../../../adr/0015-learning-category-retirement.md)，旧笔记靠 Git 历史找回）、
-[Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
+[Axiom-Flow 交互全链路](../2026-09/2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
 关联 Tracker：docs/trackers/todo.md（REQ-082 镜像行，第四轮主线 ARCH-021 承载）
 归档判定：Retain（设计定稿评审通过后按 ADR 0011 以稳定名称迁 docs/design/，本壳含草案与
 前置评估留 history/plans/ 追溯）

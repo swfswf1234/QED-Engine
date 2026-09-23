@@ -1,7 +1,7 @@
 # ADR 索引
 
 状态：Current
-最后更新：2026-09-22
+最后更新：2026-09-23
 确认状态：暂定
 
 本目录登记影响长期约束的架构决策：决定、理由、后果和取代关系。编号与生命周期规则见
@@ -19,5 +19,6 @@
 | [`0014`](0014-parsing-ownership-and-model-boundary.md) | 解析能力归属与模型边界 | 架构与边界 | v0.1 | Accepted | — |
 | [`0015`](0015-learning-category-retirement.md) | learning/ 个人学习资料类目退役 | 工程治理 | v0.1 | Accepted | — |
 | [`0016`](0016-todo-registration-one-task-one-plan.md) | todo 登记方式修订（一任务一行一壳，细节由计划承载） | 工程治理 | v0.1 | Accepted | — |
+| [`0017`](0017-design-doc-structure-contract.md) | 设计文档结构契约与事实源唯一铁律 | 工程治理 | v0.1 | Accepted | — |
 
-下一个可用编号：0017
+下一个可用编号：0018

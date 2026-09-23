@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-14
+最后更新：2026-09-23
 确认状态：暂定
 关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/control.py`、`backend/qed_engine/api/tracker.py`、`backend/qed_engine/api/axiom.py`、`backend/qed_engine/clients/axiom_client.py`、`backend/qed_engine/services/log_viewer.py`、`backend/qed_engine/services/monitor.py`（探索会话与 LLM 网关模块的契约事实源见设计文档，归属见 [code-map.md](code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`
@@ -27,7 +27,7 @@
 | ① 服务管理类 | `GET /health`、`GET /services`、`POST /services/{name}/start\|stop\|restart`、`POST /self-restart` | 4 |
 | ② 配置语义类 | `GET /config/models`、`GET /config/keys`、`GET /config/database` | 3 |
 | ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程/探索会话 | 约 33 |
-| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块判定与编辑/ingest/parse-jobs/parsing-tree | 15 |
+| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块判定与编辑/ingest/parse-jobs（含列表）/parsing-tree | 16 |
 | ⑤ 监控诊断与 LLM 网关 | 日志/GPU/Qwen/mineru + LLM 调用族 + `POST /models/{name}/start\|stop\|restart` | 15 |
 
 **启动自检**（ARCH-014）：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
@@ -457,7 +457,7 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 （apply-results 只删不建）与离线降级直写；课程探索保留 explore-sessions 会话通道，
 课程确认经 `/courses/{course_id}/confirm` 离线直写收口。
 终态写点矩阵与降级规则见
-[domain-explore 设计](../design/downloads-flow.md) §4.2/§4.4。
+[domain-explore 设计](../design/downloads-flow.md) §5.2/§5.4。
 
 #### `POST /api/v1/domains/{domain_id}/explore-knowledge`
 
@@ -559,9 +559,9 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 
 前端（8903）只连 8900：Axiom-Flow 解析管理数据归 8900 所有（数据域），内部经
 `clients/axiom_client.py`（8902 客户端）适配 8902。8902 契约事实源：Axiom-Flow
-`docs/architecture/api.md` 与根仓库设计
-[文档解析管理·与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)
-（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）。
+`docs/architecture/api.md`；职责边界与全链路数据流见根仓库设计
+[文档解析管理·全链路设计](../design/parsing-flow.md)（按
+[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 确立）。
 **解析管线在 Axiom-Flow 直连模型服务，不经 8900 网关**（见 §⑤ 说明）。
 
 ### 端点表（已实现）
@@ -575,32 +575,30 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `GET /books/{id}/pages/{no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
 | `GET /books/{id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
 | `GET /books/{id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（ARCH-020-D 实施，工作台/列表 ingest 按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s | AxiomClient.ingest_book |
-| `PUT /books/{id}/pages/{no}/blocks/{index}/edit` | **块编辑门面（目标形态）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
+| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s | AxiomClient.ingest_book |
+| `PUT /books/{id}/pages/{no}/blocks/{index}/edit` | **块编辑门面**（本契约消费面一律走 `/edit`）：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
 | `GET /books/{id}/pages/{no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
 | `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**8900 门面**：前端契约保持 /review，内部转 8902 `PUT …/blocks/{index}/edit` | AxiomClient.edit_block |
 | `GET /books/{id}/pages/{no}/blocks/{index}/review` | 块判定回显；内部走 8902 页级 `GET …/pages/{no}/edits` 过滤 block_index，无记录 → 8900 合成 404 | AxiomClient.get_page_edits |
 | `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；`engine` 缺省 mineru） | AxiomClient.create_parse_job |
+| `GET /parse-jobs` | 任务列表（透传 8902 列表端点：`book_id`/重复 `status` 过滤 + `active` 标记；前端打开工作台恢复在飞任务防重复建任务） | AxiomClient.list_parse_jobs |
 | `GET /parse-jobs/{id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
 | `GET /parsing/tree` | 左侧树聚合：8900 共享表（领域→课程）+ 8902 af_books；8902 离线降级为领域→课程 | 见 `api/axiom.py` `_build_parsing_tree` |
 
-### 规划契约（ARCH-020-B，8900 透传待实施）
+### 规划契约（8900 透传待实施）
 
-> 下列端点 **8902 已全部实现**（release@a5d2e96，契约事实源 Axiom-Flow
-> `docs/architecture/api.md`）。原本节所列 `POST /books/{id}/ingest`、
-> `PUT …/blocks/{index}/edit`、`GET …/pages/{no}/edits` 已于 **ARCH-020-D**
-> （2026-09-20 工作台轮）实施并迁入上方已实现表；`/review` 门面 transitional
-> 保留（旧前端兼容），随 `af_block_reviews` 退役删除。
+> 下列端点 **8902 已全部实现**（契约事实源 Axiom-Flow `docs/architecture/api.md`），
+> 8900 透传与前端消费未排期；`/review` 门面为过渡兼容（旧前端契约），随存量消费面退役删除。
 
 | 规划端点 | 方法 | 语义 |
 | --- | --- | --- |
 | `/books/{id}` | PATCH | 修改书目（notes 等） |
 | `/books/{id}` | DELETE | 删除 af_books 行（`?purge=true` 连产物） |
-| `/books/{id}/chunks` | GET | 块集读取 |
+| `/books/{id}/versions` | GET | 解析版本列表（只读；对比/回滚另议） |
+| `/books/{id}/chunks` | GET | 块集读取（RAG 切片预留） |
 
-> 完整契约见[交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
-
-> `GET /books/{id}` 已于 2026-09-20 界面优化轮实施并迁入上表（PDF 直显前置）。
+> 完整契约以 Axiom-Flow `docs/architecture/api.md` 为事实源；全链路语义与根侧消费要点见
+[文档解析管理·全链路设计](../design/parsing-flow.md)。
 
 ### 错误映射（④ 数据透传·Axiom-Flow）
 
@@ -791,8 +789,8 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 互斥）。密钥只在请求头，绝不下发、不入响应体；成功/失败均落 `qed_llm_calls` 记录表
 （单表三项目可写）。详情契约事实源：[llm-gateway.md](../design/llm-gateway.md)。
 
-> **解析路径变更（ARCH-020，2026-09-14，[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
-> 文档解析不再经 `/llm/vision` 网关——Axiom-Flow 解析管线经引擎适配器直连本地模型服务
+> **解析与网关边界（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）**：
+> 文档解析不经 `/llm/vision` 网关——Axiom-Flow 解析管线经引擎适配器直连本地模型服务
 > （MinerU 5002 等）；8900 只负责模型生命周期（`/models/{name}`）、探针与资源互斥。
 > `/llm/vision` 保留为控制台测试与通用视觉用途；`/models/{name}` 的 `name` 按引擎注册
 > （`qwen`/`mineru`，PaddleOCR-VL 接入时新增 `paddleocr`）。

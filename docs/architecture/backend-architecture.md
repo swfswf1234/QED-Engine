@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-14
+最后更新：2026-09-23
 确认状态：暂定
 关联代码：`web-ui/`（唯一消费方）、`scripts/qed_engine_service.py`（生命周期脚本）；
 后端三域模块（`api/`、`services/`、`clients/`）受管清单见 [code-map.md](code-map.md)
@@ -27,10 +27,9 @@
 | 数据域·QED-Tracker | `api/tracker.py` + `clients/tracker_client.py` | 下载/书目对接：catalogs、五层（qt_knowledge/qt_books/qt_sources）、tasks 语义透传 8901 |
 | 数据域·Axiom-Flow | `api/axiom.py` + `clients/axiom_client.py` | 文档解析对接：books/pages/manifest/parse-jobs/parsing-tree 透传 8902；图片代理 /books/{id}/pages/{no}/image。**解析管线不在 8900**——模型调用归 Axiom-Flow 直连（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） |
 
-> **ARCH-020 规划（2026-09-14）**：Axiom 数据域将扩展 books CRUD（GET/PATCH/DELETE）、
-> `/books/{id}/ingest`、块编辑 `/blocks/{index}/edit` 与页编辑列表；模型生命周期
-> （`/models/{name}`）按引擎注册（`qwen`/`mineru`，PaddleOCR-VL 预留 `paddleocr`）。
-> 规划端点见 [交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)。
+> Axiom 数据域端点明细与剩余规划透传（PATCH/DELETE/versions/chunks）见
+> [api-contracts.md §④](api-contracts.md)；全链路职责边界与 af_* 表设计见
+> [文档解析管理·全链路设计](../design/parsing-flow.md)。
 
 **并行推进原则**：三域仅通过 `api/main.py` 组装与共享 `config.py`/`schemas.py` 解耦；
 任一域改动不触碰其他域文件；前端独立目录演进，只依赖 8900 对外契约。
