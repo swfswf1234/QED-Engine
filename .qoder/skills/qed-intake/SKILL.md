@@ -29,7 +29,11 @@ description: Use when starting any task in the QED-Engine / QED-Tracker / Axiom-
 
 ## 3. 立项
 
-- 大修改：在 `docs/trackers/todo.md` 建任务条目，在 `docs/plans/` 建计划（见 `qed-plan`）。
+- 大修改：按**一任务一行一壳**（ADR 0016）——在 `docs/trackers/todo.md` 建**一个任务行**，
+  行内只写「该任务做什么 + 目标/效果」一句话（任务列链接计划壳），在 `docs/plans/` 建该任务
+  对应的唯一计划壳（见 `qed-plan`）；进度、边界与细节全部由壳承载，不塞进 todo。
+  不设独立 PLAN 镜像行，不再为一个任务发两个 ID。
+- 新增轮次/主线须先经用户确认；新的小任务原则上并入已有轮次（在对应壳开登记表条目）。
 - 缺陷：按标准映射「任务生命周期」的缺陷处理节登记，不单独建计划。
 - 跨项目需求：按标准映射「跨项目协作」承接登记。
 - 豁免级：直接实施，以差异与验证记录承接。

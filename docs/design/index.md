@@ -13,8 +13,10 @@
 [与 Axiom-Flow 交互全链路](../plans/2026-09-14-parsing-management-axiom-flow-chain.md)
 （UI 已晋升 [parsing-ui.md](parsing-ui.md)）；学习功能（课程学习/课后练习）现状见
 [learning-center-current-state](../plans/2026-09-10-learning-center-current-state.md)；
-文档切分与召回草案（原「探索」组，REQ-082）按 ADR 0011 移回
-[plans/ 计划壳](../plans/2026-08-18-document-chunking-recall.md)承载，评审确认后晋升。
+文档切分与召回（原「探索」组，REQ-082）已于 2026-09-22 随 ARCH-021 整合关闭，未来规划
+（RAG 切片与检索 + 解析管线优化项目划分）见
+[ARCH-025 滚动壳](../plans/2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md)「REQ-089
+第一批调研承接」节（旧草案归档 history/plans/2026-08/），设计定稿后按 ADR 0011 晋升。
 
 **已迁出 design/** 的固定契约：8900 对外 API 总纲与数据库总纲在
 [api-contracts](../architecture/api-contracts.md) 与
@@ -32,7 +34,7 @@
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
 | [llm-gateway.md](llm-gateway.md) | Accepted | In Progress | LLM 统一网关·调用面：/llm/* 端点、api/local 模式路由、调用拓扑、qed_llm_calls 调用记录；其他项目不感知模型配置（控制台 UI 见 [admin-console.md](admin-console.md)，本地模型操作面见 [local-model-management.md](local-model-management.md)） |
-| [local-model-management.md](local-model-management.md) | Accepted | In Progress | 本地模型管理·操作面：模型注册表、/models/{name} 端点族（operate_model 统一入口）、model/ 模型文件目录、MinerU 容器外迁（卷挂载）、资源互斥衔接 |
+| [local-model-management.md](local-model-management.md) | Accepted | In Progress | 本地模型服务维护·操作面（只管模型服务本身，不含 prompt）：模型注册表、/models/{name} 端点族（operate_model 统一入口）、model/ 模型文件目录、MinerU 容器外迁（卷挂载）、资源互斥衔接、健康监督 supervisor（ARCH-028） |
 
 ## 项目协同
 
@@ -49,7 +51,7 @@
 | --- | --- | --- | --- |
 | [admin-console.md](admin-console.md) | Accepted | In Progress | 管理后台·控制台与模型调用记录页 UI（`#/admin` 三区结构：服务管理/基础设施/资源监控 + `#/admin/llm-calls` 检索与审核） |
 | [admin-dashboard.md](admin-dashboard.md) | Accepted | In Progress | 管理后台·仪表盘只读看板 UI（`#/admin/dashboard`：服务在线 + 文档下载进度双饼图 + 解析进度，统计四态 = holding×status 派生） |
-| [downloads-ui.md](downloads-ui.md) | Accepted | In Progress | 文档下载管理·UI 设计（`#/admin/downloads`：左树领域→课程→教程、右侧四层展示、流程筛选与排序、三层状态口径声明） |
+| [downloads-ui.md](downloads-ui.md) | Accepted | In Progress | 文档下载管理·UI 设计（`#/admin/downloads`：左树领域→课程→教程、右侧四层展示、流程筛选与排序、三层状态口径声明、异常与降级的用户可见表现） |
 | [downloads-flow.md](downloads-flow.md) | Accepted | Implemented | 文档下载管理·后台全链路：领域 6 态 / 课程 5 态状态机、8900 五态门面 6 端点、终态写点矩阵、课程收集五阶段规则（原 course-acquisition-flow 并入）、8901 对齐缺口 |
 | [parsing-ui.md](parsing-ui.md) | Accepted | In Progress | 文档解析管理·UI 设计（`#/admin/parsing`：单屏左书目树（纯选择）+ 右对照区，原页 bbox 双向联动 + 块编辑：判定/备注/文字/范围；后端全链路见 plans/ 交互全链路） |
 

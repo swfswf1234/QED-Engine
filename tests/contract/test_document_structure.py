@@ -20,7 +20,6 @@ DOCUMENT_DIRECTORIES = (
     "plans",
     "trackers",
     "history",
-    "learning",
 )
 ACTIVE_GUIDES = {"index.md", "development.md", "operations.md"}
 
@@ -66,7 +65,6 @@ def test_docs_index_only_navigates_document_areas():
         "trackers/index.md",
         "standards/index.md",
         "history/index.md",
-        "learning/index.md",
     ):
         assert required in content
     assert "```mermaid" not in content

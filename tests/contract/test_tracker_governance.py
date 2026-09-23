@@ -14,7 +14,11 @@ ROOT = Path(__file__).resolve().parents[2]
 TRACKERS = ROOT / "docs" / "trackers"
 PLANS = ROOT / "docs" / "plans"
 TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[A-Z0-9]{3}(?:-[A-Z][A-Z0-9]*)?")
-PLAN_LINK = re.compile(r"^\[(?P<title>[^]]+)]\(\.\./plans/(?P<path>[^)]+\.md)\)$")
+# 任务列计划链接（ADR 0016 一任务一行一壳）：链接后允许「——」追加一句话任务定义/
+# 目标效果（不得含方括号与竖线），链接与描述均不改变标题/状态镜像校验口径。
+PLAN_LINK = re.compile(
+    r"^\[(?P<title>[^]]+)]\(\.\./plans/(?P<path>[^)]+\.md)\)(?:\s*——\s*(?P<note>[^|\[\]]*))?$"
+)
 ACTIVE_STATUSES = {"Accepted", "In Progress", "Blocked"}
 
 

@@ -4,11 +4,11 @@
 任务类型：C
 （任务类型注记：C 探索实验——切分/召回链路与参数需实验验证，方向已由用户 2026-08-18 裁决）
 最后更新：2026-09-21
-关联 ADR：[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）、[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审设计留 plans/——本壳承载依据）
-关联设计：[学习功能现状](2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
-[chunking-notes.md](../learning/chunking-notes.md)（切分策略）、
-[rag-notes.md](../learning/rag-notes.md)（召回链路）、
-[Axiom-Flow 交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
+关联 ADR：[ADR 0008](../../adr/v0.1/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）、[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计留 plans/——本壳承载依据）
+关联设计：[学习功能现状](../../../plans/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
+chunking-notes / rag-notes 笔记（切分策略与召回链路；learning/ 类目已于 2026-09-22 退役
+[ADR 0015](../../../adr/0015-learning-category-retirement.md)，旧笔记靠 Git 历史找回）、
+[Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
 关联 Tracker：docs/trackers/todo.md（REQ-082 镜像行，第四轮主线 ARCH-021 承载）
 归档判定：Retain（设计定稿评审通过后按 ADR 0011 以稳定名称迁 docs/design/，本壳含草案与
 前置评估留 history/plans/ 追溯）
@@ -28,7 +28,7 @@
 - 目的：整理知识——切分与召回的产出（块级知识单元）是后续学习中心课程学习与知识问答
   的知识底座。
 
-与[学习中心](2026-09-10-learning-center-current-state.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
+与[学习中心](../../../plans/2026-09-10-learning-center-current-state.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
 （对单书逐块核对、调参、人工确认）；学习中心问答是**用户侧的最终形态**（多 Agent 编排、
 课程级知识链路）。探索先行，问答后置。
 
@@ -101,11 +101,12 @@
 
 ## 阻塞与恢复
 
-阻塞证据：前置「文档解析管理闭环」未达用户验收（ARCH-020-E 待 REQ-075/080/081 回执），
-第四轮主线 ARCH-021 未启动。
-恢复条件：ARCH-021 启动评审通过（用户确认解析效果后立项探索 v0）。
-责任位置：docs/trackers/todo.md（ARCH-021 / REQ-082）、Axiom-Flow 侧（REQ-075/080/081）。
-复核触发点：ARCH-020-E 关闭时、第四轮主线启动轮立项时。
+阻塞证据：前置「文档解析管理闭环」已达人侧验收——ARCH-020-E 2026-09-22 部分验收关闭
+（b05 生效版 `185a37d55985` 312/317，缺 5 页为 PDF 空白页，根治留 REQ-086/087；REQ-075/080/081
+均已关闭），第四轮主线 ARCH-021 未启动。
+恢复条件：ARCH-021 启动评审通过（用户确认解析效果后立项探索 v0）——唯一剩余条件。
+责任位置：docs/trackers/todo.md（ARCH-021 / REQ-082）、Axiom-Flow 侧（REQ-086/087 与本草案无关）。
+复核触发点：第四轮主线启动轮立项时。
 
 ## 验证与验收
 

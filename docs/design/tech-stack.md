@@ -8,7 +8,7 @@
 关联测试：`tests/contract/test_design_documents.py`
 关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0003-shared-qed-database-independence.md`、`../history/adr/v0.1/0005-control-center-service-hosting.md`
 
-> 评估过程与对比实验记 `learning/`（个人笔记）；本文档只保存选型结论与理由。新增/替换技术先更新本文档再实现。
+> 评估过程与对比实验不随个人笔记类目沉淀（`learning/` 已于 2026-09-22 退役，[ADR 0015](../adr/0015-learning-category-retirement.md)，旧笔记靠 Git 历史找回）；本文档只保存选型结论与理由。新增/替换技术先更新本文档再实现。
 
 ## 技术栈总览
 
@@ -28,7 +28,7 @@
 ## 选型记录
 
 - **FastAPI 三服务统一**：8900/8901/8902 均 FastAPI `/api/v1`，形态一致、契约测试模式统一；
-  轻量原生，避免引入重型框架（对比 Flask/Django 的评估见 `learning/`）。
+  轻量原生，避免引入重型框架（对比 Flask/Django 的旧评估笔记已随 learning/ 退役，靠 Git 历史找回）。
 - **原生前端无构建**：学习中心与管理后台目前规模可控，静态 SPA 零构建零依赖，浏览器直连后端
   无代理；框架化（Vue/React）评估延后到学习中心正式建设时（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
 - **MySQL 8 共享 qed 库**：三项目数据集中登记与查询，表命名空间隔离保证独立性；见
@@ -37,8 +37,8 @@
 - **模型单线路**：一次只启用一条线路（当前 qwen 三用途：主对话/OCR/Embedding），厂商由
   `QED_API_PROVIDER` 选择（当前 qwen；deepseek/glm 注册表已预留，启用时验证真实可用性）；
   模型名唯一事实源为根 `.env`（见 [project-configuration.md](project-configuration.md)）。
-- **MinerU**：Axiom-Flow 解析管线主选（布局 + 公式还原），评估与实验见 Axiom-Flow 仓库与
-  `learning/`；最终结论由 Axiom-Flow 侧登记。
+- **MinerU**：Axiom-Flow 解析管线主选（布局 + 公式还原），评估与实验见 Axiom-Flow 仓库
+  （根侧旧评估笔记已随 learning/ 退役，靠 Git 历史找回）；最终结论由 Axiom-Flow 侧登记。
 - **向量库/编排未定**：待学习中心 RAG 与多 Agent 需求明确后单独评估并补记本文件；候选
   （Milvus、LangChain 等）只进规划不展示为已选。
 

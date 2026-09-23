@@ -33,7 +33,7 @@
 **非目标**：
 
 - 8900 / 8902 侧实现（见[与 Axiom-Flow 交互全链路](../../../plans/2026-09-14-parsing-management-axiom-flow-chain.md)）；
-- 切分与对话式召回（探索轮，见 [document-chunking-recall 草案](../../../plans/2026-08-18-document-chunking-recall.md)）；
+- 切分与对话式召回（探索轮，见 [document-chunking-recall 草案](../2026-08/2026-08-18-document-chunking-recall.md)）；
 - 整书级质量报告、批量验收 UI（后续轮）；
 - 控制台模型启停 UI（归 [local-model-management.md](../../../design/local-model-management.md) / [admin-console.md](../../../design/admin-console.md)）。
 

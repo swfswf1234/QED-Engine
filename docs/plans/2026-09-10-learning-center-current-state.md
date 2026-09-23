@@ -2,9 +2,9 @@
 
 状态：In Progress
 任务类型：A
-最后更新：2026-09-10
+最后更新：2026-09-22
 关联 ADR：`../history/adr/v0.1/0011-pending-design-location.md`（不确定文档暂居 plans/，设计确定后晋升 design/）、`../history/adr/v0.1/0012-ai-development-conduct.md`（REQ-070 重组轮置空依据）
-关联设计：`../design/downloads-flow.md`（知识探索已实现设计）、`../design/downloads-ui.md`（知识探索 UI）、`2026-08-18-document-chunking-recall.md`（切分与召回草案）、`../standards/doc-governance.md`（晋升规则）
+关联设计：`../design/downloads-flow.md`（知识探索已实现设计）、`../design/downloads-ui.md`（知识探索 UI）、切分与召回规划已整合入 `2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md`（原 REQ-082 草案壳 2026-09-22 归档）、`../standards/doc-governance.md`（晋升规则）
 关联 Tracker：docs/trackers/todo.md（REQ-070-LEARN 登记）
 归档判定：Retain（课程学习/课后练习设计确定后按 ADR 0011 晋升 `design/`，本现状壳届时退役）
 
@@ -18,14 +18,14 @@ REQ-070 设计文档体系重组轮将 design/ 固定为五组语义名文档集
 1. 课程学习/课后练习后续设计工作（第五轮主线方向）的唯一现状基座；
 2. 设计确定后晋升 `design/` 固定文档的事实来源。
 
-成功标准：现状与代码一致（`#/knowledge` 框架、learning/ 笔记清单）；工具链结论变化时
+成功标准：现状与代码一致（`#/knowledge` 框架）；工具链结论变化时
 本文档同步更新；晋升时本文档正文可直接迁入设计文档。
 
 ## 范围与非目标
 
 **范围**：学习功能三块现状——知识探索（已实现，指认承接文档）、课程学习（`#/knowledge`
-框架 + 工具链方向 + 知识节点模型探索）、课后练习（无设计声明）；技术学习笔记（learning/）
-与里程碑规划。
+框架 + 工具链方向 + 知识节点模型探索）、课后练习（无设计声明）；里程碑规划（原技术学习
+笔记 learning/ 目录已于 2026-09-22 类目退役，[ADR 0015](../adr/0015-learning-category-retirement.md)，旧笔记靠 Git 历史找回）。
 
 **非目标**：不重复已固定设计（知识探索六值状态机见 downloads-flow.md）；不预设课程
 学习/课后练习的设计结论；不动代码（探索期「本期只固化现状，不动代码」原则延续）。
@@ -43,8 +43,9 @@ REQ-070 设计文档体系重组轮将 design/ 固定为五组语义名文档集
 
 领域探索（探索状态机六值唯一口径、右侧四层展示、8900 五态门面与终态写点矩阵）已实现
 （2026-09-08），设计固定于 `../design/downloads-flow.md`（后台全链路）与
-`../design/downloads-ui.md`（UI 设计）；文档切分与召回方向为独立草案
-`2026-08-18-document-chunking-recall.md`（Blocked，解析管理闭环后启动）。
+`../design/downloads-ui.md`（UI 设计）；文档切分与召回方向已于 2026-09-22 随 ARCH-021
+整合，规划落 `2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md`「REQ-089 第一批
+调研承接」节（原 REQ-082 草案壳归档 history/plans/2026-08/）。
 
 ### 2. 课程学习——框架已搭，工具链方向已定，设计待细化
 
@@ -57,12 +58,12 @@ REQ-070 设计文档体系重组轮将 design/ 固定为五组语义名文档集
 - **工具链方向**（2026-08 定向，细化落选型）：
   | 环节 | 方向 | 状态 |
   | --- | --- | --- |
-  | 编排框架 | LangChain（LCEL → LangGraph → 组件生态，先学透再用） | 已定，笔记 ../learning/langchain-notes.md |
+  | 编排框架 | LangChain（LCEL → LangGraph → 组件生态，先学透再用） | 已定（旧笔记随 learning/ 退役，ADR 0015） |
   | 多 Agent 编排 | 角色化多 Agent（检索 → 推理 → 验证 → 呈现） | 待细化 |
   | 模型调用 | 经 8900 LLM 网关（`/llm/text`、`/llm/vision` 等，见 `../design/llm-gateway.md`），不绑定 LangChain 供应商逻辑，项目其余部分不感知模型配置 | 已定（2026-09-10 勘误：原 `/config/models` 为退役旧口径） |
-  | 检索 | RAG（chunking → 向量化 → 存储 → BM25 混合检索 → rerank 融合） | 待细化，笔记 ../learning/rag-notes.md、../learning/vector-db-notes.md；规划 bm25-rerank-notes.md |
-  | 文本切分 | 数学文档感知切分（公式/定理块） | 待细化，笔记 ../learning/chunking-notes.md |
-  | 知识图谱 | 解析产物实体/关系建模 → 图存储/查询 | 待细化，规划 knowledge-graph-notes.md |
+  | 检索 | RAG（chunking → 向量化 → 存储 → BM25 混合检索 → rerank 融合） | 待细化；规划见 `2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md`「REQ-089 第一批调研承接」节（旧检索笔记随 learning/ 退役，ADR 0015） |
+  | 文本切分 | 数学文档感知切分（公式/定理块） | 待细化；规划同上（旧切分笔记随 learning/ 退役） |
+  | 知识图谱 | 解析产物实体/关系建模 → 图存储/查询 | **暂不做**（2026-09-22 用户裁决；旧规划笔记随 learning/ 退役，RAG 成熟后再裁） |
   | 前端渲染 | KaTeX/MathJax 对比 + SVG 与内容图片 | 待细化 |
 - **知识节点模型**（待细化）：领域 → 课程 → 知识点（定义/定理/证明/例题/习题），知识点
   含前置依赖 DAG（学习顺序编排依据，源数据来自 Axiom-Flow 解析产物）；前端 COURSE_ORDER
@@ -92,16 +93,16 @@ QED-Tracker（教材/习题集收集）→ Axiom-Flow（解析产物 + 知识图
 ### 5. 里程碑（规划）
 
 - 技术学习线：T1 LangChain 完整学习 → T2 多 Agent 构建 → T3 向量库 + RAG 全链路 →
-  T4 知识图谱（笔记沉淀 learning/ 目录）。
+  T4 知识图谱（**暂不做**，2026-09-22 用户裁决；笔记沉淀随 learning/ 类目退役，ADR 0015）。
 - 功能里程碑：M1 数据管线贯通（教材下载 + 解析 + 高保真渲染）→ M2 单课程试点（知识点
   图谱 + 进度编排 + 基础问答）→ M3 全课程推广（13 门 + 多 Agent 问答 + 检索 99%）→
   M4 学习闭环（刷题模式、温故知新、进度追踪）。
 
 ## 验证与验收
 
-- 事实对拍：`#/knowledge` 路由与空态语义、learning/ 笔记清单与本文档一致。
+- 事实对拍：`#/knowledge` 路由与空态语义与本文档一致（learning/ 笔记清单对拍随类目退役取消）。
 - 契约测试：tests/test_web.py（web-ui 源码契约）保持全绿。
-- 工具链结论落定（各「待细化」转「已定」）时同步更新本文档并沉淀 learning/ 笔记。
+- 工具链结论落定（各「待细化」转「已定」）时同步更新本文档（笔记不再单独沉淀，learning/ 已退役）。
 
 ## 回滚
 

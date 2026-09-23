@@ -40,9 +40,8 @@
 | `adr/` | 长期决策登记，当前按 [ADR 治理规范](adr-governance.md)（暂定）约束。 |
 | `guides/` | 人类可读的**操作文档**与**开发文档**（介绍项目怎么开发、怎么运维），可包含架构信息；为人类设计，由人类判断何时整理，agent 开发时不主动涉及。例外（ADR 0012）：`development.md` 的「开发流程」节由人类授权承载 agent 开发流程细则。 |
 | `plans/` | **临时计划**：进行中任务的讨论与计划，todo 任务结束即归档。**规范文档**：整理完成后晋升、替代或合并进 `architecture/`、`standards/`、`design/` 固定文档。例外：长期滚动文档（[AI Agent 知识收件箱](../plans/ai-agent-knowledge-inbox.md)、[设计类小修与 bug 修复台账](../plans/design-bugfix-log.md)）常驻本目录，豁免清单由 `test_plan_governance.py::STANDING_DOCS` 守护。 |
-| `trackers/` | 任务台账（todo，按主线及分支 + 长期拆分）、实时状态快照（project-status，主线完成或长期任务重大变化时记录）、能力路线图（**在第五轮主线·学习中心轮 ARCH-022 后结束并归档**，结论写入固定文档）、关闭台账。 |
+| `trackers/` | 任务台账（todo，按主线及分支 + 长期拆分）、实时状态快照（project-status，主线完成或长期任务重大变化时记录）、能力路线图（**在第五轮主线·学习设计轮 ARCH-027 后结束并归档**，结论写入固定文档）、关闭台账。 |
 | `history/` | 选择性保留的长期审计证据、旧基线文档和 Git 锚点。 |
-| `learning/` | QED-Engine 独有的个人学习资料，不参与工程治理，内容自由组织。 |
 
 一个事实只设一个维护位置，其他文档使用链接。标准不得复制操作命令、设计契约或 ADR 决策理由。
 `dataset/` 是下载内容与中间产物的存储目录（原始文档、解析产物等），数据文件本身不入库
@@ -126,7 +125,7 @@ flowchart LR
   设计/契约晋升为 `design/` 或 `architecture/` 固定文档，或操作结果同步 `guides/` 与 `trackers/`。
 - todo 完成时**同时清理 todo 任务与对应 plans/ 文档**（临时计划归档至 `history/plans/` 或删除）；
   规范文档整理完成后晋升/替代/合并进固定文档，计划壳随之归档或删除。
-- 主线完成或长期任务重大变化在 `trackers/project-status.md` 记录；能力路线图在 ARCH-022 后
+- 主线完成或长期任务重大变化在 `trackers/project-status.md` 记录；能力路线图在 ARCH-027 后
   结束并归档（结论写入固定文档）。
 
 #### plan 晋升流程
@@ -144,7 +143,7 @@ plan 状态机到达 `Completed` 且 `关闭结果：Achieved`，且该 plan 包
 3. **同步 DesignRef**：按上方「DesignRef 同步规则」更新 code-map.md 和源码头部。
 4. **清理 plan**：
    - plan 文件按归档判定走 Retain 或 Delete（见「归档与删除」节）；
-   - `todo.md` 中移除该 plan 的镜像行；
+   - `todo.md` 中移除该计划对应的任务行；
    - `plans/index.md` 中从活跃计划列表移除，在已归档列表登记去处。
 5. **同步相关文档**：更新受影响的 architecture/design 文档中的「关联设计」引用（如果 plan 原来
    被引用为设计事实源）。
@@ -155,8 +154,9 @@ plan 状态机到达 `Completed` 且 `关闭结果：Achieved`，且该 plan 包
 
 ### 任务与文档绑定
 
-- 每个 todo 任务可关联一个或多个 `plans/` 文档；关联为单向关系，只在 todo 中写明计划链接，
-  plan 文件无需反向引用 todo ID。设计好了再操作，确认流程正确后按计划实现。
+- 一个任务原则上对应一份 `plans/` 文档，todo 中只占一个任务行并直接链接计划壳（ADR 0016）；
+  确需多壳的大任务可关联多份计划，关联为单向登记：todo 任务行写明计划链接，壳的「关联
+  Tracker」回指任务行 ID。设计好了再操作，确认流程正确后按计划实现。
 - 豁免：小改动（用户判定，如纯措辞/错别字/无行为修正）或本就不入 todo 的任务无需计划，
   以差异、验证与提交记录承接。
 - 长期任务（无单一终态）关联专门文档跟进，不一定是 `plans/` 文档（如项目状态快照或长期任务
@@ -171,7 +171,6 @@ plan 状态机到达 `Completed` 且 `关闭结果：Achieved`，且该 plan 包
 - 文档目录入口统一为小写 `index.md`；`docs/**/README.md` 禁止存在，根 README 是唯一例外。
 - 内部链接显式指向文件或 `index.md`，不依赖托管平台目录解析。
 - Mermaid 图与说明在同一正文维护，不提交由 Mermaid 派生的 PNG、SVG 或第二份图源。
-- `learning/` 不受命名与索引规则约束，内容自由组织，可包含中文文件名。
 
 ### 元数据
 
@@ -216,14 +215,13 @@ plan 迁入 `design/` 时的初始状态：设计状态标 `Accepted`（用户�
     事故复盘或不可替代外部证据，按年份月份归档保留；
   - **Delete（删除）**：其余计划在事实已并入固定文档（architecture/、standards/、design/）或
     同步于 tracker，且 Git 锚点有效后删除，不保留计划壳；
-  - 两态均需同步 todo 镜像（移除对应 Plan 行），并在 plans/index.md 登记去处。
+  - 两态均需同步 todo（移除对应任务行），并在 plans/index.md 登记去处。
 - `design/` 文档三态梳理：设计内容已并入 architecture/ 固定文档的标 Superseded 并删除（内容由
   固定文档承接）；已完成使命的存档文档移入 `history/`（如 `history/baselines/`）；仍具契约价值
   且任务未完成或后续轮继续使用的保持原状并更新实现状态。
 - 被整体替换的起源文档（如原始 QED 设计文档）进入 `history/baselines/`，标注范围、失效原因和
   不可变 Git commit 摘要，不复制旧代码或文档树。
 - 失效指南默认删除，旧操作从 commit 或 tag 恢复。
-- `learning/` 内容不适用归档规则，可长期保留或按个人意愿删除。
 - 选择性保留的历史正文保持当时结论，只允许补充 Historical 声明、反向关系或修复链接。
 
 #### DesignRef 同步规则

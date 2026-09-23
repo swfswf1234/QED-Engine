@@ -17,7 +17,6 @@
 | `plans/` | 进行中任务的讨论与计划（不确定文档） | [计划索引](plans/index.md) |
 | `trackers/` | 待做任务、关闭台账、路线图与实时状态快照 | [追踪索引](trackers/index.md) |
 | `history/` | 被取代文档、旧基线与审计证据 | [历史索引](history/index.md) |
-| `learning/` | QED-Engine 独有的个人学习资料（第四轮主线启动学习探索） | [学习索引](learning/index.md) |
 
 子项目（Axiom-Flow、QED-Tracker）文档各自独立，分别见其仓库内 `docs/index.md`。四服务事实冲突
 时的处理顺序与任务路由见 [AGENTS.md](../AGENTS.md)。

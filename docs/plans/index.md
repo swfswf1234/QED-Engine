@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-22
+最后更新：2026-09-23
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -16,22 +16,30 @@
 
 ## 活跃计划
 
-### 待评审设计承载（REQ-082，2026-08-18）
-- 文档切分与召回草案（原 design/「探索」组，按 ADR 0011 移回 plans/ 壳承载，Blocked），
-  状态见任务台账
-
 ### 现状承载（2026-09-10）
-- REQ-070-LEARN（学习功能现状），状态见任务台账
+- REQ-070-LEARN（学习功能现状），状态见任务台账；2026-09-22 起重组轮节退役，本现状壳作为
+  ARCH-027 学习设计轮重设计的现状基座存续（REQ-089 调研已收口，判定表落主链壳）
+
+### 持续优化滚动记录（2026-09-22）
+- ARCH-024 任务行承载壳（QED-Tracker V1.0 持续优化轮三线滚动优化记录），状态见任务台账
+- ARCH-025 任务行承载壳（Axiom-Flow（V1.0）优化轮解析+知识库两线滚动优化记录，
+  启动门槛＝对方达 V1.0，启动前预承接 REQ-089 调研），状态见任务台账
+
+### 学习设计轮（2026-09-22 并轮、2026-09-23 重划：主链路 + M1~M4 模块；原 ARCH-022 + ARCH-026）
+- ARCH-027 主链任务行承载壳（课程注册·链路编译·判分推进，含 L1~L9/R1 判定表与模块壳一览），状态见任务台账
+- ARCH-027-M1~M4 模块任务行各配固定壳（学习面 UI 与渲染基线 / 练习与复习 / 本地模型适配层 / 知识探索），状态见任务台账
 
 ### ARCH-020 解析联调轮（2026-09-14）
 - PLAN-044（文档解析管理·与 Axiom-Flow 交互全链路），状态见任务台账
-- [b05 全本解析止血与根治轮（b05-fullbook-remediation）](2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048，Blocked（W4 验收等用户裁决或 REQ-087 回执），挂 ARCH-020-E），状态见任务台账
 
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
 
 ## 已归档计划（2026-09）
+- [根仓库前端（8903）渲染优化滚动记录（web-ui-rendering-optimization）](../history/plans/2026-09/2026-09-22-web-ui-rendering-optimization.md)（PLAN-051 / ARCH-026，Not Applicable 2026-09-22：2026-09-22 并轮裁决——渲染线成为学习设计轮 W1 前置（2026-09-23 重划后由 M1 学习面 UI 与渲染基线壳承接），壳 Superseded；登记表为空、无遗留条目迁入；Retain 归档）
+- [learning/ 类目退役改造计划（learning-retirement）](../history/plans/2026-09/2026-09-22-learning-retirement.md)（PLAN-052 / REQ-090，Achieved 2026-09-22：ADR 0015 类目退役——docs/learning/ 8 份文件整体删除、doc-governance 三条目与契约目录清单摘除、现行引用改道正式稳定文档；Retain 归档）
+- [b05 全本解析止血与根治轮（b05-fullbook-remediation）](../history/plans/2026-09/2026-09-21-arch020e-b05-fullbook-remediation.md)（PLAN-048 / ARCH-020-E，Completed 2026-09-22：600s 墙根因取证 + 逐页止血 312/317 + 补跑证伪 + 空白页判失败根因（REQ-087 登记）；用户裁决**部分验收**收口 E，验收实测证据全在壳内 W4 行）
 - [design 文档整合轮（design-docs-consolidation）](../history/plans/2026-09/2026-09-21-design-docs-consolidation.md)（PLAN-047，Achieved 2026-09-21：design/ 13 份去过程化重写 + document-chunking-recall 按 ADR 0011 移回 plans/（REQ-082）+ design/index 三矛盾修正；契约 63 + 全量 500 + ruff 全绿；用户终验裁决全部晋升「已确认」）
 - [模型注册表与三接口统一轮（llm-registry-unification）](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（PLAN-046 / ARCH-023，Achieved 2026-09-21：registry/runtimes + 四段式 env + 控制台三卡 W1~W9 落地，W7/W10 真实冒烟全绿（含 BUGFIX-008 api 回退链尊重 .env）；设计事实并入 [design/llm-gateway.md](../design/llm-gateway.md) 与 [design/local-model-management.md](../design/local-model-management.md)，壳归档）
 - [解析界面单屏回调轮（parsing-sidebar-single-view）](../history/plans/2026-09/2026-09-20-parsing-sidebar-single-view.md)（ARCH-020-G，Achieved 2026-09-20：单屏「左树纯选择+右对照」定档，R1~R5 全段+复审修正 BUGFIX-007；裁决并入 [design/parsing-ui.md](../design/parsing-ui.md)，壳归档）
@@ -52,6 +60,7 @@
 - [联调问题解决清单（QED-Engine ↔ QED-Tracker）](../history/plans/2026-09/2026-09-08-integration-issues-checklist.md)（REQ-068-PLAN，Achieved 2026-09-11：ISSUE-001~008 全部 Closed，随 ARCH-019 收尾归档）
 
 ## 已归档计划（2026-08）
+- [文档切分与召回草案（document-chunking-recall）](../history/plans/2026-08/2026-08-18-document-chunking-recall.md)（REQ-082，Not Applicable 2026-09-22：随 ARCH-021 整合关闭——有效内容（块级切分/页块溯源/BM25→混合检索/探索界面 v0~v2 三阶段）被 ARCH-025 滚动壳「REQ-089 第一批调研承接」节吸收，壳 Retain 归档）
 - [文档下载全流程交互规范（ARCH-019）](../history/plans/2026-08/2026-08-27-download-ux-flow.md)（PLAN-023，已归档：Superseded——旧 8 态按钮矩阵、教程 reject/supersede/complete、探索弹窗流与 mock 与现行设计冲突；状态机与交互事实源迁 [design/downloads-flow.md](../design/downloads-flow.md) / [downloads-ui.md](../design/downloads-ui.md)）
 - [文档下载管理界面优化（REQ-067 综合计划）](../history/plans/2026-08/2026-08-29-req067-downloads-optimization.md)（PLAN-025，已归档：§A/§B 全量完成（B1~B8 经 PLAN-033/034），设计事实迁入 [design/downloads-flow.md](../design/downloads-flow.md)；浏览器验收由用户手动导入轮执行）
 - [课程探索界面设计计划（探索界面）](../history/plans/2026-08/2026-08-23-arch019-exploration-ui.md)（PLAN-020，已归档：有效交互裁决并入 PLAN-023/REQ-067，探索流程基于废弃契约）

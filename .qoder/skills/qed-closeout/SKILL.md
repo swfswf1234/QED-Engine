@@ -18,7 +18,7 @@ description: Use when a QED task is implemented and gates pass — runs the full
 - **Retain**：记录已执行数据操作、迁移/发布里程碑、事故复盘或不可替代外部证据 → 归档 `history/` 对应目录。
 - **Delete**：事实已并入固定文档或同步于 tracker，且 Git 锚点有效 → 删除计划壳。
 - 用户在任务关闭时可指定；未指定时按默认规则建议，经用户确认后执行。
-- 两态均同步 todo 镜像并在 `plans/index.md` 登记去处。
+- 两态均从 todo 移除该任务的唯一任务行（一任务一行一壳，ADR 0016），并在 `plans/index.md` 登记去处。
 
 ## 3. 台账与文档同步
 

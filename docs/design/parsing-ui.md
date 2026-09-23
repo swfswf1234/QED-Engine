@@ -216,6 +216,9 @@ interface ParsingStore {
   **版式**=块按 bbox 绝对定位到页面尺寸（字号取 bbox 高度），呈现与原页接近的还原，
   便于逐块判定「解析文档是否准确还原原页」；
 - 块级渲染复用 `blocks.ts`（heading 分级、formula KaTeX、table HTML、list、image、caption 等）；
+  formula 块渲染前先经 `unwrapMathDelimiters` **剥成对数学定界符**（`$$…$$`/`\[…\]`/`$…$`）再交
+  KaTeX——防御 ARCH-018 修复前的老代产物（`latex` 字段自带引擎定界符，KaTeX 视 `$` 为解析错误、
+  整块回退原文显示）；剥后内部仍含同种定界符则保留原文不误剥（BUGFIX-011）；
 - 点击块与左图联动选中；选中块高亮并滚动到可视区；
 - `BlockEditor`：文字修正（公式编辑 LaTeX 源码）+ 范围修正（bbox 数值输入
   `x0,y0,x1,y1`）+ 判定/备注 Popover；

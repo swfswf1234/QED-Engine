@@ -2,18 +2,19 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：backend/qed_engine/api/domain_explore.py、backend/qed_engine/api/explore.py、backend/qed_engine/services/explore_sessions.py、backend/qed_engine/services/shared_tables.py、backend/qed_engine/clients/tracker_client.py、web-ui/src/pages/Downloads.tsx、web-ui/src/components/{DownloadsTree,DomainCard,DomainConfirmModal,CourseConfirmModal,ExploreFlowModal}.tsx、web-ui/src/api/{tracker,explore-helpers}.ts、web-ui/src/stores/downloads.ts（端点请求/返回细节见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：tests/test_domain_explore.py、tests/test_explore_sessions.py、web-ui/src/pages/Downloads.test.tsx、web-ui/src/components/DownloadsTree.state.test.tsx
 关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（设计晋升位置）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（8900 网关唯一入口）
-关联文档：[downloads-ui.md](downloads-ui.md)（UI 展示层唯一事实源）、[api-contracts](../architecture/api-contracts.md)（8900 端点请求/返回细节唯一事实源）；8901 原生契约以 QED-Tracker `docs/architecture/api.md` 为事实源（不复制）
+关联文档：[downloads-ui.md](downloads-ui.md)（UI 展示规范与异常降级的用户可见表现唯一事实源）、[api-contracts](../architecture/api-contracts.md)（8900 端点请求/返回细节唯一事实源）；8901 原生契约以 QED-Tracker `docs/architecture/api.md` 为事实源（不复制）
 关联计划：[arch019-explore-ui-logic](../history/plans/2026-09/2026-09-08-arch019-explore-ui-logic.md)、
 [arch019-explore-backend-chain](../history/plans/2026-09/2026-09-08-arch019-explore-backend-chain.md)（PLAN-033/034 晋升来源）；
 链路演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 > **本文档定位**：文档下载管理页（`#/admin/downloads`）领域探索的设计事实源——统一状态机口径、
-> 8900 后端链路与终态写点（展示规范归 [downloads-ui.md](downloads-ui.md)）。
+> 8900 后端链路、终态写点与课程收集业务规则（展示规范与异常降级的用户可见表现归
+> [downloads-ui.md](downloads-ui.md)）。
 
 ## 1. 背景与定位
 
@@ -21,20 +22,33 @@
 设计取向：等待可观测（5s 轮询）、中断可恢复（刷新直读共享表）、失败可重试
 （异常态落库）。8900 对 8901 **纯透传 + 信任**。
 
-链路总图：
+链路总图（前端 → 8900 编排层 → 8901/共享表；8900 是唯一写点，前端与 8901 无直连）：
 
 ```mermaid
 flowchart LR
-    UI[前端 8903<br/>右键/按钮直触] -->|fetch 包装| ENG[QED-Engine 8900]
-    ENG -->|五态门面<br/>api/domain_explore.py| MGR[ExploreSessionManager<br/>内存会话 2h TTL]
-    ENG -->|课程探索通用通道<br/>api/explore.py| MGR
-    MGR -->|dry-run / 任务查询<br/>纯透传| TK[QED-Tracker 8901]
-    MGR -->|set_*_stage 单点写| DB[(共享表<br/>domains.exploration_stage<br/>explore_pending)]
-    DB -->|5s 轮询直读| UI
+    subgraph FE["前端 8903"]
+        UI["右键 / 按钮直触<br/>5s 轮询"]
+    end
+    subgraph ENG["QED-Engine 8900"]
+        DE["五态门面<br/>api/domain_explore.py"]
+        EX["课程探索通用通道<br/>api/explore.py"]
+        MGR["ExploreSessionManager<br/>内存会话 · 2h TTL"]
+    end
+    subgraph TKDB["数据侧"]
+        TK["QED-Tracker 8901<br/>dry-run / 任务查询"]
+        DB[("共享表<br/>domains.exploration_stage<br/>explore_pending")]
+    end
+    UI -->|"fetch 包装"| DE
+    UI -->|"fetch 包装"| EX
+    DE -->|委托| MGR
+    EX -->|委托| MGR
+    MGR -->|"纯透传"| TK
+    MGR -->|"set_*_stage 单点写"| DB
+    DB -->|"轮询直读"| UI
 ```
 
-要点：8900 是唯一写点；前端与 8901 无直连；共享表是唯一恢复源（8900 重启后轮询直读库态，
-内存会话丢失由 `active_session=false` 承接，不自动回写）。
+要点：共享表是唯一恢复源——8900 重启后轮询直读库态，内存会话丢失由
+`active_session=false` 承接，不自动回写。
 
 ## 2. 探索状态机（唯一口径）
 
@@ -55,14 +69,18 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[未开始] -- 探索领域知识/导入领域知识 --> B[已生成]
-    B -- 确认领域 --> C[探索中]
-    C -- 后台完成 --> D[待确认]
-    D -- 确认课程 --> E[已完成]
-    C -- 管线异常 --> F[失败]
-    D -- 管线异常 --> F
-    F -- 重试 --> A
-    D -- 重新探索 --> C
+    A["未开始"] -->|"探索领域知识 / 导入领域知识"| B["已生成"]
+    B -->|"确认领域"| C["探索中"]
+    C -->|"后台完成"| D["待确认"]
+    D -->|"确认课程"| E["已完成"]
+    C -->|"管线异常"| F["失败"]
+    D -->|"管线异常"| F
+    F -->|"重试"| A
+    D -->|"重新探索"| C
+    classDef terminal fill:#d4edda,stroke:#28a745,color:#000
+    classDef fail fill:#f8d7da,stroke:#dc3545,color:#000
+    class E terminal
+    class F fail
 ```
 
 ### 2.2 课程探索状态机（5 态）
@@ -77,13 +95,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[未开始] -- 开始探索 --> B[探索中]
-    B -- 后台完成 --> C[待确认]
-    C -- 确认课程 --> D[已完成]
-    B -- 管线异常 --> E[失败]
-    C -- 管线异常 --> E
-    E -- 重试 --> B
-    B -- 放弃会话 --> A
+    A["未开始"] -->|"开始探索"| B["探索中"]
+    B -->|"后台完成"| C["待确认"]
+    C -->|"确认课程"| D["已完成"]
+    B -->|"管线异常"| E["失败"]
+    C -->|"管线异常"| E
+    E -->|"重试"| B
+    B -->|"放弃会话"| A
+    classDef terminal fill:#d4edda,stroke:#28a745,color:#000
+    classDef fail fill:#f8d7da,stroke:#dc3545,color:#000
+    class D terminal
+    class E fail
 ```
 
 ### 2.3 操作×状态×接口统一表
@@ -107,13 +129,44 @@ flowchart LR
 描述/学科知识/课程方向等维护字段（课程 `exploration_stage` 由 8901
 `PATCH /courses` 支持）。领域 6 态与课程 5 态分别按 §2.1/§2.2 流转，不互相推断。
 
-## 3. 展示层（指向）
+## 3. 展示与降级表现（指向）
 
 右侧四层展示规范（领域 DomainCard / 课程操作条 / 教程行 / 书目卡，教程与书目详情弹窗、
-筛选规则）由 [downloads-ui.md](downloads-ui.md)（UI 设计文档）§2 承载，
-本文件只定义状态机、后端链路与写点。
+筛选规则）由 [downloads-ui.md](downloads-ui.md)（UI 设计文档）§2 承载；异常与降级的
+**用户可见表现**（横幅、提示条、toast、会话失效提示）由其 §4 承载。
+本文件只定义状态机、后端链路、写点与降级规则本身（§4）。
 
 ## 4. 后端链路与终态写点矩阵
+
+一次领域探索会话的完整时序（发起 → 后台生成 → 轮询感知 → 确认收口；8901 离线降级见 §4.4）：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as 前端 8903
+    participant ENG as 8900 五态门面
+    participant MGR as ExploreSessionManager
+    participant TK as QED-Tracker 8901
+    participant DB as 共享表
+
+    UI->>ENG: POST /domains/{id}/explore-knowledge
+    ENG->>MGR: 委托建会话
+    MGR->>TK: dry-run / 提交任务（纯透传）
+    MGR-->>ENG: task_id
+    ENG-->>UI: 202 Accepted
+    Note over MGR,DB: 第一轮完成 _finish_ready → 写「已生成」
+    UI->>ENG: POST /domains/{id}/confirm-domain
+    ENG->>DB: confirm_domain_info 写「探索中」
+    loop 每 5s 轮询
+        UI->>ENG: GET /domains/{id}/explore-status
+        ENG->>DB: 库态直读（8900 重启后会话丢失仍可用）
+        ENG-->>UI: active_session + exploration_stage
+    end
+    Note over MGR,DB: courses.json 落盘 → 置「待确认」
+    UI->>ENG: POST /domains/{id}/confirm-knowledge
+    ENG->>DB: apply 成功写「已完成」（终态）
+    ENG-->>UI: 200 OK
+```
 
 ### 4.1 双栈收敛
 
@@ -157,7 +210,8 @@ confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domai
 
 `active_session = (exploration_stage == 探索中)`（与 [api-contracts](../architecture/api-contracts.md) 一致）；
 8900 重启后内存会话丢失 → `task_id=null`，库态直读永远可用，前端据 `active_session=false` 提示
-「探索会话已失效，请重试」，不做自动回写。8901 离线兜底：跳过 task 查询仅返回库态。
+「探索会话已失效，请重试」（用户可见表现见 [downloads-ui.md](downloads-ui.md) §4），不做自动回写。
+8901 离线兜底：跳过 task 查询仅返回库态。
 
 ### 4.4 降级链路规则
 
@@ -169,31 +223,34 @@ confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domai
 | 探索管线失败 | 失败 + `explore_pending={kind:'error', error}` |
 | 8900 重启（会话丢失） | 不自动回写；active_session=false 承接 |
 
-## 5. 异常与降级（前端表现）
+`explore_pending.kind` 值域（后端写点契约，前端据其渲染提示条，见 [downloads-ui.md](downloads-ui.md) §4）：
+`review_results` / `name_confirmation` / `error`。
 
-| 场景 | 用户可见行为 |
-| --- | --- |
-| 8900 不可达 | 页面顶部错误横幅 + 重试 |
-| 8901 离线 | 「降级模式」横幅；树/领域维护/导入可用，探索与教程/书目操作禁用 |
-| 探索会话失效 | `active_session=false` → 提示「探索会话已失效，请重试」 |
-| 管线失败 | `explore_pending.kind='error'` → DomainCard 红色提示条 + 失败原因 + 重试 |
-| 刷新页面 | 未终态领域由 5s 轮询直读共享表恢复感知 |
-| API 失败 | toast 透出服务端 detail；乐观更新禁用，以服务端返回为准 |
-
-`explore_pending.kind` 值域：`review_results` / `name_confirmation` / `error`。
-
-## 6. 业务流程规则（课程收集五阶段）
+## 5. 业务流程规则（课程收集五阶段）
 
 > 书籍状态术语：选用态 `candidate/decided/parallel/retired` + 生命周期
 > `downloading/downloaded/verified/failed`（`failed` 可重试，`retired` 留痕退出）。
 > UI 筛选 5 档（待下载/下载中/待验证/已完成/失败）见 [downloads-ui.md](downloads-ui.md) §2.2。
 > 当前聚焦数学课程体系（13 门），后续轮次扩展计算机科学（AI 方向），五阶段规则通用。
 
+五阶段总览（阶段 0 定体系 → 逐课程走 1→4；未达完成判定可回下载补充，上限四套不可突破）：
+
+```mermaid
+flowchart LR
+    S0["阶段 0<br/>先验课程体系<br/>清单 + 学习顺序"] --> S1["阶段 1<br/>第一轮评估·选书<br/>每课程 2~4 套"]
+    S1 --> S2["阶段 2<br/>下载<br/>按套下载 · 逐课程推进"]
+    S2 --> S3["阶段 3<br/>第二轮评估·人工审核<br/>系统预检 + verify / retired"]
+    S3 --> Q{"≥2 套全部 verified?"}
+    Q -->|"是"| S4["阶段 4<br/>一轮课程完成<br/>进入维护态"]
+    Q -->|"否（四套上限内补充）"| S2
+```
+
 ### 阶段 0：先验课程体系
 
 - 课程体系先于教材收集确定，不仅包含课程清单，还包含**学习顺序**（先修的在前、依赖的在后）。
-- 来源：参考顶尖高校课程安排（Top 10 US Math PhD Qualifying Exams 水准），事实源为
-  [学习资料《突破朗道位垒》](../learning/突破朗道位垒.txt) 与前端 `COURSE_ORDER`。
+- 来源：参考顶尖高校课程安排（Top 10 US Math PhD Qualifying Exams 水准），事实源为前端
+  `COURSE_ORDER`（旧学习资料《突破朗道位垒》已随 learning/ 类目 2026-09-22 退役，
+  [ADR 0015](../adr/0015-learning-category-retirement.md)，靠 Git 历史找回）。
 - 课程体系变更属内容维护，直接更新数据，不视为架构变更。
 
 ### 阶段 1：第一轮评估（选书）
@@ -241,5 +298,6 @@ confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domai
 
 ## 维护规则
 
-状态机/写点矩阵变更须先改本文档再改代码，展示规范变更先改 [downloads-ui.md](downloads-ui.md)；
-端点请求/返回细节以 [api-contracts.md](../architecture/api-contracts.md) 为唯一事实源。
+状态机/写点矩阵变更须先改本文档再改代码，展示规范与异常降级的用户可见表现变更先改
+[downloads-ui.md](downloads-ui.md)；端点请求/返回细节以
+[api-contracts.md](../architecture/api-contracts.md) 为唯一事实源。

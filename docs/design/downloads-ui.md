@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
 关联代码：`web-ui/src/pages/Downloads.tsx`、`web-ui/src/components/DownloadsTree.tsx`、
 `web-ui/src/components/{DomainCard,DomainConfirmModal,CourseConfirmModal,ExploreFlowModal}.tsx`、
@@ -16,8 +16,9 @@
 状态机/写点/降级链路以其为准）
 
 > **本文档定位**：文档下载管理页（`#/admin/downloads`）的 **UI 设计文档**——左树结构、
-> 右侧四层展示、筛选规则、弹窗与状态口径。探索状态机、后端链路、写点矩阵
-> 归 [downloads-flow.md](downloads-flow.md)；业务流程规则（课程收集五阶段）亦在其 §6。
+> 右侧四层展示、筛选规则、弹窗、状态口径，以及异常与降级的**用户可见表现**（§4）。
+> 探索状态机、后端链路、写点矩阵与降级规则本身归 [downloads-flow.md](downloads-flow.md)；
+> 业务流程规则（课程收集五阶段）亦在其 §5。
 
 ## 1. 左树结构（领域 → 课程 → 教程）
 
@@ -115,16 +116,33 @@
 流程筛选（§2.2）是书籍状态机在 UI 上的**分组视图**；仪表盘四态是 holding×status 的
 **统计派生**。任何 UI 改动不得混用三者的字段来源。
 
-## 4. 教程命名规范（跨项目，请求：QED-Tracker）
+## 4. 异常与降级表现（用户可见行为）
+
+后端降级规则本身（8900 如何处理）见 [downloads-flow.md](downloads-flow.md) §4.4；
+本节只规定**前端呈现**：
+
+| 场景 | 用户可见行为 |
+| --- | --- |
+| 8900 不可达 | 页面顶部错误横幅 + 重试 |
+| 8901 离线 | 「降级模式」横幅；树/领域维护/导入可用，探索与教程/书目操作禁用 |
+| 探索会话失效 | `active_session=false` → 提示「探索会话已失效，请重试」 |
+| 管线失败 | `explore_pending.kind='error'` → DomainCard 红色提示条 + 失败原因 + 重试 |
+| 刷新页面 | 未终态领域由 5s 轮询直读共享表恢复感知 |
+| API 失败 | toast 透出服务端 detail；乐观更新禁用，以服务端返回为准 |
+
+`explore_pending.kind` 值域（后端写点契约，事实源见
+[downloads-flow.md](downloads-flow.md) §4.4）：`review_results` / `name_confirmation` / `error`。
+
+## 5. 教程命名规范（跨项目，请求：QED-Tracker）
 
 - 规范：tutorial 教程 `name = 教程{set_no}：{书名}（{作者}）`（书名作者取自教材决定
   引用 `textbook_ref`；en 套为「教程en：…」）；other_material 归类名不加「教程N」前缀。
 - 前端兜底：`tutorialLabel` 在 name 为空时显示「教程{set_no}」。
-- 使用手册需包含课程收集五阶段说明（业务流程见 [downloads-flow.md](downloads-flow.md) §6）。
+- 使用手册需包含课程收集五阶段说明（业务流程见 [downloads-flow.md](downloads-flow.md) §5）。
 
-## 5. 范围与协作
+## 6. 范围与协作
 
-- **范围内**：本页全部前端展示层（树/卡片/弹窗/筛选/排序/样式）。
+- **范围内**：本页全部前端展示层（树/卡片/弹窗/筛选/排序/样式/异常降级表现）。
 - **非目标**：不涉及后端 8900/8901 改动；不请求 QED-Tracker 接口变更（教程命名由其数据侧
   执行，前端 name 原样展示）；不拆分 en 套为独立教程行（排序规则已置组尾）。
 - **跨项目协作**：教程命名规范为数据侧改动，按
