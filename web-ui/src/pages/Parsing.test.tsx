@@ -69,6 +69,8 @@ const pageFixture = {
       { type: 'heading', bbox: [50, 40, 744, 80], level: 1, text: 'Test Heading' },
       { type: 'paragraph', bbox: [50, 100, 744, 200], text: 'Test paragraph content.' },
       { type: 'formula', bbox: [150, 220, 640, 280], latex: 'x^2+y^2=1' },
+      // 老代产物形态（Axiom-Flow ARCH-018 修复前 latex 自带成对定界符）
+      { type: 'formula', bbox: [150, 300, 640, 360], latex: '$$\nd (p, p ^ {\\prime}) < \\varepsilon\n$$' },
     ],
   },
 };
@@ -170,6 +172,14 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     expect(await screen.findByText('#1 · 标题')).toBeInTheDocument();
     expect(screen.getByText('#2 · 段落')).toBeInTheDocument();
     expect(screen.getByText('#3 · 公式')).toBeInTheDocument();
+    // BUGFIX-011：老代产物 latex 自带 $$…$$ 定界符 → 渲染层剥离后交 KaTeX，正文不得残留原始定界符
+    {
+      const el = screen.getByRole('button', { name: '块 4（公式）' });
+      await waitFor(() => {
+        expect(el.querySelector('.katex')).not.toBeNull();
+        expect(el.textContent).not.toMatch(/\$/);
+      });
+    }
     expect(screen.queryByText('返回列表')).toBeNull();
     expect(useParsingStore.getState().compareBookId).toBe(BOOK_A);
   });

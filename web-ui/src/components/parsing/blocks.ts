@@ -32,6 +32,23 @@ export function renderInlineMath(text: string): string {
     .join('');
 }
 
+/**
+ * 剥成对数学定界符（`$$…$$` / `\[…\]` / `$…$`），返回裸 LaTeX 交 KaTeX。
+ * 防御 Axiom-Flow ARCH-018 修复前的老代产物（latex 字段自带引擎定界符，KaTeX 视 `$` 为解析错误）。
+ * 剥后内部仍含同种定界符则保留原文（可见异常不误剥）。
+ */
+export function unwrapMathDelimiters(latex: string): string {
+  const t = latex.trim();
+  for (const d of ['$$', '\\[', '$'] as const) {
+    const close = d === '\\[' ? '\\]' : d;
+    if (t.length > d.length + close.length && t.startsWith(d) && t.endsWith(close)) {
+      const inner = t.slice(d.length, -close.length).trim();
+      if (!inner.includes(close)) return inner;
+    }
+  }
+  return t;
+}
+
 export const TYPE_LABELS: Record<string, string> = {
   heading: '标题', paragraph: '段落', formula: '公式', table: '表格', image: '图片',
   list: '列表', caption: '图注', header: '页眉', footer: '页脚', page_number: '页码',

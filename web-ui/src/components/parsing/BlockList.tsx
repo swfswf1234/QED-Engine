@@ -10,7 +10,7 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { editKey } from '../../stores/parsing';
-import { blockColor, blockText, effectiveBbox, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS } from './blocks';
+import { blockColor, blockText, effectiveBbox, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
 import BlockEditor from './BlockEditor';
 
 const { Text } = Typography;
@@ -51,17 +51,18 @@ function bboxToPct(bbox: [number, number, number, number], size: { w: number; h:
 function blockBody(block: Block, fontSizePx?: number): React.ReactNode {
   const content = blockText(block);
   if (block.type === 'formula') {
+    const body = unwrapMathDelimiters(content);
     const inline = fontSizePx !== undefined;
     const html = inline
-      ? tryRenderKatex(content, false)
-      : katex.renderToString(content, { displayMode: true, throwOnError: false });
+      ? tryRenderKatex(body, false)
+      : katex.renderToString(body, { displayMode: true, throwOnError: false });
     return html ? (
       <span
         style={inline ? { fontSize: fontSizePx } : undefined}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     ) : (
-      <Text code style={{ whiteSpace: 'pre-wrap', fontSize: fontSizePx }}>{`$$${content}$$`}</Text>
+      <Text code style={{ whiteSpace: 'pre-wrap', fontSize: fontSizePx }}>{`$$${body}$$`}</Text>
     );
   }
   if (block.type === 'table') {
