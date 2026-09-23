@@ -93,7 +93,7 @@ embedding 本地化。
 | --- | --- | --- | --- |
 | W0 | DeepTutor 本地模型管理只读调研：其监督/恢复/事件细节 → 吸收/拒绝判定表回写本壳 | 只读 `D:\coding\demo_program\DeepTutor` | **已收口 2026-09-23**：其不管理本地模型进程（只发现/探活/诊断）；判定见下「W0 调研判定」 |
 | W1 | `GET /models/{slot}` 扩展：`gpu_visible` / `degraded` 归并、`last_flip`（supervisor 内存态；无 supervisor 时回退探针态）（TDD） | 根 8900 | **已实施 2026-09-23**：新增 health_state/health_reason/gpu_visible/last_flip 四字段（availability 语义不变，控制台零影响），定向 11 + 相邻 181 全绿；真机生效需 8900 重启加载（并入 W4 浏览器实测） |
-| W2 | supervisor 骨架：分级探测 T1+T2、状态机防抖、事件日志（假 runtime 注入单测） | 根 8900 `services/llm/supervisor.py` | **逻辑层已实施 2026-09-23**（T1 复用 probe_slot / T2 `wsl -e docker exec nvidia-smi -L` fail-closed；防抖 N=3；翻转事件日志；`QED_MODEL_SUPERVISOR` 开关默认开）；真机观测演练随 W3 |
+| W2 | supervisor 骨架：分级探测 T1+T2、状态机防抖、事件日志（假 runtime 注入单测） | 根 8900 `services/llm/supervisor.py` | **逻辑层已实施 2026-09-23**（T1 复用 probe_slot / T2 `wsl -e docker exec nvidia-smi -L` fail-closed；防抖 N=3；翻转事件日志；`QED_MODEL_SUPERVISOR` 开关默认开）；真机观测演练随 W3；维护职责声明（本模块只维护模型服务本身、不含 prompt）已落 code-map 与 local-model-management 分工边界节（2026-09-23） |
 | W3 | 受控恢复：非在飞自动重启 + 退避（≤3 次）+ 在飞只告警 + 掉线诊断包采集；真机杀容器演练 | 根 8900 | 待开始（前置 W2 + 容器可起） |
 | W4 | 仪表盘「本地模型状况」卡（本壳界面设计落地，含 local/api 两态显隐实测） | 根 8903 | **已实施 2026-09-23**：LocalModelStatus 卡 + Dashboard 30s 轮询（隐藏页暂停）；tsc/vitest 26 文件 209 例/build 全绿；浏览器实测（8900 已重启加载 W1 字段）local 态单卡真实渲染「图像模型 掉线 · Docker · 显存 5.9/16 GiB · 翻转于 17:42:20」，请求全指 8900 无新报错；api 态显隐与轮询 hidden 跳过由单测覆盖（隐身视口不能观察活轮询、截图不可得） |
 | W5 | 批次与水位：根 `.env` `AXIOM_PARSE_WINDOW_SIZE=50`（已配置，生效随对方换码）+ 启动前显存水位门（阈值暂定 12GB，W0 后可调） | 根 8900 + `.env` | 部分进行（.env 已配；水位门待开始） |

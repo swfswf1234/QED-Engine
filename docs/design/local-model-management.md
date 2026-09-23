@@ -2,10 +2,10 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-23
 确认状态：已确认
-关联代码：`backend/qed_engine/services/llm/model_manager.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。注册表 `services/llm/registry.py` 主登记见 [llm-gateway.md](llm-gateway.md)、runtimes/ 适配器见本设计「槽位与 runtime」节，均在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
-关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
+关联代码：`backend/qed_engine/services/llm/model_manager.py`、`backend/qed_engine/services/llm/supervisor.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。注册表 `services/llm/registry.py` 主登记见 [llm-gateway.md](llm-gateway.md)、runtimes/ 适配器见本设计「槽位与 runtime」节，均在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
+关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_supervisor.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
 关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
 关联设计：[llm-gateway.md](llm-gateway.md)（网关/调用记录/全局模式/身份目录——分工见下）、[admin-console.md](admin-console.md)（控制台三区）、[dataset-conventions.md](dataset-conventions.md)（数据目录约定）
 关联计划：[PLAN-046](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（定档来源）、[2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)（晋升来源）
@@ -21,6 +21,7 @@
 - **网关/路由/调用记录/来源渠道解析/身份目录**：`llm-gateway.md`（/llm/text /llm/vision /llm/embedding）。
 - **runtime 同化/生命周期操作/模型文件/编排**：本文件（/models/{slot}、model/ 目录、runtimes/）。
 - **UI 展示（三区 · 槽位卡五字段）**：`admin-console.md`。
+- **维护职责（本模块定位，2026-09-23 裁决）**：本设计所辖 `model_manager + runtimes/ + supervisor` 合为本项目**唯一**的本地模型服务维护模块，负责启停/重启、单活仲裁、健康监督、受控恢复（ARCH-028 W3）、显存水位门（W5）与批次控量口径——**只管模型服务本身，不含 prompt**：prompt 组装与调用内容归 [llm-gateway.md](llm-gateway.md) 及各调用方。
 
 核心原则：无论经 LM Studio、llama.cpp 还是 docker 部署，都同化为统一的
 「本地模型」进行启停与服务，后续 AGENT、MCP 等以同样方式配置；资源互斥保证本地同时只有一个
@@ -221,6 +222,7 @@ model/
 | `backend/qed_engine/services/llm/registry.py` | 身份目录 + 槽位解析（主登记见 llm-gateway.md） |
 | `backend/qed_engine/services/llm/runtimes/` | runtime 同化适配器：lmstudio（半托管）/ llamacpp / docker |
 | `backend/qed_engine/services/llm/model_manager.py` | operate_model(slot, op) + ensure_local_ready（单活互斥） |
+| `backend/qed_engine/services/llm/supervisor.py` | 健康监督：T1/T2 分级探测 + 防抖状态机 + 翻转事件（/models/{slot} health_* 字段供给） |
 | `backend/qed_engine/api/control.py` | /models/{slot}/{start\|stop\|restart\|select}、GET /models/{slot} 端点（409/404 语义） |
 | `scripts/text-model/qed_qwen_service.py` | llamacpp runtime 生命周期脚本（start/stop/restart/status + 健康探测） |
 | `scripts/image-model/qed_mineru_service.py` | docker runtime（MinerU）生命周期脚本（infra-*.ps1 编排） |
