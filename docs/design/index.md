@@ -37,7 +37,7 @@
 
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
-| [cross-project-contracts.md](cross-project-contracts.md) | Accepted | In Progress | 三项目协同与对接契约：对接点总表、qed 库共享约定（qed_* 共享表只读）、8901 原生契约正文、8903 前端对接、独立性约定 |
+| [cross-project-contracts.md](cross-project-contracts.md) | Accepted | In Progress | 三项目协同与对接契约（总指引层）：运行与验证矩阵（单项目态/合并态双基准）、契约演进规则（兼容/破坏二分）、错误超时与离线透传、对接点总表、qed 库共享约定（qed_* 共享表只读）、8901/8902 能力面契约（端点形状指针在子仓库与 api-contracts）、8903 前端对接、独立性约定 |
 | [service-hosting.md](service-hosting.md) | Accepted | Implemented | 服务托管：8900 控制中心对三 Python 服务的注册表/探测/进程管理启停（ARCH-012 已实装） |
 | [dataset-conventions.md](dataset-conventions.md) | Accepted | In Progress | 三项目共享数据根约定：dataset/ raw 原始 + parsed 整理后两区，元数据入 DB（meta/ 退役，REQ-032） |
 | [tech-stack.md](tech-stack.md) | Accepted | In Progress | 跨项目技术选型结论与理由：FastAPI 三服务、React 19 + AntD 前端、MySQL 8 共享 qed 库、单线路模型、MinerU 解析 |

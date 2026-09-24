@@ -12,7 +12,7 @@
 
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
-| [三项目四服务总体架构](four-service-architecture.md) | Accepted | In Progress | 三项目四服务总览、端口、三中心形态、独立性铁律与交互拓扑（服务间联系与交互由此确定） |
+| [三项目四服务总体架构](four-service-architecture.md) | Accepted | In Progress | 三项目四服务总览、端口、三中心形态、独立性铁律、改动归属判定表与跨服务交互拓扑（服务间联系与交互由此确定） |
 | [QED-Engine 前端架构](frontend-architecture.md) | Accepted | Implemented | 8903 前端：web-ui/React 组织、信息架构（hash 路由）、唯一入口 8900 与独立性 |
 | [QED-Engine 后端架构](backend-architecture.md) | Accepted | Implemented | 8900 后端：三域组织（控制域 / 数据域·Tracker / 数据域·Axiom）、分层与生命周期脚本 |
 | [8900 API 接口文档](api-contracts.md) | Accepted | Implemented | 8900 固定 API 契约（按 QED-Tracker 范本逐端点展开）：服务管理 / 配置语义 / 数据透传·Tracker / 数据透传·Axiom / 监控诊断与 LLM 网关 + 统一错误码表；前端无 API 声明 |

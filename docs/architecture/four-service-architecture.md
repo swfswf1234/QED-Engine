@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-14
+最后更新：2026-09-24
 确认状态：已确认
 关联代码：服务各自代码见服务架构文档（前端/后端见本目录，Axiom-Flow/QED-Tracker 见各自仓库）
 关联测试：`tests/contract/test_architecture_documents.py`
@@ -47,15 +47,32 @@ flowchart LR
 
 ## 服务职责与端口
 
-| 服务 | 仓库 | 端口 | 职责 | 服务架构文档 |
-| --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903（已运行） | 学习中心 + 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理）；**只连 8900**（ADR 0007） | [前端架构](frontend-architecture.md) |
-| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900（已运行） | **三域组织**：控制域（配置五端点 + /services 启停托管 + 监控诊断 + LLM 网关）+ 数据域·QED-Tracker 透传 + 数据域·Axiom-Flow 透传；密钥不下发 | [后端架构](backend-architecture.md) |
-| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已迁移，8000 兼容保留，ADR 0002） | 完整解析管线（PDF ingest、引擎适配器、归一化、编排、产物落盘）+ 对照数据供给 + 人工编辑落库；模型服务直连（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） | Axiom-Flow `docs/architecture/` |
+| 服务 | 仓库 | 端口         | 职责 | 服务架构文档 |
+| --- | --- |------------| --- | --- |
+| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903（已运行）  | 学习中心 + 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理）；**只连 8900**（ADR 0007） | [前端架构](frontend-architecture.md) |
+| QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900（已运行）  | **三域组织**：控制域（配置五端点 + /services 启停托管 + 监控诊断 + LLM 网关）+ 数据域·QED-Tracker 透传 + 数据域·Axiom-Flow 透传；密钥不下发 | [后端架构](backend-architecture.md) |
+| Axiom-Flow | `Axiom-Flow/` 子仓库 | 8902（已服务化） | 完整解析管线（PDF ingest、引擎适配器、归一化、编排、产物落盘）+ 对照数据供给 + 人工编辑落库；模型服务直连（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)） | Axiom-Flow `docs/architecture/` |
 | QED-Tracker | `QED-Tracker/` 子仓库 | 8901（已服务化） | 教材/习题集/论文的发现、下载、校验、登记；写操作后台任务 + 轮询 | QED-Tracker `docs/architecture/` |
 
 端口规划见 [ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)；前端唯一入口与 8900
 网关化见 [ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)。
+
+## 改动归属判定表
+
+回答「这个改动该进哪个仓库、走什么流程」；契约变更的兼容/破坏分级与发布流程见
+[cross-project-contracts §10](../design/cross-project-contracts.md)。
+
+| 你要改的东西 | 落哪个仓库 | 走什么流程 |
+| --- | --- | --- |
+| 解析质量 / OCR 引擎适配 / 产物结构与版本布局 | Axiom-Flow | 其仓库六步；触及跨项目契约（端点语义、产物布局、af_* 表）先按跨项目协作规范登记请求 |
+| 发现 / 下载 / 校验 / 登记生命周期与元数据模型 | QED-Tracker | 同上（qt_* 表与其 API 归己仓） |
+| 前端可见行为、8900 三域（配置 / 托管 / 网关 / 透传处理） | 本仓库 `web-ui/` + `backend/qed_engine/` | 本仓库任务生命周期；涉及消费子项目接口的语义时同步 cross-project-contracts |
+| 模型启停仲裁与探针 vs 解析直连调用 | 本仓库 8900 控制域（生命周期/探针）+ Axiom-Flow（引擎适配器直连） | [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 分工，不互换 |
+| 端口、服务地址、dataset 顶层布局、共享表命名空间、跨项目传输方式 | **先 ADR 决策**，再落各仓 | ADR 治理 + 对接点表同步（cross-project-contracts §3） |
+
+一句话判据：**数据生产者管好自己的接口；消费方只在根仓库登记消费语义**——各服务接口形状
+事实源在本仓库，根仓库两文档（本文件 + cross-project-contracts）只承担总指引
+（归属 / 演进规则 / 双态验收 / 透传语义），不二次维护契约形状。
 
 ## 项目定位
 
@@ -93,3 +110,6 @@ flowchart LR
 - **dataset 数据流**：QED-Tracker 产出原始 PDF（`dataset/raw/`）→ Axiom-Flow 产出解析产物
   （`dataset/parsed/<domain>/<course>/<book_id>/`）→ 前端消费（经 8900 代理）；解析临时文件
   在 `dataset/tmp/`。
+- **运行拓扑双态验收**：独立性铁律的验收语言 = 单项目态与合并态两矩阵（各自运行依赖与降级
+  行为、合并主链验收清单、就绪判据与地址注入），正文见
+  [cross-project-contracts §9 运行与验证矩阵](../design/cross-project-contracts.md)；本文件不重复判据。
