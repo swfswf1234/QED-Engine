@@ -81,6 +81,15 @@ def test_fixed_api_and_database_documents_declare_metadata():
     assert "前端无 API" in api
 
 
+def test_database_design_is_registry_only_with_er_diagram():
+    """总纲零建表语句（事实源唯一铁律，ARCH-031）且保留关系视图。"""
+    content = (ARCHITECTURE / "database-design.md").read_text(encoding="utf-8")
+    assert "CREATE TABLE" not in content, "database-design 只登记指针，不得复制任何 DDL"
+    assert any("erDiagram" in body for body in _mermaid("database-design.md")), (
+        "database-design 缺少 mermaid ER 关系视图"
+    )
+
+
 def test_four_service_architecture_declares_metadata_and_diagram():
     content = (ARCHITECTURE / "four-service-architecture.md").read_text(encoding="utf-8")
     assert _field(content, "设计状态") in VALID_DESIGN_STATUSES

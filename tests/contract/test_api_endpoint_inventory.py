@@ -1,5 +1,5 @@
 """
-模块职责：守护 8900 端点清单——api-contracts.md 与 api/ 路由文件双向一致。
+模块职责：守护 8900 端点清单——api-contracts.md（正文与端点总表）与 api/ 路由文件双向一致。
 设计关联（DesignRef）：docs/standards/code-document-traceability.md
 实现状态：Current
 被测代码：docs/architecture/api-contracts.md、backend/qed_engine/api
@@ -19,6 +19,12 @@ PREFIX = re.compile(r'APIRouter\(prefix="([^"]+)"')
 HEADING = re.compile(r"^#{2,4}\s+(GET|POST|PUT|PATCH|DELETE)\s+(\S+)")
 TABLE_CELL = re.compile(r"^\|\s+(GET|POST|PUT|PATCH|DELETE)\s+(\S+)\s+\|")
 PLACEHOLDER = re.compile(r"\{[^}]*\}")
+REGISTRY_BLOCK = re.compile(
+    r"<!-- endpoint-registry:start -->\n(.*?)<!-- endpoint-registry:end -->", re.DOTALL
+)
+REGISTRY_ROW = re.compile(
+    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*(\S+)\s*\|\s*([①②③④⑤])\s*\|\s*(在用|过渡)\s*\|\s*$"
+)
 
 
 def _normalize(path: str) -> str:
@@ -82,3 +88,36 @@ def test_documented_endpoints_match_implemented_endpoints():
     )
     assert documented, "api-contracts.md 未解析到任何端点"
     assert implemented, "backend/qed_engine/api 未解析到任何路由"
+
+
+def _registry_rows() -> list[tuple[str, str, str, str]]:
+    content = API_DOC.read_text(encoding="utf-8")
+    block = REGISTRY_BLOCK.search(content)
+    assert block, "api-contracts.md 缺少端点总表哨兵区（endpoint-registry）"
+    rows = []
+    for line in block.group(1).splitlines():
+        match = REGISTRY_ROW.match(line.strip())
+        if match:
+            rows.append(match.groups())
+    return rows
+
+
+def test_registry_table_matches_implemented_endpoints():
+    """端点总表（哨兵区）与代码路由独立二次比对：正文写了标题但漏登总表也是漂移。"""
+    rows = _registry_rows()
+    assert rows
+    registry = {(method, _normalize(path)) for method, path, _domain, _status in rows}
+    implemented = _code_endpoints()
+
+    missing_in_registry = sorted(implemented - registry)
+    ghost_in_registry = sorted(registry - implemented)
+    assert not missing_in_registry, (
+        f"以下端点已实现但「端点总表」缺行：\n{missing_in_registry}"
+    )
+    assert not ghost_in_registry, (
+        f"以下端点在「端点总表」登记但代码不存在：\n{ghost_in_registry}"
+    )
+    for method, path, domain, status in rows:
+        assert path.startswith("/api/v1"), f"总表路径必须带 /api/v1 前缀：{method} {path}"
+        assert domain in "①②③④⑤"
+        assert status in {"在用", "过渡"}

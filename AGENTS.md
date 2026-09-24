@@ -33,8 +33,8 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 [任务台账](docs/trackers/todo.md) 与[能力路线图](docs/trackers/roadmap.md)。
 
 **文档优先级**：agent 与项目开发优先读取**已确认文档**（当前：`standards/` 全部 9 份标准已确认；
-`architecture/`、`design/` 按各自声明的确认状态——`four-service-architecture.md`、`code-map.md`
-已确认，其余**暂定**，可读可执行但待评审）。文档链路规则见[文档治理规范](docs/standards/doc-governance.md)。
+`architecture/`、`design/` 按各自声明的确认状态——`four-service-architecture.md`、
+`code-map.md`、`api-contracts.md`、`database-design.md` 已确认，其余**暂定**，可读可执行但待评审）。文档链路规则见[文档治理规范](docs/standards/doc-governance.md)。
 
 ## 四个服务与独立性
 

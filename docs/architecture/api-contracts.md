@@ -2,13 +2,15 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-23
-确认状态：暂定
+最后更新：2026-09-24
+确认状态：已确认
 关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/control.py`、`backend/qed_engine/api/tracker.py`、`backend/qed_engine/api/axiom.py`、`backend/qed_engine/clients/axiom_client.py`、`backend/qed_engine/services/log_viewer.py`、`backend/qed_engine/services/monitor.py`（探索会话与 LLM 网关模块的契约事实源见设计文档，归属见 [code-map.md](code-map.md)）
-关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`
+关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`、`tests/contract/test_api_endpoint_inventory.py`
 关联 ADR：`../history/adr/v0.1/0002-frontend-and-port-centralization.md`、`../history/adr/v0.1/0007-qed-engine-backend-gateway.md`、`../history/adr/v0.1/0008-frontend-react-refactor.md`、`../history/adr/v0.1/0010-documentation-versioning.md`、`../adr/0014-parsing-ownership-and-model-boundary.md`
 
-> 本文件是 **QED-Engine 的固定 API 接口文档**（ADR 0010），按**接口类型**组织（REQ-046）：
+> 本文件是 **QED-Engine 的固定 API 接口文档**（ADR 0010），按**接口类型**组织（REQ-046），
+> 只描述**当前契约**：演进与退役规则见 [cross-project-contracts §10](../design/cross-project-contracts.md)，
+> 历史过程叙事见 `docs/history/` 各计划壳与 Git 历史。
 > **QED-Engine 前端无 API 接口**（静态页面 + 只连 8900，见 [frontend-architecture.md](frontend-architecture.md)），
 > 本文件为 8900 全部对外端点的契约总表；8901 / 8902 的 API 文档以各自仓库
 > `docs/architecture/` 为准（8900 只做透传适配）。版本末期确认更新后，前版本契约进 `history/`。
@@ -20,18 +22,20 @@
 数据域语义 API、服务托管与监控诊断。**密钥绝不下发**——子项目不经过中心获取 key，而是直读
 根 `.env`，中心只回答"用哪个模型、是否已配置"。
 
-8900 是 `.env` 的唯一只读语义代理。接口按类型分为**五类**：
+8900 是 `.env` 的唯一只读语义代理。接口按类型分为**五类**（共 85 端点，清单与状态见
+「端点总表」，逐端点语义见对应分节）：
 
-| 类型 | 端点 | 端点数 |
+| 类型 | 范围 | 端点数 |
 | --- | --- | --- |
-| ① 服务管理类 | `GET /health`、`GET /services`、`POST /services/{name}/start\|stop\|restart`、`POST /self-restart` | 4 |
-| ② 配置语义类 | `GET /config/models`、`GET /config/keys`、`GET /config/database` | 3 |
-| ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程/探索会话 | 约 33 |
-| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块判定与编辑/ingest/parse-jobs（含列表）/parsing-tree | 16 |
-| ⑤ 监控诊断与 LLM 网关 | 日志/GPU/Qwen/mineru + LLM 调用族 + `POST /models/{name}/start\|stop\|restart` | 15 |
+| ① 服务管理类 | 健康检查、服务注册表、启停托管、8900 自身重启 | 6 |
+| ② 配置语义类 | 模型路由表、供应商配置状态、统一数据库快照 | 3 |
+| ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程 + 探索会话与领域探索门面（8900 自有） | 41 |
+| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块编辑与判定/ingest/parse-jobs/parsing-tree | 16 |
+| ⑤ 监控诊断与 LLM 网关 | 日志/GPU/槽位探针与启停/选择 + LLM 调用族 + MySQL 即时探测 | 19 |
 
-**启动自检**（ARCH-014）：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
-结果写日志，MySQL 结果为 `/config/database` 启动快照；不再提供按需探测端点。
+**启动自检**：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
+结果写日志，MySQL 结果为 `/config/database` 启动快照；不提供按需探测端点（MySQL 的
+控制台即时探测走 `POST /database/test`）。
 
 ## 服务信息
 
@@ -39,6 +43,127 @@
 - 端口：`8900`
 - 前缀：`/api/v1`
 - 启动（根仓库目录）：`python -m uvicorn qed_engine.api.main:app --host 127.0.0.1 --port 8900`
+
+## 通用约定
+
+- **版本与前缀**：`/api/v1` 为唯一版本前缀；契约的兼容/破坏分级与发布流程见
+  [cross-project-contracts §10](../design/cross-project-contracts.md)。
+- **无认证**：仅 localhost 回环访问、服务间无认证（部署与安全假设见
+  [cross-project-contracts §12](../design/cross-project-contracts.md)），不得暴露公网。
+- **成功响应**：资源 JSON 原样返回；透传层把上游 201/204 一律规整为 200，
+  除非端点显式声明创建语义（201，如 `POST /books`）或发起语义（202）。
+- **发起语义（202 + 轮询）**：一切长操作（下载 fetch、领域探索任务、探索会话、解析任务、
+  模型启停）受理后立即 202 + 句柄（`task_id` / `session_id` / `job_id` / 槽位状态），
+  状态收敛由前端轮询对应资源端点；唯一分钟级同步例外是 `POST /books/{book_id}/ingest`
+  （范式统一声明与超时预算见 [cross-project-contracts §11](../design/cross-project-contracts.md)）。
+- **错误包络**：业务透传错误为 `{"detail": {"code": "<UPPER_SNAKE>", "message": "<展示文案>"}}`，
+  `code` 由 8901/8902 产生、8900 同码透出（message 即前端展示文案）；8900 自有校验与
+  门面错误 `detail` 为中文纯文本；子服务不可达为 503 + `"<服务名> 服务不可达：…"` 纯文本。
+  状态码语义见「状态码」表，透传码字典见「业务错误码字典」。
+- **路径参数命名**：本文档路径参数名与 FastAPI 路由一致（`{book_id}` `{page_no}`
+  `{block_index}` `{job_id}` `{session_id}` `{task_id}` `{course_id}` `{domain_id}`
+  `{knowledge_id}` `{name}` `{slot}` `{service}` `{call_id}`）。
+- **相对地址重写**：8902 产物中的相对资源 URL（原页图）由 8900 重写为 8900 代理绝对地址
+  后返回（浏览器只连 8900，ADR 0007）。
+- **密钥**：任何响应体、日志与异常信息不含密钥值（见「强制规则」）。
+
+## 端点总表
+
+本表与 FastAPI 实际路由由契约测试双向比对守护（`tests/contract/test_api_endpoint_inventory.py`，
+增删端点必须同步本表）。状态：`在用`＝当前契约；`过渡`＝deprecated 兼容面，替代与处置见
+「退役与过渡」。未实现的规划端点不入本表，见 §③/§④「规划契约」。
+
+<!-- endpoint-registry:start -->
+
+| Method | Path | 域 | 状态 |
+| --- | --- | --- | --- |
+| GET | /api/v1/health | ① | 在用 |
+| GET | /api/v1/services | ① | 在用 |
+| POST | /api/v1/services/{name}/start | ① | 在用 |
+| POST | /api/v1/services/{name}/stop | ① | 在用 |
+| POST | /api/v1/services/{name}/restart | ① | 在用 |
+| POST | /api/v1/self-restart | ① | 在用 |
+| GET | /api/v1/config/models | ② | 在用 |
+| GET | /api/v1/config/keys | ② | 在用 |
+| GET | /api/v1/config/database | ② | 在用 |
+| GET | /api/v1/catalogs/{course_id} | ③ | 在用 |
+| GET | /api/v1/tasks | ③ | 在用 |
+| GET | /api/v1/tasks/{task_id} | ③ | 在用 |
+| GET | /api/v1/knowledge | ③ | 在用 |
+| GET | /api/v1/knowledge/{knowledge_id} | ③ | 在用 |
+| POST | /api/v1/knowledge/{knowledge_id}/confirm | ③ | 在用 |
+| PATCH | /api/v1/knowledge/{knowledge_id} | ③ | 在用 |
+| DELETE | /api/v1/knowledge/{knowledge_id} | ③ | 在用 |
+| POST | /api/v1/books | ③ | 在用 |
+| GET | /api/v1/books/{book_id}/sources | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/sources | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/register | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/fetch | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/import | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/start | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/fail | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/verify | ③ | 在用 |
+| POST | /api/v1/books/{book_id}/cancel | ③ | 在用 |
+| POST | /api/v1/knowledge/{knowledge_id}/fetch | ③ | 在用 |
+| GET | /api/v1/courses | ③ | 在用 |
+| GET | /api/v1/domains | ③ | 在用 |
+| POST | /api/v1/domains | ③ | 在用 |
+| POST | /api/v1/domains/import | ③ | 在用 |
+| DELETE | /api/v1/domains/{domain_id} | ③ | 在用 |
+| PATCH | /api/v1/domains/{domain_id} | ③ | 在用 |
+| POST | /api/v1/domains/{domain_id}/courses | ③ | 在用 |
+| POST | /api/v1/domains/{domain_id}/commit-import | ③ | 在用 |
+| PATCH | /api/v1/courses/{course_id} | ③ | 在用 |
+| DELETE | /api/v1/courses/{course_id} | ③ | 在用 |
+| POST | /api/v1/courses/{course_id}/knowledge | ③ | 在用 |
+| POST | /api/v1/explore-sessions | ③ | 在用 |
+| GET | /api/v1/explore-sessions/{session_id} | ③ | 在用 |
+| POST | /api/v1/explore-sessions/{session_id}/confirm-name | ③ | 在用 |
+| POST | /api/v1/explore-sessions/{session_id}/apply | ③ | 在用 |
+| DELETE | /api/v1/explore-sessions/{session_id} | ③ | 在用 |
+| POST | /api/v1/domains/{domain_id}/explore-knowledge | ③ | 在用 |
+| POST | /api/v1/domains/{domain_id}/confirm-domain | ③ | 在用 |
+| POST | /api/v1/domains/{domain_id}/confirm-knowledge | ③ | 在用 |
+| GET | /api/v1/domains/{domain_id}/explore-status | ③ | 在用 |
+| POST | /api/v1/courses/{course_id}/explore-knowledge | ③ | 在用 |
+| POST | /api/v1/courses/{course_id}/confirm | ③ | 在用 |
+| GET | /api/v1/books | ④ | 在用 |
+| GET | /api/v1/books/{book_id} | ④ | 在用 |
+| POST | /api/v1/books/sync | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/pages/{page_no} | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/pages/{page_no}/image | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/file | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/manifest | ④ | 在用 |
+| POST | /api/v1/books/{book_id}/ingest | ④ | 在用 |
+| PUT | /api/v1/books/{book_id}/pages/{page_no}/blocks/{block_index}/edit | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/pages/{page_no}/edits | ④ | 在用 |
+| PUT | /api/v1/books/{book_id}/pages/{page_no}/blocks/{block_index}/review | ④ | 过渡 |
+| GET | /api/v1/books/{book_id}/pages/{page_no}/blocks/{block_index}/review | ④ | 过渡 |
+| POST | /api/v1/parse-jobs | ④ | 在用 |
+| GET | /api/v1/parse-jobs | ④ | 在用 |
+| GET | /api/v1/parse-jobs/{job_id} | ④ | 在用 |
+| GET | /api/v1/parsing/tree | ④ | 在用 |
+| GET | /api/v1/logs/{service} | ⑤ | 在用 |
+| GET | /api/v1/monitor/gpu | ⑤ | 在用 |
+| GET | /api/v1/monitor/{slot} | ⑤ | 在用 |
+| GET | /api/v1/monitor/qwen | ⑤ | 过渡 |
+| GET | /api/v1/monitor/mineru | ⑤ | 过渡 |
+| GET | /api/v1/models/{name} | ⑤ | 在用 |
+| POST | /api/v1/models/{name}/start | ⑤ | 在用 |
+| POST | /api/v1/models/{name}/stop | ⑤ | 在用 |
+| POST | /api/v1/models/{name}/restart | ⑤ | 在用 |
+| POST | /api/v1/models/{name}/select | ⑤ | 在用 |
+| POST | /api/v1/llm/text | ⑤ | 在用 |
+| POST | /api/v1/llm/vision | ⑤ | 在用 |
+| POST | /api/v1/llm/embedding | ⑤ | 在用 |
+| POST | /api/v1/llm/test/text | ⑤ | 在用 |
+| POST | /api/v1/llm/test/vision | ⑤ | 在用 |
+| POST | /api/v1/llm/test/embedding | ⑤ | 在用 |
+| GET | /api/v1/llm/calls | ⑤ | 在用 |
+| PATCH | /api/v1/llm/calls/{call_id}/review | ⑤ | 在用 |
+| POST | /api/v1/database/test | ⑤ | 在用 |
+
+<!-- endpoint-registry:end -->
 
 ## ① 服务管理类
 
@@ -71,13 +196,13 @@
 {"status": "restarting"}
 ```
 
-- Windows 下 spawn/退出的技术风险实施期验证；失败时返回明确错误并提示人工重启。
+- Windows 下 spawn 失败时返回明确错误并提示人工重启。
 
 ## ② 配置语义类
 
 ### GET /api/v1/config/models
 
-模型路由表（**单线路**：只返回当前生效用途，qwen 三用途；备选线路启用时恢复路由）：
+模型路由表（**单线路**：只返回当前生效用途，qwen 三用途）：
 `default`/`ocr`/`embedding` 为**解析后生效档**（按 `QED_API_PROVIDER` 路由）。子项目不感知密钥。
 
 ```json
@@ -92,12 +217,11 @@
 - `configured`：`API_KEY` 是否已配置（空值视为未配置），子项目据此决定降级策略。
 - `default`/`ocr` 模型为**解析后生效值**：显式配置（`QED_MODEL`/`QED_OCR_MODEL`）优先，否则按厂商
   默认（`backend/qed_engine/services/llm/clients.py` `PROVIDERS` 注册表）；`embedding` 保持配置值
-  （本轮推荐值 `text-embedding-v4`）。
+  （推荐值 `text-embedding-v4`）。
 - 厂商无视觉时（deepseek）：`ocr` 的 `model` 显示 `（无视觉）` 约定。
 - 模型名配置来源见 [project-configuration.md](../design/project-configuration.md) 变量表。
-- 备选线路（GLM 对话/专用文档 OCR、deepseek 对话）变量未恢复，启用时恢复本接口对应路由；
-  glm-ocr 文档解析专用接口（布局+文本提取，支持图片/PDF）的接入适配在 Axiom-Flow 对接轮完成
-  （REQ-008，备选线路启用时恢复）。
+- 备选线路（GLM 对话/专用文档 OCR、deepseek 对话）变量启用时恢复本接口对应路由；
+  glm-ocr 文档解析专用接口的接入适配在 Axiom-Flow 对接轮完成（REQ-008）。
 
 ### GET /api/v1/config/keys
 
@@ -110,15 +234,16 @@
 
 - `provider`：当前 `QED_API_PROVIDER`（qwen / deepseek / glm）。
 - `configured`：`API_KEY` 是否已配置。该布尔仅表示「key 是否已配置」，**不代表服务可达**。
-  供应商可达性由 8900 **启动自检**负责（见下节），前端横幅不再展示。
+  供应商可达性由 8900 **启动自检**负责（见下节）。
 - `mode`：当前 `QED_API_SELECT`（api / local）。前端控制台依赖卡模式感知用——api 模式
   文字/图像模型为云端厂商（不探测 Qwen/MinerU），local 模式探测本地服务。
 
 ### GET /api/v1/config/database
 
-统一数据库配置与**连接状态**（2026-08-04 用户裁决：MySQL 8 新建 `qed` 库，三项目共用；
-ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一次，本端点只读快照，不再按需
-探测）。只返回主机/库名等非敏感信息与布尔配置状态，**密码值绝不下发**。
+统一数据库配置与**连接状态**（MySQL 8 共享 `qed` 库，见
+[database-design.md](database-design.md)）。语义为**启动快照**——8900 启动时真实连接探测
+一次，本端点只读快照，不按需探测。只返回主机/库名等非敏感信息与布尔配置状态，
+**密码值绝不下发**。
 
 ```json
 {
@@ -134,24 +259,21 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
   （错误摘要不含密码与主机细节）。
 - 变量来源与别名映射见[project-configuration.md](../design/project-configuration.md) 统一数据库小节。
 - 字段变化（如新增库名列表）需同步更新本契约与 `backend/qed_engine/api/schemas.py`。
+- 控制台**即时**连接探测走 `POST /database/test`（⑤），本端点始终保持启动快照语义。
 
-### LLM 供应商启动自检（替代 `/config/llm-status`）
+### LLM 供应商启动自检
 
-原 `GET /config/llm-status` 已删除（ARCH-014，2026-08-16，返回 404）；8900 **启动时对
-`QED_API_PROVIDER` 对应厂商探测一次**（models 列表接口，免费、无 token 消耗，5s 超时），
-结果写启动日志（`启动自检：qwen LLM 可达=True（…）`）。未配置 key 不探测。**强制规则**：
-密钥只出现在探测请求头，绝不进入日志/异常信息。
+8900 **启动时对 `QED_API_PROVIDER` 对应厂商探测一次**（models 列表接口，免费、无 token
+消耗，5s 超时），结果写启动日志（`启动自检：qwen LLM 可达=True（…）`）。未配置 key 不探测。
+**强制规则**：密钥只出现在探测请求头，绝不进入日志/异常信息。
 
 ## ③ 数据透传·QED-Tracker（8901 适配）
 
 前端（8903）只连 8900：目录/任务/教程/书籍契约归 8900 所有（数据域），内部经
 `clients/tracker_client.py`（8901 客户端）适配 8901；8901 契约正文以 QED-Tracker
-`docs/architecture/api.md`（2026-09-11）为事实源，路径与 8901 一致（透传）。
-
-> **⚠ 8900 路由集对齐状态（2026-09-11，PLAN-038）**：本节语义已对齐 QED-Tracker 新契约
-> （QED-050-D / QED-060）；标「⚠ 待对齐」的条目，其 8900 路由实现仍为过渡形态
-> （旧书籍状态机端点、`POST /books` 旧请求体、`import` 无 body 等），**目标变更与跟进清单见 §③.9**。
-> 8901 侧行为以 QED-Tracker 文档为准。
+`docs/architecture/api.md` 为事实源，路径与 8901 一致（透传）。
+8900 侧能力面分组语义（不构成端点契约）见
+[cross-project-contracts §5](../design/cross-project-contracts.md)。
 
 **五层语义（QED-031 两态 + QED-050/060 书库化）**：教程（qt_knowledge）draft→confirmed
 （两态终态）；书籍（qt_books）为域级书库——选用态 `candidate/decided/parallel/retired` +
@@ -197,7 +319,7 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 
 #### `PATCH /api/v1/knowledge/{knowledge_id}`
 
-更新教程信息（REQ-067 §B 配套）。**路径参数：** `knowledge_id`。
+更新教程信息。**路径参数：** `knowledge_id`。
 **请求体（字段均可选，仅传非空项）：** `name`、`position`、`intro`、`set_no`、`kind`、`notes`。
 **返回：** 200 更新后的教程详情（含 `books[]`）。**错误：** 404 不存在。
 
@@ -206,12 +328,7 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 物理删除教程及其孤立书籍数据（仍被其他教程引用的书保留）。**路径参数：** `knowledge_id`。
 **返回：** 200 `{"ok": "true"}`。**错误：** 404 不存在。
 
-### 书籍
-
-> **✅ 已对齐（QED-060，PLAN-040）**：`POST /books` 用 `book_id`+`title`（无 `knowledge_id`）；
-> `register/import` 经 `mark_owned` 落 `holding=owned + status=downloaded`；下载生命周期端点为
-> `start/fail/verify/cancel`（`decide/retry/complete/reject/supersede` 已随本轮删除）。
-> 8900 适配层与前端调用已同步，详见 §③.9。
+### 书籍（QED-060 书库化）
 
 #### `POST /api/v1/books`
 
@@ -280,7 +397,7 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 
 #### `POST /api/v1/books/{book_id}/import`
 
-人工导入书籍 PDF（**multipart/form-data**，PLAN-039）：8900 将上传字节落系统临时文件 →
+人工导入书籍 PDF（**multipart/form-data**）：8900 将上传字节落系统临时文件 →
 调 8901 import（完整性校验 / sha256 去重 / 原子落盘 → `raw/<domain>/<course>/<slug>_<sha8>.pdf`
 + `mark_owned`）→ 清理临时文件。**浏览器文件选择器上传，用户无需提供服务器路径。**
 
@@ -307,16 +424,9 @@ ARCH-014：语义改为**启动快照**——8900 启动时真实连接探测一
 取消下载（`downloading → decided` 复位，不删除已落盘文件）；用于解除卡死的 `downloading`。
 **错误：** 404、409（仅 `downloading` 可 cancel）。
 
-> **已删除端点（QED-060 / PLAN-040）**：`decide`、`retry`、`complete`、`reject`、`supersede`
-> 属旧八态下载机，8900 已不再注册（请求返回 404/405）。候选→决定改由采纳端点
-> （`POST /courses/{id}/knowledge`）建立 decided 书行；下载完成由五阶段编排内部 `mark_owned`
-> 承接；退役（`retired + retire_reason`）写入端点待 REQ-079 由 QED-Tracker 提供。
+### 领域与课程体系（REQ-059，8901 承接）
 
-### 领域与课程体系（REQ-059 + 探索，2026-08-28 至 09-04）
-
-领域/课程管理端点透传 8901（QED-Tracker 承接）；探索功能由 8900 自有探索会话端点承接
-（PLAN-022 B3）。会话执行体：`services/explore_sessions.py`（内存态 + 后台线程调 8901
-dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py`。
+领域/课程管理端点透传 8901。
 
 #### `GET /api/v1/courses`
 
@@ -329,86 +439,77 @@ dry-run 管线）；exploration_stage 状态流转经 `services/shared_tables.py
 
 #### `POST /api/v1/domains`
 
-手工新建领域（domain_id 服务端生成为请求口径）。**请求体：**
+手工新建领域。**请求体：**
 `{"name","description?","stages?","level?","scope?","classic_tracks?"}`。
 
-**错误：** 409 DOMAIN_NAME_CONFLICT（name 或 domain_id 已存在）、422 INVALID_PARAMS。
+**错误：** 409 `DOMAIN_NAME_CONFLICT`（name 或 domain_id 已存在）、422 `INVALID_PARAMS`。
 
 #### `PATCH /api/v1/domains/{domain_id}`
 
 修改领域字段（name/domain_id 不可变；空 body = no-op）。
 **可改字段：** `description/stages/level/scope/classic_tracks/path_results/exploration_stage`。
 
-**错误：** 404 DOMAIN_NOT_FOUND。
+**错误：** 404 `DOMAIN_NOT_FOUND`。
 
 #### `DELETE /api/v1/domains/{domain_id}`
 
 删除领域（有课程 409 保护）。
 
-**错误：** 404 DOMAIN_NOT_FOUND、409 DOMAIN_NOT_EMPTY。
+**错误：** 404 `DOMAIN_NOT_FOUND`、409 `DOMAIN_NOT_EMPTY`。
 
 #### `POST /api/v1/domains/{domain_id}/courses`
 
 新增课程（手工维护与探索 apply 共用；course_id 缺省服务端生成）。**请求体：**
 `{"name","stage?","sort_order?","description?","aliases?","track?","prerequisites?"}`。
 
-**错误：** 404 DOMAIN_NOT_FOUND、409 COURSE_ALREADY_EXISTS、422 INVALID_PARAMS。
+**错误：** 404 `DOMAIN_NOT_FOUND`、409 `COURSE_ALREADY_EXISTS`、422 `INVALID_PARAMS`。
 
 #### `PATCH /api/v1/courses/{course_id}`
 
 修改课程（name/course_id 不可变；仅提交显式字段）。
 **可改字段：** `stage/sort_order/description/aliases/track/prerequisites`。
 
-> ⚠ 待对齐（REQ-077）：目标契约新增 `exploration_stage` 字段（课程阶段流转经本端点，
-> 取消 8900 共享表直写依赖）；8901 与 8900 均待支持。
-
-**错误：** 404 COURSE_NOT_FOUND。
+**错误：** 404 `COURSE_NOT_FOUND`。
 
 #### `DELETE /api/v1/courses/{course_id}`
 
 删除课程（有教程 409 保护）。
 
-**错误：** 404 COURSE_NOT_FOUND、409 COURSE_HAS_KNOWLEDGE。
+**错误：** 404 `COURSE_NOT_FOUND`、409 `COURSE_HAS_KNOWLEDGE`。
 
 #### `POST /api/v1/courses/{course_id}/knowledge`
 
 导入/采纳课程知识（tutorials JSON，每套 = `set_no/name/position/intro/textbook_ref/
 exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书行（parallel_ref 建
-`status=parallel`）并回填 `book_id`。**请求体：** `{"tutorials": [...]}`（`source` 可选，仅来源标记）。
+`status=parallel`）并回填 `book_id`。**请求体：** `{"tutorials": [...]}`。
 
-**返回：** 201 `{"created": [{"knowledge_id","set_no","name","status":"draft","existing":false}]}`。
-**错误：** 404 COURSE_NOT_FOUND、409 SET_NO_CONFLICT、422 INVALID_PARAMS。
-
-> ⚠ 待对齐：8900 当前透传 8901 结果（旧文档曾记 `{"tutorials_created":N}`）。
+**返回：** 透传 8901 采纳结果体（形状以 8901 契约为准）；8900 在成功后把课程
+`exploration_stage` 从未开始写为**待确认**。
+**错误：** 404 `COURSE_NOT_FOUND`、409 `SET_NO_CONFLICT`、422 `INVALID_PARAMS`。
 
 #### `POST /api/v1/domains/import`
 
-手动领域 JSON 导入（QED-050，六步流程第 1 步）：校验 manual@v1 → 写
+手动领域 JSON 导入（六步流程第 1 步）：校验 manual@v1 → 写
 `raw/{domain_id}/domains.json` → 既有领域置 `exploration_stage=已生成`。**只写文件不落库**
-（课程由 confirm 双分支 / `courses/import` 承接；`source` 参数已退役）。
+（课程由 confirm 双分支 / `courses/import` 承接）。
 
 **请求体：** `{"domain": {...manual@v1 全文...}, "target_domain_id?": "..."}`。
 
 **返回：** 200 `{"domain_id","file_path","exploration_stage":"已生成","message"}`。
-**错误：** 400 INVALID_PARAMS（校验失败/文件不可读）、404 DOMAIN_NOT_FOUND（领域须先创建）、422 缺 domain。
+**错误：** 400 `INVALID_PARAMS`（校验失败/文件不可读）、404 `DOMAIN_NOT_FOUND`（领域须先创建）、422 缺 domain。
 
 #### `POST /api/v1/domains/{domain_id}/commit-import`
 
 手动导入课程（六步流程第 3 步）：透传 8901 `POST /domains/{domain_id}/courses/import`，
-从 `raw/{domain_id}/domains.json` 读 courses → upsert `qed_course` → 状态置 **待确认**
-（已完成由 `confirm-knowledge`→apply-results 收口）。
+从 `raw/{domain_id}/domains.json` 读 courses → upsert `qed_course` → 状态置 **待确认**。
 
 **返回：** `{"domain_id","courses_created":N,"courses_updated":M,"exploration_stage":"待确认"}`。
-**错误：** 400（domains.json 无课程）、404、409 INVALID_TRANSITION（状态须为 已生成/探索中）。
+**错误：** 400（domains.json 无课程）、404、409 `INVALID_TRANSITION`（状态须为 已生成/探索中）。
 
-> **UI 不再调用（PLAN-041，2026-09-11）**：`confirm-domain` 已置 `待确认`，再调本端点必 409
-> （守卫只收 `已生成/探索中`）；「已导入」路径改为仅 `confirm-domain`，课程行与「已完成」
-> 由 `confirm-knowledge` 桥接收口。端点保留供其他调用方/离线场景。
+- 端点保留供离线/手动场景；前端「已导入」路径经 `confirm-domain` + `confirm-knowledge`
+  桥接收口，`待确认` 状态下调本端点必 409（守卫只收 `已生成/探索中`）。
 
-> 注：`/domains/{id}/explore` 和 `/domains/{id}/confirm-name` 已移除（2026-09-07），
-> 领域探索与名称确认由 ExploreFlowModal（`/explore-sessions`）承接。
-
-### 探索会话（8900 自有，PLAN-022 B3）
+### 探索会话（8900 自有）
 
 会话态内存存储（进程重启即失，前端刷新后重新发起），TTL 2 小时惰性清理；管线执行中 8901
 同步 dry-run（领域两步约 4 分钟/课程 tutorials@v2 约 90 秒），故 202+轮询必要；LLM 调用审计
@@ -449,7 +550,7 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 
 **错误：** 404。
 
-### 领域探索五态门面（8900 自有，PLAN-034，2026-09-08；课程确认收口 PLAN-035，2026-09-10 补登记）
+### 领域探索五态门面（8900 自有）
 
 `api/domain_explore.py` 六端点，定位为五态状态机门面：领域链路委托 8901 原生任务链
 （`domain_explore`/`domain_explore_courses` 异步任务 + confirm/apply-results 端点，
@@ -498,7 +599,7 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 
 #### `POST /api/v1/courses/{course_id}/confirm`
 
-课程探索确认（PLAN-035）：课程 `exploration_stage` 从「待确认」写为「已完成」
+课程探索确认：课程 `exploration_stage` 从「待确认」写为「已完成」
 （`shared_tables.set_course_stage` 离线直写）。**返回 200：**
 `{"course_id","ok":true,"exploration_stage":"已完成","message"}`。
 **错误：** 404（课程不存在）、409（当前状态非「待确认」）、500（状态写入失败）。
@@ -512,54 +613,27 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 courses.json 合成 `{"kind":"review_results","courses":[...]}`（原生任务链成功不写 pending）。
 领域不存在或查询异常时降级返回 `available:false` + `exploration_stage="未开始"`（200，不抛错）。
 
-### ③.9 8900 路由集对齐跟进清单（2026-09-11，PLAN-038 立；PLAN-040 书籍组收口）
+### 规划契约（8900 待实施）
 
-> 8901 原生端点已由 QED-Tracker 就绪；本节记录 8900 适配层对齐进度。
+> 未实现面不入端点总表；跟进经[任务台账](../trackers/todo.md)对应 REQ 行。
 
-**书籍组（✅ 已完成，PLAN-040 2026-09-11）**
-
-| 目标 | 8900 状态 | 变更 |
-| --- | --- | --- |
-| `POST /books` 用 `book_id`+`title`（201） | ✅ | 换请求体与状态码（仅转发非空项） |
-| `POST /books/{id}/register` → `mark_owned` | ✅ | 透传 8901（`status=downloaded`） |
-| `POST /books/{id}/import` 改 multipart | ✅ 已实现（PLAN-039） | 浏览器文件选择器上传，8900 落临时文件转 8901 |
-| `POST /books/{id}/start|fail|verify` | ✅ | 透传 8901 下载生命周期 |
-| 新增 `POST /books/{id}/cancel` | ✅ 已新增 | `downloading → decided` |
-| 删除 `decide/retry/complete/reject/supersede` | ✅ 已删除 | 路由与 `TrackerClient` 方法一并移除 |
-
-> 前端跟进（✅ 已完成）：`web-ui/src/api/tracker.ts` 删除 `decideBook/retryBook/rejectBook/
-> supersedeBook`、新增 `cancelBook`；`Downloads.tsx` 移除「否定」按钮与否决流程
-> （退役端点待 REQ-079，无后端可调）。`stores/dashboard.ts` 下载进度聚合补
-> `downloaded/verified/failed` 生命周期仍待跟进。
-
-**领域/课程组**
-
-| 目标 | 当前 8900 状态 | 变更 |
-| --- | --- | --- |
-| 新增 `GET /courses/{domain_id}` | **缺失** | 透传 8901 单领域课程详情 |
-| `PATCH /courses` 支持 `exploration_stage` | 不支持 | 待 8901 支持后透传（REQ-077） |
-| `POST /domains/import` 去 `source` | 已无 `source`（`target_domain_id`） | 文档已对齐 |
-| `commit-import` → `/courses/import`（待确认） | 已按 ISSUE-002 接 `/courses/import` | 文档已对齐 |
+| 规划端点 | 方法 | 语义 | 依赖 |
+| --- | --- | --- | --- |
+| `/courses/{domain_id}` | GET | 透传 8901 单领域课程详情 | 无（8901 已就绪） |
+| `/courses/{course_id}` | PATCH | 支持 `exploration_stage` 字段（课程阶段流转经本端点，取消 8900 共享表直写依赖） | 8901 支持（REQ-077） |
 
 ### 错误映射（③ 数据透传·QED-Tracker）
 
 8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409 处理生效）；
 8901 连接失败/5xx → 503 + `QED-Tracker 服务不可达：…`（前端据此降级显示，独立性铁律）。
 create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
-结构化错误统一 `{detail: {code, message}}`，`message` 即前端展示文案。
-成功态规整：上游 201/204 一律以 200 返回（透传层不做状态码直通），除非端点文档显式声明
-创建语义（如 `POST /books` 201）；发起类端点显式 202。
-
-> 历史：旧 `/resources` 清单/详情/预览/状态机端点与 `/tasks/catalog/evaluate`、
-> `/tasks/books/download` 已随 QED-030（qt_resources 退役）移除；三表语义 API 已随 QED-031
-> 知识层次重构退役，8900 不再暴露。三表模型历史契约原文（design/downloads-three-table-model.md，
-> Superseded）已于 2026-09-10 REQ-070 重组轮删除，可自 Git 历史查阅（ REQ-030/031 时期提交）。
 
 ## ④ 数据透传·Axiom-Flow（8902 适配）
 
 前端（8903）只连 8900：Axiom-Flow 解析管理数据归 8900 所有（数据域），内部经
 `clients/axiom_client.py`（8902 客户端）适配 8902。8902 契约事实源：Axiom-Flow
-`docs/architecture/api.md`；职责边界与全链路数据流见根仓库设计
+`docs/architecture/api.md`；8900 侧能力面分组语义（不构成端点契约）见
+[cross-project-contracts §6](../design/cross-project-contracts.md)；职责边界与全链路数据流见根仓库设计
 [文档解析管理·全链路设计](../design/parsing-flow.md)（按
 [ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 确立）。
 **解析管线在 Axiom-Flow 直连模型服务，不经 8900 网关**（见 §⑤ 说明）。
@@ -569,33 +643,33 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | 端点 | 语义 | 内部适配 |
 | --- | --- | --- |
 | `GET /books` | 书目列表（af_books：课程归属 domain_id/course_id/course_name + ingest/解析进度） | AxiomClient.list_books |
-| `GET /books/{id}` | 单本详情（8902 `BookOut` 原样透传：`file_path` 数据根相对路径 + `ingest_status`/`page_count`，前端 PDF 直显判定源） | AxiomClient.get_book |
+| `GET /books/{book_id}` | 单本详情（8902 `BookOut` 原样透传：`file_path` 数据根相对路径 + `ingest_status`/`page_count`，前端 PDF 直显判定源） | AxiomClient.get_book |
 | `POST /books/sync` | 同步已验证书目：8900 聚合 8901 verified 书目 → 8902 upsert af_books（幂等，book_id 同源 qt_books）；payload 按 8902 `BookSyncItem`（`file_path`=8901 relative_path、`authors` 为 `{name,role}` 对象数组，不发 sha256/page_count） | AxiomClient.sync_books |
-| `GET /books/{id}/pages/{no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并）；8902 `PageData` 无 `page_no`，由 8900 用路径参数补写，并把相对 `image_url` 重写为 8900 页图代理绝对地址（serve_web 不代理 /api） | AxiomClient.get_book_page |
-| `GET /books/{id}/pages/{no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
-| `GET /books/{id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
-| `GET /books/{id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `POST /books/{id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s | AxiomClient.ingest_book |
-| `PUT /books/{id}/pages/{no}/blocks/{index}/edit` | **块编辑门面**（本契约消费面一律走 `/edit`）：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
-| `GET /books/{id}/pages/{no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
-| `PUT /books/{id}/pages/{no}/blocks/{index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**8900 门面**：前端契约保持 /review，内部转 8902 `PUT …/blocks/{index}/edit` | AxiomClient.edit_block |
-| `GET /books/{id}/pages/{no}/blocks/{index}/review` | 块判定回显；内部走 8902 页级 `GET …/pages/{no}/edits` 过滤 block_index，无记录 → 8900 合成 404 | AxiomClient.get_page_edits |
+| `GET /books/{book_id}/pages/{page_no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并）；8902 `PageData` 无 `page_no`，由 8900 用路径参数补写，并把相对 `image_url` 重写为 8900 页图代理绝对地址（serve_web 不代理 /api） | AxiomClient.get_book_page |
+| `GET /books/{book_id}/pages/{page_no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
+| `GET /books/{book_id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{book_id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
+| `GET /books/{book_id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
+| `POST /books/{book_id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s（通用约定的同步例外） | AxiomClient.ingest_book |
+| `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/edit` | **块编辑门面（本契约消费面一律走 `/edit`）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
+| `GET /books/{book_id}/pages/{page_no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
+| `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**过渡门面**（状态=过渡），内部转 8902 `PUT …/edit`；替代与处置见「退役与过渡」 | AxiomClient.edit_block |
+| `GET /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | 块判定回显；**过渡门面**（状态=过渡），内部走 8902 页级 `GET …/edits` 过滤 block_index，无记录 → 8900 合成 404 | AxiomClient.get_page_edits |
 | `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；`engine` 缺省 mineru） | AxiomClient.create_parse_job |
 | `GET /parse-jobs` | 任务列表（透传 8902 列表端点：`book_id`/重复 `status` 过滤 + `active` 标记；前端打开工作台恢复在飞任务防重复建任务） | AxiomClient.list_parse_jobs |
-| `GET /parse-jobs/{id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
+| `GET /parse-jobs/{job_id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
 | `GET /parsing/tree` | 左侧树聚合：8900 共享表（领域→课程）+ 8902 af_books；8902 离线降级为领域→课程 | 见 `api/axiom.py` `_build_parsing_tree` |
 
-### 规划契约（8900 透传待实施）
+### 规划契约（8902 已实现、8900 透传待实施）
 
 > 下列端点 **8902 已全部实现**（契约事实源 Axiom-Flow `docs/architecture/api.md`），
-> 8900 透传与前端消费未排期；`/review` 门面为过渡兼容（旧前端契约），随存量消费面退役删除。
+> 8900 透传与前端消费未排期；未实现面不入端点总表。
 
 | 规划端点 | 方法 | 语义 |
 | --- | --- | --- |
-| `/books/{id}` | PATCH | 修改书目（notes 等） |
-| `/books/{id}` | DELETE | 删除 af_books 行（`?purge=true` 连产物） |
-| `/books/{id}/versions` | GET | 解析版本列表（只读；对比/回滚另议） |
-| `/books/{id}/chunks` | GET | 块集读取（RAG 切片预留） |
+| `/books/{book_id}` | PATCH | 修改书目（notes 等） |
+| `/books/{book_id}` | DELETE | 删除 af_books 行（`?purge=true` 连产物） |
+| `/books/{book_id}/versions` | GET | 解析版本列表（只读；对比/回滚另议） |
+| `/books/{book_id}/chunks` | GET | 块集读取（RAG 切片预留） |
 
 > 完整契约以 Axiom-Flow `docs/architecture/api.md` 为事实源；全链路语义与根侧消费要点见
 [文档解析管理·全链路设计](../design/parsing-flow.md)。
@@ -610,7 +684,7 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 
 ## ⑤ 监控诊断与 LLM 网关
 
-支撑前端控制台的组件监控（GPU / Qwen / mineru / 日志 / 8900 自身重启）与 LLM 网关。
+支撑前端控制台的组件监控（GPU / 模型槽位 / 日志 / 8900 自身重启）与 LLM 网关。
 实现于 `services/log_viewer.py`、`services/monitor.py` 与 `services/llm/`（网关/客户端/
 模型管理器/调用记录），路由挂 `api/control.py`。
 
@@ -629,8 +703,8 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 
 ### GET /api/v1/monitor/gpu
 
-GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用、利用率、占用进程列表
-（含 kind 分类）、系统内存使用。
+GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型号、显存总量/已用、
+利用率、占用进程列表（含 kind 分类）、系统内存使用。
 
 ```json
 {"available": true, "name": "NVIDIA GeForce RTX 4080", "memory_total_mb": 16376,
@@ -639,14 +713,14 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 ```
 
 - `available=false` 附 `reason`（nvidia-smi 不存在/无 GPU/解析失败）。
-- **利用率与逐进程显存口径（2026-09-06 用户裁决）**：利用率取 Windows 性能计数器
+- **双口径**：利用率取 Windows 性能计数器
   `\GPU Engine(*)\Utilization Percentage`（任务管理器同源），响应带 `utilization_source`；
-  逐进程 `memory_mb` 用 `\GPU Process Memory(*)\Dedicated Usage`（分配口径，任务管理器同源）
-  按 pid 匹配，缺失回落 `None`。nvidia-smi 整卡 `memory.used/total` 保持物理驻留口径——
+  逐进程 `memory_mb` 用 `\GPU Process Memory(*)\Dedicated Usage`（分配口径）按 pid 匹配，
+  缺失回落 `None`。nvidia-smi 整卡 `memory.used/total` 保持物理驻留口径——
   两口径定义不同（分配 vs 物理驻留），前端以脚注说明。
-- **同源差异提示**：PDH 分配口径总和与 nvidia-smi 物理驻留可能不一致（实测 ≈3721MB vs 2705MB），
-  属定义差异非 bug；前端饼图剩余片用 `max(0, used − Σ进程)` 兜底并标注。
-- `processes[].kind`（REQ-038）：模型进程名关键词白名单
+- **同源差异提示**：PDH 分配口径总和与 nvidia-smi 物理驻留可能不一致，属定义差异非 bug；
+  前端饼图剩余片用 `max(0, used − Σ进程)` 兜底并标注。
+- `processes[].kind`：模型进程名关键词白名单
   （lm studio/lmstudio/llama/qwen/mineru/python/vmmem/ollama，大小写不敏感包含匹配）
   命中 → `"model"`，其余 → `"other"`；前端饼图据此高亮「非模型任务占用」。
 - Windows WDDM 模式下每进程显存为 `[N/A]`/`[Insufficient Permissions]` → 该行保留，
@@ -657,21 +731,20 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### POST /api/v1/models/{name}/start
 
-本地模型槽位启动，经 `model_manager.operate_model`（PLAN-046 单活仲裁：启动前先停其他
-在跑槽位，`QED_RESOURCE_GUARD`）。`name ∈ {text, vision}`，旧名 `qwen`/`mineru` 经别名兼容
-（deprecated，语义等同 `text`/`vision`）。
+本地模型槽位启动，经 `model_manager.operate_model`（**单活仲裁**：`QED_RESOURCE_GUARD`
+启用时启动前先停其他在跑槽位）。`name ∈ {text, vision}`，旧名 `qwen`/`mineru` 为别名
+（状态=过渡，见「退役与过渡」）。
 
 ```json
 {"name": "text", "status": "starting"}
 ```
 
-- **槽位来源 = api（`manifest.source` > `QED_API_SELECT`）→ 409**（云端无启停语义，仅测试）；
-  来源 = local 允许启停（v3：按槽位生效来源判定，取代 v2 全局模式判定）。
+- **槽位来源 = api（`manifest.source` > `QED_API_SELECT`）→ 409**（云端无启停语义）；
+  来源 = local 允许启停（按**槽位生效来源**判定）。
 - 未知 `name` → 404（槽位校验同步完成）。
 - **派发即返回**：启停操作在 8900 后台线程执行（local 模型加载可达分钟级），HTTP 响应不被
   操作本体阻塞；同槽位已有操作进行中 → 409（槽位级 in-flight 互斥，操作结束自动释放）。
-- 状态收敛由前端轮询 `GET /models/{slot}` 的 `ready` 字段判定（v2；已取代旧版 `/monitor/{slot}` 轮询；
-  轮询窗口模型侧为 300s）。
+- 状态收敛由前端轮询 `GET /models/{name}` 的 `ready` 字段判定（轮询窗口模型侧为 300s）。
 
 ### POST /api/v1/models/{name}/stop
 
@@ -693,16 +766,16 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### POST /api/v1/models/{name}/select
 
-槽位运行态选择（PLAN-046 新增，v3 扩展）：`{source?, runtime?, model?}`（至少一项）写入
+槽位运行态选择：`{source?, runtime?, model?}`（至少一项）写入
 `model/<槽位>/manifest.json` 的对应字段（重启保留，解析优先级最高）：
 
 | 字段 | 取值 | 写入 |
 | --- | --- | --- |
 | `source` | `api` \| `local` | `manifest.source`（槽位来源） |
 | `runtime` | `lmstudio` \| `llamacpp` \| `docker` \| `default` | `manifest.runtime`（`default` = 清空回退全局默认） |
-| `model` | 注册表身份名 | `manifest.active`（v2 已有，向后兼容 `{model}` 单字段） |
+| `model` | 注册表身份名 | `manifest.active`（向后兼容 `{model}` 单字段） |
 
-槽位名支持旧名别名；`embedding` 无运行态 manifest → 404；未知槽位/身份/runtime → 404；
+槽位名支持旧名别名（状态=过渡）；`embedding` 无运行态 manifest → 404；未知槽位/身份/runtime → 404；
 `source`/`runtime` 非法取值 → 422。select 不受来源限制（两来源均可写）。
 
 ```json
@@ -711,7 +784,7 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### GET /api/v1/models/{name}
 
-槽位状态（PLAN-046 新增，v3 扩展，控制台三卡数据源）：
+槽位状态（控制台三卡数据源）：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -746,10 +819,10 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### GET /api/v1/monitor/{slot}
 
-槽位泛化探针（PLAN-046 新增）：`text` 按槽位渠道探 OpenAI 兼容端点（`QED_MODEL_URL`）；
+槽位泛化探针：`text` 按槽位渠道探 OpenAI 兼容端点（`QED_MODEL_URL`）；
 `vision` 探 MinerU `/health`（`QED_OCR_MODEL_URL`）；`embedding` 无本地 runtime
 （恒 `reachable=false` + 原因）。未知槽位 → 404。
-旧名 `/monitor/qwen`、`/monitor/mineru` 保留（deprecated）。
+旧名 `/monitor/qwen`、`/monitor/mineru` 为过渡别名（状态=过渡，见「退役与过渡」）。
 
 ```json
 {"slot": "text", "runtime": "lmstudio", "reachable": true,
@@ -758,22 +831,22 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ### GET /api/v1/monitor/qwen
 
-**deprecated（PLAN-046）**：槽位泛化为 `GET /monitor/{slot}`（`text`，按槽位渠道
-探端点），本端点过渡期保留（别名语义）。本地 LLM（Qwen，OpenAI 兼容）探测：服务可达性 + 已加载模型。
+**状态=过渡**（替代：`GET /monitor/{slot}` 之 `text`）。本地 LLM（Qwen，OpenAI 兼容）探测：
+服务可达性 + 已加载模型。
 
 ```json
 {"reachable": true, "base_url": "http://127.0.0.1:5001/v1", "models": ["qwen3-8b"],
  "reason": ""}
 ```
 
-- 探测目标与超时沿 `/config/llm-status` 模式（未配置不探测）；默认
+- 探测目标与超时沿启动自检模式（未配置不探测）；默认
   `http://127.0.0.1:5001/v1`（`QED_MODEL_URL` 可覆盖，变量表见
   [project-configuration.md](../design/project-configuration.md)）。
 
 ### GET /api/v1/monitor/mineru
 
-**deprecated（PLAN-046）**：槽位泛化为 `GET /monitor/{slot}`（`vision`，探 MinerU
-`/health`），本端点过渡期保留（别名语义）。mineru 解析服务（5002，WSL 容器）健康探测。
+**状态=过渡**（替代：`GET /monitor/{slot}` 之 `vision`）。mineru 解析服务（5002，WSL 容器）
+健康探测。
 
 ```json
 {"reachable": true, "port": 5002, "reason": ""}
@@ -782,7 +855,7 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 - 容器未启动/WSL 不可达 → `reachable=false` + 中文原因（提示运行容器编排脚本），
   不泄漏堆栈。
 
-### LLM 网关（ARCH-016：`/llm/*` 端点族）
+### LLM 网关（`/llm/*` 端点族）
 
 按**槽位来源**路由（`manifest.source` > `QED_API_SELECT` 默认）：api 按 `QED_API_PROVIDER` 选厂商
 （当前 qwen），local 走本地模型（文字槽位渠道 runtime / 图像 MinerU，经 `QED_RESOURCE_GUARD`
@@ -793,32 +866,77 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 > 文档解析不经 `/llm/vision` 网关——Axiom-Flow 解析管线经引擎适配器直连本地模型服务
 > （MinerU 5002 等）；8900 只负责模型生命周期（`/models/{name}`）、探针与资源互斥。
 > `/llm/vision` 保留为控制台测试与通用视觉用途；`/models/{name}` 的 `name` 按引擎注册
-> （`qwen`/`mineru`，PaddleOCR-VL 接入时新增 `paddleocr`）。
+> （`qwen`/`mineru` 旧名过渡别名 → `text`/`vision`，PaddleOCR-VL 接入时新增 `paddleocr`）。
 
 | 端点 | 语义 |
 | --- | --- |
 | `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061） |
 | `POST /llm/vision` | 图像模型调用：`{image_base64 或 pdf_base64+pdf_filename, prompt?, prompt_template?, max_tokens?}` → 注册表解析路由 api/local → `{reply, success, call_id?}`；超时与 `max_tokens` 语义同 text（REQ-061） |
-| `POST /llm/embedding` | 向量模型调用（PLAN-046 新增，仅 api）：`{input: [str]}` → `{embeddings, success, call_id?}`（顺序与 input 一致）；空 input 422；调用记录 prompt 记 JSON 输入、response 记维度摘要（不存向量本体） |
+| `POST /llm/embedding` | 向量模型调用（仅 api）：`{input: [str]}` → `{embeddings, success, call_id?}`（顺序与 input 一致）；空 input 422；调用记录 prompt 记 JSON 输入、response 记维度摘要（不存向量本体） |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
-| `POST /llm/test/embedding` | 向量模型测试（PLAN-046 新增，控制台测试按钮）：小 input 真实调用，成功/失败 + 原因 |
-| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060 新增后 4 过滤） |
-| `PATCH /llm/calls/{id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
-| `POST /database/test` | MySQL 即时连接探测（控制台测试按钮，替代启动快照只读） |
+| `POST /llm/test/embedding` | 向量模型测试（控制台测试按钮）：小 input 真实调用，成功/失败 + 原因 |
+| `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060） |
+| `PATCH /llm/calls/{call_id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
+| `POST /database/test` | MySQL 即时连接探测（控制台测试按钮）；`/config/database` 保持启动快照语义不受影响 |
 
-## 错误码
+## 状态码
 
 | 状态码 | 含义 |
 | --- | --- |
-| 200 | 成功（上游 201/204 已规整为 200） |
-| 202 | 任务已接受（后台执行） |
-| 400 | 请求格式错误（INVALID_PARAMS） |
-| 404 | 资源不存在（未知服务日志、探索会话不存在/过期、上游 404 透传、`UPSTREAM_NOT_IMPLEMENTED` 归一） |
-| 409 | 冲突（状态机非法迁移、服务窗口冲突、`DOMAIN_EXPLORING`、`INVALID_TRANSITION`） |
-| 422 | 参数校验失败（缺必填字段、格式错误、verdict 非 ok/bad、decision/custom 缺 name） |
+| 200 | 成功（透传层把上游 201/204 规整为 200，除非端点声明创建/发起语义） |
+| 202 | 任务已接受（后台执行，轮询收敛，见通用约定） |
+| 400 | 请求格式错误 |
+| 404 | 资源不存在（未知服务日志、探索会话不存在/过期、上游 404 透传、`UPSTREAM_NOT_IMPLEMENTED`） |
+| 409 | 冲突（状态机非法迁移、服务窗口冲突、名称/唯一键冲突，码见字典） |
+| 422 | 参数校验失败（缺必填字段、格式错误、枚举值非法） |
 | 500 | 服务端错误 |
-| 503 | 子项目服务不可达（8901/8902 连接失败/5xx → `QED-Tracker 服务不可达：…` / `Axiom-Flow 服务不可达：…`） |
+| 503 | 子项目服务不可达（8901/8902 连接失败/5xx → 纯文本 detail） |
+
+## 业务错误码字典
+
+`code` 由产生方给出，8900 同码透传（除标注 8900 产生外）；`message` 为可直接展示的中文文案。
+8900 自有门面（domain_explore / explore-sessions / 配置域）错误为**纯文本 detail**，
+不产出结构化码。
+
+| code | 状态码 | 产生方 | 触发条件 | 客户端应对 |
+| --- | --- | --- | --- | --- |
+| `BOOK_ALREADY_EXISTS` | 409 | 8901 | `POST /books` book_id 已存在 | 改走详情/编辑，不重复建 |
+| `BOOK_NOT_FOUND` | 404 | 8901 | 书籍行不存在（register/import 等） | 刷新书库列表 |
+| `INVALID_PARAMS` | 422 | 8901 | book_id 格式错、缺 title、值域错误 | 表单标红 message |
+| `INVALID_TRANSITION` | 409 | 8901/8902 | 状态机非法迁移（start/cancel/verify、commit-import 前置态不符） | 重新拉当前态后禁用按钮 |
+| `DOMAIN_NAME_CONFLICT` | 409 | 8901 | `POST /domains` name 或 domain_id 已存在 | 改名或进既有领域 |
+| `DOMAIN_NOT_FOUND` | 404 | 8901 | 领域不存在 | 刷新领域树 |
+| `DOMAIN_NOT_EMPTY` | 409 | 8901 | 删除有课程的领域 | 先清课程 |
+| `COURSE_ALREADY_EXISTS` | 409 | 8901 | 新增课程冲突 | 进既有课程 |
+| `COURSE_NOT_FOUND` | 404 | 8901 | 课程不存在 | 刷新课程树 |
+| `COURSE_HAS_KNOWLEDGE` | 409 | 8901 | 删除含教程的课程 | 先清教程 |
+| `SET_NO_CONFLICT` | 409 | 8901 | 采纳教程 set_no 冲突 | 调整 set_no 重提 |
+| `UPSTREAM_NOT_IMPLEMENTED` | 404 | 8900 | 手工维护端点 8901 尚未实现（REQ-059 承接中） | 提示升级/走规划路径 |
+
+## 退役与过渡
+
+处置策略按 [cross-project-contracts §10](../design/cross-project-contracts.md)：退役＝直接删除
+（请求返回 404/405，不保留 410 壳）；过渡面随存量消费面退役删除。过程细节可自
+`docs/history/` 计划壳与 Git 历史追溯。
+
+### 已删除（请求返回 404/405）
+
+| 旧端点面 | 后继 |
+| --- | --- |
+| `/books/{book_id}/decide·retry·complete·reject·supersede`（POST，旧八态下载机） | 下载生命周期 `start/fail/verify/cancel` + 五阶段编排内部 `mark_owned`（QED-060）；候选→决定由采纳端点 `POST /courses/{id}/knowledge` 建 decided 行；退役写入面待 REQ-079（QED-Tracker） |
+| `/config/llm-status`（GET） | 启动自检 + `GET /config/keys`（可达性不再按需探测） |
+| `/resources` 清单/详情/预览/状态机族、`/tasks/catalog/evaluate`、`/tasks/books/download` | qt_resources 退役（QED-030），五层模型端点承接 |
+| 三表语义 API 族 | QED-031 知识层次重构退役（历史契约原文自 Git 历史查阅） |
+| `/domains/{domain_id}/explore`、`/domains/{domain_id}/confirm-name`（POST） | 领域探索与名称确认由 ExploreFlowModal（`/explore-sessions` 通道）承接 |
+
+### 过渡面（在册，状态=过渡）
+
+| 端点/入参 | 替代 | 处置 |
+| --- | --- | --- |
+| `GET/PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | `PUT …/edit` + `GET …/edits`（8902 原生形状） | 8900 门面兼容旧前端契约；存量消费面迁完后删除 |
+| `GET /monitor/qwen`、`GET /monitor/mineru` | `GET /monitor/{slot}`（text/vision） | 别名兼容期，前端切槽位探针后删除 |
+| 槽位旧名 `qwen`/`mineru`（`/models/{name}/*`、`/monitor/{slot}`、select） | `text`/`vision` | 别名解析保留，消费方迁移后删除 |
 
 ## 强制规则
 
@@ -833,12 +951,14 @@ GPU 状态（nvidia-smi 解析 + 系统内存）：型号、显存总量/已用�
 
 ## 验证
 
+- `tests/contract/test_api_endpoint_inventory.py`：端点总表 ↔ FastAPI `app.routes` 双向一致
+  （本文件增删端点必须同步总表，否则契约门禁红）。
 - `pytest tests -q` 全绿；`ruff check backend tests` 无错误。
 - uvicorn 启动后：配置域四接口均返回 200；启动日志含 LLM 启动自检与 MySQL 快照信息；
-  `/config/llm-status` 返回 404（ARCH-014 已删除）；`/config/database` 返回启动快照
-  （`reachable`/`reason` 与启动时一致，不再按需探测）。
+  `/config/llm-status` 返回 404（已退役）；`/config/database` 返回启动快照
+  （`reachable`/`reason` 与启动时一致，不按需探测）。
 - 8901 在线时 `/catalogs/math-qe` 返回真实数据；8901 离线时返回 503 且配置域
   不受影响（独立性铁律）。
 - LLM 网关 api/local 模式真实冒烟（`/llm/test/text` ok=true、`qed_llm_calls` 落库）。
-- 供应商 key 真实可用性以各服务实际调用为准（`scripts/check_api_keys.py` 已于 2026-08-17
-  随 scripts/ 整理退役；glm 曾返 429 余额不足以智谱账户状态为准，不影响中心降级运行）。
+- 供应商 key 真实可用性以各服务实际调用为准（glm 曾返 429 余额不足，属账户状态，
+  不影响中心降级运行）。
