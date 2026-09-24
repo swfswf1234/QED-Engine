@@ -149,11 +149,20 @@ def test_api_endpoint_tokens_present():
 
 
 def test_dashboard_course_completion_semantics():
-    """仪表盘课程进度口径（2026-09-07 重构裁决：三行图表 + 统计数字）：课程完成 =
-    exploration_stage 已完成 且 已决定书籍全部 owned（持有验收），见 design/admin-dashboard.md。"""
+    """仪表盘块二课程推进口径（2026-09-24 REQ-033 二改裁决：领域可选大卡三段，
+    逐课程四态行 + 书籍五态计数）：课程完成 = exploration_stage 已完成 且
+    已决定书籍全部 owned（持有验收口径不变），见 design/admin-dashboard.md §3。
+    旧聚合名 buildCourseProgress / buildDomainDownloadBars / buildParseProgress 均已退役；
+    块三判定基座改为 af_books 字段（ADR 0007：active_job_id 生效版本才叫已完成）。"""
     src = (SRC / "stores" / "dashboard.ts").read_text(encoding="utf-8")
-    assert "buildCourseProgress" in src, "dashboard store 应实现 buildCourseProgress"
+    assert "buildDomainDownloadDetail" in src, "dashboard store 应实现块二领域大卡聚合"
+    assert "buildCourseProgress" not in src, "旧三行饼图聚合应退役"
+    assert "buildDomainDownloadBars" not in src, "一版堆叠横条聚合应退役（二改）"
+    assert "buildParseProgress" not in src, "一版按最新 job 判定的聚合应退役（二改）"
     assert "owned" in src, "完成判定应基于书籍 owned 持有状态"
+    assert "buildParseGroups" in src, "块三课程分组聚合应存在"
+    assert "active_job_id" in src, "块三已完成判定应基于生效版本 active_job_id（ADR 0007）"
+    assert "page_count" in src, "块三分母应为全书 page_count"
 
 
 def test_console_message_feedback():

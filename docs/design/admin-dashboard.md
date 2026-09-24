@@ -2,225 +2,249 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-23
+最后更新：2026-09-24
 确认状态：已确认
-关联代码：`web-ui/src/pages/Dashboard.tsx`、`web-ui/src/stores/dashboard.ts`、`web-ui/src/components/EChart.tsx`、`web-ui/src/stores/runtime.ts`（后端透传端点见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
+关联代码：`web-ui/src/pages/Dashboard.tsx`、`web-ui/src/stores/dashboard.ts`、`web-ui/src/components/dashboard/LocalModelStatus.tsx`、`web-ui/src/api/axiom.ts`、`web-ui/src/stores/runtime.ts`（后端透传端点见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Dashboard.test.tsx`、`web-ui/src/stores/dashboard.aggregate.test.ts`
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
-关联设计：[前端架构](../architecture/frontend-architecture.md)、[数据库总纲](../architecture/database-design.md)、[downloads-flow.md](downloads-flow.md)（探索状态机口径）、[downloads-ui.md](downloads-ui.md)（筛选档状态口径）
-关联计划：[dashboard-design-snapshot](../history/plans/2026-09/2026-09-01-dashboard-design-snapshot.md)（来源快照）；
+关联设计：[前端架构](../architecture/frontend-architecture.md)、[数据库总纲](../architecture/database-design.md)、[downloads-flow.md](downloads-flow.md)（探索状态机口径）、[downloads-ui.md](downloads-ui.md)（筛选档状态口径）、[admin-console.md](admin-console.md)（控制台，服务数据共享方）
+关联计划：[REQ-033 承载壳（已归档）](../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)；
 界面演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 1. 定位与目标
 
-本文档是管理后台**仪表盘页**（`#/admin/dashboard`）的 UI 设计事实源：**只读数据看板**
-——服务在线情况 + 四统计数字 + 三行图表（领域探索/课程/文档下载进度），不含操作按钮
-（启停/测试等一切操作归控制台，见 [admin-console.md](admin-console.md)）。代码注释标记
-其为过渡形态，整体优化后置（REQ-033）。
+本文档是管理后台**仪表盘页**（`#/admin/dashboard`）的 UI 设计事实源：**只读数据看板**，
+自上而下固定三大块——
 
-- **目标**：一屏只读呈现「服务活着吗、下载主线推进到哪了」，图表口径与下载管理页
-  状态口径一致，任一数据域不可达时分级降级；
-- **成功标准**：服务在线 + 统计数字 + 三行图表（领域/课程/书籍）结构完整无歧义，
-  后续 REQ-033 优化可直接引用本文档；饼图各态判定与 §3 计算逻辑一一对应。
+| 块 | 名称 | 备注小字（extra） |
+| --- | --- | --- |
+| 块一（一张卡上下两段） | 服务详情（含「本地模型列表」固定分节） | 「QED服务及本地模型启动详情」（用户原文 carve-out，全页唯一保留的 extra） |
+| 块二 | 文档下载情况 | 无（不写任何说明小字） |
+| 块三 | 文档解析情况 | 无（不写任何说明小字） |
+
+- **标题层级（全局）**：三块卡标题（含块二大卡标题）一律 `Typography.Title level={4}`
+  （与控制台「服务管理」同字体大小），不用 antd Card 默认 16px 卡头标题。
+- **目标**：一屏只读回答「服务状态、下载主线水位、解析水位」三个问题，任一数据域
+  不可达时按块独立降级；
+- **成功标准**：三块结构完整、判定口径与 §4/§5 表一一对应；块一与控制台共享 runtime
+  store 零额外请求；页面无操作按钮（一切操作归控制台）；
 - 验收门禁：`cd web-ui && npm test`、`npx tsc --noEmit`、`npm run build` 通过，
   8903 打开 `#/admin/dashboard` 人工核验。
 
 ## 2. 范围与非目标
 
-**范围**：仪表盘页面的 UI 结构、数据流、Store 设计、聚合函数逻辑。
-**非目标**：不涉及代码变更；不涉及其他管理页面；不涉及 REQ-033 优化方案。
+**范围**：仪表盘页面的三块结构、状态判定口径、Store 与聚合函数、降级矩阵。
+**非目标**：不涉及其他管理页面；不承载服务启停操作（归控制台）。
 
 本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律：UI 文档只写消费语义，不复制字段级契约）：
 
 | 内容 | 唯一事实源 |
 | --- | --- |
-| `/knowledge`、`/knowledge/{id}`、`/courses` 端点路径与响应形状 | [api-contracts.md](../architecture/api-contracts.md)（数据域透传） |
+| `/knowledge`、`/knowledge/{id}`、`/courses`、`/books`、`/parse-jobs` 端点路径与响应形状 | [api-contracts.md](../architecture/api-contracts.md)（数据域透传） |
+| `af_books` 列语义（`parse_status` 进度 / `last_parse_result` 结局 / `active_job_id` 生效版本）与任务状态机 | Axiom-Flow 仓库 `docs/adr/0007-parse-status-semantics.md` 与 `docs/architecture/database-design.md`（本档 §5 只写 UI 消费口径） |
 | `qt_*` / `qed_*` 表结构与记录字段定义 | QED-Tracker `docs/architecture/database-private-tables.md` / `database-shared-tables.md`；根侧登记见 [database-design.md](../architecture/database-design.md) |
 | 领域/课程探索状态机口径 | [downloads-flow.md](downloads-flow.md) |
 | 下载管理页展示层级与筛选档 | [downloads-ui.md](downloads-ui.md) |
-| 服务启停/模型操作 | [admin-console.md](admin-console.md) |
+| 服务启停/模型操作与显存/槽位展示 | [admin-console.md](admin-console.md) |
 
-## 3. 布局结构
+## 3. 块一：服务详情（一张卡，含「本地模型列表」分节）
 
-### 3.1 区域 1：服务在线情况
+块一为**一张卡**、上下两段。卡标题「服务详情」，extra「QED服务及本地模型启动详情」
+（用户原文 carve-out，见 §1 表）。
 
-- 标题：`服务在线情况`
-- 展示 4 服务状态徽章（只读）
-- 数据来源：`useRuntimeStore.services`（AdminLayout mount 时预取，仪表盘无额外请求）
-- 使用 `withWebServiceFallback()` 确保 8903 始终显示
-- 组件：`StatusBadge`（绿=online，红=offline，黄=starting/stopping）
+1. **服务徽章段**（上，恒在）：4 服务状态徽章（只读），数据源
+   `useRuntimeStore.services`（AdminLayout mount 预取，仪表盘零额外请求），
+   `withWebServiceFallback()` 保证 8903 自身恒显示；组件 `StatusBadge`
+   （绿=online，红=offline，黄=starting/stopping）。
+2. **「本地模型列表」分节**（下，恒在）：分节标题「本地模型列表」**居中**；
+   文字模型、图像模型**左右两栏**（文字在左、图像在右），两栏恒在
+   （取消旧单活守卫「只挑在跑槽位显示」与全 api 整卡隐藏，`LocalModelStatus`
+   为常驻分节）。每栏内顺序固定：`槽位名 → 模型名称 → 状态徽章`，三列**固定列宽、
+   内容增减不移动**（模型名列定宽 ellipsis 截断）。模型名 `slot.model`
+   **非空即显示**（不限已加载态）。
 
-### 3.2 区域 1.5：统计数字
+**三态判据**（degraded 并入未加载、全 api 槽位恒显未加载）：
 
-- 位于服务在线情况之后、领域探索进度之前
-- 四列横向排列：
+| 状态 | 颜色 | 判据 |
+| --- | --- | --- |
+| 已加载 | 绿（success） | `ready === true`（绑定模型探针就绪） |
+| 未加载 | 灰（default） | `source === 'api'`（云端 API，无本地模型，tooltip 说明），或 `health_state ∈ {ready, degraded}` 且 `ready === false`（LM Studio 服务在跑、模型未起，或 GPU 降级） |
+| 未启动 | 红（error） | `health_state === down`，或无观测且无绑定 |
+
+栏内不显示 channel 标签（LM Studio/Docker/…）、「翻转于」时刻、显存读数、启动时间；
+`health_reason` 与云端来源说明只进徽章 tooltip。
+
+**不展示水位行**：MySQL 可达性、显存/利用率、当前在跑、解析服务水位归控制台
+（[admin-console.md](admin-console.md)），仪表盘不重复。
+
+## 4. 块二：文档下载情况
+
+四统计数字 + **领域按钮行**（`Segmented` 退役；每按钮＝领域名 + 领域四态
+小圆点，**超过 5 个领域折叠为前 5 + 「更多▾」下拉**，点选即切换领域、选中态高亮；
+选项来自 `/courses` 领域列表，默认第一个，所选领域数据消失时回落第一个）+
+**单领域一张大卡**（标题领域名 + 四态 Tag → 课程逐行四段格子进度 → 卡尾一行颜色图例）。
+
+### 4.1 统计数字（全领域口径）
 
 | 指标 | 计算逻辑 |
 | --- | --- |
-| 已探明领域数 | `exploration_stage !== '未开始'` 的领域数 |
+| 领域数 | 全部领域总数（全量口径，含未开始领域） |
 | 课程数 | 所有领域下课程总数 |
-| 书籍卷数 | 所有教程详情中的 `books[]` 总数（去重） |
-| 验收书目数 | `holding === 'owned'` 的书籍数 |
+| 书目数 | 所有教程详情中的 `books[]` 总数（按 `book_id` 去重） |
+| 验收通过 | `holding === 'owned'` 的书籍数（按 `book_id` 去重） |
 
-### 3.3 区域 2：领域探索进度（第一行，聚合单饼图）
+### 4.2 领域四态（按钮小圆点与大卡标题 Tag 同一口径）
 
-- 单个饼图聚合所有领域
-- 数据来源：`GET /courses` → `DomainSystem[]`
-- 饼图状态（3 态）：
+由领域下课程与书籍状态聚合派生（`buildDomainDownloadState`，替代旧
+`buildDomainStageLabel` 探索三态）：
 
-| 状态 | 颜色 | 计算逻辑 |
-| --- | --- | --- |
-| 新建 | 灰色 #d9d9d9 | `exploration_stage === '未开始'` |
-| 探索中 | 绿色 #52c41a | `exploration_stage in ['已生成', '探索中', '待确认']` |
-| 完成 | 蓝色 #1677ff | `exploration_stage === '已完成'` |
-
-- 标题：`领域探索进度`（左对齐）
-- 饼图位置偏左：`center: ['30%', '52%']`
-- 聚合函数：`buildDomainProgress(courseSystem)` → `DownloadSlice[]`
-
-### 3.4 区域 3：课程进度（第二行，按领域分组）
-
-- 每个领域一张饼图卡片，最多 3 个并排，超过换行；无课程的领域不展示
-- 数据来源：`GET /courses` → 每个领域的 `courses[]` + 书籍状态
-- 饼图状态（4 态）：
-
-| 状态 | 颜色 | 计算逻辑 |
-| --- | --- | --- |
-| 探索中 | 灰色 #d9d9d9 | `course.exploration_stage !== '已完成'` |
-| 探索完成 | 绿色 #52c41a | `exploration_stage === '已完成'` 且该课程下无 owned 书籍 |
-| 下载中 | 橙色 #faad14 | `exploration_stage === '已完成'` 且该课程下有 owned 书籍但非全部 |
-| 完成 | 蓝色 #1677ff | `exploration_stage === '已完成'` 且该课程下所有已决定书籍均为 owned |
-
-- 标题：仅显示领域名（如"数学"），不加后缀
-- 聚合函数：`buildCourseProgress(courseSystem, details)` → `DomainCoursesSlice`
-
-### 3.5 区域 4：文档下载进度（第三行，按领域分组）
-
-- 每个领域一张饼图卡片，按 3 列换行
-- 数据来源：`knowledge` details 中的 `books[]`，按 `domain_id` 分组
-- 饼图状态（**5 态**，对齐书籍生命周期，与 `downloads-ui.md` §4.2 筛选档一致）：
-
-| 状态 | 颜色 | 计算逻辑 |
-| --- | --- | --- |
-| 未开始 | 灰色 #d9d9d9 | `status === 'candidate'` |
-| 下载中 | 橙色 #faad14 | `status in ('decided', 'downloading')` |
-| 待验证 | 青色 #13c2c2 | `status === 'downloaded'` |
-| 完成 | 蓝色 #1677ff | `status === 'verified'` |
-| 失败 | 红色 #ff4d4f | `status === 'failed'` |
-
-`parallel` 与 `retired` 不计入下载进度（`parallel` 为平行读物、`retired` 为退役留痕）。
-
-- 标题：仅显示领域名（如"数学"），不加后缀
-- 聚合函数：`buildBookDownloadProgress(courseSystem, details)` → `DomainCoursesSlice`
-
-### 3.6 状态与降级矩阵
-
-| 异常场景 | 展示行为 |
+| 状态 | 判据（按序取首个命中） |
 | --- | --- |
-| 8901 不可达 | 警告横幅 "QED-Tracker 数据不可达" + 错误信息 |
-| Courses 不可达 | 警告横幅 "课程体系不可达"（三行图表降级） |
-| 空数据 | 提示 "暂无数据" |
+| 未开始（新建） | 无任何课程进入探索 |
+| 探索中 | 有课程进入探索，但还没有书开始下载 |
+| 下载中 | 任一课程有书开始下载（`status ∈ {decided, downloading, downloaded, verified, failed}`），且未全部拿齐 |
+| 下载完成 | 已有书开始下载，且全部课程均已探索完成、所有已决定书 `status ∈ {downloaded, verified}`（拿齐） |
 
-## 4. Store 设计
+### 4.3 领域大卡·课程段（逐课程一行，四段行）
 
-### 4.1 useDashboardStore（Zustand）
+每行只有四段：`课程名（ellipsis）｜ 课程状态 Tag ｜ 教程数（如有）｜ 进度格子`，其他不写。
+
+**课程状态**（`courseProgressState`，按序取首个命中；行内彩色堆叠进度条与计数文本退役）：
+
+| 状态 | 判据 |
+| --- | --- |
+| 未探索 | `exploration_stage` 为空或「未开始」 |
+| 完成 | 探索已完成 且 课程可画格书目非空、全部 `verified` |
+| 下载中 | 存在已开始下载的书（`status ∈ {decided, downloading, downloaded, verified, failed}`） |
+| 探索中 | 其余 |
+
+**教程数**＝`/knowledge` 中该课程 `kind === 'tutorial'` 记录数，显示「教程×N」，N=0 不显示。
+
+**进度格子**＝每本书一个小方格（11 本就 11 格；`book_id` 去重、首现序），颜色按四桶
+（`bookDownloadBucket`；`parallel`/`retired` 不画格），悬停 tooltip 显示书名；
+未探索行无格子：
+
+| 桶 | 书 status | 格子颜色 |
+| --- | --- | --- |
+| 未开始下载 | candidate | 灰 |
+| 下载中（含失败） | decided / downloading / failed | 橙 |
+| 下载完成 | downloaded（拿到未验收） | 蓝 |
+| 验证完成 | verified | 绿 |
+
+书籍归属链路不变：`books[] ← knowledge.course_id → courseSystem 反查 domain`。
+
+### 4.4 领域大卡·图例行
+
+卡底**一行四色图例恒在**：`■未开始下载 ■下载中(含失败) ■下载完成 ■验证完成`
+（颜色与 §4.3 四桶一致），不写其他文字。退役：四桶计数文本（「未n·下n·完n·验n」式）、
+「领域书籍 态×N」汇总行、课程彩色堆叠进度条。
+
+## 5. 块三：文档解析情况
+
+### 5.1 判定基座与 KPI
+
+判定基座为 **`/books`（af_books 书目字段）**，`/parse-jobs` 仅用于「失败 N 页」
+辅助展示（每书取 `created_at` 最新的 job）。书目字段语义与状态机以 Axiom-Flow
+ADR 0007 为事实源，本档只写 UI 消费口径：**「已完成」＝存在生效版本且该版本覆盖
+全书**（`pages_done` 描述的正是 `active_job_id` 所指版本），页数分母恒为全书
+`page_count`，不以单次 job 的 progress 判书级结局。
+
+KPI 四项（此序）：课程数（分组数）/ 书目数 / 解析中 / 已完成。卡内无任何说明性小字。
+
+### 5.2 书级状态判定表（`parseBookLabel`，按序取首个命中）
+
+| 序 | 状态 | 判据 |
+| --- | --- | --- |
+| 1 | 解析中 | `parse_status === 'parsing'`（进度态，优先于任何结局残留） |
+| 2 | 已完成 | `active_job_id` 非空 且 `pages_done ≥ page_count`（生效版本覆盖全书；`page_count` 未知时视为覆盖） |
+| 3 | 部分生效 | `active_job_id` 非空 但 `pages_done < page_count`（生效版本只覆盖部分页，如局部重解析版本） |
+| 4 | 未生效 | 无生效版本 且 `pages_done ≥ page_count > 0` |
+| 5 | partial / 失败 / 中断 | 无生效版本 且 `last_parse_result ∈ {partial, failed, interrupted}` |
+| 6 | 未入库 | `ingest_status !== 'ingested'` 且 `page_count = 0` |
+| 7 | 未开始 | 其余（已入库、从未有任务结局） |
+
+生效版本在手时书级结局只按版本页覆盖判（序 2/3），不受后续失败任务残留的
+`last_parse_result` 影响——`pages_done` 描述的是 `active_job_id` 所指版本
+（Axiom-Flow database-design 口径）。
+
+### 5.3 分组与分页
+
+- 按 `course_id` 分组（组标题取 `course_name`，缺失归「未归属课程」），组序 =
+  书目首次出现序；**有在飞书目的组置顶浮起**（组标题带 ● 标记）；
+- 每页固定 **3 个课程组**，超出走 `Pagination`；
+- 每书一行：书名（ellipsis）+ 状态 Tag + 三段堆叠条（done 蓝 / failed 红 / 剩余灰，
+  分母 `page_count`）+ 「done/total 页 · 失败 N」辅助文本。
+
+## 6. Store、聚合与数据流
+
+### 6.1 useDashboardStore（Zustand）
 
 ```
 State:
-  knowledge: KnowledgeRecord[]            // 教程列表（/knowledge）
-  details: Record<string, KnowledgeDetail> // 教程详情缓存（knowledge_id → detail）
-  courseSystem: DomainSystem[]             // 领域课程体系（/courses）
-  loading: boolean                         // 刷新按钮状态
-  error: string | null                     // 全局错误（8900 不可达）
-  dataError: string | null                 // 数据域错误（8901 不可达）
-  courseError: string | null               // 课程体系错误（courses 不可达）
-
+  knowledge / details / courseSystem      // 块二数据源（/knowledge ×N + /courses）
+  parseBooks / parseJobs                  // 块三数据源（/books + /parse-jobs）
+  loading / error / dataError / courseError / parseError
 Actions:
-  fetchAll() → 3 类请求编排（knowledge + knowledge/{id} × N + courses）
+  fetchAll()    // 块二三线并行独立拉取；tracker 线 = knowledge + 逐行 getKnowledge
+                // (Promise.allSettled) + courses
+  fetchParse()  // 仅重拉 /books + /parse-jobs；失败保留旧值只置 parseError
 ```
 
-### 4.2 纯聚合函数（dashboard.ts）
+30s 保鲜轮询：tick 调 `fetchSlots + fetchParse`（块三在飞与块一状况保鲜；块二不轮询；
+本页无 GPU 数据消费者，`fetchGpu` 不在轮询内），`document.hidden` 时跳过。
 
-| 函数 | 输入 | 输出 | 用途 |
-| --- | --- | --- | --- |
-| `buildDomainProgress(courseSystem)` | 领域课程体系 | `DownloadSlice[]` | 领域探索进度饼图（聚合单饼图） |
-| `buildCourseProgress(courseSystem, details)` | 领域课程体系 + 教程详情 | `DomainCoursesSlice` | 课程进度饼图（按领域分组） |
-| `buildBookDownloadProgress(courseSystem, details)` | 领域课程体系 + 教程详情 | `DomainCoursesSlice` | 文档下载进度饼图（按领域分组） |
-| `buildDashboardStats(courseSystem, details)` | 领域课程体系 + 教程详情 | `DashboardStats` | 4 个统计数字 |
+### 6.2 纯聚合函数（dashboard.ts，独立可测）
 
-### 4.3 useRuntimeStore（只读）
+| 函数 | 输入 | 用途 |
+| --- | --- | --- |
+| `buildDashboardStats` | courseSystem + details | §4.1 四统计数字 |
+| `buildDomainDownloadDetail` | courseSystem + details + domainId + knowledge | §4.3/§4.4 领域大卡（四态 + 课程四段行格子 + 图例） |
+| `buildDomainDownloadState` | 领域课程/书籍态 | §4.2 领域四态（按钮圆点与标题 Tag） |
+| `courseProgressState` | 单课程 + 其书籍 | §4.3 课程状态词（未探索/探索中/下载中/完成） |
+| `bookDownloadBucket` | 单本书 | §4.3 格子四桶着色（`courseDownloadBuckets` 计数桶退役） |
+| `parseBookLabel` | 单条 af_books 记录 | §5.2 书级判定 |
+| `buildParseGroups` | books + jobs | §5.1/§5.3 分组、KPI、失败页装饰 |
 
-- 仪表盘仅读取 `services` 字段（AdminLayout 预取）
-- 不触发任何额外 API 调用
+退役聚合名（勿复活）：`buildDomainStageLabel`、`bookDownloadSlices`、`courseProgressRow`、
+`buildCourseProgress`、`buildDomainProgress`、
+`buildBookDownloadProgress`（三行饼图）、`buildDomainDownloadBars`、
+`buildParseProgress`（一版双条/按最新 job 判定）；`courseDownloadBuckets`/`DownloadSlice`/
+`summarySlices`/`bucketCounts` 计数文本（四改桶计数形态，五改格子替代）。
 
-## 5. API 链路（消费要点）
-
-端点路径与响应形状以 [api-contracts.md](../architecture/api-contracts.md) 为唯一事实源
-（本档不复制维护）；此处只登记消费链路与容错口径：
-
-- **初始加载（fetchAll）**：三类请求，均经 8900 透传 8901——教程列表（`/knowledge`）、
-  逐教程详情（`/knowledge/{id}` ×N，`Promise.allSettled` 并行）、课程体系（`/courses`）；
-- **域归属链路**：
-
-```
-books[] (from knowledge details)
-  → knowledge.course_id
-    → courseSystem[domain].courses[course]
-      → domain_id (从 DomainSystem 嵌套结构反查)
-```
-
-- **请求链路**（全部经 8900，ADR 0007）：
-
-```
-Browser (8903)
-  → Vite proxy (/api/v1)
-    → Backend (8900)
-      → tracker.py (透传)
-        → TrackerClient (httpx)
-          → QED-Tracker (8901)
-            → MySQL (qed_domain / qed_course / qt_knowledge / qt_books)
-```
-
-- **错误处理**：8900 不可达（`ApiError.kind=offline`）→ 全局错误横幅；8901 不可达
-  （HTTP 503）→ `dataError` 下载卡片降级；单个教程请求失败 → `allSettled` 静默跳过
-  （部分降级）；courses 不可达 → `courseError` 三行图表全部降级。
-
-## 6. 关键组件文件
+### 6.3 关键组件文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `pages/Dashboard.tsx` | 主页面，服务在线情况 + 统计数字 + 三行图表 |
-| `pages/Dashboard.test.tsx` | 页面测试 |
-| `stores/dashboard.ts` | Zustand store + 4 个纯聚合函数 |
-| `stores/dashboard.aggregate.test.ts` | 聚合函数单元测试 |
-| `stores/runtime.ts` | 共享 runtime store（只读 services） |
-| `stores/index.ts` | 类型定义（DomainSystem/BookRecord 等） |
-| `api/tracker.ts` | API 客户端：listKnowledge/getKnowledge/listCourseSystem |
-| `api/client.ts` | 统一 API 客户端 + describeError |
-| `components/EChart.tsx` | ECharts 轻量封装（PieChart） |
-| `components/StatusBadge.tsx` | 状态徽章 |
-| `components/AdminLayout.tsx` | 管理台骨架 |
+| `pages/Dashboard.tsx` | 三块布局（卡标题 Title level 4）、块二领域按钮（>5 更多▾折叠）与大卡（格子+图例）、块三分组分页与进度条 |
+| `stores/dashboard.ts` | Zustand store + §6.2 聚合函数 |
+| `stores/runtime.ts` | 共享 runtime store（块一 services 只读消费） |
+| `components/dashboard/LocalModelStatus.tsx` | 块一「本地模型列表」常驻分节（居中标题、文字/图像左右两栏恒在、槽位名→模型名→三态徽章固定列宽） |
+| `api/axiom.ts` | `/books`、`/parse-jobs` 客户端（BookMeta 消费 af_books 字段） |
+| `api/tracker.ts` | `/knowledge`、`/courses` 客户端 |
 
-## 7. 数据依赖口径
+本页面**不**使用 ECharts（图表形态已退役，`components/EChart.tsx` 服务其他页面）。
 
-记录字段级定义以 §2 指针所列事实源为准（本档不复制 TypeScript 契约）。UI 消费的字段
-语义口径：
+## 7. 状态与降级矩阵
 
-- `BookRecord`（书库化重构后口径）：图表依赖 `status`（选用 `decided/parallel/candidate/retired`
-  + 生命周期 `downloading/downloaded/verified/failed` 两族复合）与 `holding`（`owned/missing`），
-  判定见 §3.2/§3.4/§3.5；卷级展示键为 `book_id + part`；
-- `DomainSystem`：图表依赖 `exploration_stage`（`未开始/已生成/探索中/待确认/已完成/失败`，
-  状态机口径归 [downloads-flow.md](downloads-flow.md)）与嵌套 `courses[]`；
-- `DashboardStats`（UI 派生类型）：`exploredDomains/totalCourses/totalBooks/verifiedBooks`
-  四数字，计算逻辑即 §3.2。
+| 异常场景 | 展示行为 |
+| --- | --- |
+| 8900 不可达（offline） | 整体错误横幅「仪表盘数据获取失败」 |
+| 8901 不可达（/knowledge 503） | 块二降级提示「QED-Tracker 数据不可达」；块一块三照常 |
+| /courses 不可达 | 块二降级提示「课程体系不可达」 |
+| 8902 不可达（/books、/parse-jobs） | 块三独立降级横幅「文档解析数据不可达」；块一块二照常；块一徽章行按 services 显示 axiom 离线 |
+| 单教程详情失败 | `allSettled` 静默跳过（部分降级） |
+| 空数据 | 各块短句提示，不占位 |
 
-## 8. 已知约束与约定
+## 8. 已知约束与维护规则
 
-1. **空态不占位**：无数据时显示简短提示，不占用大量空间
-2. **独立性铁律**：8901 离线 → 三行图表降级，不影响服务在线情况卡片
-3. **并行请求容错**：`Promise.allSettled` 确保单个教程失败不阻塞整体
-4. **Courses 独立降级**：courses 请求失败 → 三行图表全部降级
-5. **无操作按钮**：仪表盘纯只读，所有操作在控制台完成
-6. **域归属反查**：books 通过 knowledge.course_id → courseSystem 反查 domain_id
-7. **维护规则**：上游字段口径变化（如 QED-Tracker 表重构）先改各自事实源文档，本档
-   §7 只回核 UI 依赖语义是否仍成立
+1. **只读铁律**：仪表盘无任何操作按钮，一切操作归控制台；
+2. **独立性铁律**：8901/8902 离线只降级对应块，不阻塞其他块；8900 离线才有整体横幅；
+3. **零额外请求**：块一数据全部来自共享 runtime store（AdminLayout/控制台轮询已供），
+   仪表盘自身不发 `/services`；
+4. **完成语义**：块三「已完成」= 生效版本覆盖全书（ADR 0007 + `pages_done` 版本口径），
+   生效版本仅覆盖部分页显示「部分生效」，页齐未激活显示「未生效」而非「已完成」，
+   不得用单次 job 状态冒充书级结局；
+5. **备注文案**：全页仅块一保留 extra「QED服务及本地模型启动详情」（用户原文
+   carve-out）；块二/块三无 extra、卡内不写任何说明性小字，判定细节只认本档；
+6. **维护规则**：上游字段口径变化（Tracker 表重构、Axiom-Flow 状态机演进）先改各自
+   事实源文档，本档 §4/§5 判定表回核 UI 消费口径是否仍成立。

@@ -59,7 +59,10 @@ class GpuStatus(BaseModel):
     name: str = ""
     memory_total_mb: int = 0
     memory_used_mb: int = 0
-    utilization_percent: int = 0
+    # PDH 利用率为小数（如 0.2），int 会截断为 0 → float
+    utilization_percent: float = 0
+    # 利用率来源（REQ-033：PDH 任务管理器同源，不可用回落 nvidia-smi）
+    utilization_source: str = "nvidia-smi"
     processes: list[dict] = []
     sys_memory_total_mb: int = 0
     sys_memory_used_mb: int = 0

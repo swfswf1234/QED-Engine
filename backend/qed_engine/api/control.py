@@ -17,6 +17,7 @@ import base64
 import binascii
 import logging
 import threading
+import time
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -626,10 +627,58 @@ def logs(service: str, tail: int = 200, keyword: str | None = None) -> LogsRespo
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+_gpu_probe_cache: tuple[float, dict] | None = None  # (time.monotonic 时刻, probe_gpu payload)
+_gpu_probe_lock = threading.Lock()
+_gpu_probe_refreshing = False  # 后台单飞刷新在飞标记（锁内翻转）
+GPU_PROBE_CACHE_TTL_S = 10.0
+
+
+def _gpu_probe_refresh_async() -> None:
+    """SWR 后台重采：完成后带新时间戳写缓存；失败吞异常保旧值（尽力降级，线程不外抛）。"""
+    global _gpu_probe_cache, _gpu_probe_refreshing
+    try:
+        payload = probe_gpu(memory_fn=probe_memory)
+        _gpu_probe_cache = (time.monotonic(), payload)
+    except Exception:  # noqa: BLE001 - 后台线程任何失败都保旧缓存，绝不让请求侧感知
+        logging.getLogger(__name__).warning("GPU 后台探针失败，沿用旧缓存", exc_info=True)
+    finally:
+        _gpu_probe_refreshing = False
+
+
+def _gpu_probe_cached() -> dict:
+    """REQ-033 性能 SWR（stale-while-revalidate）：TTL 内直接返回；过期**立即回旧值**
+    并派生后台单飞重采（PDH 单次 Get-Counter 采样下限 ≈2.4s，不让用户请求路径买单）；
+    仅进程首个请求同步探针（锁内合流，并发只跑一次）。多轮询源（Console 60s /
+    Dashboard 30s / ResourceWatch 10s）天然合流。"""
+    global _gpu_probe_cache, _gpu_probe_refreshing
+    now = time.monotonic()
+    cache = _gpu_probe_cache
+    if cache is None:
+        with _gpu_probe_lock:
+            cache = _gpu_probe_cache
+            if cache is None:
+                payload = probe_gpu(memory_fn=probe_memory)
+                cache = (time.monotonic(), payload)
+                _gpu_probe_cache = cache
+            return cache[1]
+    if now - cache[0] < GPU_PROBE_CACHE_TTL_S:
+        return cache[1]
+    with _gpu_probe_lock:
+        if not _gpu_probe_refreshing:
+            _gpu_probe_refreshing = True
+            threading.Thread(target=_gpu_probe_refresh_async, daemon=True,
+                             name="gpu-probe-refresh").start()
+    return cache[1]
+
+
 @router.get("/monitor/gpu", response_model=GpuStatus)
 def monitor_gpu() -> GpuStatus:
-    """GPU 状态（nvidia-smi 解析）+ 系统内存（GlobalMemoryStatusEx）；不可用也 200 + reason。"""
-    return GpuStatus(**probe_gpu(memory_fn=probe_memory))
+    """GPU 状态（nvidia-smi + PDH）+ 系统内存；不可用也 200 + reason。
+
+    探针结果带 10s TTL + SWR 缓存（REQ-033 性能：PDH 单次 Get-Counter 采样下限 ≈2.4s，
+    过期回旧值后台重采，用户路径不等探针）。
+    """
+    return GpuStatus(**_gpu_probe_cached())
 
 
 @router.get("/monitor/qwen", response_model=QwenStatus)

@@ -6,9 +6,9 @@
  * 操作收敛 / 测试动作等行为级覆盖在 Console.test.tsx（经界面驱动），此处不重复。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useRuntimeStore, withWebServiceFallback } from './runtime';
+import { useRuntimeStore, withWebServiceFallback, deriveRunningModels, formatRunningModels, formatRunningSlotLine } from './runtime';
 import { mockFetch } from '../test/setup';
-import type { ServiceStatus } from './index';
+import type { ServiceStatus, SlotStatus, SlotName } from './index';
 
 function svc(name: string, port: number, status: string): ServiceStatus {
   return {
@@ -114,5 +114,66 @@ describe('useRuntimeStore', () => {
     expect(useRuntimeStore.getState().slotErrors.vision).not.toBeNull();
     expect(useRuntimeStore.getState().error).toBeNull();
     expect(useRuntimeStore.getState().gpuError).not.toBeNull();
+  });
+
+  it('REQ-033 性能：fetchAll 增量提交——快路回包即落库，不被最慢路（gpu ≈3s）拖累', async () => {
+    let resolveGpu: ((r: Response) => void) | undefined;
+    const gpuPending = new Promise<Response>((res) => { resolveGpu = res; });
+    const json = (body: unknown) =>
+      Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/monitor/gpu')) return gpuPending;
+      if (url.includes('/services')) return json({ services: [svc('config', 8900, 'online')] });
+      return Promise.reject(new TypeError(`no route: ${url}`));
+    });
+    const p = useRuntimeStore.getState().fetchAll();
+    await new Promise((r) => setTimeout(r, 0)); // 快路 microtask 落定，gpu 仍在飞
+    expect(useRuntimeStore.getState().services).toHaveLength(1); // 旧 Promise.all 语义下此处应为空
+    expect(useRuntimeStore.getState().error).toBeNull();
+    expect(useRuntimeStore.getState().gpu).toBeNull();
+    expect(useRuntimeStore.getState().loading).toBe(true);
+    resolveGpu!(new Response(JSON.stringify({ available: true, name: 'RTX 4080' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await p;
+    expect(useRuntimeStore.getState().gpu?.name).toBe('RTX 4080');
+    expect(useRuntimeStore.getState().loading).toBe(false);
+  });
+});
+
+function slotSt(over: Partial<SlotStatus> & { slot: SlotName }): SlotStatus {
+  return { source: 'local', channel: 'lmstudio', ready: true, ...over } as SlotStatus;
+}
+
+describe('deriveRunningModels / formatRunningModels（S3·S4 共用派生：本地在跑槽位身份）', () => {
+  it('仅 source=local 且 ready 的槽位入选，顺序固定 文字→图像→向量', () => {
+    const running = deriveRunningModels({
+      text: slotSt({ slot: 'text', identity: 'qwen3.8-27b', channel: 'lmstudio' }),
+      vision: slotSt({ slot: 'vision', source: 'api', channel: 'direct', model: 'glm-4v' }),
+      embedding: slotSt({ slot: 'embedding', ready: false }),
+    });
+    expect(running).toEqual([{ slot: 'text', label: '文字', identity: 'qwen3.8-27b', channel: 'lmstudio' }]);
+    expect(formatRunningModels(running)).toBe('文字·qwen3.8-27b（lmstudio）');
+  });
+
+  it('identity 缺失回落 model；channel 缺失省略括号；空列表返回空串', () => {
+    const running = deriveRunningModels({
+      text: null,
+      vision: slotSt({ slot: 'vision', model: 'minicpm-v', identity: undefined, channel: '' }),
+      embedding: null,
+    });
+    expect(formatRunningModels(running)).toBe('图像·minicpm-v');
+    expect(formatRunningModels(deriveRunningModels({ text: null, vision: null, embedding: null }))).toBe('');
+  });
+});
+
+describe('formatRunningSlotLine（当前在跑一行文案）', () => {
+  it('有 local ready 槽位时列出身份名；全 api 就绪显示（API 模式）；无就绪槽位显示 无', () => {
+    expect(formatRunningSlotLine({
+      text: slotSt({ slot: 'text', identity: 'qwen3.8-27b' }), vision: null, embedding: null,
+    })).toBe('文字·qwen3.8-27b（lmstudio）');
+    expect(formatRunningSlotLine({
+      text: slotSt({ slot: 'text', source: 'api', channel: 'direct', model: 'glm-4v' }),
+      vision: null, embedding: null,
+    })).toBe('（API 模式）');
+    expect(formatRunningSlotLine({ text: null, vision: null, embedding: null })).toBe('无');
   });
 });

@@ -126,3 +126,29 @@ describe('GpuOverview 渲染', () => {
     expect(screen.queryByText('非模型任务')).not.toBeInTheDocument();
   });
 });
+
+describe('当前在跑标注行（REQ-033 S3 / BUGFIX-017）', () => {
+  const slotsLocal = {
+    text: { slot: 'text', source: 'local', channel: 'lmstudio', identity: 'qwen3.8-27b', ready: true },
+    vision: null, embedding: null,
+  } as unknown as Record<import('../stores').SlotName, import('../stores').SlotStatus | null>;
+
+  it('GPU 可用时指标行下渲染「当前在跑：槽位·身份名（渠道）」，零新增请求', () => {
+    render(<GpuOverview gpu={gpuBase} gpuError={null} slots={slotsLocal} />);
+    expect(screen.getByText(/当前在跑/)).toBeInTheDocument();
+    expect(screen.getByText('文字·qwen3.8-27b（lmstudio）')).toBeInTheDocument();
+  });
+
+  it('无本地在跑槽位：文案回落（API 模式）/无', () => {
+    render(
+      <GpuOverview
+        gpu={gpuBase}
+        gpuError={null}
+        slots={{ text: null, vision: null, embedding: null } as never}
+      />,
+    );
+    expect(screen.getByText('当前在跑：')).toBeInTheDocument();
+    expect(screen.getByText('无')).toBeInTheDocument();
+  });
+});
+

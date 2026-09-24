@@ -533,7 +533,7 @@ export default function Console() {
 
       {/* ③资源监控（GPU 状态 + 本地模型） */}
       <Title level={4} style={{ marginTop: 24 }}>资源监控</Title>
-      <GpuOverview gpu={gpu} gpuError={gpuError} />
+      <GpuOverview gpu={gpu} gpuError={gpuError} slots={slots} />
 
       {/* 模型三槽位（PLAN-046：渠道/可用状态 + local 模型下拉；向量卡仅测试）——紧跟 GPU 状态卡 */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>

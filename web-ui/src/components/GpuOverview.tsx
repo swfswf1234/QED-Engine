@@ -6,11 +6,12 @@
  * - 三态降级：探测失败（gpuError）/ 探测中（null）/ GPU 不可用（available=false）
  */
 import type { ReactNode } from 'react';
-import { Card, Col, Descriptions, Row, Space, Typography } from 'antd';
-import { DesktopOutlined } from '@ant-design/icons';
+import { Card, Col, Descriptions, Row, Space, Tooltip, Typography } from 'antd';
+import { DesktopOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import type { EChartsCoreOption } from 'echarts/core';
 import EChart from './EChart';
-import type { GpuStatus } from '../stores';
+import type { GpuStatus, SlotName, SlotStatus } from '../stores';
+import { deriveRunningModels, formatRunningSlotLine } from '../stores/runtime';
 
 const { Text } = Typography;
 
@@ -77,14 +78,16 @@ export function buildVramSlices(gpu: GpuStatus): VramSlice[] {
   return slices;
 }
 
-/** ECharts 环形饼图配置：tooltip 显示 GB，隐藏内置图例（用自定义 HTML 图例替代） */
-function buildVramOption(gpu: GpuStatus): EChartsCoreOption {
+/** ECharts 环形饼图配置：tooltip 显示 GB（模型占用片附在跑身份名，REQ-033 S3），隐藏内置图例 */
+function buildVramOption(gpu: GpuStatus, runningNames: string): EChartsCoreOption {
   const slices = buildVramSlices(gpu);
   return {
     tooltip: {
       trigger: 'item',
       formatter: ({ name, value }: { name: string; value: number }) =>
-        `${name}：${formatGb(value)}`,
+        name === '模型占用' && runningNames
+          ? `${name}：${formatGb(value)}<br/>在跑：${runningNames}`
+          : `${name}：${formatGb(value)}`,
     },
     legend: { show: false },
     series: [
@@ -122,7 +125,14 @@ function VramLegend({ slices }: { slices: VramSlice[] }) {
  * GPU 状态卡：指标行 + 全量内存占比饼图 + 颜色图例
  * 三态降级：探测失败（gpuError）/ 探测中（null）/ GPU 不可用（available=false）
  */
-export default function GpuOverview({ gpu, gpuError }: { gpu: GpuStatus | null; gpuError: string | null }) {
+export default function GpuOverview({
+  gpu, gpuError, slots,
+}: {
+  gpu: GpuStatus | null;
+  gpuError: string | null;
+  /** 模型三槽位状态（在跑标注行数据源，store 既有字段派生零新增请求） */
+  slots?: Record<SlotName, SlotStatus | null> | null;
+}) {
   let body: ReactNode;
   if (gpuError) {
     body = <Text type="secondary">GPU 探测失败（{gpuError}）。点「刷新」重试。</Text>;
@@ -133,18 +143,27 @@ export default function GpuOverview({ gpu, gpuError }: { gpu: GpuStatus | null; 
   } else {
     const g = gpu;
     const slices = buildVramSlices(g);
+    const slotMap = slots ?? { text: null, vision: null, embedding: null };
+    const running = deriveRunningModels(slotMap);
+    const runningNames = running.map((m) => `${m.label} ${m.identity}`).join('、');
     body = (
       <Row gutter={[16, 8]}>
         <Col xs={24} md={13}>
           <Descriptions size="small" column={1} colon={false}>
             <Descriptions.Item label="显卡型号">{g.name || '未知'}</Descriptions.Item>
-            <Descriptions.Item label="显存使用">{formatGb(g.memory_used_mb)} / {formatGb(g.memory_total_mb)}</Descriptions.Item>
+            <Descriptions.Item label="显存使用">
+              {formatGb(g.memory_used_mb)} / {formatGb(g.memory_total_mb)}
+              <Tooltip title={`占用为 nvidia-smi 物理驻留口径；逐进程明细为 PDH 分配口径${g.utilization_source === 'pdh' ? '；利用率为 PDH（任务管理器同源）口径' : ''}。WSL 容器内模型的显存计入驱动驻留、不出现在进程明细中。`}>
+                <InfoCircleOutlined style={{ marginLeft: 6, color: '#999' }} />
+              </Tooltip>
+            </Descriptions.Item>
             <Descriptions.Item label="利用率">{g.utilization_percent}%</Descriptions.Item>
             <Descriptions.Item label="系统内存">{formatGb(g.sys_memory_used_mb)} / {formatGb(g.sys_memory_total_mb)}（{g.sys_memory_percent}%）</Descriptions.Item>
+            <Descriptions.Item label="当前在跑：">{formatRunningSlotLine(slotMap)}</Descriptions.Item>
           </Descriptions>
         </Col>
         <Col xs={24} md={11}>
-          <EChart option={buildVramOption(g)} height={180} />
+          <EChart option={buildVramOption(g, runningNames)} height={180} />
           <VramLegend slices={slices} />
         </Col>
       </Row>

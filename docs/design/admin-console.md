@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-23
+最后更新：2026-09-24
 确认状态：已确认
 关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
@@ -67,20 +67,34 @@
 
 ### 3.3 区 3：资源监控（GpuOverview + SlotCard 三槽位卡）
 
-展示 GPU 型号、VRAM 已用/总量、利用率、系统内存已用/总量、VRAM 构成饼图、进程列表。
+展示 GPU 型号、VRAM 已用/总量、利用率、系统内存已用/总量、**当前在跑模型标注行**、
+VRAM 构成三片饼图（模型占用/其他/空闲，仅颜色图例）。**无进程列表与逐任务占比展示**
+（REQ-038 用户裁决「颜色图例即可」；原 §3.3「进程列表」为文档侧过时表述，BUGFIX-017
+随本壳修正，实现一直是三片饼图）。
 
 **显存口径（本机 WDDM 背景）**：
 
 - 指标行（整卡）：`nvidia-smi` **物理驻留口径**（`used`/`total`）。
-- 进程行与饼图：**PDH 计数器分配口径**（`\GPU Process Memory(*)\Dedicated Usage`，任务管理器同源），
-  进程显存含真实值；进程列表按 friendly name 聚合。
+- 饼图「模型占用/其他」两片的拆分：**PDH 计数器分配口径**（`\GPU Process Memory(*)\Dedicated Usage`，
+  任务管理器同源），仅按比例分配到 nvidia-smi 驻留总量上，不改变总量；逐进程明细不上 UI，
+  原始进程名保留在 `/monitor/gpu` 响应供诊断（`kind` 字段即「其他」片进程名）。
+- **WSL 容器模型**（如 Docker 内 mineru）：显存走驱动侧驻留，计入总量但**不出现在 PDH
+  进程明细**，其占比无法从饼图单独拆认，以「当前在跑」标注行为准。
 - 利用率：`\GPU Engine(*)\Utilization Percentage`（任务管理器同源），响应带 `utilization_source`
   （`pdh` | `nvidia-smi`），不使用 WDDM 下失真的 nvidia-smi 利用率。
-- 进程名：`[Insufficient Permissions]` 经 `resolve_process_name`（tasklist CSV）补全真实名。
-- **非模型任务聚合**：单项占比 ≤10% 合并为「其他任务」，>10% 单独列示（`OTHER_AGG_THRESHOLD`）。
+- 显存与利用率两计数器合并为**单次** PowerShell `Get-Counter` 调用（PDH 冷启动 ~1.5s/次，
+  合并省一次），实现见 `services/monitor.py` `probe_pdh`。
+- 进程名：`[Insufficient Permissions]` 经 `resolve_process_name`（tasklist CSV）补全真实名
+  （只进 `/monitor/gpu` 响应，供诊断/告警，不上 UI）。
 
-饼图分类：模型进程（蓝/绿）、非模型任务（橙，含聚合「其他任务」）、系统/图形（灰）、空闲（绿）。
-告警：VRAM ≥ 95% 显示横幅并列出非模型任务进程。刷新：60 秒自动刷新，操作期间暂停。
+饼图分类：模型占用（蓝）/ 其他（灰）/ 空闲（绿）三片聚合，仅颜色图例。
+刷新：60 秒自动刷新，操作期间暂停（显存 ≥95% 高位告警不在控制台呈现，归解析页
+ResourceWatch 弹窗，见 [parsing-ui.md](parsing-ui.md)）。
+
+**当前在跑模型标注（REQ-033 S3）**：指标行下增一行「当前在跑」，数据源为 store 既有
+`slots` 派生（**零新增请求**，`deriveRunningModels`/`formatRunningSlotLine`）：
+`source=local` 且 ready 的槽位逐个显示「槽位·身份名（渠道）」、顿号连接；全 api 且有
+就绪显示「（API 模式）」；否则「无」。饼图「模型占用」片 tooltip 追加在跑身份名。
 
 **模型三槽位卡（SlotCard，五字段）**：数据源 `GET /models/{slot}`（SlotStatus，三卡并行拉取）。
 
@@ -168,7 +182,8 @@ State:
   gpuError: string | null
   slots: Record<SlotName, SlotStatus | null>      // text/vision/embedding 三槽位状态
   slotErrors: Record<SlotName, string | null>     // 槽位独立错误
-  keys: KeysStatus | null          // 厂商配置 + 运行模式（keys.mode = api|local）
+  keys: KeysStatus | null          // 厂商配置 + 运行模式（keys.mode = api|local；resource_guard 单活守卫开关）
+  modelsConfig: ModelsConfig | null // 模型注册表运行态（manifest 摘要，PLAN-046）
   loading: boolean                 // fetchAll 进行中标记
   error: string | null             // 全局错误（8900 不可达）
   dbError: string | null
@@ -176,7 +191,10 @@ State:
   testing: 'db' | 'text' | 'vision' | 'embedding' | null
 
 Actions:
-  fetchAll()        → 7 并行请求（services/database/gpu/三槽位/keys），per-field 错误降级
+  fetchAll()        → 8 路并行请求（services/database/gpu/三槽位/keys/modelsConfig），
+                      逐路**增量提交**：每路回包即 set 对应字段（快路不被 /monitor/gpu
+                      慢探针拖累），失败仅置对应字段错误并保留旧值；keys/modelsConfig
+                      失败静默；全部落定后清 loading（operating 期间不覆盖）
   fetchGpu()        → 独立 GPU 刷新（60 秒间隔）
   fetchSlots()      → 三槽位状态重拉（选择模型/模型操作后刷新）
   operate(name, op) → 服务启停重启 + 轮询收敛（1s × 15）
@@ -200,8 +218,11 @@ options: {value,label,description}[]; notes?; error? }
 控制域端点路径与请求/响应形状以 [api-contracts.md](../architecture/api-contracts.md) 为
 唯一事实源（本档不复制维护）；此处只登记消费链路与节奏：
 
-- **初始加载**：`fetchAll` 并行 7 请求——`/services`、`/config/database`、`/monitor/gpu`、
-  `/models/{slot}` ×3、`/config/keys`；per-field 错误独立降级（§5）；
+- **初始加载**：`fetchAll` 并行 8 请求——`/services`、`/config/database`、`/monitor/gpu`、
+  `/models/{slot}` ×3、`/config/keys`、`/config/models`；逐路增量提交、per-field 错误独立
+  降级（§5）；`/monitor/gpu` 在 8900 侧带 ~10s TTL + **SWR** 缓存（PDH 单次 Get-Counter
+  采样下限 ≈2.4s：过期请求立即回旧值并派生**后台单飞**重采，仅进程首采同步），
+  合流控制台 60s / 仪表盘 30s / 解析页 ResourceWatch 10s 多轮询器；
 - **操作面**：服务启停重启（`/services/{name}/{op}`；8900 自身走 `/self-restart`）、模型槽位
   启停重启（`/models/{slot}/{op}`）与选择（`/models/{slot}/select`）、MySQL 测试
   （`/database/test`）、三槽位验证（`/llm/test/{slot}`）、调用记录检索与审核
@@ -224,7 +245,7 @@ Browser (8903)
 | 文件 | 职责 |
 | --- | --- |
 | `web-ui/src/pages/Console.tsx` | 主页面：三区布局 + ServiceCard/SlotCard（五字段：来源/模型/渠道/可用/备注） |
-| `web-ui/src/components/GpuOverview.tsx` | 资源监控 GPU 卡 + VRAM 饼图 + 非模型聚合（partitionOtherProcs） |
+| `web-ui/src/components/GpuOverview.tsx` | 资源监控 GPU 卡：指标行 + 当前在跑标注 + 三片显存饼图（buildVramSlices，PDH 比例拆分） |
 | `web-ui/src/components/StatusBadge.tsx` | 状态徽章 |
 | `web-ui/src/components/AdminLayout.tsx` | 管理台骨架，mount 时触发 fetchAll |
 | `web-ui/src/stores/runtime.ts` | Zustand store：fetchAll/fetchSlots/operate/operateModel/selectModel/test |

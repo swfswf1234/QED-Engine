@@ -56,6 +56,8 @@ export interface GpuStatus {
   memory_total_mb?: number;
   memory_used_mb?: number;
   utilization_percent?: number;
+  /** 利用率来源（REQ-033）：pdh=任务管理器同源 / nvidia-smi=回落 */
+  utilization_source?: string;
   processes?: GpuProcess[];
   sys_memory_total_mb?: number;
   sys_memory_used_mb?: number;

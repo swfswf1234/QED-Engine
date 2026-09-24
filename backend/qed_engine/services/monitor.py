@@ -100,23 +100,45 @@ PDH_MEM_PATH = r"\GPU Process Memory(*)\Dedicated Usage"
 PDH_UTIL_PATH = r"\GPU Engine(*)\Utilization Percentage"
 
 
-def _run_pdh(path: str, runner=None) -> str:
-    """subprocess 调 PowerShell Get-Counter（5.1 参数名 -Counter）取计数样例；失败尽力返回 ""。
+def _pdh_cmd() -> list[str]:
+    """单次 Get-Counter 拉双计数器（REQ-033 性能：省一次 PowerShell 冷启动 ≈1.5s）。
 
-    runner 注入约定与 _run_smi 一致：返回输出字符串（真实 subprocess.run 内部取 stdout，
-    测试直接返回伪字符串）。超时/失败返回空串。
+    输出按 MEM|实例|值 / UTIL|实例|值 打标，供 split_pdh_streams 拆流。
     """
-    run = runner or subprocess.run
+    script = (
+        "$c = Get-Counter -Counter '" + PDH_MEM_PATH + "','" + PDH_UTIL_PATH + "'; "
+        "$c.CounterSamples | ForEach-Object { "
+        "if ($_.Path -match 'Dedicated Usage') { \"MEM|$($_.InstanceName)|$([math]::Round($_.CookedValue,1))\" } "
+        "else { \"UTIL|$($_.InstanceName)|$([math]::Round($_.CookedValue,2))\" } }"
+    )
+    return ["powershell", "-NoProfile", "-Command", script]
+
+
+def _run_pdh(runner=None) -> str:
+    """执行合并 PDH 探测；超时/失败返回空串（尽力降级，不抛异常）。"""
+    run = runner or (
+        lambda cmd, **kw: subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    )
     try:
-        result = run(
-            ["powershell", "-NoProfile", "-Command",
-             f"$c = Get-Counter -Counter '{path}'; "
-             f"$c.CounterSamples | ForEach-Object {{ \"$($_.InstanceName): $([math]::Round($_.CookedValue,1))\" }}"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.stdout if isinstance(result, subprocess.CompletedProcess) else result
-    except (FileNotFoundError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return run(_pdh_cmd()) or ""
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
         return ""
+
+
+def split_pdh_streams(out: str) -> tuple[str, str]:
+    """合并打标输出 → (显存流, 利用率流)，各自还原为「实例: 值」行供解析。"""
+    mem_lines: list[str] = []
+    util_lines: list[str] = []
+    for line in out.splitlines():
+        tag, _, rest = line.partition("|")
+        inst, _, value = rest.partition("|")
+        if not value:
+            continue
+        if tag == "MEM":
+            mem_lines.append(f"{inst}: {value}")
+        elif tag == "UTIL":
+            util_lines.append(f"{inst}: {value}")
+    return "\n".join(mem_lines), "\n".join(util_lines)
 
 
 def parse_pdh_process_memory(out: str) -> dict[int, float]:
@@ -138,14 +160,15 @@ def parse_pdh_process_memory(out: str) -> dict[int, float]:
 
 
 def parse_pdh_utilization(out: str) -> float | None:
-    """解析 \\GPU Engine Utilization Percentage：取非零 sample 最大值（代表 GPU 总体活动）。
+    """解析 \GPU Engine Utilization Percentage：取非零 sample 最大值（代表 GPU 总体活动）。
 
-    输出行形如：`luid=pid_29052_luid_0x00000000_0x00010c6e_phys_0_eng_0_engtype_3d util=0.2`。
+    行形如 `pid_29052_luid_0x..._phys_0_eng_0_engtype_3d: 0.2`（PowerShell 实例名真实形状；
+    旧实现按「luid=.. util=」假想格式解析，真机永不命中——REQ-033 性能轮顺带修正）。
     引擎分 3d/copy/video 等类型，任务管理器同源口径按物理 GPU 上下文取非零最大值。
     """
     vals: list[float] = []
     for line in out.splitlines():
-        m = re.match(r"\s*luid=pid_\d+_luid_.+?_phys_\d+_eng_\d+_engtype_\w+ util=([\d.]+)", line)
+        m = re.match(r"\s*pid_\d+_luid_.+?_eng_\d+_engtype_\w+:\s*([\d.]+)", line)
         if not m:
             continue
         vals.append(float(m.group(1)))
@@ -153,14 +176,15 @@ def parse_pdh_utilization(out: str) -> float | None:
 
 
 def probe_pdh(runner=None) -> dict:
-    """Windows PDH：逐进程专用显存（分配口径映射）+ GPU 利用率（任务管理器同源）。
+    """Windows PDH 合并探测：单次 Get-Counter 同时取逐进程专用显存（分配口径）+ 利用率。
 
     任一探测失败（PowerShell 缺失/超时/解析为空）尽力降级：processes_mb 为空、utilization None；
-    不抛异常，供 probe_gpu 集成时回落 nvidia-smi 口径。
+    不抛异常，供 probe_gpu 集成时回落 nvidia-smi 口径。runner 可注入（测试），收 _pdh_cmd() 命令表。
     """
+    mem_out, util_out = split_pdh_streams(_run_pdh(runner))
     return {
-        "processes_mb": parse_pdh_process_memory(_run_pdh(PDH_MEM_PATH, runner)),
-        "utilization_percent": parse_pdh_utilization(_run_pdh(PDH_UTIL_PATH, runner)),
+        "processes_mb": parse_pdh_process_memory(mem_out),
+        "utilization_percent": parse_pdh_utilization(util_out),
     }
 
 
@@ -287,7 +311,7 @@ def probe_qwen(settings: Settings, client: httpx.Client | None = None,
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         own = client is None
-        http = client or httpx.Client(timeout=PROBE_TIMEOUT)
+        http = client or httpx.Client(timeout=PROBE_TIMEOUT, trust_env=False)
         try:
             response = http.get(f"{base}/models", headers=headers)
         finally:
@@ -315,7 +339,7 @@ def probe_mineru(client: httpx.Client | None = None, base_url: str | None = None
     port = httpx.URL(base).port or 5002
     try:
         own = client is None
-        http = client or httpx.Client(timeout=PROBE_TIMEOUT)
+        http = client or httpx.Client(timeout=PROBE_TIMEOUT, trust_env=False)
         try:
             response = http.get(f"{base}{MINERU_HEALTH_PATH}")
         finally:

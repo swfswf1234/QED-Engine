@@ -80,6 +80,46 @@ export function withWebServiceFallback(services: ServiceStatus[]): ServiceStatus
   return [...merged].sort((a, b) => a.port - b.port);
 }
 
+/** 槽位中文标签（在跑标注/状况卡共用，S3·S4 派生口径） */
+export const SLOT_LABELS: Record<SlotName, string> = { text: '文字', vision: '图像', embedding: '向量' };
+
+export interface RunningModel {
+  slot: SlotName;
+  label: string;
+  identity: string;
+  channel: string;
+}
+
+/** 本地在跑槽位身份（source=local 且 ready）：由 store 既有 slots 派生，零新增请求（REQ-033 S3） */
+export function deriveRunningModels(slots: Record<SlotName, SlotStatus | null>): RunningModel[] {
+  const out: RunningModel[] = [];
+  for (const slot of ['text', 'vision', 'embedding'] as SlotName[]) {
+    const st = slots[slot];
+    if (st && st.source === 'local' && st.ready) {
+      out.push({
+        slot,
+        label: SLOT_LABELS[slot],
+        identity: st.identity || st.model || '未知模型',
+        channel: st.channel || st.runtime || '',
+      });
+    }
+  }
+  return out;
+}
+
+export function formatRunningModels(models: RunningModel[]): string {
+  return models.map((m) => `${m.label}·${m.identity}${m.channel ? `（${m.channel}）` : ''}`).join('、');
+}
+
+/** 「当前在跑」一行文案：本地在跑 → 槽位·身份名（渠道）；全 api 就绪 →（API 模式）；其余 → 无 */
+export function formatRunningSlotLine(slots: Record<SlotName, SlotStatus | null>): string {
+  const running = deriveRunningModels(slots);
+  if (running.length > 0) return formatRunningModels(running);
+  const apiActive = (['text', 'vision', 'embedding'] as SlotName[])
+    .some((slot) => slots[slot]?.source === 'api' && slots[slot]?.ready);
+  return apiActive ? '（API 模式）' : '无';
+}
+
 /** 启停操作收敛结果（2026-08-17：操作成功/失败由收敛结果驱动，前端 message 提示） */
 export interface OperateResult {
   name: string;
@@ -189,42 +229,41 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     // （AdminLayout 挂载拉取 + Console 挂载补拉场景下只发一轮）
     if (get().loading || get().operating) return;
     set({ loading: true });
-    // 七路并行独立拉取：services 失败 → 整体横幅；database/gpu/槽位/keys 失败 → 仅对应字段降级
-    const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
-      call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
-    const [[services, servicesErr], [dbStatus, dbErr], [gpu, gpuErr],
-      [text, textErr], [vision, visionErr], [embedding, embeddingErr], [keys], [modelsConfig]] =
-      await Promise.all([
-        fetchOne(() => listServices({ timeoutMs: SERVICES_TIMEOUT_MS })),
-        fetchOne(() => getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS })),
-        fetchOne(() => monitorGpu({ timeoutMs: GPU_TIMEOUT_MS })),
-        fetchOne(() => getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS })),
-        fetchOne(() => getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS })),
-        fetchOne(() => getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS })),
-        fetchOne(() => getKeys({ timeoutMs: SERVICES_TIMEOUT_MS })),
-        fetchOne(() => fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS })),
-      ]);
+    // 八路并行独立拉取 + 逐路增量提交（REQ-033 性能）：快路回包即落库渲染，
+    // 不被最慢路（/monitor/gpu 探针 ≈3s）拖累；失败仅置对应字段错误、保留旧值。
     const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
-    set({
-      services: services ?? get().services,
-      dbStatus: dbStatus ?? get().dbStatus,
-      gpu: gpu ?? get().gpu,
-      slots: {
-        text: text ?? get().slots.text,
-        vision: vision ?? get().slots.vision,
-        embedding: embedding ?? get().slots.embedding,
-      },
-      keys: keys ?? get().keys,
-      modelsConfig: modelsConfig ?? get().modelsConfig,
-      error: servicesErr ? reason(servicesErr) : null,
-      dbError: dbErr ? reason(dbErr) : null,
-      gpuError: gpuErr ? reason(gpuErr) : null,
-      slotErrors: {
-        text: textErr ? reason(textErr) : null,
-        vision: visionErr ? reason(visionErr) : null,
-        embedding: embeddingErr ? reason(embeddingErr) : null,
-      },
-    });
+    const setSlot = (slot: SlotName, status: SlotStatus | null, err: unknown | null) => {
+      const { slots, slotErrors } = get();
+      set({
+        slots: err ? slots : { ...slots, [slot]: status },
+        slotErrors: { ...slotErrors, [slot]: err ? reason(err) : null },
+      });
+    };
+    const jobs = [
+      listServices({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+        (services) => set({ services, error: null }),
+        (err) => set({ error: reason(err) }),
+      ),
+      getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS }).then(
+        (dbStatus) => set({ dbStatus, dbError: null }),
+        (err) => set({ dbError: reason(err) }),
+      ),
+      monitorGpu({ timeoutMs: GPU_TIMEOUT_MS }).then(
+        (gpu) => set({ gpu, gpuError: null }),
+        (err) => set({ gpuError: reason(err) }),
+      ),
+      getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (text) => setSlot('text', text, null), (err) => setSlot('text', null, err)),
+      getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (vision) => setSlot('vision', vision, null), (err) => setSlot('vision', null, err)),
+      getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (embedding) => setSlot('embedding', embedding, null), (err) => setSlot('embedding', null, err)),
+      getKeys({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+        (keys) => set({ keys }), () => undefined),
+      fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+        (modelsConfig) => set({ modelsConfig }), () => undefined),
+    ];
+    await Promise.all(jobs);
     if (!get().operating) set({ loading: false });
   },
 
