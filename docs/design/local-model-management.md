@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-23
+最后更新：2026-09-24
 确认状态：已确认
 关联代码：`backend/qed_engine/services/llm/model_manager.py`、`backend/qed_engine/services/llm/supervisor.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。注册表 `services/llm/registry.py` 主登记见 [llm-gateway.md](llm-gateway.md)、runtimes/ 适配器见本设计「槽位与 runtime」节，均在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_supervisor.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
@@ -31,7 +31,7 @@
 
 | 槽位（slot） | 类别 | api 身份 | 本地渠道选项（默认 → 可选） | 探针 | 测试端点 |
 | --- | --- | --- | --- | --- | --- |
-| `text` | 文字 | qwen-plus | 默认（=全局 `QED_LOCAL_RUNTIME`）；**LM Studio 登记可用**；Docker / llama.cpp 待上线 | `GET /monitor/text`（旧 `/monitor/qwen` 别名） | `POST /llm/test/text` |
+| `text` | 文字 | qwen-plus | 默认（=全局 `QED_LOCAL_RUNTIME`）；**LM Studio / llama.cpp 登记可用**；Docker 待上线 | `GET /monitor/text`（旧 `/monitor/qwen` 别名） | `POST /llm/test/text` |
 | `vision` | 图像 | qwen-vl-plus | 默认（=docker）；**Docker（MinerU）登记可用**；LM Studio / llama.cpp 待上线 | `GET /monitor/vision`（旧 `/monitor/mineru` 别名） | `POST /llm/test/vision` |
 | `embedding` | 向量 | text-embedding-v4 | 无本地候选（全待上线；**来源固定 api，全局 local 不影响**） | — | `POST /llm/test/embedding` |
 
@@ -53,12 +53,17 @@ class LocalRuntime(Protocol):
 
 - **lmstudio（半托管）**：probe = `GET /api/v0/models`（REST v0）且 `state == "loaded"` 的模型
   含当前身份（`/v1/models` 列**全量已下载**模型，不能当已加载判定）；start = server 未起时
-  尝试 `lms server start`（PATH 探测，失败报明确原因）→ 先 `lms unload` 其他已加载模型
-  （单活 + 显存释放）→ `lms load <模型key> --gpu max`（幂等）；stop = `lms unload`（全量释放用
+  尝试 `lms server start`（PATH 探测，失败报明确原因；5001 被 llama-server 占位时先脚本 stop
+  清位）→ 先 `lms unload` 其他已加载模型（单活 + 显存释放）→ `lms load <模型key>` 按身份参数表
+  带旗标并恒附 `-y` 非交互（幂等，见「本地模型启动参数契约」）；stop = `lms unload`（全量释放用
   `lms unload --all`），server 进程本身由 LM Studio 自管，不杀。REST API v0 **无 load/unload
   端点**，生命周期一律走 `lms` CLI；LM Studio 开启 API token 认证时探活请求经
   `QED_LMSTUDIO_TOKEN` 带 Bearer（密钥只存 .env）。
-- **llamacpp**：现 `scripts/text-model/qed_qwen_service.py`（manifest → llama-server 进程）平移，
+- **llamacpp**：`scripts/text-model/qed_qwen_service.py`（llama-server 进程），二进制解析
+  PATH 优先 → `~/.lmstudio/extensions/backends/` 自带后端（CUDA 变体优先、版本数值最大）；
+  模型引用直指 `~/.lmstudio/models/**.gguf`（身份表相对引用，零额外安装）；加载参数由 8900 经
+  CLI 旗标注入（`--gguf/--ctx/--ngl/--fa/--parallel`，manifest `serve` 仅作脚本直跑兼容回退）；
+  启动前常驻 LM Studio server 占用共用端口时自动 `lms unload --all` + `lms server stop` 让位。
   脚本保留 CLI 入口（start/stop/restart/status）。
 - **docker**：现 `scripts/image-model/qed_mineru_service.py`（infra-*.ps1 + compose）平移，
   脚本保留 CLI 入口。未来 llama.cpp 打包 docker 服务复用本 runtime（新增一份 compose）。
@@ -68,6 +73,42 @@ class LocalRuntime(Protocol):
 > （模型槽位 `model/<引擎>/`）；控制台依赖组件卡展示当前生效 OCR 引擎。**模型生命周期归 8900，
 > 解析调用不归**——Axiom-Flow 解析管线经引擎适配器直连模型服务，8900 只负责启停、探针与资源互斥
 > （换引擎不改 8900 调用链）。
+
+## 本地模型启动参数契约（加载层）
+
+本地模型参数分三层，各层事实源唯一、互不越界：
+
+| 层 | 内容 | 事实源 | 变更方式 |
+| --- | --- | --- | --- |
+| 进程层 | 端口、URL、token 等宿主连接参数 | `.env`（Settings） | 改 .env + 重启 8900 |
+| **加载层** | 模型加载参数（上下文长度、GPU 卸载、并行、TTL、flash-attn） | registry `IDENTITIES` 身份表 `Identity.params: dict[runtime, dict]`（键为 runtime 原生语义） | 改身份表 + 重启 8900（无热重载；**不做 UI 编辑与热更新**） |
+| 请求层 | temperature / max_tokens 等采样参数 | 调用方逐请求透传（归 [llm-gateway.md](llm-gateway.md)） | 不归本契约 |
+
+- **生效链**：`registry.binding_params(settings, slot)`（生效绑定 = 渠道解析 × 身份 params）
+  → `ensure_local_ready` 注入 `runtime.start(params=…)`；**监督器受控恢复经 `operate_model`
+  同链路重启**，恢复不丢参数。未声明 params 的 runtime 键（如 docker）恒 `{}`，行为不变。
+- **lmstudio 参数键**（`lms load` 旗标映射）：`context`→`-c`、`gpu`→`--gpu`（缺省 `max`）、
+  `parallel`→`--parallel`、`ttl`→`--ttl`；load 命令恒附 `-y`（脚本化非交互：本机存在前缀歧义
+  key，无 TTY 时交互提示会挂死后台线程；歧义时 LM Studio 取第一匹配，**保持本地模型 key 唯一
+  是消歧唯一手段**）。
+- **llamacpp 参数键**（8900 → 脚本旗标 → llama-server 原生参数）：`ctx`→`--ctx`→`--ctx-size`、
+  `ngl`→`--ngl`→`--n-gpu-layers`、`fa`→`--fa`→`--flash-attn on`（**必须取值式**，裸旗标吞后续
+  参数）、`parallel`→`--parallel`→`--parallel`；GGUF 同级 `mmproj-*.gguf` 存在时自动挂
+  `--mmproj`。
+- **当前参数档案**（4080 16GB 显存约束，`lms load --estimate-only` 实测预估）：
+
+| 身份 | lmstudio | llamacpp |
+| --- | --- | --- |
+| qwen3.8-27b | `context: 8192, gpu: max`（16384 档预估 16.10 GiB 超卡，回落 8192） | `ctx: 8192, ngl: -1, fa: true`（同显存约束） |
+| qwen3.5-9b | `context: 16384, gpu: max`（16384 档预估 11.93 GiB 可容纳） | `ctx: 16384, ngl: -1, fa: true` |
+
+- **真机读回判据**（参数是否生效以此为准，不信任请求侧）：lmstudio =
+  `GET /api/v0/models` 目标模型 `loaded_context_length`；llamacpp = `GET /slots` 的 `n_ctx`
+  （本机 llama-server 0.4.1-dev `/props` 无 ctx 字段）与进程命令行。
+- **端口互斥**（text 槽两渠道共用 `QED_MODEL_URL` 端口）：占用判别 = REST v0 `/api/v0/models`
+  有应答为 LM Studio、仅 `/v1/models` 有应答为 llama-server；llamacpp 启动前让位序列
+  `lms unload --all` → `lms server stop` → 轮询端口释放（单独 `server stop` 不终止 LM Studio
+  自带 worker，显存不释放）；lmstudio 启动前反向以脚本 stop 清 llama-server 占位。
 
 ## 统一操作入口：operate_model(slot, op)
 
@@ -218,7 +259,7 @@ model/
 ## 健康监督与受控恢复（supervisor）
 
 `services/llm/supervisor.py` 随 app 建起守护线程（`QED_MODEL_SUPERVISOR=true` 默认开；测试进程注入
-false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复；api 来源槽位跳过不探测。监督器只观测、
+false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复；api 来源槽位**暂停观测**：不探测并清空快照与期望状态（切换不残留旧观测）。监督器只观测、
 告警与重启模型服务本身，不触碰 prompt 与业务参数（见「分工边界」维护职责条）。
 
 - **T1 存活**：复用 `monitor.probe_slot`（5s 预算），失败记 down。
@@ -227,16 +268,40 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
   探测异常按不可见处理（fail-closed）。
 - **状态机防抖**：翻转需连续 3 次同向观测，初始观测即时定态；翻转写结构化事件日志
   （`模型监督事件 slot=… frm->to reason=…`），经 `GET /models/{slot}` 的 health_state/health_reason/
-  gpu_visible/last_flip 供给仪表盘状况卡。
+  gpu_visible/last_flip 供给仪表盘「本地模型列表」分节。
+- **期望状态（desired）**：每槽位记 `running / stopped / 未声明`——观测到 ready 即采纳 running（人工停止优先，不被观测覆盖）；`operate_model` start/restart 上报 running、stop 上报 stopped；api 来源暂停时清空。人工停止是合法终态：在下次显式启动前不参与自动恢复。
 - **受控恢复**：槽位处于 down/degraded 期间每 4 个 tick（约 2min）派发一次
   `operate_model(slot, "restart")`（独立线程执行，不阻塞 tick）；连续 ≤3 次仍救不活 → 放弃转纯告警
-  （WARNING「模型恢复放弃」），翻回 ready 即重置预算。
+  （WARNING「模型恢复放弃」），翻回 ready 即重置预算。恢复仅对 desired=running 的槽位派发（期望状态门）；人工停止/未声明不派发，每 Episode 只告警一次（INFO「模型监督告警」）。
 - **在飞门（与已知约束 9 运维约定并行）**：解析在飞时跳过重启只告警。判据仅 vision 适用：
   8902 `GET /api/v1/parse-jobs?status=queued,running`（REQ-088；旧码无端点 404/405 回退书目级
   active_job_id 判定）；8902 连接失败＝不可能有解析在跑 → 不在飞放行；其余查询失败保守按在飞
   （宁可不重启，不可杀在飞解析）。
 - **掉线诊断包**：翻转至非就绪时对 docker 渠道槽位采集 docker events（近 10min）、mineru-api 日志尾
   （2000 行）与容器内 GPU 可见性，落运行日志（单段截断、内存有界），供掉线根因定谳取证。
+
+## 仪表盘与控制台双口径契约
+
+`GET /models/{slot}` 同时应答两组状态字段，两界面各消费一组，二者偏差属设计、不强行拉平：
+
+| 口径 | 字段 | 语义 | 消费方 |
+| --- | --- | --- | --- |
+| 实时单发探针 | `ready` / `availability` | 请求时刻单发探测（local＝绑定模型探针；api＝API key 已配置即「可用」） | 控制台槽位卡 |
+| 防抖定态 | `health_state` / `health_reason` / `gpu_visible` / `last_flip` | 监督器状态机（30s tick、连续 3 次同向观测才翻转；含降级态） | 仪表盘「本地模型列表」分节 |
+
+- 允许偏差：状态变更后仪表盘需 3×探测间隔 + 30s 前端轮询（最长约 2 分钟）才收敛；
+  GPU blocked 时控制台显示「可用」而仪表盘显示「未加载」（degraded 并入未加载徽章，
+  原因在 tooltip），属设计目标差异（仪表盘更敏感）。
+- 两口径不混用：仪表盘徽章以 health_state 为准（仅监督器关闭时按 ready 推导兼容回退）；
+  控制台不消费 health_state。仪表盘块一为合卡「服务详情」，其「本地模型列表」常驻分节
+  （文字/图像左右两栏，栏内 槽位名→模型名→徽章，模型名 `slot.model` 非空即显示）
+  徽章只显三态（已加载/未加载/未启动，degraded 与全 api 并入未加载），
+  滞后口径不写入卡面，双口径语义以本节为事实源。
+- 未加载态呈现：`health_state=ready` 且 `ready=false`（服务存活但模型未加载）时，仪表盘徽章
+  呈中性灰色「未加载」，`health_reason` 只进 tooltip；服务与模型双就绪才显示绿色「已加载」。
+  该派生仅在前端显示层，监督器状态机与 health_state 字段语义不变。
+- 前端保鲜说明：仪表盘 30s 轮询取数（隐藏页跳过）；控制台槽位卡为进页、操作后与手动刷新时
+  取数、不轮询——两页并排久开后各自过期是偏差的口径外来源。
 
 ## 关键组件文件
 
@@ -270,7 +335,7 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
    `GPU access blocked by the operating system`），`docker restart mineru-api` 或重跑
    `infra-up.ps1` 恢复；解析前建议先确认容器内 GPU 可见。
 8. **LM Studio 生命周期经 `lms` CLI**：REST API v0 无 load/unload 端点，加载/卸载一律经
-   `lms load <key> --gpu max` / `lms unload`；探活用 `GET /api/v0/models` 的 `state == "loaded"`
+   `lms load <key> … -y` / `lms unload`（旗标按身份参数表，见「本地模型启动参数契约」；key 前缀歧义时 `-y` 取第一匹配，保持本地 key 唯一）；探活用 `GET /api/v0/models` 的 `state == "loaded"`
    （`/v1/models` 列全量已下载模型）。端口以本机实际配置为准（`lms server status` 查看，默认
    1234，本机为 5001，经 `QED_MODEL_URL` 配置）；本机开启 API token 认证，经
    `QED_LMSTUDIO_TOKEN` 带 Bearer。`lms` CLI 不在 PATH 时 start 报明确原因（半托管降级为

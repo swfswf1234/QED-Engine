@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -61,10 +62,49 @@ def _health_ok(port: int) -> bool:
         return False
 
 
+def _lmstudio_backends_dir() -> Path:
+    """LM Studio 后端扩展目录（自带 llama.cpp 构建，ARCH-033 R2 回退来源）。"""
+    return Path.home() / ".lmstudio" / "extensions" / "backends"
+
+
+def _lmstudio_models_dir() -> Path:
+    """LM Studio 模型下载目录（llamacpp 通道 GGUF 引用的落点）。"""
+    return Path.home() / ".lmstudio" / "models"
+
+
+def _backend_version(name: str) -> tuple[int, ...]:
+    tail = name.rsplit("-", 1)[-1]
+    return tuple(int(x) for x in tail.split(".")) if tail[:1].isdigit() else (0,)
+
+
 def _find_llama_server() -> str | None:
-    """llama-server 路径；未安装返回 None。"""
-    import shutil
-    return shutil.which("llama-server")
+    """llama-server 路径：PATH 优先 → LM Studio 自带后端（CUDA 变体优先、版本数值最大）。"""
+    found = shutil.which("llama-server")
+    if found:
+        return found
+    base = _lmstudio_backends_dir()
+    if not base.is_dir():
+        return None
+    cands = [
+        (exe, d.name)
+        for d in base.glob("llama.cpp-*")
+        if d.is_dir() and (exe := d / "llama-server.exe").is_file()
+    ]
+    if not cands:
+        return None
+    cuda = [c for c in cands if "nvidia-cuda" in c[1]]
+    exe = max(cuda or cands, key=lambda c: _backend_version(c[1]))[0]
+    return str(exe)
+
+
+def _resolve_gguf_path(value: str) -> Path:
+    """GGUF 引用解析：绝对路径直用；相对路径挂 ~/.lmstudio/models（缺失抛 FileNotFoundError）。"""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _lmstudio_models_dir() / path
+    if not path.is_file():
+        raise FileNotFoundError(f"GGUF 不存在：{path}")
+    return path
 
 
 def _resolve_model_path(manifest: dict) -> Path:
@@ -82,20 +122,31 @@ def _resolve_model_path(manifest: dict) -> Path:
     return gguf_files[0]
 
 
-def _build_server_cmd(manifest: dict, port: int) -> list[str]:
-    """构建 llama-server 启动命令。"""
+def _build_server_cmd(manifest: dict, port: int, model_path: Path,
+                      cli: dict | None = None) -> list[str]:
+    """构建 llama-server 启动命令：CLI 参数 > manifest serve 兼容回退（ARCH-033，
+    参数事实源已移 registry 身份表，8900 经旗标注入；脚本直跑仍可读 manifest）。"""
     serve = manifest.get("serve", {})
-    model_path = _resolve_model_path(manifest)
+    cli = cli or {}
     cmd = [
         "llama-server",
         "--model", str(model_path),
         "--port", str(port),
         "--host", "0.0.0.0",
     ]
-    if "ctx" in serve:
-        cmd += ["--ctx-size", str(serve["ctx"])]
-    if "n_gpu_layers" in serve:
-        cmd += ["--n-gpu-layers", str(serve["n_gpu_layers"])]
+    ctx = cli.get("ctx", serve.get("ctx"))
+    if ctx is not None:
+        cmd += ["--ctx-size", str(ctx)]
+    ngl = cli.get("ngl", serve.get("n_gpu_layers"))
+    if ngl is not None:
+        cmd += ["--n-gpu-layers", str(ngl)]
+    if cli.get("fa"):
+        cmd += ["--flash-attn", "on"]  # 真机需取值；裸旗标会吞后续参数致解析失败
+    if cli.get("parallel") is not None:
+        cmd += ["--parallel", str(cli["parallel"])]
+    mmproj = next(iter(sorted(model_path.parent.glob("mmproj-*.gguf"))), None)
+    if mmproj is not None:
+        cmd += ["--mmproj", str(mmproj)]
     return cmd
 
 
@@ -106,14 +157,30 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 0
     llama = _find_llama_server()
     if llama is None:
-        print("llama-server 未安装：请先安装 llama.cpp（https://github.com/ggml-org/llama.cpp）")
+        print("llama-server 未安装：请先安装 llama.cpp（https://github.com/ggml-org/llama.cpp）"
+              "或安装 LM Studio（自带后端）")
         return 1
+    cli = {
+        "ctx": getattr(args, "ctx", None),
+        "ngl": getattr(args, "ngl", None),
+        "fa": getattr(args, "fa", None),
+        "parallel": getattr(args, "parallel", None),
+    }
+    cli = {k: v for k, v in cli.items() if v is not None}
     try:
-        manifest = _load_manifest()
+        if getattr(args, "gguf", None):
+            model_path = _resolve_gguf_path(args.gguf)
+            try:
+                manifest = _load_manifest()
+            except (FileNotFoundError, json.JSONDecodeError, ValueError):
+                manifest = {}  # CLI 参数在场时 manifest 仅兼容回退，不阻塞（ARCH-033）
+        else:
+            manifest = _load_manifest()
+            model_path = _resolve_model_path(manifest)
     except (FileNotFoundError, json.JSONDecodeError, ValueError) as exc:
-        print(f"manifest 错误：{exc}")
+        print(f"manifest/模型错误：{exc}")
         return 1
-    cmd = _build_server_cmd(manifest, port)
+    cmd = _build_server_cmd(manifest, port, model_path, cli)
     cmd[0] = llama  # 替换为实际路径
     try:
         proc = subprocess.Popen(
@@ -177,6 +244,16 @@ def _wait_healthy(port: int, timeout: float) -> int:
     return 1
 
 
+def _add_serve_args(parser: argparse.ArgumentParser) -> None:
+    """加载层参数旗标（8900 经 registry 身份表注入；缺省回退 manifest serve）。"""
+    parser.add_argument("--gguf", default=None,
+                        help="GGUF 路径（绝对路径或 ~/.lmstudio/models 相对引用）")
+    parser.add_argument("--ctx", type=int, default=None, help="上下文长度（--ctx-size）")
+    parser.add_argument("--ngl", type=int, default=None, help="GPU 卸载层数（--n-gpu-layers）")
+    parser.add_argument("--fa", action="store_true", default=None, help="启用 flash-attn")
+    parser.add_argument("--parallel", type=int, default=None, help="并行槽数")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qed_qwen_service",
@@ -189,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="启动 llama-server（加载 GGUF）")
     start.add_argument("--wait", nargs="?", const=HEALTH_TIMEOUT_SECONDS, type=float, default=0.0,
                        help="等待 /v1/models 就绪，默认 60s")
+    _add_serve_args(start)
     start.set_defaults(func=cmd_start)
 
     stop = subparsers.add_parser("stop", help="停止 llama-server")
@@ -196,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     restart = subparsers.add_parser("restart", help="重启服务")
     restart.add_argument("--wait", nargs="?", const=HEALTH_TIMEOUT_SECONDS, type=float, default=0.0)
+    _add_serve_args(restart)
     restart.set_defaults(func=cmd_restart)
 
     status = subparsers.add_parser("status", help="查询服务状态")

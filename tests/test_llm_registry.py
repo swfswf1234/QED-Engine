@@ -52,7 +52,10 @@ def test_identity_catalog_covers_all_slots():
 def test_slot_identities_carry_metadata():
     """身份条目含 api 引用或本地引用与一句话备注（控制台下拉/备注数据源）。"""
     qwen318 = registry.IDENTITIES["qwen3.8-27b"]
-    assert qwen318.local == {"lmstudio": "qwen3.8-27b"}
+    assert qwen318.local == {
+        "lmstudio": "qwen3.8-27b",
+        "llamacpp": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q3_K_XL.gguf",
+    }
     assert qwen318.api is None
     assert qwen318.description
     assert registry.IDENTITIES["qwen-plus"].api == ("qwen", "qwen-plus")
@@ -227,13 +230,15 @@ def test_resolve_local_manifest_root_threaded_through(tmp_path):
     assert (text.identity, text.model) == ("qwen3.8-27b", "qwen3.8-27b")
 
 
-def test_resolve_local_llamacpp_runtime_error(tmp_path):
-    """local 模式 + llamacpp runtime：身份目录暂无 llamacpp 引用 → 明确错误（不抛异常）。"""
+def test_resolve_local_text_llamacpp(tmp_path):
+    """local 模式 + llamacpp runtime（ARCH-033 W3 真做）：解析到 GGUF 引用与共用端点。"""
     results = registry.resolve(
         _settings(qed_api_select="local", qed_local_runtime="llamacpp"), tmp_path)
     text = results["text"]
-    assert text.error != ""
-    assert "llamacpp" in text.error
+    assert text.error == ""
+    assert text.provider == "llamacpp"
+    assert text.model == "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q3_K_XL.gguf"
+    assert text.base_url == "http://127.0.0.1:5001/v1"
 
 
 def test_resolve_local_text_docker_runtime_error(tmp_path):
@@ -361,7 +366,8 @@ def test_slot_channel_options_derived_from_registry():
     """渠道选项：text → lmstudio 可用、docker/llamacpp 待上线；vision → docker 可用；embedding 空。"""
     text = {o["value"]: o["status"] for o in registry.slot_channel_options("text")}
     assert text["lmstudio"] == "available"
-    assert text["docker"] == "pending" and text["llamacpp"] == "pending"
+    assert text["docker"] == "pending"
+    assert text["llamacpp"] == "available"  # ARCH-033 W3：llamacpp 引用已入目录
     assert text["default"] == "available"
     vision = {o["value"]: o["status"] for o in registry.slot_channel_options("vision")}
     assert vision["docker"] == "available" and vision["lmstudio"] == "pending"
@@ -376,3 +382,50 @@ def test_slot_model_options_filtered_by_source_and_runtime():
     assert set(local_names) == {"qwen3.8-27b", "qwen3.5-9b"}
     assert registry.slot_model_options("text", "local", "docker") == []
     assert [i.name for i in registry.slot_model_options("vision", "local", "docker")] == ["mineru"]
+
+
+# ---------- 本地模型启动参数（ARCH-033） ----------
+
+
+def test_local_text_identities_declare_lmstudio_params():
+    """text 本地两身份 lmstudio 参数：27B context=8192（R5 显存回落改判）、9B 16384；gpu=max。"""
+    assert registry.IDENTITIES["qwen3.8-27b"].params["lmstudio"] == {"context": 8192, "gpu": "max"}
+    assert registry.IDENTITIES["qwen3.5-9b"].params["lmstudio"] == {"context": 16384, "gpu": "max"}
+
+
+def test_identity_without_params_defaults_empty():
+    """未声明参数的身份（api 身份、mineru）params 为空 dict，不影响既有解析。"""
+    assert registry.IDENTITIES["qwen-plus"].params == {}
+    assert registry.IDENTITIES["mineru"].params == {}
+
+
+def test_binding_params_follows_bound_runtime_and_identity(tmp_path):
+    """binding_params：按生效绑定（runtime × 身份）返回参数组；manifest 覆盖生效。"""
+    s = _settings(qed_api_select="local", qed_model="qwen3.5-9b")
+    assert registry.binding_params(s, "text", tmp_path) == {"context": 16384, "gpu": "max"}
+    _write_manifest(tmp_path, "qwen", {"active": "qwen3.8-27b", "source": "local", "runtime": "lmstudio"})
+    assert registry.binding_params(s, "text", tmp_path) == {"context": 8192, "gpu": "max"}
+
+
+def test_binding_params_empty_for_api_only_and_unknown_binding(tmp_path):
+    """embedding（无本地绑定）与 vision-docker（身份未声明 docker 参数）返回 {}。"""
+    s = _settings(qed_api_select="local")
+    assert registry.binding_params(s, "embedding", tmp_path) == {}
+    assert registry.binding_params(s, "vision", tmp_path) == {}
+
+
+def test_text_identities_carry_llamacpp_params():
+    """llamacpp 参数：27B ctx=8192（R5 显存回落改判，双渠道同一显存约束）、9B 16384；ngl -1 + fa。"""
+    assert registry.IDENTITIES["qwen3.8-27b"].params["llamacpp"]["ctx"] == 8192
+    assert registry.IDENTITIES["qwen3.5-9b"].params["llamacpp"]["ctx"] == 16384
+    for name in ("qwen3.8-27b", "qwen3.5-9b"):
+        lp = registry.IDENTITIES[name].params["llamacpp"]
+        assert lp["ngl"] == -1 and lp["fa"] is True
+
+
+def test_binding_params_llamacpp_runtime(tmp_path):
+    """manifest runtime=llamacpp 时 binding_params 返回 llamacpp 参数组。"""
+    _write_manifest(tmp_path, "qwen", {"active": "qwen3.8-27b", "source": "local",
+                                       "runtime": "llamacpp"})
+    s = _settings(qed_api_select="local")
+    assert registry.binding_params(s, "text", tmp_path) == {"ctx": 8192, "ngl": -1, "fa": True}

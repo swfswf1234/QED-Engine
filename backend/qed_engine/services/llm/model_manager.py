@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from qed_engine.config import Settings
-from qed_engine.services.llm import registry
+from qed_engine.services.llm import registry, supervisor
 from qed_engine.services.llm.runtimes import get_runtime
 
 ROOT = Path(__file__).resolve().parents[4]  # services/llm/ → 仓库根
@@ -85,7 +85,9 @@ def ensure_local_ready(settings: Settings, slot: str, script_runner: Callable | 
         return
     if settings.qed_resource_guard:
         stop_other_local_slots(settings, slot, script_runner=script_runner, log=log)
-    result = rt.start(settings, model, log=log, script_runner=script_runner)
+    # 加载层参数注入（ARCH-033：registry 身份表 = 唯一事实源，监督器恢复重启同链路）
+    params = registry.binding_params(settings, slot)
+    result = rt.start(settings, model, log=log, script_runner=script_runner, params=params)
     if not result.ok:
         log(f"start 槽位 {slot} 失败：{result.detail}")
 
@@ -130,10 +132,13 @@ def operate_model(name: str, op: str, settings: Settings,
 
     if op == "start":
         ensure_local_ready(settings, slot, script_runner=script_runner, log=log)
+        supervisor.note_desired_active(slot, "running")
         return
     if op == "stop":
         rt.stop(settings, model, log=log, script_runner=script_runner)
+        supervisor.note_desired_active(slot, "stopped")
         return
     # restart：先停本槽位再走 ensure（单活仲裁）
     rt.stop(settings, model, log=log, script_runner=script_runner)
     ensure_local_ready(settings, slot, script_runner=script_runner, log=log)
+    supervisor.note_desired_active(slot, "running")

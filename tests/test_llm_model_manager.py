@@ -13,6 +13,7 @@ import pytest
 from qed_engine.config import Settings
 from qed_engine.services.llm import model_manager, registry, runtimes
 from qed_engine.services.llm.runtimes import base as rt_base
+from qed_engine.services.llm.runtimes import llamacpp as lc_mod
 from qed_engine.services.llm.runtimes import lmstudio as lm_mod
 from qed_engine.services.llm.runtimes.base import RuntimeResult
 
@@ -42,7 +43,7 @@ def _recorder_rt(monkeypatch, rt, probe: bool, name: str, calls: list):
     monkeypatch.setattr(rt, "probe", lambda settings, model="": probe)
     monkeypatch.setattr(
         rt, "start",
-        lambda settings, model="", log=None, script_runner=None:
+        lambda settings, model="", log=None, script_runner=None, params=None:
         calls.append(("start", name, model)) or RuntimeResult(True, "stub start"),
     )
     monkeypatch.setattr(
@@ -116,13 +117,14 @@ def test_local_without_guard_skips_stop_other(monkeypatch):
 
 
 def test_local_binding_missing_logs_and_skips(monkeypatch):
-    """绑定缺失（如 llamacpp 无身份引用）→ 仅记日志，不触碰 runtime、不抛异常。"""
+    """绑定缺失（如 docker 无 text 身份引用，ARCH-033 W3 后 llamacpp 已有）→ 仅记日志，不触碰 runtime、不抛异常。"""
     def _boom(name):
         raise AssertionError(f"绑定缺失不应取 runtime：{name}")
 
     monkeypatch.setattr(model_manager, "get_runtime", _boom)
     logs: list[str] = []
-    model_manager.ensure_local_ready(_settings(qed_local_runtime="llamacpp"), "text", log=logs.append)
+    # ARCH-033 W3 后 llamacpp 已有引用，绑定缺失样例改用 docker（text 仍无候选）
+    model_manager.ensure_local_ready(_settings(qed_local_runtime="docker"), "text", log=logs.append)
     assert logs and "无可用本地模型" in logs[0]
 
 
@@ -293,7 +295,7 @@ def test_lmstudio_start_unloads_others_then_loads(monkeypatch):
     assert result.ok is True
     assert lms_calls == [
         ["unload", "other-model"],
-        ["load", MODEL_27B, "--gpu", "max"],
+        ["load", MODEL_27B, "--gpu", "max", "-y"],
     ]
 
 
@@ -393,3 +395,192 @@ def test_local_binding_precedence_matches_registry():
     assert binding is not None
     runtime_key, model, identity, _notes = binding
     assert (runtime_key, model, identity) == ("lmstudio", MODEL_27B, "qwen3.8-27b")
+
+
+# --- W12 operate_model 期望状态上报（ARCH-028 人工停止语义，用户裁决 2026-09-24） ---
+
+
+def test_operate_model_notifies_supervisor_intent(monkeypatch):
+    """start/restart 成功→running、stop 成功→stopped：经 note_desired_active 上报在跑期望。"""
+    from qed_engine.services.llm import supervisor
+
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(supervisor, "note_desired_active",
+                        lambda slot, desired: notes.append((slot, desired)))
+    calls: list = []
+    _recorder_rt(monkeypatch, runtimes.get_runtime("lmstudio"), True, "lmstudio", calls)
+    model_manager.operate_model("text", "stop", settings=_settings())
+    assert notes == [("text", "stopped")]
+    model_manager.operate_model("text", "start", settings=_settings())
+    assert notes == [("text", "stopped"), ("text", "running")]
+    model_manager.operate_model("text", "restart", settings=_settings())
+    assert notes == [("text", "stopped"), ("text", "running"), ("text", "running")]
+
+
+def test_operate_model_failure_does_not_notify(monkeypatch):
+    """操作抛错（如停止脚本失败）不上报期望，避免监督器误判人工意图。"""
+    from qed_engine.services.llm import supervisor
+
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(supervisor, "note_desired_active",
+                        lambda slot, desired: notes.append((slot, desired)))
+
+    class Boom:
+        def stop(self, *a, **k):
+            raise RuntimeError("docker 不可达")
+
+        def probe(self, *a, **k):
+            return False
+
+    monkeypatch.setattr(model_manager, "get_runtime", lambda name: Boom())
+    with pytest.raises(RuntimeError):
+        model_manager.operate_model("text", "stop", settings=_settings())
+    assert notes == []
+
+
+# ---------- 加载参数注入（ARCH-033 W2） ----------
+
+
+def test_lmstudio_start_load_with_params(monkeypatch):
+    """start(params=...)：lms load 带 -c <context> 与表内 gpu 值（裁决 R1/R5）。"""
+    lms_calls: list[list[str]] = []
+    monkeypatch.setattr(lm_mod, "_sleep", lambda _s: None)
+    payloads = [
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},  # _server_up
+        {"data": []},                                      # 单活清单（无其他）
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},  # 加载轮询
+    ]
+    monkeypatch.setattr(lm_mod, "_get_json", lambda url, timeout=2.0, token="": payloads.pop(0))
+    monkeypatch.setattr(
+        lm_mod, "_run_lms", lambda args, timeout=60.0: lms_calls.append(args) or 0,
+    )
+    result = lm_mod.LmStudioRuntime().start(
+        _settings(), MODEL_27B, params={"context": 16384, "gpu": "max"})
+    assert result.ok is True
+    assert ["load", MODEL_27B, "--gpu", "max", "-c", "16384", "-y"] in lms_calls
+
+
+def test_lmstudio_start_parallel_ttl_params(monkeypatch):
+    """params 含 parallel/ttl 时映射为 --parallel/--ttl（缺省项不出现）。"""
+    lms_calls: list[list[str]] = []
+    monkeypatch.setattr(lm_mod, "_sleep", lambda _s: None)
+    payloads = [
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},
+        {"data": []},
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},
+    ]
+    monkeypatch.setattr(lm_mod, "_get_json", lambda url, timeout=2.0, token="": payloads.pop(0))
+    monkeypatch.setattr(
+        lm_mod, "_run_lms", lambda args, timeout=60.0: lms_calls.append(args) or 0,
+    )
+    lm_mod.LmStudioRuntime().start(
+        _settings(), MODEL_27B,
+        params={"context": 8192, "gpu": "0.8", "parallel": 2, "ttl": 600})
+    assert ["load", MODEL_27B, "--gpu", "0.8", "-c", "8192", "--parallel", "2", "--ttl", "600", "-y"] in lms_calls
+
+
+def test_ensure_local_ready_passes_binding_params(monkeypatch):
+    """model_manager 把 registry.binding_params（身份表）注入 runtime.start。"""
+    seen: list[dict] = []
+    rt = lm_mod.LmStudioRuntime()
+    monkeypatch.setattr(model_manager, "get_runtime", lambda _name: rt)
+    monkeypatch.setattr(rt, "probe", lambda settings, model="": True)  # 已就绪路径不走 start
+    monkeypatch.setattr(rt, "probe", lambda settings, model="": False)
+    monkeypatch.setattr(
+        rt, "start",
+        lambda settings, model="", log=None, script_runner=None, params=None:
+        seen.append({"model": model, "params": params})
+        or RuntimeResult(True, "stub"),
+    )
+    model_manager.ensure_local_ready(_settings(qed_api_select="local"), "text")
+    assert seen == [{"model": MODEL_27B, "params": {"context": 8192, "gpu": "max"}}]
+
+
+# ---------- llamacpp 真做与端口互斥（ARCH-033 W3/W4） ----------
+
+
+def _fake_script_runner(cmds: list, rc: int = 0):
+    def runner(cmd, **_kw):
+        class R:
+            returncode = rc
+
+        cmds.append(cmd)
+        return R()
+
+    return runner
+
+
+def test_llamacpp_start_maps_params_to_script_flags(monkeypatch):
+    """params → 脚本旗标：--gguf 引用与 ctx/ngl/fa 进 argv（经 run_script 的 extra_args）。"""
+    monkeypatch.setattr(lc_mod, "_lmstudio_server_running", lambda settings: False)
+    cmds: list = []
+    rt = runtimes.get_runtime("llamacpp")
+    result = rt.start(_settings(), "unsloth/q.gguf", log=lambda _m: None,
+                      script_runner=_fake_script_runner(cmds),
+                      params={"ctx": 16384, "ngl": -1, "fa": True})
+    assert result.ok is True
+    assert cmds[0][2:] == ["start", "--gguf", "unsloth/q.gguf",
+                           "--ctx", "16384", "--ngl", "-1", "--fa"]
+
+
+def test_llamacpp_start_stops_lmstudio_server_first(monkeypatch):
+    """端口被常驻 LM Studio 占用：先 lms server stop 让位（裁决 R3）再走脚本启动。"""
+    state = {"running": True}
+
+    def _running(_settings):
+        prev = state["running"]
+        state["running"] = False
+        return prev
+
+    monkeypatch.setattr(lc_mod, "_lmstudio_server_running", _running)
+    lms_calls: list = []
+    monkeypatch.setattr(
+        lm_mod, "_run_lms", lambda args, timeout=60.0: lms_calls.append(args) or 0)
+    cmds: list = []
+    rt = runtimes.get_runtime("llamacpp")
+    result = rt.start(_settings(), "unsloth/q.gguf", log=lambda _m: None,
+                      script_runner=_fake_script_runner(cmds), params={"ctx": 8192})
+    assert result.ok is True
+    # W7 真机修正：server stop 单独不足（LM Studio 自带 worker 残驻占显存），先 unload 全量
+    assert lms_calls == [["unload", "--all"], ["server", "stop"]]
+    assert cmds[0][2:] == ["start", "--gguf", "unsloth/q.gguf", "--ctx", "8192"]
+
+
+def test_llamacpp_start_fails_when_lmstudio_refuses_to_yield(monkeypatch):
+    """lms server stop 失败（rc≠0）：启动失败并给出明确中文原因，不动脚本。"""
+    monkeypatch.setattr(lc_mod, "_lmstudio_server_running", lambda settings: True)
+    monkeypatch.setattr(lm_mod, "_run_lms", lambda args, timeout=60.0: 1)
+    cmds: list = []
+    rt = runtimes.get_runtime("llamacpp")
+    result = rt.start(_settings(), "unsloth/q.gguf", log=lambda _m: None,
+                      script_runner=_fake_script_runner(cmds))
+    assert result.ok is False
+    assert "LM Studio" in result.detail
+    assert cmds == []
+
+
+def test_lmstudio_start_clears_llama_server_occupation(monkeypatch):
+    """反向互斥（R3）：5001 响应 /v1/models 但非 LM Studio → 判定 llama-server 占位，
+    先脚本 stop 清位再 lms server start。"""
+    monkeypatch.setattr(lm_mod, "_sleep", lambda _s: None)
+    payloads = [
+        None,                                                       # _server_up：v0 无应答
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},           # server start 后轮询
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},           # 单活清单
+        {"data": [{"id": MODEL_27B, "state": "loaded"}]},           # load 后轮询
+    ]
+    monkeypatch.setattr(
+        lm_mod, "_get_json",
+        lambda url, timeout=2.0, token="": payloads.pop(0) if payloads else None)
+    monkeypatch.setattr(lm_mod, "probe_http", lambda url: True)
+    lms_calls: list = []
+    monkeypatch.setattr(
+        lm_mod, "_run_lms",
+        lambda args, timeout=60.0: lms_calls.append(args) or 0)
+    cmds: list = []
+    result = lm_mod.LmStudioRuntime().start(_settings(), MODEL_27B, log=lambda _m: None,
+                                            script_runner=_fake_script_runner(cmds))
+    assert result.ok is True
+    assert "qed_qwen_service.py" in cmds[0][1] and cmds[0][2] == "stop"
+    assert ["server", "start"] in lms_calls
+    assert ["load", MODEL_27B, "--gpu", "max", "-y"] in lms_calls

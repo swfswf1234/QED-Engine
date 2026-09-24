@@ -18,8 +18,14 @@ Episode 上限 max_recoveries=3 次后转纯告警（翻回 ready 预算重置�
 非就绪翻转触发掉线诊断包（docker 槽位：events + 日志尾 2000 行 + nvidia-smi -L，
 写 8900 日志）。显存水位门在 W5。
 
-设计关联（DesignRef）：docs/plans/2026-09-23-local-model-stability-round.md、
-docs/design/local-model-management.md
+W12 期望状态（用户裁决 2026-09-24）：槽位记 desired=running/stopped/未声明——观测到
+ready 即采纳 running、operate_model start/restart 经 note_desired_active 上报 running、
+stop 上报 stopped；自动恢复只对 desired=running 的故障 Episode 生效（人工停止=合法终态
+永不复活，只发一次告警）；api 来源暂停观测时清空快照与期望（不冻结旧「就绪」，
+api→local 切换不拉起模型）。
+
+设计关联（DesignRef）：docs/design/local-model-management.md、
+docs/plans/2026-09-23-local-model-stability-round.md
 实现状态：Current
 关联测试：tests/test_llm_supervisor.py
 """
@@ -29,6 +35,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -51,7 +58,7 @@ GPU_PROBE_TIMEOUT = 15.0
 
 @dataclass
 class _SlotState:
-    state: str = ""       # "" = 未观测（api 来源 / 尚未 tick）
+    state: str = ""       # "" = 未观测（api 来源 / 尚未 tick / 暂停清位）
     reason: str = ""
     gpu_visible: bool | None = None
     pending: str = ""
@@ -60,6 +67,18 @@ class _SlotState:
     attempts: int = 0        # W3 本故障 Episode 已尝试恢复次数
     given_up: bool = False   # W3 达上限转纯告警
     ticks: int = 0           # W3 非就绪态累计 tick 数（退避节拍：ticks 为 recover_cooldown 整数倍时评估）
+    desired: str = ""        # W12 在跑期望：running/stopped/""=未声明（观测采纳或人工上报）
+    alerted: bool = False    # W12 本 Episode 非期望态告警只发一次
+
+
+# 活跃实例（create_app 接线 start() 时登记；多实例后起者接管意图上报）
+_ACTIVE: ModelSupervisor | None = None
+
+
+def note_desired_active(slot: str, desired: str) -> None:
+    """外部模块（model_manager）上报槽位在跑期望；监督器未启用时静默忽略。"""
+    if _ACTIVE is not None:
+        _ACTIVE.note_desired(slot, desired)
 
 
 def docker_gpu_visible(runner: Callable = subprocess.run) -> bool:
@@ -121,8 +140,9 @@ class ModelSupervisor:
     # --- 状态机 ---
 
     def _observe(self, slot: str) -> tuple[str, str, bool | None] | None:
-        """单次分级观测 → (state, reason, gpu_visible)；None=本槽位不观测（api 来源）。"""
+        """单次分级观测 → (state, reason, gpu_visible)；None=本槽位不观测（api 来源，暂停清位）。"""
         if registry.configured_source(self.settings, slot) != "local":
+            self._pause(slot)
             return None
         ok, reason = self._probe_t1(slot)
         if not ok:
@@ -131,6 +151,18 @@ class ModelSupervisor:
         if gpu is False:
             return DEGRADED, "容器内 GPU 不可见（已知约束 7：唤醒 WSL 后重启 mineru-api 恢复）", False
         return READY, "", gpu
+
+    def _pause(self, slot: str) -> None:
+        """api 来源暂停观测：清快照与在跑期望（不冻结旧「就绪」、不携带意图跨切换模式）。"""
+        with self._lock:
+            s = self._states[slot]
+            if s.state == "":
+                return
+            LOG.info("模型监督事件 slot=%s %s->∅ reason=观察暂停（api 来源）", slot, s.state)
+            s.state, s.reason, s.gpu_visible = "", "", None
+            s.pending, s.pending_count = "", 0
+            s.desired, s.alerted = "", False
+            s.attempts, s.given_up, s.ticks = 0, False, 0
 
     def tick(self) -> None:
         """一轮全槽位观测 + 防抖状态机 + 受控恢复（守护线程体；测试直接调用驱动）。"""
@@ -170,18 +202,37 @@ class ModelSupervisor:
         s.state, s.reason, s.gpu_visible = state, reason, gpu
         s.pending, s.pending_count = "", 0
         s.last_flip = self._clock().astimezone().isoformat(timespec="seconds")
+        s.alerted = False  # 新 Episode 告警位重置
         if state == READY:
             s.attempts, s.given_up, s.ticks = 0, False, 0
+            if s.desired != "stopped":
+                s.desired = "running"  # 观测到在跑即采纳期望；人工 stopped 优先级更高
         # 事件账（结构化行，供日志检索与 W3 恢复决策；吸收 DeepTutor 稳定 reason 形态）
         LOG.info("模型监督事件 slot=%s %s->%s reason=%s", slot, frm or "∅", state, reason or "-")
+
+    def note_desired(self, slot: str, desired: str) -> None:
+        """W12 在跑期望声明入口（operate_model 经 note_desired_active 上报；测试可直调）。"""
+        if slot not in self._states or desired not in ("running", "stopped"):
+            return
+        with self._lock:
+            self._states[slot].desired = desired
+        LOG.info("模型期望状态 slot=%s desired=%s", slot, desired)
 
     # --- W3 受控恢复 ---
 
     def _recover_step(self, slot: str) -> None:
-        """非就绪槽位的恢复决策：在飞只告警；退避节拍（每 recover_cooldown 个 tick 评估一次）；上限次数后转纯告警。"""
+        """非就绪槽位恢复决策：期望≠running 只告警；在飞只告警；退避节拍评估；上限后转纯告警。"""
         with self._lock:
             s = self._states[slot]
-            if s.state not in (DOWN, DEGRADED) or s.given_up:
+            if s.state not in (DOWN, DEGRADED):
+                return
+            if s.desired != "running":
+                if not s.alerted:
+                    s.alerted = True
+                    LOG.info("模型监督告警 slot=%s state=%s 期望=%s（人工停止/未声明在跑）"
+                             "不自动恢复，仅告警", slot, s.state, s.desired or "未声明")
+                return
+            if s.given_up:
                 return
             s.ticks += 1
             if s.ticks % self._recover_cooldown:
@@ -271,9 +322,13 @@ class ModelSupervisor:
         """掉线诊断包（W6 取证素材）：docker 槽位采 events + 日志尾 2000 行 + GPU 可见性。"""
         if registry.slot_runtime(self.settings, slot) != "docker":
             return
+        now = int(time.time())
         captures = [
-            ("docker-events", ["wsl", "-e", "docker", "events", "--since", "10m", "--until", "now",
-                               "--format", "{{.Action}} {{.Status}} {{.Actor.Attributes.name}}"]),
+            # epoch 整数 since/until + 仅现存字段：{{.Status}} 与「--until now」在真机
+            # 分别 rc=64 / rc=1（09-24 取证），旧写法 events 段实际采空
+            ("docker-events", ["wsl", "-e", "docker", "events",
+                               "--since", str(now - 600), "--until", str(now),
+                               "--format", "{{.Action}} {{.Type}} {{.Actor.Attributes.name}}"]),
             ("mineru-logs", ["wsl", "-e", "docker", "logs", "--tail", "2000", "mineru-api"]),
             ("gpu-probe", ["wsl", "-e", "docker", "exec", "mineru-api", "nvidia-smi", "-L"]),
         ]
@@ -301,9 +356,11 @@ class ModelSupervisor:
     # --- 线程生命周期 ---
 
     def start(self) -> None:
-        """起守护线程（先等 interval 再首 tick，测试进程快速建/拆 app 不触发探测）。"""
+        """起守护线程（先等 interval 再首 tick，测试进程快速建/拆 app 不触发探测）；登记为活跃实例。"""
+        global _ACTIVE
         if self._thread is not None:
             return
+        _ACTIVE = self
         self._thread = threading.Thread(target=self._loop, daemon=True, name="model-supervisor")
         self._thread.start()
 

@@ -43,7 +43,8 @@ class LocalRuntime(Protocol):
     def probe(self, settings: Settings, model: str = "") -> bool: ...
 
     def start(self, settings: Settings, model: str = "", log: Callable[[str], None] | None = None,
-              script_runner: Callable | None = None) -> RuntimeResult: ...
+              script_runner: Callable | None = None,
+              params: dict | None = None) -> RuntimeResult: ...
 
     def stop(self, settings: Settings, model: str = "", log: Callable[[str], None] | None = None,
              script_runner: Callable | None = None) -> RuntimeResult: ...
@@ -58,12 +59,16 @@ def probe_http(url: str) -> bool:
         return False
 
 
-def run_script(script: Path, command: str, script_runner: Callable | None = None) -> int:
-    """执行本地模型生命周期脚本（start/stop）；script_runner 可注入（测试）。"""
+def run_script(script: Path, command: str, script_runner: Callable | None = None,
+               extra_args: tuple[str, ...] = ()) -> int:
+    """执行本地模型生命周期脚本（start/stop）；script_runner 可注入（测试）。
+
+    extra_args：加载参数旗标（ARCH-033，8900 由 registry 身份表注入脚本 CLI）。
+    """
     runner = script_runner or subprocess.run
     try:
         result = runner(
-            [sys.executable, str(script), command],
+            [sys.executable, str(script), command, *extra_args],
             capture_output=True,
             text=True,
             timeout=600,
@@ -86,13 +91,19 @@ class ScriptRuntime:
         return probe_http(self.health_url(settings))
 
     def start(self, settings: Settings, model: str = "", log: Callable[[str], None] | None = None,
-              script_runner: Callable | None = None) -> RuntimeResult:
+              script_runner: Callable | None = None,
+              params: dict | None = None) -> RuntimeResult:
         log = log or (lambda _m: None)
         log(f"start {self.label}")
-        rc = run_script(self.script, "start", script_runner)
+        rc = run_script(self.script, "start", script_runner,
+                        extra_args=tuple(self.extra_start_args(model, params or {})))
         if rc != 0:
             return RuntimeResult(False, f"start {self.label} 失败（rc={rc}）")
         return RuntimeResult(True, f"start {self.label} 完成")
+
+    def extra_start_args(self, model: str, params: dict) -> list[str]:
+        """子类钩子：加载参数 → 脚本 CLI 旗标（llamacpp 覆写；docker 无参数恒空）。"""
+        return []
 
     def stop(self, settings: Settings, model: str = "", log: Callable[[str], None] | None = None,
              script_runner: Callable | None = None) -> RuntimeResult:

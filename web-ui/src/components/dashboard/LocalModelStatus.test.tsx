@@ -1,12 +1,18 @@
+/**
+ * 块一「本地模型列表」分节测试（2026-09-24 五改 F1）
+ * - 分节标题「本地模型列表」居中；文字模型在左、图像模型在右两栏（slot-column 顺序断言）
+ * - 每栏顺序＝槽位名 → 模型名称（slot.model 非空即显示，不限已加载）→ 状态徽章；固定列宽
+ * - 三态判据不变（四改）：ready→已加载；api/degraded→未加载；down/无数据→未启动
+ * - 四改旧形态退役：「本地模型服务」标题、上下两行布局不再出现
+ */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
-import LocalModelStatus from './LocalModelStatus';
+import LocalModelStatus, { slotModelState } from './LocalModelStatus';
 import { theme } from '../../theme';
 import { useRuntimeStore } from '../../stores/runtime';
-import type { GpuStatus, SlotStatus } from '../../stores';
+import type { SlotStatus } from '../../stores';
 
-/** 槽位状态最小夹具（仪表盘状况卡只消费这些字段） */
 function slot(partial: Partial<SlotStatus> & Pick<SlotStatus, 'slot' | 'source'>): SlotStatus {
   return {
     channel: partial.source === 'api' ? 'direct' : 'lmstudio',
@@ -15,18 +21,13 @@ function slot(partial: Partial<SlotStatus> & Pick<SlotStatus, 'slot' | 'source'>
   } as SlotStatus;
 }
 
-function seed(
-  slots: { text: SlotStatus | null; vision: SlotStatus | null },
-  opts: { guard?: boolean; gpu?: GpuStatus | null } = {},
-) {
+function seed(slots: { text: SlotStatus | null; vision: SlotStatus | null }) {
   useRuntimeStore.setState({
     slots: { text: slots.text, vision: slots.vision, embedding: null },
-    keys: { provider: 'qwen', configured: true, mode: 'local', resource_guard: opts.guard ?? true },
-    gpu: opts.gpu ?? null,
   });
 }
 
-function renderCard() {
+function renderSection() {
   return render(
     <ConfigProvider theme={theme}>
       <LocalModelStatus />
@@ -34,115 +35,94 @@ function renderCard() {
   );
 }
 
-const GPU: GpuStatus = { available: true, memory_total_mb: 16384, memory_used_mb: 8192 };
+function columns(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>('[data-slot-column]')];
+}
 
-describe('仪表盘「本地模型状况」卡（ARCH-028 W4 显隐与单卡规则）', () => {
+describe('slotModelState（三态判据，四改口径不变）', () => {
+  it('null→未启动；api 先于 ready（api 的 ready=API_KEY 已配置≠模型已加载）', () => {
+    expect(slotModelState(null)).toBe('未启动');
+    expect(slotModelState(slot({ slot: 'text', source: 'api', ready: true }))).toBe('未加载');
+    expect(slotModelState(slot({ slot: 'text', source: 'local', health_state: 'down' }))).toBe('未启动');
+    // degraded 并入未加载（四改裁决）
+    expect(slotModelState(slot({ slot: 'text', source: 'local', health_state: 'degraded' }))).toBe('未加载');
+    expect(slotModelState(slot({ slot: 'text', source: 'local', health_state: 'ready' }))).toBe('未加载');
+  });
+
+  it('ready=true（local）→ 已加载', () => {
+    expect(slotModelState(slot({ slot: 'text', source: 'local', ready: true, health_state: 'ready' }))).toBe('已加载');
+  });
+});
+
+describe('仪表盘块一「本地模型列表」分节（五改 F1）', () => {
   beforeEach(() => {
-    useRuntimeStore.setState({ slots: { text: null, vision: null, embedding: null }, keys: null, gpu: null });
+    useRuntimeStore.setState({ slots: { text: null, vision: null, embedding: null } });
   });
 
-  it('全槽位 api 来源（或未加载）→ 整卡隐藏', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'api' }),
-        vision: slot({ slot: 'vision', source: 'api' }),
-      },
-    );
-    renderCard();
-    expect(screen.queryByText('本地模型状况')).not.toBeInTheDocument();
+  it('分节标题「本地模型列表」居中；左右两栏且文字模型在左（旧「本地模型服务」退役）', () => {
+    const { container } = renderSection();
+    const heading = screen.getByText('本地模型列表');
+    // antd Text strong 渲染 span.ant-typography>strong，getByText 命中最内层 strong，
+    // 居中层是最近的 div 祖先（非 parentElement）
+    expect(heading.closest('div')).toHaveStyle({ 'text-align': 'center' });
+    expect(screen.queryByText('本地模型服务')).not.toBeInTheDocument();
+    const cols = columns(container);
+    expect(cols.map((c) => c.dataset.slotColumn)).toEqual(['text', 'vision']);
+    // 两栏恒在（无数据也各占一栏，不再是上下两行）
+    expect(screen.getAllByText('未启动')).toHaveLength(2);
   });
 
-  it('未加载（slots 全 null）→ 隐藏不闪空态', () => {
-    seed({ text: null, vision: null });
-    renderCard();
-    expect(screen.queryByText('本地模型状况')).not.toBeInTheDocument();
+  it('栏内顺序＝槽位名 → 模型名称 → 状态徽章；模型名非空即显示（未加载也显示）', () => {
+    seed({
+      text: slot({ slot: 'text', source: 'local', model: 'qwen3-32b', health_state: 'ready', ready: false }),
+      vision: slot({ slot: 'vision', source: 'local', model: 'qwen-vl', health_state: 'down' }),
+    });
+    const { container } = renderSection();
+    const textCol = columns(container)[0];
+    expect(textCol.textContent).toBe('文字模型qwen3-32b未加载');
+    const visionCol = columns(container)[1];
+    expect(visionCol.textContent).toBe('图像模型qwen-vl未启动');
   });
 
-  it('单活守卫开：恒单卡，图像模型就绪即切图像并持续监控', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'local', health_state: 'down', ready: false }),
-        vision: slot({ slot: 'vision', source: 'local', channel: 'docker', health_state: 'ready', ready: true }),
-      },
-      { guard: true },
-    );
-    renderCard();
-    expect(screen.getByText('本地模型状况')).toBeInTheDocument();
-    expect(screen.getByText('图像模型')).toBeInTheDocument();
-    expect(screen.getByText('就绪')).toBeInTheDocument();
-    expect(screen.getByText('Docker')).toBeInTheDocument();
-    // 单卡：文字模型不呈现
-    expect(screen.queryByText('文字模型')).not.toBeInTheDocument();
+  it('已加载 → 徽章「已加载」+ 模型名；无模型名时名字段留空但徽章定宽（列宽不移动）', () => {
+    seed({
+      text: slot({ slot: 'text', source: 'local', model: 'glm-4.5', ready: true, health_state: 'ready' }),
+      vision: slot({ slot: 'vision', source: 'local', ready: false }),
+    });
+    const { container } = renderSection();
+    const cols = columns(container);
+    expect(cols[0].textContent).toBe('文字模型glm-4.5已加载');
+    expect(cols[1].textContent).toBe('图像模型未加载');
+    const badge = cols[1].querySelector('.ant-tag') as HTMLElement;
+    expect(badge.style.width).toBe('64px');
+    // 不显示：channel、翻转时间、旧徽章词
+    expect(screen.queryByText(/LM Studio|Docker|翻转于/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/就绪|降级|掉线|未就绪|服务存活/)).not.toBeInTheDocument();
   });
 
-  it('单活守卫开：都没在跑 → 默认呈现文字槽位（未就绪态）', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'local', ready: false }),
-        vision: slot({ slot: 'vision', source: 'local', ready: false }),
-      },
-      { guard: true },
-    );
-    renderCard();
-    expect(screen.getByText('文字模型')).toBeInTheDocument();
-    expect(screen.getByText('未就绪')).toBeInTheDocument();
-    expect(screen.queryByText('图像模型')).not.toBeInTheDocument();
+  it('全 api → 两栏均「未加载」且显示 api 模型名（分节不隐藏）', () => {
+    seed({
+      text: slot({ slot: 'text', source: 'api', model: 'qwen-plus', ready: true }),
+      vision: slot({ slot: 'vision', source: 'api', ready: false }),
+    });
+    const { container } = renderSection();
+    const cols = columns(container);
+    expect(cols[0].textContent).toBe('文字模型qwen-plus未加载');
+    expect(cols[1].textContent).toBe('图像模型未加载');
+    expect(screen.getAllByText('未加载')).toHaveLength(2);
   });
 
-  it('单活守卫开：都没在跑但有近期翻转 → 呈现最后活跃槽位（图像）', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'local', ready: false, last_flip: '2026-09-23T08:00:00+08:00' }),
-        vision: slot({ slot: 'vision', source: 'local', ready: false, last_flip: '2026-09-23T10:00:00+08:00' }),
-      },
-      { guard: true },
-    );
-    renderCard();
-    expect(screen.getByText('图像模型')).toBeInTheDocument();
-    expect(screen.getByText('翻转于 10:00:00')).toBeInTheDocument();
-  });
-
-  it('守卫关 → 文字/图像双卡并列', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'local', health_state: 'ready', ready: true }),
-        vision: slot({ slot: 'vision', source: 'local', channel: 'docker', health_state: 'down', ready: false }),
-      },
-      { guard: false },
-    );
-    renderCard();
-    expect(screen.getByText('文字模型')).toBeInTheDocument();
-    expect(screen.getByText('图像模型')).toBeInTheDocument();
-    expect(screen.getByText('掉线')).toBeInTheDocument();
-  });
-
-  it('降级态：T1 绿 + GPU 不可见 → 徽章「降级」+ 显存读数', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'api' }),
-        vision: slot({
-          slot: 'vision', source: 'local', channel: 'docker', ready: true,
-          health_state: 'degraded', health_reason: '容器内 GPU 不可见', gpu_visible: false,
-        }),
-      },
-      { gpu: GPU },
-    );
-    renderCard();
-    expect(screen.getByText('降级')).toBeInTheDocument();
-    expect(screen.getByText(/8\.0 \/ 16 GiB/)).toBeInTheDocument();
-  });
-
-  it('监督器关闭回退：health_state 空按 ready 推导（旧后端兼容）', () => {
-    seed(
-      {
-        text: slot({ slot: 'text', source: 'local', ready: true }),
-        vision: slot({ slot: 'vision', source: 'api' }),
-      },
-    );
-    renderCard();
-    expect(screen.getByText('文字模型')).toBeInTheDocument();
-    expect(screen.getByText('就绪')).toBeInTheDocument();
-    // keys 未下发 resource_guard（旧后端）→ 按 true 兜底：单卡不呈现图像
-    expect(screen.queryByText('图像模型')).not.toBeInTheDocument();
+  it('degraded（容器 GPU 不可见）→ 徽章「未加载」，原因只进 tooltip 不上卡面', () => {
+    seed({
+      text: slot({ slot: 'text', source: 'api' }),
+      vision: slot({
+        slot: 'vision', source: 'local', channel: 'docker', ready: false,
+        health_state: 'degraded', health_reason: '容器内 GPU 不可见', gpu_visible: false,
+      }),
+    });
+    renderSection();
+    expect(screen.getAllByText('未加载')).toHaveLength(2);
+    expect(screen.queryByText('容器内 GPU 不可见')).not.toBeInTheDocument();
+    expect(screen.queryByText(/显存/)).not.toBeInTheDocument();
   });
 });

@@ -122,7 +122,7 @@ def qwen_chat(
     max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
     """
     own = client is None
-    http = client or httpx.Client(timeout=timeout)
+    http = client or httpx.Client(timeout=timeout, trust_env=False)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -235,7 +235,7 @@ def mineru_parse(
     若引擎摘除需同步对齐本函数。
     """
     own = client is None
-    http = client or httpx.Client(timeout=30.0)
+    http = client or httpx.Client(timeout=30.0, trust_env=False)
     try:
         files = {"files": (filename, file_bytes, "application/pdf")}
         response = http.post(f"{base_url.rstrip('/')}/file_parse", files=files)

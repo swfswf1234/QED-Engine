@@ -54,13 +54,18 @@ SLOT_ENV_FIELDS = {
 
 @dataclass(frozen=True)
 class Identity:
-    """模型身份：一个可被用户指名选择的模型（不分 api/local）。"""
+    """模型身份：一个可被用户指名选择的模型（不分 api/local）。
+
+    ARCH-033：params 为加载层启动参数（runtime → 参数组，键取 runtime 原生名），
+    改参数=改本表+重启 8900，无 json 配置子系统与 UI 编辑（裁决 R1）。
+    """
 
     name: str
     slot: str
     description: str = ""  # 一句话备注（控制台「备注」行）
     api: tuple[str, str] | None = None  # api 引用（provider, model）
     local: dict[str, str] | None = None  # 本地引用（runtime → 模型标识）
+    params: dict[str, dict] = field(default_factory=dict)  # runtime → 加载参数（ARCH-033）
 
 
 # 身份目录（首版静态表；新增部署形态=补 local 引用，新增模型=补条目）
@@ -78,13 +83,20 @@ IDENTITIES: dict[str, Identity] = {
             "qwen3.8-27b",
             "text",
             "Qwen3.8 27B，本机 LM Studio 已下载",
-            local={"lmstudio": "qwen3.8-27b"},
+            local={"lmstudio": "qwen3.8-27b",
+                   "llamacpp": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q3_K_XL.gguf"},
+            # 27B@16384 预估 16.10 GiB 超 4080 16GB——R5 改判 8192（双渠道同约束）
+            params={"lmstudio": {"context": 8192, "gpu": "max"},
+                    "llamacpp": {"ctx": 8192, "ngl": -1, "fa": True}},
         ),
         Identity(
             "qwen3.5-9b",
             "text",
             "Qwen3.5 9B，轻量本地模型",
-            local={"lmstudio": "qwen/qwen3.5-9b"},
+            local={"lmstudio": "qwen/qwen3.5-9b",
+                   "llamacpp": "lmstudio-community/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0.gguf"},
+            params={"lmstudio": {"context": 16384, "gpu": "max"},
+                    "llamacpp": {"ctx": 16384, "ngl": -1, "fa": True}},
         ),
         Identity(
             "qwen-vl-plus", "vision", "通义千问 VL Plus，云端视觉模型", api=("qwen", "qwen-vl-plus")
@@ -340,6 +352,16 @@ def local_binding(settings: Settings, slot: str,
         notes.append(f"身份 {ident_name} 在 runtime {runtime} 无本地引用，回退槽位默认 {fb}")
         ident_name = fb
     return runtime, local_ref, ident_name, notes
+
+
+def binding_params(settings: Settings, slot: str,
+                   manifest_root: Path | None = None) -> dict:
+    """生效绑定的加载层参数（runtime × 身份，ARCH-033）；无绑定或未声明返回 {}。"""
+    binding = local_binding(settings, slot, manifest_root)
+    if binding is None:
+        return {}
+    runtime, _ref, ident_name, _notes = binding
+    return dict(IDENTITIES[ident_name].params.get(runtime, {}))
 
 
 def _resolve_local(slot: str, ident_name: str, settings: Settings,

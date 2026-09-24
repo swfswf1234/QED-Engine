@@ -2,8 +2,8 @@
 模块职责：ARCH-028 本地模型监督器单测——首观测即时定态、状态机防抖翻转（N 次同向）、
 分级探测（T1 存活 + T2 容器内 GPU 可见性 → 降级态）、api 来源槽位跳过、快照契约，
 以及 GET /models/{slot} 健康字段扩展（health_state / gpu_visible / last_flip）。
-设计关联（DesignRef）：docs/plans/2026-09-23-local-model-stability-round.md、
-docs/design/local-model-management.md
+设计关联（DesignRef）：docs/design/local-model-management.md、
+docs/plans/2026-09-23-local-model-stability-round.md
 实现状态：Current
 被测代码：backend/qed_engine/services/llm/supervisor.py、backend/qed_engine/api/control.py
 """
@@ -235,6 +235,7 @@ def test_degraded_flip_triggers_recovery():
     sup = _supervisor(lambda slot: (True, ""),
                       probe_gpu=lambda slot: False if slot == "vision" else None,
                       recover=calls.append)
+    sup.note_desired("vision", "running")  # W12：期望已声明（控制台 start 语义）才进恢复通道
     for _ in range(4):  # 初始观测 degraded 定态 → ticks=4 到节拍触发恢复
         sup.tick()
     assert sup.snapshot("vision")["state"] == supervisor.DEGRADED
@@ -290,6 +291,8 @@ def test_ready_flip_resets_recovery_budget(caplog):
     state = {"down": True}
     sup = _supervisor(lambda slot: (False, "连接失败") if state["down"] else (True, ""),
                       recover=calls.append, recover_cooldown=1)
+    sup.note_desired("text", "running")  # W12：期望已声明才走恢复通道（本例验证预算重置）
+    sup.note_desired("vision", "running")
     sup.tick()  # 初始观测即翻 down，翻转 tick 即评估 → 各槽位第 1 次
     assert calls == ["text", "vision"]
     state["down"] = False
@@ -321,6 +324,33 @@ def test_diagnostics_exception_does_not_break_tick():
     for _ in range(4):
         sup.tick()  # 不抛出即通过
     assert sup.snapshot("text")["state"] == supervisor.DOWN
+
+
+def test_default_diagnostics_events_cmd_uses_epoch_and_existing_fields(monkeypatch):
+    # 真机取证（09-24）：{{.Status}} 字段不存在 rc=64、「--until now」解析失败 rc=1，
+    # events 段实际采空；修正为 epoch since/until + 现存字段（实测 rc=0）
+    calls = []
+
+    class _Ok:
+        returncode = 0
+        stdout = b"create container mineru-api"
+        stderr = b""
+
+    def fake_run(cmd, **kw):
+        calls.append(list(cmd))
+        return _Ok()
+
+    monkeypatch.setattr(supervisor.subprocess, "run", fake_run)
+    sup = _supervisor(lambda slot: (True, ""))
+    sup._default_diagnostics("vision")
+
+    events = next(c for c in calls if "events" in c)
+    assert ".Status" not in " ".join(events)
+    assert "now" not in events
+    since = events[events.index("--since") + 1]
+    until = events[events.index("--until") + 1]
+    assert since.isdigit() and until.isdigit()
+    assert int(until) - int(since) == 600
 
 
 def test_no_recovery_when_ready():
@@ -443,3 +473,71 @@ def test_supervisor_info_line_reaches_stderr(capsys, monkeypatch):
     supervisor.LOG.info("模型监督事件 slot=test-emit")
     captured = capsys.readouterr()
     assert "slot=test-emit" in captured.err, "INFO 事件行不得被静默丢弃（事件账 v1 走 8900 日志）"
+
+
+# --- W12 期望状态（desired）：人工停止/切回 local 不自动拉起（用户裁决 2026-09-24） ---
+
+
+def test_first_observation_down_does_not_auto_start():
+    """进程首观测 down（8900 启动时模型本就没跑/被人工停过）：只定态告警，不派发重启。"""
+    calls: list[str] = []
+    sup = _supervisor(lambda slot: (False, "拒连"), recover=calls.append, recover_cooldown=1)
+    for _ in range(4):
+        sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.DOWN
+    assert calls == [], "无在跑期望声明不自动恢复（旧行为＝退避重启拉起）"
+
+
+def test_manual_stop_suppresses_auto_recovery(caplog):
+    """控制台 stop（desired=stopped）后 ready→down：不派发重启，每 episode 只告警一次。"""
+    import logging
+
+    calls: list[str] = []
+    sup = _supervisor(_down_probe(), recover=calls.append)
+    sup.note_desired("text", "stopped")
+    sup.note_desired("vision", "stopped")
+    with caplog.at_level(logging.INFO, logger="qed_engine.services"):
+        for _ in range(12):
+            sup.tick()
+    assert calls == [], "人工停止槽位永不自动复活（直到下次手动 start）"
+    alerts = [r.message for r in caplog.records if "仅告警" in r.message]
+    assert len(alerts) == 2, "text/vision 各一条，不重复刷屏"
+    assert any("slot=text" in a for a in alerts)
+
+
+def test_observed_ready_adopts_running_and_crash_recovers():
+    """首观测就绪 → 采纳 desired=running；其后掉线属故障，退避自动重启照常（保留 W3 语义）。"""
+    calls: list[str] = []
+    sup = _supervisor(_down_probe(), recover=calls.append)
+    for _ in range(8):
+        sup.tick()
+    assert calls == ["text", "vision"]
+
+
+def test_api_pause_clears_stale_snapshot_and_intent(monkeypatch):
+    """切 api：观测暂停、快照清空（不再冻结旧「就绪」）；切回 local 停着模型→定态 down 但不拉起。"""
+    from qed_engine.services.llm import registry
+
+    mode = {"src": "local"}
+    monkeypatch.setattr(registry, "configured_source", lambda s, slot: mode["src"])
+    alive = {"ok": True}
+    rec: list[str] = []
+    sup = _supervisor(lambda slot: (alive["ok"], ""), recover=rec.append, recover_cooldown=1)
+    sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.READY
+    mode["src"] = "api"
+    alive["ok"] = False  # api 期间模型被人工停止
+    sup.tick()
+    assert sup.snapshot("text")["state"] == "", "api 暂停须清快照，仪表盘不得再显冻结的 ready"
+    mode["src"] = "local"
+    sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.DOWN, "切回即初观测定态"
+    assert rec == [], "api→local 切换不得启动本地模型（期望已随暂停清空）"
+
+
+def test_note_desired_ignores_unknown_slot_and_value():
+    sup = _supervisor(lambda slot: (True, ""))
+    sup.note_desired("embedding", "running")
+    sup.note_desired("text", "bogus")
+    sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.READY  # 非法入参静默忽略不破坏观测

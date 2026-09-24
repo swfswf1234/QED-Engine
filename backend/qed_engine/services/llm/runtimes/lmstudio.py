@@ -25,7 +25,7 @@ import urllib.request
 from collections.abc import Callable
 
 from qed_engine.config import Settings
-from qed_engine.services.llm.runtimes.base import RuntimeResult
+from qed_engine.services.llm.runtimes.base import RuntimeResult, probe_http
 
 # REST API v0 探活端点（W7 本机实测：仅 models 可用；load/unload 不存在于本机版本）
 MODELS_PATH = "/api/v0/models"
@@ -125,11 +125,21 @@ class LmStudioRuntime:
         return _contains_id(ids, model)
 
     def start(self, settings: Settings, model: str = "", log: Callable[[str], None] | None = None,
-              script_runner: Callable | None = None) -> RuntimeResult:
+              script_runner: Callable | None = None,
+              params: dict | None = None) -> RuntimeResult:
         log = log or (lambda _m: None)
         if not model:
             return RuntimeResult(False, "未指定 LM Studio 模型标识（注册表本地引用缺失）")
         if not _server_up(settings):
+            # 反向互斥（ARCH-033 R3）：/v1/models 有应答而 REST v0 无应答
+            # = 端口被 llama-server 占位，先脚本 stop 清位再起 LM Studio server
+            if probe_http(settings.qed_model_url.rstrip("/") + "/models"):
+                from qed_engine.services.llm.runtimes import llamacpp
+                log("5001 被 llama-server 占位，脚本 stop 清位")
+                cleared = llamacpp.runtime.stop(settings, "", log=log,
+                                                script_runner=script_runner)
+                if not cleared.ok:
+                    return RuntimeResult(False, f"清理 llama-server 失败：{cleared.detail}")
             log("LM Studio server 未启动，尝试 lms server start")
             if _run_lms(["server", "start"]) != 0:
                 return RuntimeResult(False, "lms CLI 启动失败（不在 PATH 或 server 启动报错）")
@@ -146,8 +156,17 @@ class LmStudioRuntime:
                 log(f"unload {loaded}（单活互斥）")
                 if _run_lms(["unload", loaded]) != 0:
                     return RuntimeResult(False, f"卸载已加载模型失败：{loaded}（lms unload rc≠0）")
-        # 加载目标（--gpu max：单活语义下独占 4080 16GB 显存；幂等，已加载时 CLI 返回 0）
-        if _run_lms(["load", model, "--gpu", "max"]) != 0:
+        # 加载目标（幂等，已加载时 CLI 返回 0）；参数来自 registry 身份表（ARCH-033），
+        # 缺省 gpu=max 保持单活语义下独占显存；无 params 时行为与旧版逐字节一致
+        load_args = ["load", model, "--gpu", str((params or {}).get("gpu", "max"))]
+        if (params or {}).get("context"):
+            load_args += ["-c", str(params["context"])]
+        if (params or {}).get("parallel"):
+            load_args += ["--parallel", str(params["parallel"])]
+        if (params or {}).get("ttl"):
+            load_args += ["--ttl", str(params["ttl"])]
+        load_args.append("-y")  # W7 真机：歧义 key 触发交互式选择，后台无 TTY 即挂死
+        if _run_lms(load_args) != 0:
             return RuntimeResult(False, f"LM Studio 加载模型失败：{model}（lms load rc≠0）")
         deadline = time.monotonic() + LOAD_TIMEOUT_S
         while time.monotonic() < deadline:

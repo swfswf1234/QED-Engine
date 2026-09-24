@@ -54,13 +54,13 @@
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `backend/qed_engine/services/llm/registry.py` | 模型身份注册表 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_registry.py` | PLAN-046 v3：身份目录（身份→api/本地引用 + description）+ 槽位级来源/渠道运行态（manifest.source/runtime/active）+ 渠道/模型选项派生，gateway/model_manager 统一消费。 |
+| `backend/qed_engine/services/llm/registry.py` | 模型身份注册表 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_registry.py` | PLAN-046 v3：身份目录（身份→api/本地引用 + description）+ 槽位级来源/渠道运行态（manifest.source/runtime/active）+ 渠道/模型选项派生，gateway/model_manager 统一消费。ARCH-033：Identity.params 加载层参数（runtime→参数组，唯一事实源）+ binding_params 解析注入。 |
 | `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py` | 文字/视觉/向量统一入口，经注册表解析按 QED_API_SELECT 路由 api/local（local 经单活仲裁拉起）。 |
 | `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen 文字/视觉、MinerU、provider_embeddings（向量）；httpx transport 可注入。 |
 | `backend/qed_engine/services/llm/model_manager.py` | 本地模型服务维护（启停与单活仲裁） | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 v3：ensure_local_ready(slot) 单活仲裁（槽位渠道 manifest.runtime > 全局默认）；operate_model 槽位化 + qwen/mineru 旧名别名。 |
-| `backend/qed_engine/services/llm/runtimes/base.py` | 本地 runtime 基座 | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：LocalRuntime 协议（probe/start/stop）+ RuntimeResult + 脚本型基类（llamacpp/docker 复用 scripts/ 生命周期脚本）。 |
-| `backend/qed_engine/services/llm/runtimes/lmstudio.py` | LM Studio 半托管 runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 + W7 实测：probe=REST v0 `state=loaded`；start=lms server start + `lms load --gpu max`（先卸载其他已加载）；stop=`lms unload`（server 保留）；端点 `QED_MODEL_URL`；探活经 QED_LMSTUDIO_TOKEN 带认证。 |
-| `backend/qed_engine/services/llm/runtimes/llamacpp.py` | llamacpp runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：llama-server 生命周期复用 text-model 脚本（端点 `QED_MODEL_URL`）；身份目录暂无 llamacpp 引用（预留，加引用即接通）。 |
+| `backend/qed_engine/services/llm/runtimes/base.py` | 本地 runtime 基座 | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：LocalRuntime 协议（probe/start/stop，start 带 params 关键字）+ RuntimeResult + 脚本型基类（llamacpp/docker 复用 scripts/ 生命周期脚本；extra_start_args 钩子注入参数旗标）。 |
+| `backend/qed_engine/services/llm/runtimes/lmstudio.py` | LM Studio 半托管 runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 + W7 实测：probe=REST v0 `state=loaded`；start=lms server start + `lms load`（ARCH-033：按身份 params 带 `-c/--gpu/--parallel/--ttl`，缺省 `--gpu max` 不变；先卸载其他已加载；5001 被 llama-server 占位时脚本 stop 反向清位，裁决 R3）；stop=`lms unload`（server 保留）；端点 `QED_MODEL_URL`；探活经 QED_LMSTUDIO_TOKEN 带认证。 |
+| `backend/qed_engine/services/llm/runtimes/llamacpp.py` | llamacpp runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | ARCH-033 真做：llama-server 生命周期复用 text-model 脚本（端点 `QED_MODEL_URL`，与 LM Studio 共用 5001）；身份表已挂 llamacpp GGUF 引用（~/.lmstudio/models 相对）+ 加载参数；启动前探测常驻 LM Studio server 占位 → 自动 `lms unload --all` + `lms server stop` 让位（裁决 R3；W7 真机修正：单独 stop 不释放 worker 显存）。 |
 | `backend/qed_engine/services/llm/runtimes/docker.py` | docker runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：MinerU 容器生命周期复用 image-model 脚本（infra-*.ps1）；端点 `QED_OCR_MODEL_URL`（5002）；vision 槽位默认 runtime。 |
 | `backend/qed_engine/services/llm/supervisor.py` | 本地模型服务维护·健康监督 | Current | `docs/design/local-model-management.md` | `tests/test_llm_supervisor.py` | ARCH-028 W2：T1（probe_slot）+T2（容器内 nvidia-smi，fail-closed）分级探测、ready/degraded/down 状态机 N=3 防抖、翻转事件日志，供 /models/{slot} health_* 字段与仪表盘状况卡消费；`QED_MODEL_SUPERVISOR` 默认开。W3 受控恢复：非就绪退避节拍（每 4 tick≈2min）派发 restart、≤3 次转纯告警、ready 翻转重置；在飞门双路（REQ-088 列表端点，旧码回退 active_job_id；8902 离线放行/查询失败保守在飞）；非就绪翻转采掉线诊断包（docker events+日志尾+GPU）。只维护模型服务本身，不涉及 prompt。 |
 | `backend/qed_engine/services/llm/call_log.py` | LLM 调用记录 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_call_log.py` | qed_llm_calls 幂等建表/写入/分页检索；DB 不可达降级。 |
@@ -89,6 +89,7 @@
 | `tests/test_llm_registry.py` | 模型身份注册表契约测试 | Current | `docs/design/llm-gateway.md` | — | 身份目录覆盖、来源/渠道/身份三级运行态优先级、渠道与模型选项派生、api/local 解析与回退。 |
 | `tests/test_llm_call_log.py` | LLM 调用记录契约测试 | Current | `docs/design/llm-gateway.md` | — | 建表 SQL、写入字段、分页检索。 |
 | `tests/test_llm_endpoints.py` | LLM 网关端点契约测试 | Current | `docs/design/llm-gateway.md` | — | /llm/text、/llm/vision、/llm/test/* 端点。 |
+| `tests/test_llm_supervisor.py` | 本地模型监督器契约测试 | Current | `docs/design/local-model-management.md` | — | 分级探测定态/防抖翻转事件/退避恢复≤3 在飞门双路/W12 期望状态（人工停止不复活、api 暂停清位）/诊断包异常不阻断。 |
 | `tests/conftest.py` | 根测试基座（autouse 打桩） | Current | `docs/architecture/api-contracts.md` | — | probe_pdh/monitor.subprocess.run 打桩，隔离真实 PowerShell 调用与测试污染。 |
 
 ### 测试·契约

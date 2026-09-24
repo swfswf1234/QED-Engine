@@ -286,3 +286,39 @@ def test_provider_embeddings_bad_format():
                 api_key="sk-test", model="text-embedding-v4",
                 input_texts=["hi"], client=client,
             )
+
+
+def test_local_clients_self_built_disable_env_proxy(monkeypatch):
+    """回归（与 monitor 探针同源假 502）：qwen_chat/mineru_parse 未注入 client 自建时必须 trust_env=False。
+
+    本机注册表代理经环境变量劫持 127.0.0.1:5001/5002 请求产生假 502，控制台 local 直连随机失效。
+    """
+    captured = []
+
+    class _StubClient:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+        def get(self, url, **kw):
+            if url.endswith("/models"):
+                return httpx.Response(200, json={"data": [{"id": "qwen3-8b"}]})
+            return httpx.Response(200, json={
+                "code": 200,
+                "data": {"state": "done", "full_zip_url": "", "markdown": "## 标题"},
+            })
+
+        def post(self, url, **kw):
+            if url.endswith("/file_parse"):
+                return httpx.Response(200, json={"task_id": "t-1"})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "本地回答"}}]})
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(clients.httpx, "Client", _StubClient)
+    reply = clients.qwen_chat("http://127.0.0.1:5001/v1", [{"role": "user", "content": "hi"}])
+    assert reply == "本地回答"
+    md = clients.mineru_parse("http://127.0.0.1:5002", b"pdf", "a.pdf", poll_interval=0.01, max_wait=1.0)
+    assert "标题" in md
+    assert len(captured) == 2
+    assert all(k.get("trust_env") is False for k in captured)
