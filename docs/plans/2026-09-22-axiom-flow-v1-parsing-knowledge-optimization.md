@@ -5,7 +5,7 @@
 最后更新：2026-09-22
 关联 ADR：无新增（治理沿用 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 不确定文档暂居 plans/；跨项目执行边界见 standards/cross-project-collaboration.md）
 关联设计：[dataset-conventions.md](../design/dataset-conventions.md)（产物布局）、
-[交互全链路](2026-09-14-parsing-management-axiom-flow-chain.md)（8902 契约 + af_* 四表事实源）
+[parsing-flow.md](../design/parsing-flow.md)（8902 契约 + af_* 四表根侧契约事实源）
 关联 Tracker：docs/trackers/todo.md（ARCH-025 任务行，一任务一行一壳，ADR 0016）
 归档判定：Retain（滚动记录，关闭时按当时里程碑归档 history/plans/）
 

@@ -29,6 +29,7 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const editMode = useParsingStore((s) => s.editMode);
   const activeJob = useParsingStore((s) => s.activeJob);
   const jobError = useParsingStore((s) => s.jobError);
+  const jobSubmitting = useParsingStore((s) => s.jobSubmitting);
   const edits = useParsingStore((s) => s.edits);
   const compareBookId = useParsingStore((s) => s.compareBookId);
   const setScrollMode = useParsingStore((s) => s.setScrollMode);
@@ -115,10 +116,10 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
             书页入库
           </Button>
         </Tooltip>
-        <Button size="small" type="primary" disabled={running || book.ingest_status !== 'ingested'} onClick={() => void createParseJob([pageNo])}>
+        <Button size="small" type="primary" disabled={running || jobSubmitting || book.ingest_status !== 'ingested'} onClick={() => void createParseJob([pageNo])}>
           解析本页
         </Button>
-        <Button size="small" disabled={running || book.ingest_status !== 'ingested' || !book.file_path} onClick={() => void createParseJob(undefined)}>
+        <Button size="small" disabled={running || jobSubmitting || book.ingest_status !== 'ingested' || !book.file_path} onClick={() => void createParseJob(undefined)}>
           全本解析
         </Button>
         {running && activeJob && (

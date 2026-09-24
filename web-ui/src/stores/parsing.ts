@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import {
   createParseJob, getBook, getBookPage, getPageEdits, getParsingTree, getParseJob,
-  ingestBook as apiIngestBook, listBooks, putBlockEdit, syncBooks,
+  ingestBook as apiIngestBook, listBooks, listParseJobs, putBlockEdit, syncBooks,
 } from '../api/axiom';
 import { ApiError } from '../api/client';
 import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode } from '../api/axiom';
@@ -70,6 +70,8 @@ export interface ParsingStore {
   // 解析任务
   activeJob: ParseJob | null;
   jobError: string | null;
+  /** 提交闸门：POST /parse-jobs 在途即 true，按钮禁用防连点重复建任务（与 ingestBusy 同口径） */
+  jobSubmitting: boolean;
   ingestBusy: Record<string, boolean>;
   // 编辑
   edits: Record<string, BlockEdit>;
@@ -161,6 +163,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     zoom: 100,
     activeJob: null,
     jobError: null,
+    jobSubmitting: false,
     ingestBusy: {},
     edits: {},
     editSubmitting: false,
@@ -210,6 +213,14 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       });
       const detail = await getBook(bookId).catch(() => null);
       if (detail && get().compareBookId === bookId) set({ compareBook: detail });
+      // 防重闸门·重开恢复：该书在服务端有非终态任务即恢复 activeJob 并续轮询
+      // （否则重开工作台后 activeJob=null，可重复建任务压垮本地模型）
+      const list = await listParseJobs(bookId, ['queued', 'running']).catch(() => null);
+      const runningJob = list?.jobs.find((j) => j.active) ?? list?.jobs[0];
+      if (runningJob && get().compareBookId === bookId) {
+        set({ activeJob: runningJob });
+        void pollJob(String(runningJob.id));
+      }
       await get().loadPage(pageNo);
     },
 
@@ -277,11 +288,13 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       const s = get();
       const bookId = bookIdArg ?? s.compareBookId;
       if (!bookId) return;
+      if (s.jobSubmitting) return;
       if (s.activeJob && (s.activeJob.status === 'queued' || s.activeJob.status === 'running')) return;
-      set({ jobError: null });
+      set({ jobError: null, jobSubmitting: true });
       const [job, err] = await createParseJob(bookId, pages)
         .then((r) => [r, null] as const)
         .catch((e) => [null, e] as const);
+      set({ jobSubmitting: false });
       if (err || !job) {
         set({ jobError: `解析任务提交失败：${errText(err)}` });
         return;

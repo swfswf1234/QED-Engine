@@ -35,15 +35,21 @@ export interface BookMeta {
   display_title?: string;
   /** 卷标识（空=单卷本；上册/下册；Vol.1/2/3；同名多卷的区分依据） */
   part?: string;
-  /** 解析进度（af_books 自持字段，REQ-042） */
-  parse_status?: string; // pending / parsing / completed / failed
+  /** 解析进度（af_books 自持字段，REQ-042；ADR 0007 起仅进度 pending/parsing） */
+  parse_status?: string;
   pages_done?: number;
+  /** 最近一次任务结局（ADR 0007 与进度分列：''/completed/partial/failed/interrupted） */
+  last_parse_result?: string;
+  /** 生效解析版本（af_books.active_job_id，「哪一版可读」唯一事实源；null=未激活） */
+  active_job_id?: string | null;
   [key: string]: unknown;
 }
 
 export interface ParseJobProgress {
   parsed: number;
   total: number;
+  /** 失败页数（真机响应恒有；partial 判定与仪表盘块三 KPI 消费） */
+  failed?: number;
   error?: string;
 }
 
@@ -244,6 +250,25 @@ export function createParseJob(
 /** GET /api/v1/parse-jobs/{id}：任务状态与进度 */
 export function getParseJob(jobId: string, opts?: ApiRequestOptions): Promise<ParseJob> {
   return api.get<ParseJob>(`/parse-jobs/${jobId}`, opts);
+}
+
+export interface ParseJobListOut {
+  jobs: ParseJob[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** GET /api/v1/parse-jobs 列表：book_id/status 过滤（8s 默认超时；打开工作台恢复在飞任务用） */
+export function listParseJobs(
+  bookId?: string,
+  status?: string[],
+  opts?: ApiRequestOptions,
+): Promise<ParseJobListOut> {
+  return api.get<ParseJobListOut>('/parse-jobs', {
+    ...opts,
+    params: { book_id: bookId, status: status?.length ? status : undefined, limit: '50' },
+  });
 }
 
 // --- 左侧树聚合（ARCH-020） ---

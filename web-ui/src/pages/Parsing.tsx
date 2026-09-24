@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import BookTree from '../components/parsing/BookTree';
 import CompareView, { blocksOf } from '../components/parsing/CompareView';
 import ParseToolbar from '../components/parsing/ParseToolbar';
+import ResourceWatch from '../components/parsing/ResourceWatch';
 import { describeError } from '../api/client';
 import { useParsingStore } from '../stores/parsing';
 
@@ -89,6 +90,8 @@ export default function Parsing() {
 
   return (
     <Layout.Content style={{ padding: 24, maxWidth: 2400, width: '98%', margin: '0 auto' }}>
+      {/* 资源监控弹窗（显存 ≥95% / 模型服务中断），页面存续期间 10s 轮询 */}
+      <ResourceWatch />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <Title level={2} style={{ margin: 0 }}>文档解析管理</Title>
         {/* 单一「刷新」按钮（G 轮裁决：同步书目并入，不再单列按钮） */}

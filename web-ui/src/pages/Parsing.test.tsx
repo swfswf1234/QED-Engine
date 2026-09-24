@@ -86,7 +86,7 @@ const resetStore = () =>
     pages: {}, selectedBlock: -1, editMode: false,
     scrollMode: 'single', renderMode: 'stream', syncScroll: true,
     zoom: 100,
-    activeJob: null, jobError: null, ingestBusy: {},
+    activeJob: null, jobError: null, jobSubmitting: false, ingestBusy: {},
     edits: {}, editSubmitting: false,
   });
 
@@ -337,6 +337,79 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     await waitFor(() => {
       expect(useParsingStore.getState().activeJob?.status).toBe('completed');
     });
+  });
+
+  it('「全本解析」提交未返回期间连点只发一次 POST（防重闸门，与书页入库同口径）', async () => {
+    let postCount = 0;
+    let resolvePost: (v: Response) => void = () => {};
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'POST' && url.includes('/parse-jobs')) {
+        postCount += 1;
+        return new Promise<Response>((r) => { resolvePost = r; });
+      }
+      if (method === 'GET' && url.includes('/parse-jobs/j1')) {
+        return Promise.resolve(json({ id: 'j1', book_id: BOOK_A, status: 'running', progress: { parsed: 0, total: 20 } }));
+      }
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+      if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: ${method} ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
+    await screen.findByText('#2 · 段落');
+    const fullBtn = screen.getByRole('button', { name: '全本解析' });
+    await user.click(fullBtn);
+    await user.click(fullBtn);
+    await user.click(screen.getByRole('button', { name: '解析本页' }));
+    expect(postCount).toBe(1);
+    expect(fullBtn).toBeDisabled();
+    resolvePost(json({ id: 'j1', book_id: BOOK_A, status: 'running', progress: { parsed: 0, total: 20 } }));
+    await waitFor(() => expect(useParsingStore.getState().jobSubmitting).toBe(false));
+    await waitFor(() => expect(useParsingStore.getState().activeJob?.id).toBe('j1'));
+  });
+
+  it('重开工作台恢复服务端在飞任务：按钮禁用 + 进度回显，再点提交不发 POST（防重复建任务）', async () => {
+    let postCount = 0;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'POST' && url.includes('/parse-jobs')) {
+        postCount += 1;
+        return Promise.resolve(json({ id: 'jx', book_id: BOOK_A, status: 'queued', progress: { parsed: 0, total: 20 } }));
+      }
+      if (method === 'GET' && url.includes('/parse-jobs?')) {
+        return Promise.resolve(json({
+          jobs: [{ id: 'j9', book_id: BOOK_A, status: 'running', progress: { parsed: 3, total: 20 }, active: true }],
+          total: 1, limit: 50, offset: 0,
+        }));
+      }
+      if (method === 'GET' && url.includes('/parse-jobs/j9')) {
+        return new Promise<Response>(() => {}); // 轮询挂起：任务保持 running
+      }
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
+      if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
+      if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
+      if (url.includes('/books')) return Promise.resolve(json(booksFixture));
+      return Promise.reject(new TypeError(`no route: ${method} ${url}`));
+    });
+    renderP();
+    await screen.findByText(TITLE_A);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(TITLE_A));
+    await screen.findByText('#2 · 段落');
+    expect(await screen.findByText('3/20')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全本解析' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '解析本页' })).toBeDisabled();
+    await waitFor(() => expect(useParsingStore.getState().activeJob?.id).toBe('j9'));
+    // store 级双保险：即便绕过按钮直接提交也被在飞闸门拦下
+    await useParsingStore.getState().createParseJob([1]);
+    expect(postCount).toBe(0);
   });
 
 });

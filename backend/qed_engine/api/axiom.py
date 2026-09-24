@@ -5,7 +5,8 @@
 docs/architecture/api.md（v2 冻结契约）与其 REQ-001（8900 侧适配）：
 GET /books、GET /books/{id}（单本详情）、GET /books/{id}/file（源 PDF inline 流，数据根边界校验）、
 GET /books/{id}/pages/{no}（8900 补写 page_no、重写 image_url 为 8900 代理绝对地址）、
-GET /books/{id}/manifest、POST /parse-jobs（engine 字段）、GET /parse-jobs/{id}、
+GET /books/{id}/manifest、POST /parse-jobs（engine 字段）、GET /parse-jobs（列表，book_id/status 过滤透传）、
+GET /parse-jobs/{id}、
 POST /books/sync（聚合 8901 verified 书籍，按 BookSyncItem 形状转发 8902 upsert）、
 PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（8900 对前端保持 /review 门面与
 BlockReview 响应形状，内部转 8902 /edit + 页级 /edits 过滤）、
@@ -22,8 +23,9 @@ Axiom-Flow docs/architecture/api.md）
 """
 
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from qed_engine.clients.axiom_client import AxiomClient, AxiomError
@@ -309,6 +311,29 @@ def get_page_edits(book_id: str, page_no: int, request: Request) -> list:
 def create_parse_job(body: ParseJobCreateBody, request: Request) -> dict:
     """提交解析任务（book_id、pages、engine）；返回 8902 ParseJob 原样（主键 id、progress 对象）。"""
     return _call(request, _axiom(request).create_parse_job, body.book_id, body.pages, body.engine)
+
+
+@router.get("/parse-jobs")
+def list_parse_jobs(
+    request: Request,
+    book_id: Annotated[str | None, Query()] = None,
+    status: Annotated[list[str] | None, Query()] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """任务列表（透传 8902 GET /parse-jobs：book_id/status 过滤 + active 标记）。
+
+    前端打开工作台时用它恢复服务端在飞任务（防止重开界面后重复建任务）。
+    8902 旧码无此端点 → 4xx 原样透传，前端自行降级。
+    """
+    return _call(
+        request,
+        _axiom(request).list_parse_jobs,
+        status=status,
+        book_id=book_id,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/parse-jobs/{job_id}")

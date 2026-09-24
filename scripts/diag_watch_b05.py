@@ -1,6 +1,5 @@
 # b05 全本 job 进度监视（只读轮询，可删）
 import json
-import sys
 import time
 import urllib.request
 

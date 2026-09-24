@@ -35,8 +35,8 @@ export class ApiError extends Error {
 export interface ApiRequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
-  /** query 参数（GET；undefined/空值跳过） */
-  params?: Record<string, string | undefined>;
+  /** query 参数（GET；undefined/空值跳过；数组 → 重复参数 status=a&status=b） */
+  params?: Record<string, string | string[] | undefined>;
 }
 
 async function request<T>(path: string, init?: RequestInit, opts?: ApiRequestOptions): Promise<T> {
@@ -53,11 +53,15 @@ async function request<T>(path: string, init?: RequestInit, opts?: ApiRequestOpt
   }
 
   const query = opts?.params
-    ? new URLSearchParams(
-        Object.entries(opts.params)
-          .filter(([, v]) => v !== undefined && v !== '')
-          .map(([k, v]) => [k, v as string]),
-      ).toString()
+    ? (() => {
+        const sp = new URLSearchParams();
+        for (const [k, v] of Object.entries(opts.params)) {
+          if (v === undefined || v === '') continue;
+          if (Array.isArray(v)) v.forEach((item) => sp.append(k, item));
+          else sp.set(k, v);
+        }
+        return sp.toString();
+      })()
     : '';
   const url = `${API_BASE}${path}${query ? `?${query}` : ''}`;
 

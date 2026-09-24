@@ -1214,6 +1214,33 @@ def test_axiom_parse_job_create_and_query(monkeypatch):
     assert queried.json()["status"] == "running"
 
 
+def test_axiom_parse_job_list_proxy(monkeypatch):
+    """GET /parse-jobs 列表：透传 book_id/status 过滤，8902 ParseJobListOut 原样返回（打开工作台恢复在飞任务用）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/parse-jobs"
+        assert request.method == "GET"
+        assert request.url.params.get("book_id") == "01-rudin"
+        assert request.url.params.get_list("status") == ["queued", "running"]
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [{"id": "j-1", "book_id": "01-rudin", "status": "running",
+                          "progress": {"parsed": 1, "total": 2}, "active": True}],
+                "total": 1,
+                "limit": 50,
+                "offset": 0,
+            },
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/parse-jobs", params={"book_id": "01-rudin", "status": ["queued", "running"]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jobs"][0]["id"] == "j-1"
+    assert body["jobs"][0]["active"] is True
+
+
 def test_axiom_upstream_404_passthrough(monkeypatch):
     """8902 返回 404（book/page 不存在）：8900 同码透传 detail。"""
 
