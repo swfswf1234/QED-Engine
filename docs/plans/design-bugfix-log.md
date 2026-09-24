@@ -295,3 +295,83 @@
   滚动壳节/mirror 标题/monitor trust_env），本层文档契约（test_design_documents、
   test_architecture_documents、链接门禁）全绿。
 - **状态**：已完成（2026-09-23）
+
+### BUGFIX-017：admin-console §3.3 资源监控「进程列表」表述与三片饼图实现双向漂移，且占用不标模型身份
+
+- **发现日期**：2026-09-24（用户接任务①排查定案）
+- **设计文档**：`../design/admin-console.md` §3.3
+- **问题与根因**：§3.3 开头仍写「展示…进程列表」并保留逐进程/「其他任务」聚合描述
+  （OTHER_AGG_THRESHOLD 语义），而 2026-09-06 REQ-038 重构后实现为三片聚合饼图
+  （模型占用/其他/空闲）+ 颜色图例、进程清单不渲染（`GpuOverview.test.tsx` 专门断言
+  「无模型进程清单」）；同时用户反馈「模型占用没写是哪个模型」——设计本身也未要求
+  标注身份，属需求缺口而非纯实现偏差。
+- **修复与验证**：设计正文（**已完成 2026-09-24**，随 REQ-033 收口）：§3.3 更正为三片饼图现状口径 + 新增「当前在跑」
+  身份行规格（slots 派生，零新请求；全 api 显示 API 模式）与饼图 tooltip 带身份名；
+  容器显存在 Windows PDH 口径不可见的措辞按驻留口径说明。实现与验收随 REQ-033
+  承载壳（admin-display-optimization）W1/W4 完成，浏览器实测「当前在跑」行真机可见
+  （本地槽未就绪+API 槽就绪 →「（API 模式）」），证据见
+  [REQ-033 壳归档](../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)。
+- **状态**：已修复（2026-09-24 登记，随 REQ-033 收口关闭）
+
+### BUGFIX-018：监督器恢复策略缺「期望状态」维度——人工停止的模型被退避重启复活，api 来源槽位冻结旧「就绪」
+
+- **发现日期**：2026-09-24（用户实报「停止文字+图像模型后仪表盘仍显示就绪」与「控制台 api 切回本地后模型被自动启动」）
+- **设计文档**：`../design/local-model-management.md` 健康监督与受控恢复节
+- **问题与根因**：恢复决策只看观测态（down/degraded）与在飞门，不看「用户是否期望该槽位在跑」——人工
+  stop 后观测一旦翻 down，监督器把用户明确停止的模型按故障退避重启（09-24 日志实录恢复尝试）；api 来源
+  槽位「跳过不探测」实现为保留旧快照的冻结态，local→api 切换后仪表盘持续显示过期「就绪·显存·翻转时刻」，
+  切回 local 时又凭残留状态参与恢复链路。前端侧缺口：状况卡对「server 存活但模型未加载」形态
+  （health_state=ready 且 ready=false，T1 口径与 availability 口径分裂）无就绪性说明（用户裁决：只加说明
+  文案，不标降级）。
+- **修复与验证**：设计节补**期望状态（desired）**条款与 api 暂停清位语义（running/stopped/未声明；观测
+  ready 采纳 running；start/restart 上报 running、stop 上报 stopped；自动恢复限 desired=running、人工停止
+  每 Episode 仅告警一次），supervisor 与 model_manager 实现同步。TDD：test_llm_supervisor 新增 6 例（人工
+  停止不复活、api 暂停清位、ready 采纳后真崩仍恢复等）＋ test_llm_model_manager 上报挂点 2 例＋
+  LocalModelStatus vitest 2 例；定向 97 passed、契约线红三枚（supervisor 注册/DesignRef 遗留）同批修绿。
+  登记于 ARCH-028 壳监督器设计 §8 与 W12 行。
+- **状态**：已修复（2026-09-24；真机生效需 8900 重启）
+
+
+### BUGFIX-019：仪表盘/控制台双口径状态契约未落设计文档，仪表盘卡角标未自解释防抖滞后（审核轮）
+
+- **发现日期**：2026-09-24（用户要求审核「仪表盘状态为何与控制台不一致」）
+- **设计文档**：`../design/local-model-management.md`（新增「仪表盘与控制台双口径契约」节）
+- **问题与根因**：两界面同读 `GET /models/{slot}` 但消费两组不同语义字段（控制台＝实时单发探针
+  `availability`，仪表盘＝监督器防抖定态 `health_state`，翻转滞后 3×30s），该契约只在 W1 实现时
+  以代码注释说明，设计正文仅声明 health_state 供给状况卡；卡片角标「数据源监督器探针」未交代
+  滞后，用户误以为未同源。偏差本身属设计口径（S1/S2），非实现 bug。
+- **修复与验证**：设计文档落双口径契约节（字段分工/允许偏差/不混用守则/前端保鲜说明）；仪表盘
+  卡角标改写为「监督器防抖定态（滞后 ≤2min）· 实时状态与控制台操作详见 控制台」（TDD：
+  LocalModelStatus vitest 新增 1 例先行红后绿，该文件 12 例 + Dashboard 9 例全绿）。
+- **状态**：已完成（2026-09-24）
+
+
+### BUGFIX-020：仪表盘徽章「就绪」被误读为「模型可用」——未加载态二轮裁决改中性徽章「未加载（服务存活）」
+
+- **发现日期**：2026-09-24（用户质疑「本地模型都未启动，文字模型为何显示就绪」）
+- **设计文档**：`../design/local-model-management.md`（「仪表盘与控制台双口径契约」节补未加载态呈现守则）
+- **问题与根因**：监督器 T1「服务存活」口径与用户直觉「模型可用」口径的语义落差现场演示——LM Studio
+  server 常驻应答 5001（无模型加载，实况 netstat/tasklist 实锤），health_state=ready 判定正确，
+  但绿色「就绪」徽章＋次要小字（BUGFIX-018 一裁形态）自解释力度不足仍被误读为误报。徽章措辞问题，
+  非探针错误、非双口径契约缺口（契约本身已落）。
+- **修复与验证**：用户二轮裁决——`health_state=ready` 且 `ready=false` 时徽章改中性色
+  「未加载（服务存活）」，服务与模型双就绪才显绿色「就绪」，仍不标降级；后端与 health_state 语义
+  零改动（纯前端显示派生）。TDD：LocalModelStatus vitest 2 例改先行红后绿（该文件 12 例 +
+  Dashboard 9 例全绿、build 重建）；浏览器实测 reload 后文字卡真实渲染「未加载（服务存活）」、
+  控制台无报错。
+- **状态**：已完成（2026-09-24）
+
+
+### BUGFIX-021：状况卡「当前在跑」筛选误含 server 常驻未加载槽位——三轮裁决改口径 ready∪degraded
+
+- **发现日期**：2026-09-24（用户质疑「当前在跑：图像·mineru，为何状况卡还并列挂着未加载的文字卡」）
+- **设计文档**：壳「界面设计」显隐规则表（状况卡呈现规则事实源；admin-dashboard.md 明示本档不复制组件内部结构）
+- **问题与根因**：`pickOccupied` 用 `health_state∈{ready,degraded}`（T1 服务存活口径）筛在跑，
+  而 LM Studio server 为进程常驻——即使模型未加载 health_state 恒 ready，被误判「在跑」与真在跑的
+  图像槽位并列呈现；蓝图「单活互斥保证正常 ≤1 个在跑」的前提被 server 常驻形态证伪。同仪表盘/控制台
+  侧「当前在跑」身份行（ready 口径，`deriveRunningModels`）口径也不一致。
+- **修复与验证**：三轮裁决——在跑筛选口径改 `ready=true ∪ health_state=degraded`，都没在跑时回退
+  「最近翻转 > 默认文字」不变。TDD：LocalModelStatus vitest 新增实况复现例（text health=ready 未加载
+  + vision 真在跑 → 只呈现图像）先行红后绿，该文件 13 例、全量 236 例全绿、build 重建；浏览器实测
+  reload 后状况卡仅「图像模型 · 就绪 · Docker · 翻转于 12:35:52」一行，文字卡不再误挂。
+- **状态**：已完成（2026-09-24）

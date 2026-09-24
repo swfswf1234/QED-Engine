@@ -17,7 +17,7 @@
 
 | 服务 | 仓库 | 端口 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——**单屏「左书目树（纯选择）+ 右对照工作台」**：原页图 vs 解析还原对照、bbox 双向联动、块编辑+判定、单页/全本解析+进度、连续滚动、URL 恢复（2026-09-20 ARCH-020-G 定档，取代历轮左树进度/两级列表形态）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007）；**控制台 LLM 改造（ARCH-016，2026-08-20）**：四服务卡后 GPU 总览条 + 依赖组件三卡（MySQL/文字模型/图像模型，置灰 + 测试按钮）+ 「模型调用记录」检索页（`#/admin/llm-calls`） |
+| QED-Engine 前端 | 根仓库 `web-ui/`（构建产物 dist/ 由 serve_web.py 托管） | 8903 | 已运行 | 学习界面（建设中）+ 管理后台（控制台 / 仪表盘 / 文档下载管理 / 文档解析管理——**单屏「左书目树（纯选择）+ 右对照工作台」**：原页图 vs 解析还原对照、bbox 双向联动、块编辑+判定、单页/全本解析+进度、连续滚动、URL 恢复（2026-09-20 ARCH-020-G 定档，取代历轮左树进度/两级列表形态）；**React 重构主轮（ARCH-011）四界面已完成并切换**（2026-08-17 旧 web/ 退役，直接经 8903 调试）；**只连 8900**（ADR 0007）；**控制台 LLM 改造（ARCH-016，2026-08-20）**：四服务卡后 GPU 总览条 + 依赖组件三卡（MySQL/文字模型/图像模型，置灰 + 测试按钮）+ 「模型调用记录」检索页（`#/admin/llm-calls`）；**管理台展示优化（REQ-033，2026-09-24 五改收口）**：仪表盘三块（服务详情含「本地模型列表」两栏分节 / 文档下载课程格子进度+图例 / 文档解析 KPI+课程分组）+ 控制台「当前在跑」模型标注 + GPU 探测 SWR 提速与增量刷新（形态事实见 [design/admin-dashboard.md](../design/admin-dashboard.md)） |
 | QED-Engine 后端 | 根仓库 `backend/qed_engine/` | 8900 | 已运行 | **三域组织（ARCH-012，2026-08-16 实施完成）**：控制域（配置五端点 + /services 启停托管 + /logs、/monitor/gpu、qwen、mineru、/self-restart 监控诊断）+ 数据域·QED-Tracker（catalogs/三表/tasks 适配 8901）+ 数据域·Axiom-Flow（预留）；密钥不下发。**2026-08-17：服务注册表扩为四单元（新增 web/8903）、tracker/web/axiom 三单元均走生命周期脚本（axiom 由 Popen 切换，REQ-039）、脚本单元停止/重启语义修复、serve_web.py 切 web-ui/dist**。**LLM 网关与模型管理（ARCH-016，2026-08-20 实施完成）**：三项目密钥约定（各 `.env` 自持 `API_KEY`，旧变量降级别名，`QED_API_SELECT` 选模式）+ 8900 LLM 网关端点（/llm/text、/llm/vision、/llm/test/*、/llm/calls、/database/test）+ 本地模型生命周期脚本（scripts/text-model/ + scripts/image-model/）+ 资源互斥（QED_RESOURCE_GUARD）+ qed_llm_calls 调用记录（单表三项目可写）；`--mode（api 或 local）` 启停。**密钥收敛（2026-08-20
   用户裁决）**：逐厂商 key（QWEN/DEEPSEEK/GLM_API_KEY）已取消，单一 `API_KEY` + `QED_API_PROVIDER`
   （qwen/deepseek/glm，默认 qwen）选厂商，`/config/keys` 改返回 `{provider, configured}` |
@@ -50,6 +50,7 @@
   （DeepTutor 学习面）调研收口，L1~L9/R1 判定表落主链壳（含各条承接壳列）；**本轮只排根仓库任务，
   暂不向 Axiom-Flow / QED-Tracker 发请求**；ARCH-022、ARCH-026、PLAN-051、REQ-089 四行
   Superseded/Achieved 关闭见 completed.md。
+- 已完成（2026-09-24 收口，挂 ARCH-028 稳定性轮支线）：**本地模型启动参数配置（ARCH-033）**——加载层参数（上下文长度等）挂 registry 身份表 `Identity.params` 并全链路生效（含监督器受控恢复）：lms load 带 `-c/--gpu/--parallel/--ttl` 且恒附 `-y` 非交互（歧义 key 防挂死，本地 key 唯一为消歧手段）；llamacpp 通道真做（复用 LM Studio 自带 llama-server 与 `~/.lmstudio/models` GGUF，零安装；PATH→backends 最新版回退 + mmproj 自动挂）；text 槽 5001 双向互斥自动让位（llamacpp 启动前 `lms unload --all` + `lms server stop`——单独 stop 不终止自带 worker 不释放显存）；参数档案 27B=8192（16GB 显存约束 R5 改判）/9B=16384 双渠道，两渠道真机读回生效 ctx 验证；设计事实晋升 [local-model-management.md](../design/local-model-management.md)「本地模型启动参数契约（加载层）」节；壳归档 history/plans/2026-09/。
 - 已完成（文档收口，2026-09-22）：**ARCH-025 优化项下沉 Axiom-Flow 登记（用户裁决：这是其 1.0 版本任务）**——
   P1~P3/R1~R4 优化项以对方仓库自身治理形态登记进 `Axiom-Flow/docs/trackers/`：todo 新增 v1.0 主线节
   （聚合行 ARCH-021 + 支线行 ARCH-022/023 + PLAN-009 镜像行），承载壳为其
