@@ -1,17 +1,20 @@
 /**
- * 对照区顶栏（parsing-ui §7 ParseToolbar，G 轮单屏版）：
- * 书名｜页码导航（输入跳页 + 上/下页）｜渲染模式（流式/版式）｜
- * 滚动模式 + 滚动同步｜缩放｜编辑模式开关｜审阅统计｜解析本页/全本 + 书页入库 + 任务进度。
- * 无「返回列表」（单屏无列表态）；无 engine 选择（服务端默认引擎）；
- * 无视图模式切换（G 轮裁决：固定对照，未解析页天然只显示书页图）。
+ * 对照区顶栏（parsing-ui §7/§8 ParseToolbar，REQ-098 双工作台版）：
+ * 书名｜页码导航｜渲染模式（流式/版式重排版）+ 版式样式面板（排版按钮）｜
+ * 滚动模式 + 滚动同步｜缩放｜编辑模式开关 + 编辑口径（框图/内容）+ 框图操作条｜
+ * 审阅统计｜解析本页/全本 + 书页入库 + 任务进度。
+ * 框图口径的删除/合并/新框落库按钮在引擎承接（REQ-099 R2）前禁用 + tooltip；
+ * 拉伸/移动落库走既有 corrected_bbox `/edit` 链不受限。
+ * 无「返回列表」（单屏无列表态）；无 engine 选择（服务端默认引擎）。
  * 键盘 ←/→ 翻页由页面容器处理（弹层/输入聚焦时禁用）。
  */
 import { useState } from 'react';
-import { Button, InputNumber, Progress, Segmented, Slider, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Button, InputNumber, Popover, Progress, Segmented, Slider, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { editKey, useParsingStore } from '../../stores/parsing';
 import type { BookMeta } from '../../api/axiom';
 import { parsingBookLabel } from './BookTree';
+import TypographyPanel from './TypographyPanel';
 
 const { Text } = Typography;
 
@@ -27,6 +30,10 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const syncScroll = useParsingStore((s) => s.syncScroll);
   const zoom = useParsingStore((s) => s.zoom);
   const editMode = useParsingStore((s) => s.editMode);
+  const editPane = useParsingStore((s) => s.editPane);
+  const boxSelection = useParsingStore((s) => s.boxSelection);
+  const regionDraft = useParsingStore((s) => s.regionDraft);
+  const typography = useParsingStore((s) => s.typography);
   const activeJob = useParsingStore((s) => s.activeJob);
   const jobError = useParsingStore((s) => s.jobError);
   const jobSubmitting = useParsingStore((s) => s.jobSubmitting);
@@ -37,6 +44,11 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const setSyncScroll = useParsingStore((s) => s.setSyncScroll);
   const setZoom = useParsingStore((s) => s.setZoom);
   const setEditMode = useParsingStore((s) => s.setEditMode);
+  const setEditPane = useParsingStore((s) => s.setEditPane);
+  const setTypography = useParsingStore((s) => s.setTypography);
+  const deleteSelectedBlocks = useParsingStore((s) => s.deleteSelectedBlocks);
+  const mergeSelectedBlocks = useParsingStore((s) => s.mergeSelectedBlocks);
+  const resetRegionDraft = useParsingStore((s) => s.resetRegionDraft);
   const loadPage = useParsingStore((s) => s.loadPage);
   const gotoPage = useParsingStore((s) => s.gotoPage);
   const createParseJob = useParsingStore((s) => s.createParseJob);
@@ -50,6 +62,7 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const judged = compareBookId
     ? Array.from({ length: blockCount }, (_, i) => edits[editKey(compareBookId, pageNo, i)]).filter((e) => e?.verdict).length
     : 0;
+  const draftDirty = regionDraft.added.length + regionDraft.deleted.length + regionDraft.merged.length > 0;
 
   const jump = (v: number | null) => {
     if (v == null) return;
@@ -81,6 +94,11 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
           value={renderMode}
           onChange={(v) => setRenderMode(v as 'stream' | 'layout')}
         />
+        {renderMode === 'layout' && (
+          <Popover trigger="click" content={<TypographyPanel prefs={typography} onChange={setTypography} />}>
+            <Button size="small" aria-label="版式样式面板">排版</Button>
+          </Popover>
+        )}
       </Space>
       <Space wrap size={8}>
         <Segmented
@@ -108,8 +126,28 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
           <Text type="secondary" style={{ fontSize: 12 }}>编辑模式</Text>
           <Switch size="small" aria-label="编辑模式开关" checked={editMode} onChange={setEditMode} checkedChildren="编辑" unCheckedChildren="只读" />
         </Space>
+        {editMode && (
+          <Segmented
+            size="small"
+            aria-label="编辑口径"
+            options={[{ label: '框图', value: 'box' }, { label: '内容', value: 'content' }]}
+            value={editPane}
+            onChange={(v) => setEditPane(v as 'box' | 'content')}
+          />
+        )}
         <Tag>已判定 {judged} / 共 {blockCount} 块</Tag>
       </Space>
+      {editMode && editPane === 'box' && (
+        <Space wrap size={6}>
+          <Button size="small" disabled={boxSelection.length === 0} onClick={deleteSelectedBlocks}>删除选中</Button>
+          <Button size="small" disabled={boxSelection.length < 2} onClick={mergeSelectedBlocks}>合并选中</Button>
+          <Button size="small" disabled={!draftDirty} onClick={resetRegionDraft}>清空草稿</Button>
+          <Tooltip title="等待解析引擎侧承接（REQ-099 R2：删除/合并/新框落库）">
+            <Button size="small" type="primary" disabled data-testid="persist-box-edits">保存框图修改</Button>
+          </Tooltip>
+          {draftDirty && <Text type="secondary" style={{ fontSize: 12 }}>框图修改暂未生效（本地预览，落库等待引擎承接）</Text>}
+        </Space>
+      )}
       <Space wrap size={8}>
         <Tooltip title={book.file_path ? '把原始 PDF 逐页转成书页图并登记页数（解析的前置步骤，不调用模型）' : '书目未登记源 PDF 路径，无法入库'}>
           <Button size="small" disabled={!book.file_path} onClick={() => void ingestBook(book.book_id)} loading={Boolean(ingestBusy[book.book_id])}>

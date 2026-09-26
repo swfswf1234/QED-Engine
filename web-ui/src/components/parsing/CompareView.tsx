@@ -1,9 +1,10 @@
 /**
  * 双栏对照区（parsing-ui §8 CompareView）：态分流（原始文件优先）+ 单页/连续滚动两模式。
- * - 单页：左原文页（PageImagePane + bbox overlay）｜右解析文档（BlockList），两列各自滚动 + 滚动同步
+ * - 单页：左原文页（PageImagePane + bbox overlay）｜右解析文档（BlockList 流式/版式重排版），两列各自滚动 + 滚动同步
  * - 连续：视口页窗口 [cur-2, cur+8] 纵向流，每页一个双栏单元，页码随视口联动
  * - 态分流（G 轮裁决：无视图模式切换，恒为对照）：已解析→双栏；已入库未解析→原页图占满；
  *   未入库有 file_path→iframe PDF 直显；否则明确空态
+ * - 编辑双口径（§5/§10）：框图=左栏几何交互（拉伸/移动/新框/多选），内容=右栏 BlockEditor 只改内容
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, Tag, Typography } from 'antd';
@@ -75,10 +76,17 @@ function PagePair(props: PagePairProps) {
   const edits = useParsingStore((s) => s.edits);
   const editSubmitting = useParsingStore((s) => s.editSubmitting);
   const loadPage = useParsingStore((s) => s.loadPage);
+  const editPane = useParsingStore((s) => s.editPane);
+  const typography = useParsingStore((s) => s.typography);
+  const regionDraft = useParsingStore((s) => s.regionDraft);
+  const addRegionDraft = useParsingStore((s) => s.addRegionDraft);
+  const toggleBoxSelect = useParsingStore((s) => s.toggleBoxSelect);
 
   const blocks = entry?.data ? blocksOf(entry.data) : [];
   const parsed = Boolean(entry?.parsed) && blocks.length > 0;
   const ingested = book.ingest_status === 'ingested';
+  const boxEdit = editMode && editPane === 'box';
+  const contentEdit = editMode && editPane === 'content';
 
   const originalPane = (
     <div style={paneScrollStyle} ref={paneRefs?.left} data-testid={`pane-original-${pageNo}`}>
@@ -98,6 +106,19 @@ function PagePair(props: PagePairProps) {
             selectedIndex={selected}
             hoveredIndex={hovered}
             zoom={zoom}
+            boxEdit={boxEdit}
+            regionDraft={regionDraft}
+            onBoxCommit={(i, bbox, input) => {
+              const key = `${book.book_id}:${pageNo}:${i}`;
+              const prev = edits[key];
+              void useParsingStore.getState().submitEdit(i, {
+                ...(typeof prev?.corrected_text === 'string' ? { corrected_text: prev.corrected_text } : {}),
+                ...(prev?.note ? { note: prev.note } : {}),
+                ...(input ?? { corrected_bbox: bbox }),
+              });
+            }}
+            onNewBox={addRegionDraft}
+            onMultiSelect={toggleBoxSelect}
             onSelect={onSelect}
             onHover={onHover}
             onImageSize={onImageSize}
@@ -134,8 +155,9 @@ function PagePair(props: PagePairProps) {
               edits={edits}
               renderMode={renderMode}
               imageSize={imageSize}
+              typography={typography}
               selectedIndex={selected}
-              editMode={editMode}
+              editMode={contentEdit}
               submitting={editSubmitting}
               onSelect={onSelect}
               onHover={onHover}

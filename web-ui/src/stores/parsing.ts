@@ -13,11 +13,25 @@ import {
 } from '../api/axiom';
 import { ApiError } from '../api/client';
 import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode } from '../api/axiom';
+import {
+  loadTypographyPrefs, saveTypographyPrefs,
+  type TypographyPrefs,
+} from '../components/parsing/typography';
+import type { BBox } from '../components/parsing/regions';
 
 export type { ParsingTreeNode } from '../api/axiom';
 
 export type ScrollMode = 'single' | 'continuous';
 export type RenderMode = 'stream' | 'layout';
+/** 编辑口径：左=框图几何（拉伸/移动/新框/删/合），右=内容替换（parsing-ui §5/§10） */
+export type EditPane = 'box' | 'content';
+/** 框图本地预览草稿（删除/合并/新框不落库，REQ-099 R2 承接后接通） */
+export interface RegionDraft {
+  added: BBox[];
+  deleted: number[];
+  merged: number[][];
+}
+
 /** 单页加载态（连续滚动模式多页缓存） */
 export interface PageEntry {
   data: PageData | null;
@@ -62,6 +76,11 @@ export interface ParsingStore {
   pages: Record<number, PageEntry>;
   selectedBlock: number;
   editMode: boolean;
+  // 编辑工作台（§5：口径 / 框图多选 / 本地草稿 / 版式偏好）
+  editPane: EditPane;
+  boxSelection: number[];
+  regionDraft: RegionDraft;
+  typography: TypographyPrefs;
   // 工作台视图选项（§7 顶栏；engine 不设选择，走服务端默认；G 轮裁决无视图模式切换）
   scrollMode: ScrollMode;
   renderMode: RenderMode;
@@ -89,6 +108,14 @@ export interface ParsingStore {
   setZoom: (z: number) => void;
   selectBlock: (index: number) => void;
   setEditMode: (on: boolean) => void;
+  setEditPane: (pane: EditPane) => void;
+  toggleBoxSelect: (index: number) => void;
+  addRegionDraft: (bbox: BBox) => void;
+  deleteSelectedBlocks: () => void;
+  restoreDeletedRegion: (blockIndex: number) => void;
+  mergeSelectedBlocks: () => void;
+  resetRegionDraft: () => void;
+  setTypography: (patch: Partial<TypographyPrefs>) => void;
   ingestBook: (bookId: string) => Promise<void>;
   createParseJob: (pages?: number[], bookId?: string) => Promise<void>;
   submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
@@ -157,6 +184,10 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     pages: {},
     selectedBlock: -1,
     editMode: false,
+    editPane: 'box',
+    boxSelection: [],
+    regionDraft: { added: [], deleted: [], merged: [] },
+    typography: loadTypographyPrefs(),
     scrollMode: 'single',
     renderMode: 'stream',
     syncScroll: true,
@@ -207,6 +238,8 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
         comparePageNo: pageNo,
         pages: {},
         selectedBlock: -1,
+        boxSelection: [],
+        regionDraft: { added: [], deleted: [], merged: [] },
         activeJob: null,
         jobError: null,
         edits: {},
@@ -229,7 +262,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       if (!compareBookId) return;
       const entry = pages[pageNo];
       if (entry?.loading) return;
-      set({ comparePageNo: pageNo, selectedBlock: -1 });
+      set({ comparePageNo: pageNo, selectedBlock: -1, boxSelection: [], regionDraft: { added: [], deleted: [], merged: [] } });
       await fetchPage(compareBookId, pageNo);
       if (get().compareBookId === compareBookId) {
         const list = await getPageEdits(compareBookId, pageNo).catch(() => null);
@@ -263,7 +296,42 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     setSyncScroll: (on) => set({ syncScroll: on }),
     setZoom: (z) => set({ zoom: z }),
     selectBlock: (index) => set({ selectedBlock: index }),
-    setEditMode: (on) => set({ editMode: on, selectedBlock: on ? get().selectedBlock : -1 }),
+    setEditMode: (on) => set(on
+      ? { editMode: true }
+      : {
+        editMode: false,
+        selectedBlock: -1,
+        boxSelection: [],
+        regionDraft: { added: [], deleted: [], merged: [] },
+      }),
+    setEditPane: (pane) => set({ editPane: pane }),
+    toggleBoxSelect: (index) => set((s) => ({
+      boxSelection: s.boxSelection.includes(index)
+        ? s.boxSelection.filter((i) => i !== index)
+        : [...s.boxSelection, index],
+    })),
+    addRegionDraft: (bbox) => set((s) => ({ regionDraft: { ...s.regionDraft, added: [...s.regionDraft.added, bbox] } })),
+    deleteSelectedBlocks: () => set((s) => ({
+      regionDraft: { ...s.regionDraft, deleted: Array.from(new Set([...s.regionDraft.deleted, ...s.boxSelection])) },
+      boxSelection: [],
+      selectedBlock: -1,
+    })),
+    restoreDeletedRegion: (blockIndex) => set((s) => ({
+      regionDraft: { ...s.regionDraft, deleted: s.regionDraft.deleted.filter((i) => i !== blockIndex) },
+    })),
+    mergeSelectedBlocks: () => set((s) => (s.boxSelection.length >= 2
+      ? {
+        regionDraft: { ...s.regionDraft, merged: [...s.regionDraft.merged, [...s.boxSelection]] },
+        boxSelection: [],
+        selectedBlock: -1,
+      }
+      : {})),
+    resetRegionDraft: () => set({ regionDraft: { added: [], deleted: [], merged: [] } }),
+    setTypography: (patch) => set((s) => {
+      const next = { ...s.typography, ...patch };
+      saveTypographyPrefs(next);
+      return { typography: next };
+    }),
 
     ingestBook: async (bookId) => {
       if (get().ingestBusy[bookId]) return;
@@ -323,7 +391,16 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
 
     clearCompare: () => {
       ++pollToken;
-      set({ compareBookId: null, compareBook: null, pages: {}, selectedBlock: -1, activeJob: null, comparePageNo: 1 });
+      set({
+        compareBookId: null,
+        compareBook: null,
+        pages: {},
+        selectedBlock: -1,
+        boxSelection: [],
+        regionDraft: { added: [], deleted: [], merged: [] },
+        activeJob: null,
+        comparePageNo: 1,
+      });
     },
   };
 });

@@ -266,8 +266,9 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     const user = userEvent.setup();
     await user.click(screen.getByText(TITLE_A));
     await screen.findByText('#2 · 段落');
-    // 开编辑模式（Switch 用 aria-label 定位）
+    // 开编辑模式（Switch 用 aria-label 定位）；口径切「内容」（默认=框图，REQ-098 双口径）
     await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
+    await user.click(await screen.findByText('内容'));
     await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
     await user.click(await screen.findByRole('button', { name: /不一致/ }));
     await waitFor(() => expect(putUrl).not.toBe(''));
@@ -303,6 +304,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     await screen.findByText('Test paragraph content.');
     await user.click(screen.getByText('版式'));
     await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
+    await user.click(await screen.findByText('内容'));
     await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
     await user.click(await screen.findByRole('button', { name: /不一致/ }));
     await waitFor(() => expect(putUrl).not.toBe(''));

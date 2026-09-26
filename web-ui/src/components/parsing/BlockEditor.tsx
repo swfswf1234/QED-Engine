@@ -1,6 +1,7 @@
 /**
- * 单块编辑弹层内容（parsing-ui §8 BlockEditor）：
- * 判定（一致/不一致）+ 备注 + 文字修正（公式为 LaTeX 源码）+ bbox 数值修正。
+ * 单块内容编辑弹层（parsing-ui §8/§9 BlockEditor，内容口径）：
+ * 只修改内容——判定（一致/不一致）+ 备注 + 文字替换（公式为 LaTeX 源码）。
+ * 框几何修改归左栏框编辑口径（§10），弹层不含 bbox 数值输入（用户裁决）。
  * 保存走 /edit 门面（PUT blocks/{i}/edit）。
  */
 import { useEffect, useState } from 'react';
@@ -22,32 +23,19 @@ interface BlockEditorProps {
 export default function BlockEditor({ block, edit, submitting, onSubmit }: BlockEditorProps) {
   const [text, setText] = useState(edit?.corrected_text ?? blockText(block));
   const [note, setNote] = useState(edit?.note ?? '');
-  const [bboxText, setBboxText] = useState((edit?.corrected_bbox ?? block.bbox ?? []).join(','));
   const [savedFlash, setSavedFlash] = useState(false);
 
   useEffect(() => {
     setText(edit?.corrected_text ?? blockText(block));
     setNote(edit?.note ?? '');
-    setBboxText((edit?.corrected_bbox ?? block.bbox ?? []).join(','));
     setSavedFlash(false);
     // 切换选中块时重置草稿（block 引用变化即重置）
   }, [block, edit]);
 
-  const parseBbox = (): [number, number, number, number] | null => {
-    const parts = bboxText.split(',').map((p) => Number(p.trim()));
-    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
-    return parts as [number, number, number, number];
-  };
-
   const save = async () => {
-    const bbox = parseBbox();
-    const input: Parameters<typeof onSubmit>[0] = { note, corrected_text: text };
-    if (bbox) input.corrected_bbox = bbox;
-    const ok = await onSubmit(input);
+    const ok = await onSubmit({ note, corrected_text: text });
     if (ok) setSavedFlash(true);
   };
-
-  const bboxInvalid = bboxText.trim() !== '' && parseBbox() === null;
 
   return (
     <Space direction="vertical" size={6} style={{ width: 380 }}>
@@ -72,16 +60,8 @@ export default function BlockEditor({ block, edit, submitting, onSubmit }: Block
         aria-label="块文字修正"
       />
       <Input size="small" placeholder="备注" value={note} onChange={(e) => setNote(e.target.value)} aria-label="块备注" />
-      <Input
-        size="small"
-        value={bboxText}
-        onChange={(e) => setBboxText(e.target.value)}
-        placeholder="bbox：x0,y0,x1,y1（原页图像素坐标）"
-        aria-label="块 bbox 修正"
-        status={bboxInvalid ? 'error' : undefined}
-      />
       <Space size={6}>
-        <Button size="small" type="primary" icon={<SaveOutlined />} loading={submitting} disabled={bboxInvalid} onClick={() => void save()}>
+        <Button size="small" type="primary" icon={<SaveOutlined />} loading={submitting} onClick={() => void save()}>
           保存修正
         </Button>
         {savedFlash && <Text type="success" style={{ fontSize: 12 }}>已保存</Text>}

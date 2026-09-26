@@ -1,18 +1,22 @@
 # 文档解析管理 UI 设计（parsing-ui）
 
 设计状态：Accepted
-实现状态：Implemented
-最后更新：2026-09-23
+实现状态：In Progress
+最后更新：2026-09-26
 确认状态：已确认
 关联代码：`web-ui/src/pages/Parsing.tsx`、`web-ui/src/stores/parsing.ts`、`web-ui/src/api/axiom.ts`、
-`web-ui/src/components/parsing/`（BookTree/ParseToolbar/CompareView/PageImagePane/BlockList/BlockEditor/ResourceWatch/blocks.ts）
-关联测试：`web-ui/src/pages/Parsing.test.tsx`、`web-ui/src/components/parsing/ResourceWatch.test.tsx`、`tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
+`web-ui/src/components/parsing/`（BookTree/ParseToolbar/CompareView/PageImagePane/BlockList/BlockEditor/
+TypographyPanel/ResourceWatch/blocks.ts/typography.ts/regions.ts）
+关联测试：`web-ui/src/pages/Parsing.test.tsx`、`web-ui/src/components/parsing/typography.test.ts`、
+`web-ui/src/components/parsing/regions.test.ts`、`web-ui/src/components/parsing/ResourceWatch.test.tsx`、
+`tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
 关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
 关联设计：[frontend-architecture.md](../architecture/frontend-architecture.md)（8903 信息架构与视觉规范）、
 [downloads-ui.md](downloads-ui.md)（左树与状态点风格参照）、
 [local-model-management.md](local-model-management.md)（模型生命周期操作面）、
 [parsing-flow.md](parsing-flow.md)（后端全链路设计）
-关联计划：界面形态演进经 git 历史与 `history/plans/2026-09/` 各计划壳追溯
+关联计划：界面形态演进经 git 历史与 `history/plans/2026-09/` 各计划壳追溯；
+编辑模式框图与版式重排版由 `history/plans/2026-09/` REQ-098 轮设计与实施（进行中见 `plans/` 壳）
 
 ## 1. 定位与目标
 
@@ -21,7 +25,8 @@
 「用户在这页如何选书、入库、发起解析、对照阅读并逐块判定修正」。
 
 - **目标**：单屏完成「选书 → 书页入库 → 解析 → 原页/解析双栏对照 → 逐块判定与修正」，
-  交互现场即可感知资源与模型服务风险；
+  编辑模式提供**框图工作台**（页图上拉伸/移动/新增/删除/合并取字框）与**版式重排版**
+  （中文字体排印的成品化阅读面）；交互现场即可感知资源与模型服务风险；
 - **成功标准**：任一页面状态（未入库/已入库未解析/已解析/任务在飞/依赖离线/显存爆表）
   均有且只有一种明确的用户可见表现；对照与编辑操作不依赖后端内部结构，后端全链路
   演进（版本布局等）界面契约不变。
@@ -60,26 +65,30 @@ flowchart TD
     P --> RW[ResourceWatch 资源告警弹窗 无 UI 输出]
     C --> TB[ParseToolbar 对照顶栏]
     C --> CV[CompareView 双栏容器]
-    CV --> PI[PageImagePane 原文页 + bbox overlay]
-    CV --> BL[BlockList 解析文档块渲染]
-    BL --> BE[BlockEditor 单块编辑]
+    CV --> PI[PageImagePane 原文页 + bbox overlay + 框编辑交互]
+    CV --> BL[BlockList 解析文档渲染 流式/版式重排版]
+    BL --> BE[BlockEditor 单块内容编辑]
+    TB --> TP[TypographyPanel 版式样式面板]
 ```
 
 | 文件 | 职责 |
 | --- | --- |
 | `web-ui/src/pages/Parsing.tsx` | 页面容器：单屏布局（左树 + 右对照）、URL hash 同步、全局横幅（8900 错误 / 8902 降级 / 同步结果） |
 | `web-ui/src/components/parsing/BookTree.tsx` | 左书目树：领域→课程→书三级（数据源 `/parsing/tree`），**纯选择**，无状态徽标/筛选 |
-| `web-ui/src/components/parsing/ParseToolbar.tsx` | 对照顶栏：书名、页码导航、滚动模式、同步滚动、缩放、解析本页/全本、书页入库、任务进度、审阅统计（**无 engine 选择**） |
+| `web-ui/src/components/parsing/ParseToolbar.tsx` | 对照顶栏：书名、页码导航、渲染模式（流式/版式）、滚动模式、同步滚动、缩放、编辑开关 + 编辑口径（左框图/右内容）、框图操作条（§10）、版式样式面板（§9）、解析本页/全本、书页入库、任务进度、审阅统计（**无 engine 选择**） |
 | `web-ui/src/components/parsing/CompareView.tsx` | 双栏容器：态分流（§9）、单页模式 / 连续滚动模式、滚动同步 |
-| `web-ui/src/components/parsing/PageImagePane.tsx` | 原文页 + bbox overlay（hover/选中联动） |
-| `web-ui/src/components/parsing/BlockList.tsx` | 解析文档渲染（流式/版式两模式，KaTeX/Markdown/表格）+ 选中联动 |
-| `web-ui/src/components/parsing/BlockEditor.tsx` | 单块编辑：文字修正（公式为 LaTeX 源码）+ 范围数值修正 + 判定/备注 Popover |
+| `web-ui/src/components/parsing/PageImagePane.tsx` | 原文页 + bbox overlay（hover/选中联动）+ **框编辑交互**：8 手柄拉伸、框体移动（落 `corrected_bbox`）、空白拖拽画新框、Ctrl/Shift 多选（§10） |
+| `web-ui/src/components/parsing/BlockList.tsx` | 解析文档渲染：**流式**（按块顺序，可读性优先）/ **版式=重排版**（§9 版式重排版规格，非原页复刻）+ 选中联动；KaTeX/Markdown/表格 |
+| `web-ui/src/components/parsing/BlockEditor.tsx` | 单块**内容**编辑：文字替换（公式为 LaTeX 源码）+ 判定/备注 Popover（框几何修改归左栏框编辑，弹层不含 bbox 数值输入） |
+| `web-ui/src/components/parsing/TypographyPanel.tsx` | 版式样式面板：正文字体（宋/黑/楷）+ 正文字号（五号～一号阶梯）+「显示页眉页脚/页码」开关；偏好存 localStorage |
 | `web-ui/src/components/parsing/ResourceWatch.tsx` | 资源告警弹窗（§12）：10s 轮询 `/monitor/gpu` + `/models/vision`，显存 ≥95% 与模型服务中断各一路 notification，无自身界面 |
-| `web-ui/src/components/parsing/blocks.ts` | 块渲染工具（`tryRenderKatex`/`renderInlineMath`/`blockText`/`TYPE_LABELS`） |
-| `web-ui/src/stores/parsing.ts` | 树/选中书/页/任务/编辑状态与动作 |
+| `web-ui/src/components/parsing/blocks.ts` | 块渲染工具（`tryRenderKatex`/`renderInlineMath`/`blockText`/`TYPE_LABELS`/`effectiveBbox`） |
+| `web-ui/src/components/parsing/typography.ts` | 版式排印纯函数：字号阶梯、标题级差推导、字体角色映射、目录启发式识别、pt↔px 换算 |
+| `web-ui/src/components/parsing/regions.ts` | 框图几何纯函数：resize 位移、坐标换算、夹紧、并集、阅读序文本拼接 |
+| `web-ui/src/stores/parsing.ts` | 树/选中书/页/任务/编辑状态与动作 + 框图编辑态（口径、多选、本地删/合/新框）+ 版式偏好 |
 | `web-ui/src/api/axiom.ts` | 8900 适配端点封装与类型 |
 
-块渲染与判定为两套独立能力：渲染在 `BlockList`（+`blocks.ts`），判定/编辑在 `BlockEditor`。
+块渲染与判定为两套独立能力：渲染在 `BlockList`（+`blocks.ts`/`typography.ts`），判定/内容编辑在 `BlockEditor`；框图几何编辑在 `PageImagePane`（+`regions.ts`）。
 
 ## 5. 状态模型（stores/parsing.ts）
 
@@ -102,14 +111,22 @@ interface ParsingStore {
   comparePageNo: number;
   compareBook: BookMeta | null;
   pages: Record<number, PageEntry>;  // 页数据缓存（连续滚动窗口）
-  selectedBlock: number;       // -1 无选中
+  selectedBlock: number;       // -1 无选中（两口径共享联动选中）
   hoveredBlock: number;        // -1 无 hover
   editMode: boolean;           // 只读 / 编辑
+  editPane: 'box' | 'content'; // 编辑口径：左=框图几何，右=内容替换（§9.1/§10）
+  boxSelection: number[];      // 框图口径多选（删除/合并对象）
+  regionDraft: {               // 框图本地预览态（删/合/新框；落库禁用，REQ-099 R2 承接后接通）
+    added: BBox[];             // 新画框（原页图像素坐标）
+    deleted: number[];         // 待删块索引
+    merged: number[][];        // 待合并组（并集框预览）
+  };
   viewMode: 'compare' | 'original' | 'parsed';
   scrollMode: 'single' | 'continuous';
-  renderMode: 'stream' | 'layout';
+  renderMode: 'stream' | 'layout';  // 版式=重排版（§9.1，非原页复刻）
   syncScroll: boolean;
   zoom: number;
+  typography: TypographyPrefs; // 版式偏好（正文字体/字号级/页眉页脚；localStorage 持久）
   // 解析任务
   activeJob: ParseJob | null;
   jobError: string | null;
@@ -126,6 +143,10 @@ interface ParsingStore {
   gotoPage: (delta: number) => void;
   selectBlock: (index: number) => void;
   setEditMode: (on: boolean) => void;
+  setEditPane: (pane: 'box' | 'content') => void;
+  toggleBoxSelect: (index: number) => void;   // Ctrl/Shift 多选
+  addRegionDraft / mergeBoxSelection / removeRegionDelete / resetRegionDraft;  // 框图本地预览动作
+  setTypography: (patch: Partial<TypographyPrefs>) => void;  // 版式偏好（写 localStorage）
   setViewMode / setScrollMode / setRenderMode / setSyncScroll / setZoom / setEngine;
   submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
   ingestBook: (bookId: string) => Promise<void>;
@@ -149,6 +170,13 @@ interface ParsingStore {
   有则回填 `activeJob` 并续轮询（列表端点不可用时保守降级为不回填）；
 - 运行中任务轮询 `GET /parse-jobs/{id}`，终态自动刷新当前书 + 当前页（进度回显于顶栏）；
 - 编辑提交后以响应合并回 `edits`（不整页重拉），保证回显；
+- **编辑口径（`editPane`）只切交互面**：框图/内容两口径共享 `selectedBlock` 与左右栏双向联动；
+  口径=框图时拉伸/移动即时落 `corrected_bbox`，删除/合并/画新框**只进 `regionDraft` 本地预览**，
+  持久化按钮禁用 + tooltip（REQ-099 R2 承接前，§12 降级行）；
+- 口径=内容时 `BlockEditor` **只修改内容**（文字/LaTeX/判定/备注），不含 bbox 数值输入
+  （用户裁决：左修改是对框图的修改，右侧是对内容的替换）；
+- 版式偏好 `typography` 初始化读 localStorage、变更即写回；只作用于版式（重排版）渲染，
+  流式模式不受影响；切书切页不清空。
 - `compareBookId/comparePageNo` 双向同步 URL hash（`?book&page`），支持刷新恢复。
 
 ## 6. 数据契约（消费要点）
@@ -196,7 +224,9 @@ interface ParsingStore {
   键盘 `←`/`→` 翻页（编辑弹层打开时禁用）；连续滚动模式下页码随视口联动显示；
 - **滚动模式** Segmented：`单页`（默认，翻页式）｜`连续`（整本书纵向页流，见 §9）；
   单页模式两列各自滚动 + **滚动同步** Switch；
-- **渲染模式** Segmented：`流式`｜`版式`（§9）；
+- **渲染模式** Segmented：`流式`｜`版式`（§9.1 版式重排版规格）；`版式` 时行内出现「排版」按钮，
+  打开**版式样式面板**（TypographyPanel：正文字体 宋/黑/楷、正文字号 五号～一号、显示页眉页脚
+  开关；偏好即时持久，面板仅这三项控制）；
 - **视图恒为对照**：无「仅原文/仅解析」切换——未解析页由 §9 态分流天然只显示书页图；
 - **缩放** Slider：适配宽度 / 100%（A4 794px 基准）/ 自定义百分比；
 - **解析操作区**（右侧）：**「书页入库」**（= ingest：PDF 逐页转书页图并登记页数，解析前置，
@@ -204,7 +234,12 @@ interface ParsingStore {
   ＋「全本解析」（省略 pages）；提交后轮询 `GET /parse-jobs/{id}` 显示
   `progress.parsed/total` 进度条，完成自动刷新当前页；运行中禁用重复提交；失败显示错误
   文本 + 重试；
-- **审阅统计**：「已判定 x / 共 y 块」（当前页）；编辑模式开关：只读 / 编辑（避免浏览时误改）。
+- **审阅统计**：「已判定 x / 共 y 块」（当前页）；
+- **编辑模式**开关（只读 / 编辑，避免浏览时误改）。开启后出现**口径 Segmented**：
+  `框图`（左栏页图几何操作，§10）｜`内容`（右栏块内容编辑，§9），默认 `框图`；
+  框图口径附**操作条**：「删除选中」「合并选中」（多选 ≥2 时可用）「清空草稿」；
+  删除/合并/新框的**持久化按钮**在引擎承接前禁用 + tooltip「等待解析引擎侧承接」
+  （REQ-099 R2，§12）；拉伸/移动落库不受此限（走既有 `corrected_bbox` `/edit` 链）。
 
 ## 9. 双栏对照区（CompareView）
 
@@ -233,20 +268,48 @@ interface ParsingStore {
 
 `BlockList` + `BlockEditor`：
 
-- **两种渲染模式**（顶栏切换）：**流式**=按块顺序排版（可读性优先）；
-  **版式**=块按 bbox 绝对定位到页面尺寸（字号取 bbox 高度），呈现与原页接近的还原，
-  便于逐块判定「解析文档是否准确还原原页」；
+- **两种渲染模式**（顶栏切换）：**流式**=按块顺序排版（可读性优先，含换行保真，见下）；
+  **版式**=**重排版**（§9.1）——**不是按原页复刻**：块按阅读序流入 A4（794px）单栏纸面，
+  高度不限（长超过原页没问题），文字必须完整展示（禁止 ellipsis / overflow 截断）；
 - 块级渲染复用 `blocks.ts`（heading 分级、formula KaTeX、table HTML、list、image、caption 等）；
   formula 块渲染前先经 `unwrapMathDelimiters` **剥成对数学定界符**（`$$…$$`/`\[…\]`/`$…$`）再交
   KaTeX——存量产物的 `latex` 字段可能自带引擎定界符，KaTeX 视 `$` 为解析错误、整块回退原文显示；
   剥后内部仍含同种定界符则保留原文不误剥；
+- **换行保真**：块文本内含 `\n` 时流式与版式两档均以 `white-space: pre-wrap` 呈现行结构（符号表/目录等"多行进一块"的产物不折叠连排）；文本为空的块版式态不渲染；
 - 点击块与左图联动选中；选中块高亮并滚动到可视区；
-- `BlockEditor`：文字修正（公式编辑 LaTeX 源码）+ 范围修正（bbox 数值输入
-  `x0,y0,x1,y1`）+ 判定/备注 Popover；
+- `BlockEditor`（内容口径）：**只修改内容**——文字替换（公式编辑 LaTeX 源码）+ 判定/备注
+  Popover；**不含 bbox 数值输入**（框几何修改归左栏框编辑口径，用户裁决）；
 - 保存：`PUT /books/{id}/pages/{no}/blocks/{index}/edit`，
   `{verdict, note, corrected_text, corrected_bbox}`；
 - 回显：进入页时拉取页数据（blocks + 已合并 edits），刷新后保持；有编辑的块显示标记
   （判定 Tag + 修正角标）。
+
+### 9.1 版式重排版规格（typography）
+
+- **字号阶梯**（pt，px = pt × 4/3）：L0 五号 10.5｜L1 小四 12｜L2 四号 14｜L3 小三 15｜
+  L4 三号 16｜L5 小二 18｜L6 二号 22｜L7 小一 24｜L8 一号 26——最小五号、最大一号（硬约束）；
+- **正文**：样式面板手动选一级，默认 **L0 五号**（用户裁决）；覆盖 paragraph / list /
+  table / formula（正文统一一个字号）；表格随正文级自适应纸面宽度，不横向截断；
+- **标题**：按级差自动推导，不可单独设置——**大标题（一级）= 正文级 + 4，小标题（二级）= +2，
+  三级及以下 = +1**，一律封顶 L8；标题恒大于正文；
+- **字体角色**（中英文混排：西文一律 Times New Roman 前置）：正文**宋体**
+  （`'Times New Roman', SimSun`）、标题**黑体**（`'Times New Roman', SimHei`）、
+  目录/题注**楷体**（`'Times New Roman', KaiTi`）；样式面板「正文字体」在宋/黑/楷三档切换正文族；
+- **题注（caption）**：正文同级字号、楷体；
+- **节题白名单（类标题）**：单行 paragraph 去空白全文命中白名单（目录 / 目次 / Contents /
+  重要符号表 / 符号表 / 前言 / 序 / 序言 / 后记 / 附录 / 索引 / 参考文献 / 致谢）即按一级
+  标题排版（黑体 + 级差推导），并作为目录组/符号表组的**触发点**；白名单只做全文匹配、
+  不做子串匹配（防误伤正文）；
+- **目录（TOC）**：正文同级，缩进列表 + 点线引导 + 页码右对齐；识别为启发式——heading 或
+  白名单类标题文本为「目录 / 目次 / Contents」起，其后连续 list/paragraph（块内多行按行拆
+  条目）直至下一 heading 或组断（引擎侧 TOC 块类型落地后改为按类型识别，REQ-099 R4/R5 兜底）；
+- **符号表（三列对齐）**：类标题后连续多行段落，非空行 ≥60% 命中「符号（不含空白）+ 说明 +
+  行尾页码（数字/逗号/顿号/破折号）」形态时按三列表式排版——符号列自适应宽、说明列左对齐、
+  页码列右对齐；个别未命中行整行进说明列（页码列空）；整块不命中回落正文 pre-wrap
+  （数据侧类型修正承接后改按类型识别，REQ-099 R5）；
+- **页眉/页脚/页码**（header / footer / page_number）：版式态**默认隐藏**（用户裁决），
+  样式面板「显示页眉页脚」开关可恢复；
+- 偏好（正文字体、正文字号级、页眉页脚开关）localStorage 持久，见 §5 规则。
 
 ## 10. bbox 规范
 
@@ -254,9 +317,15 @@ interface ParsingStore {
   overlay 用相对百分比定位（`left/top/width/height` = 坐标 / `image_size`），随图自适应缩放；
 - **颜色**：按块类型固定色板（heading/paragraph/formula/table/image/…），半透明填充 + 实线边框；
   选中态加粗高亮（`#1677ff`），hover 态提升透明度；
-- **编辑**：`editMode` 下经 `BlockEditor` 数值输入修改范围；提交前夹紧到
-  `[0,0,image_size]`，最小尺寸约束（如 8px）防退化，保证 x0<x1、y0<y1；
-  图上拖拽/缩放手柄为预留增强，未纳入当前设计；
+- **框图编辑（编辑口径=框图，`PageImagePane` + `regions.ts`）**：选中块显示 8 手柄 + 框体可拖移；
+  **拉伸/移动**：pointer 事件实时预览，松手即经 `submitEdit` 落 `corrected_bbox`（与旧数值输入
+  同一条 `/edit` 链）；提交前夹紧到 `[0,0,image_size]`、最小尺寸 8px 防退化，保证 x0<x1、y0<y1；
+  **画新框**：页图空白处拖拽生成，进 `regionDraft.added` 本地预览（半透明新框，无块编号），
+  落库与区域驱动重解析待引擎承接（REQ-099 R1/R2）；
+  **删除/合并**：`boxSelection` 多选（Ctrl/Shift 点框）后经顶栏操作条触发；合并 = 并集 bbox +
+  阅读序（y0 主序、x0 次序）文本拼接预览；均只进 `regionDraft` 本地态，持久化禁用（§12）；
+- **已解析页重解析**：口径=框图时「解析本页」按钮语义不变（仍 `pages:[当前页]`）；R1 承接前
+  框图改动不影响解析结果，任务完成横幅提示「框图修改暂未生效」（§12）；
 - **无 bbox 块**：不在图上画框（仅列表可选中），标注「无坐标」。
 
 ## 11. 视觉规范
@@ -281,6 +350,9 @@ interface ParsingStore {
 | 模型服务离线 | 提交期 8902 探活失败返回 503 | **不创建任务**（前端显示提交失败提示）；受理后故障才逐页失败、job 记 failed |
 | 显存 ≥95% | `/monitor/gpu` 算得占比 | 右上角常驻警告弹窗「显存占用过高（NN%）」（<90% 自动撤下并复位，防抖） |
 | 模型服务中断 | `/models/vision` `health_state=down` | 右上角常驻错误弹窗「本地模型服务中断」+ 原因与 `last_flip`；同一事故只弹一次，恢复即撤下 |
+| 框结构操作落库（删/合/新框） | 8902 无块结构编辑 API（REQ-099 R2 未承接） | 操作仅在页图上本地预览呈现；持久化按钮禁用 + tooltip「等待解析引擎侧承接」 |
+| 区域驱动重解析 | REQ-099 R1 未承接 | 「解析本页」按既有全块解析执行；任务完成结果横幅提示「框图修改暂未生效」 |
+| 版式重排版 | 纯前端能力，无新增后端依赖 | 正常可用；8902 离线时对照面本身不可用（随既有降级行） |
 
 **资源告警（ResourceWatch）**：显存爆表与模型服务被打挂会直接导致解析任务逐页失败，
 须在解析作业现场即时提醒（仪表盘属被动可见面，不构成提醒）。
@@ -294,4 +366,6 @@ interface ParsingStore {
   §6 只回核消费口径（超时/轮询/判据）是否仍成立；
 - 任务状态机、版本激活与续跑语义以 [parsing-flow.md](parsing-flow.md) §4 为准，本档不
   复制状态定义；
-- UI 无 engine 选择（固定服务端默认）；图上拖拽/缩放手柄为预留增强，未纳入当前设计。
+- UI 无 engine 选择（固定服务端默认）；图上框编辑（拉伸/移动/画新框/删除/合并）与版式重排版
+  已由 REQ-098 轮纳入设计（§9.1/§10），其中框删除/合并/新框落库与区域驱动重解析依赖
+  REQ-099（R1/R2）引擎侧承接；版式=**重排版而非原页复刻**，字号五号～一号为硬约束。

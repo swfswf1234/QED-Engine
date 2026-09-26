@@ -1,16 +1,18 @@
 /**
- * 解析文档块渲染（parsing-ui §8 BlockList）：
+ * 解析文档块渲染（parsing-ui §8/§9.1 BlockList）：
  * - 流式：按块顺序排版（可读性优先，BlockView 渲染逻辑迁移）
- * - 版式：块按 bbox 绝对定位到纸面（字号取 bbox 高度），还原接近原页便于逐块判定
- * - 选中/hover 与左图 PageImagePane 双向联动；编辑模式下选中块弹 BlockEditor
+ * - 版式=**重排版**（§9.1）：块按阅读序流入 A4 单栏纸面，高度不限、文字完整展示；
+ *   字号阶梯（五号～一号）+ 标题级差推导 + 字体角色 + 目录启发式，纯函数在 typography.ts
+ * - 选中/hover 与左图 PageImagePane 双向联动；内容口径下选中块弹 BlockEditor（只改内容）
  */
-import { Fragment, useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Popover, Tag, Typography } from 'antd';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { editKey } from '../../stores/parsing';
-import { blockColor, blockText, effectiveBbox, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
+import { blockText, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
+import { assignRoles, roleTypography, symbolLineParts, tocItemParts, type TypographyPrefs } from './typography';
 import BlockEditor from './BlockEditor';
 
 const { Text } = Typography;
@@ -25,26 +27,14 @@ export interface BlockListProps {
   renderMode: RenderMode;
   /** 页图自然尺寸（版式模式坐标换算；null=尺寸未知，回退 A4@96dpi） */
   imageSize: { w: number; h: number } | null;
+  /** 版式偏好（§9.1；仅版式模式消费，流式不受影响） */
+  typography: TypographyPrefs;
   selectedIndex: number;
   editMode: boolean;
   submitting?: boolean;
   onSelect: (index: number) => void;
   onHover?: (index: number) => void;
   onSubmit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
-}
-
-/** 版式模式坐标换算：像素 bbox → 百分比（自然尺寸未知时按 A4@96dpi 近似） */
-function bboxToPct(bbox: [number, number, number, number], size: { w: number; h: number } | null) {
-  const w = size?.w ?? 794;
-  const h = size?.h ?? 1123;
-  const [x0, y0, x1, y1] = bbox;
-  const pct = (v: number, total: number) => Math.max(0, Math.min(100, (v / total) * 100));
-  return {
-    left: `${pct(x0, w)}%`,
-    top: `${pct(y0, h)}%`,
-    width: `${pct(x1, w) - pct(x0, w)}%`,
-    height: `${pct(y1, h) - pct(y0, h)}%`,
-  };
 }
 
 /** 块内容节点（流式/版式共用；formula=KaTeX、table=HTML、heading=级别标签） */
@@ -76,7 +66,7 @@ function blockBody(block: Block, fontSizePx?: number): React.ReactNode {
     );
   }
   return (
-    <span style={{ fontSize: fontSizePx }}>
+    <span style={{ fontSize: fontSizePx, whiteSpace: 'pre-wrap' }}>
       <span dangerouslySetInnerHTML={{ __html: renderInlineMath(content) }} />
     </span>
   );
@@ -94,9 +84,52 @@ function EditTags({ edit }: { edit?: BlockEdit }) {
   );
 }
 
+/** 目录条目行（§9.1）：标题 + 点线引导 + 页码右对齐 */
+function TocRows({ block }: { block: Block }) {
+  const raw = block.type === 'list' ? (block.items ?? []) : blockText(block).split('\n');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingInlineStart: '1em' }}>
+      {raw.map((line, i) => {
+        const { title, page } = tocItemParts(line);
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span>{title}</span>
+            {page !== '' && (
+              <>
+                <span style={{ flex: 1, minWidth: 24, borderBottom: '1px dotted #999', transform: 'translateY(-0.25em)' }} />
+                <span data-toc-page={page} style={{ textAlign: 'right' }}>{page}</span>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 符号表三列行（§9.1）：符号列自适应 / 说明列左对齐 / 页码列右对齐；未命中行整行进说明列 */
+function SymbolRows({ block }: { block: Block }) {
+  const lines = (block.type === 'list' ? (block.items ?? []) : blockText(block).split('\n'))
+    .filter((l) => l.trim() !== '');
+  return (
+    <div data-testid="symbol-table" style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingInlineStart: '1em' }}>
+      {lines.map((line, i) => {
+        const parts = symbolLineParts(line);
+        return (
+          <div key={i} data-testid="symbol-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', columnGap: 12, alignItems: 'baseline' }}>
+            <span data-symbol-col style={{ whiteSpace: 'pre' }}>{parts?.symbol ?? ''}</span>
+            <span style={{ whiteSpace: 'pre-wrap' }}>{parts ? parts.desc : line.trim()}</span>
+            <span data-symbol-page style={{ textAlign: 'right', whiteSpace: 'pre' }}>{parts?.page ?? ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function BlockList(props: BlockListProps) {
   const {
-    bookId, pageNo, blocks, edits, renderMode, imageSize,
+    bookId, pageNo, blocks, edits, renderMode, typography,
     selectedIndex, editMode, submitting, onSelect, onHover, onSubmit,
   } = props;
 
@@ -109,54 +142,66 @@ export default function BlockList(props: BlockListProps) {
 
   const keys = useMemo(() => blocks.map((_, i) => editKey(bookId, pageNo, i)), [blocks, bookId, pageNo]);
 
-  /** 编辑模式 + 选中 → 弹 BlockEditor（流式/版式两分支共用） */
+  /** 编辑模式 + 选中 → 弹 BlockEditor（流式/版式两分支共用；外层 div 承载 key） */
   const withEditor = (idx: number, el: React.ReactElement) => {
     const b = blocks[idx];
     if (!(editMode && idx === selectedIndex) || !b) return el;
     return (
-      <Popover
-        content={<BlockEditor block={b} edit={edits[keys[idx]]} submitting={submitting} onSubmit={(input) => onSubmit(idx, input)} />}
-        trigger="click"
-        open
-        onOpenChange={(open) => { if (!open) onSelect(-1); }}
-      >
-        {el}
-      </Popover>
+      <div key={`ed-${idx}`}>
+        <Popover
+          content={<BlockEditor block={b} edit={edits[keys[idx]]} submitting={submitting} onSubmit={(input) => onSubmit(idx, input)} />}
+          trigger="click"
+          open
+          onOpenChange={(open) => { if (!open) onSelect(-1); }}
+        >
+          {el}
+        </Popover>
+      </div>
     );
   };
 
   if (renderMode === 'layout') {
+    const roles = assignRoles(blocks);
     return (
-      <div style={{ position: 'relative', width: '100%', aspectRatio: '794 / 1123', background: '#fff' }}>
+      <div data-testid="layout-flow" style={{ color: '#222' }}>
         {blocks.map((b, idx) => {
-          if (!hasBbox(b)) return null;
-          const bb = effectiveBbox(b);
-          const pct = bboxToPct(bb, imageSize);
-          const fontPx = Math.max(10, Math.min(40, ((bb[3] - bb[1]) / (imageSize?.h ?? 1123)) * 1123 / 4));
+          const role = roles[idx];
+          if (role === 'furniture' && !typography.showFurniture) return null;
+          // 空文本块（解析侧取字丢失等）不渲染，避免版式面出空行
+          if (b.type !== 'image' && blockText(b).trim() === '') return null;
+          const st = roleTypography(role, b, typography);
           const selected = idx === selectedIndex;
-          return (
-            <Fragment key={idx}>
-              {withEditor(idx, (
-                <div
-                  ref={(el) => { refs.current[idx] = el; }}
-                  role="button"
-                  aria-label={`块 ${idx + 1}（${TYPE_LABELS[b.type] ?? b.type}）`}
-                  style={{
-                    position: 'absolute', ...pct, boxSizing: 'border-box',
-                    overflow: 'hidden', padding: 2,
-                    border: `1px solid ${selected ? '#1677ff' : blockColor(b.type)}`,
-                    background: selected ? 'rgba(22,119,255,.08)' : 'transparent',
-                    cursor: 'pointer', lineHeight: 1.2,
-                  }}
-                  onClick={() => onSelect(selected ? -1 : idx)}
-                  onMouseEnter={() => onHover?.(idx)}
-                  onMouseLeave={() => onHover?.(-1)}
-                >
-                  <div style={{ fontSize: fontPx }}>{blockBody(b, fontPx)}</div>
-                </div>
-              ))}
-            </Fragment>
-          );
+          const boxStyle: React.CSSProperties = {
+            fontSize: st.fontSizePx,
+            fontFamily: st.fontFamily,
+            fontWeight: st.fontWeight,
+            lineHeight: 1.6,
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: `1px solid ${selected ? '#1677ff' : 'transparent'}`,
+            background: selected ? '#e6f4ff' : 'transparent',
+            cursor: 'pointer',
+            margin: role === 'heading' ? '0.8em 0 0.3em' : '0 0 0.2em',
+            wordBreak: 'break-word',
+            textAlign: role === 'furniture' ? 'center' : undefined,
+          };
+          return withEditor(idx, (
+            <div
+              key={idx}
+              ref={(el) => { refs.current[idx] = el; }}
+              role="button"
+              data-block-role={role}
+              aria-label={`块 ${idx + 1}（${TYPE_LABELS[b.type] ?? b.type}）`}
+              style={boxStyle}
+              onClick={() => onSelect(selected ? -1 : idx)}
+              onMouseEnter={() => onHover?.(idx)}
+              onMouseLeave={() => onHover?.(-1)}
+            >
+              {role === 'toc' ? <TocRows block={b} />
+                : role === 'symbolTable' ? <SymbolRows block={b} />
+                : blockBody(b, st.fontSizePx)}
+            </div>
+          ));
         })}
       </div>
     );
