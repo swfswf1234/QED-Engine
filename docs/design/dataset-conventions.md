@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-24
+最后更新：2026-09-26
 确认状态：已确认
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
@@ -71,7 +71,7 @@
 │   └── exploration/<对象名>探索.txt   # 探索发起文档（用户手写参考，不参与自动清理）
 ├── parsed/                           # 解析产物区（写入方 Axiom-Flow）
 │   └── <domain_id>/<course_id>/<book_id>/   # book_id 同源 qt_books（如 mathanalysis-b05）
-│       ├── pages/ + book.json + manifest.json   # 根视图（ingest 首版产物）
+│       ├── pages/                    # 根视图唯一长期驻留（ingest 页图，版本硬链接来源）
 │       └── versions/<job_id>/        # 解析版本（每次 job 完整产物）
 └── backups/                          # D 类操作备份留痕（命名与登记约束见上节）
 ```
@@ -82,15 +82,16 @@
 - **解析版本划分（实施方：Axiom-Flow）**：同一书目每次解析 job 的产物按版本独立落盘，
   互不覆盖——
   - 版本目录：`parsed/<domain>/<course>/<book_id>/versions/<job_id>/`，内含该版本完整产物
-    （页图 `pages/`、blocks、markdown、manifest.json）；job 完成校验通过后原子写入。
+    （页图 `pages/`、blocks、markdown、book.json、manifest.json）；job 完成校验通过后原子写入。
   - **生效版本由指针选择**：`af_books.active_job_id` 是唯一事实源，读取方（8902 页/块/
     manifest 端点、8900 代理、前端）统一经指针解析作用目录；置位 = 单列 UPDATE，切换
-    不发生任何磁盘写入。`active_job_id` 为 NULL 时回退**根视图**（ingest 直出的首版
+    不发生任何磁盘写入。`active_job_id` 为 NULL 时回退**根视图**（存量旧布局直出的首版
     legacy 产物），重新 ingest 只交换根视图并重置指针，`versions/` 完整保留。
   - **页图跨版本硬链接去重**：版本目录的 `pages/` 以 `os.link` 接入根视图页图（非复制），
     多版本不重复占盘；硬链接不可用的文件系统回落复制并告警。整版重解析（seed）同样
     逐个硬链接基线，`manifest.json`/`chunks.json` 各版本独立生成。
-  - 历史版本保留供对比与回滚；旧版本清理属 D 类数据操作（备份 + 用户确认），不自动删除。
+  - **激活即清旧**：新版本激活（`active_job_id` 置位）后自动删除旧版本目录，磁盘同一本书
+    只保留当前生效版本；删除动作记运行日志，历史版本不驻留。
   - domain 为空时省略层级（现状 `parsed/linear_algebra/…` 即此形态），版本化规则不受影响。
 - **插图/引擎返回图片**：归一化落 `versions/<job_id>/pages/images/<name>`，blocks 与
   markdown 以书目目录相对路径引用（不内嵌字节）。当前 MinerU 适配器不请求图片返回
@@ -106,11 +107,33 @@
 
 | 子域 | 写入方 | 读取方 | 内容 |
 | --- | --- | --- | --- |
-| `raw/<domain>/<course>/` | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始数据（PDF/快照），保持来源完整性与校验信息；元数据（sha256/路径/状态）在 `qt_books` |
-| `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*` 四表 |
+| `raw/<domain>/<course>/`（PDF/快照） | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始数据（PDF/快照），保持来源完整性与校验信息；元数据（sha256/路径/状态）在 `qt_books` |
+| `raw/{domain_id}/domains.json`、`raw/{domain_id}/courses.json`（中间态） | QED-Tracker（探索管线） | QED-Tracker（重导入） | 领域知识正本（REQ-078 例外）；`courses.json` 为中间态（领域完成时反写 domains.json 后删除）；状态事实源在 DB |
+| `raw/{domain_id}/{course_id}/tutorials.json` | QED-Tracker（探索管线） | QED-Tracker（重导入） | 课程知识正本（REQ-078 例外）；状态事实源在 DB |
+| `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*` 四表；产物布局见下表 |
 | `tmp/qed-tracker/downloads/` | QED-Tracker 自用 | — | 下载中间产物，任务结束清理 |
 | `tmp/exploration/` | 用户手工维护 | QED-Tracker（LLM 探索输入，经 ref_doc_path） | 探索发起文档（`<对象名>探索.txt`），用户资产不自动清理 |
 | `backups/<日期>-<任务>` | 发起操作的 agent/用户 | 回滚时 | D 类数据操作备份留痕；不入任何服务读取路径 |
+
+## 存储链路单一事实源原则（ARCH-032）
+
+全链路「探索→下载→解析」对每类数据只维护一份落点，多写即 JSON 岛：
+
+| 数据类别 | 唯一落点 | 备注 |
+| --- | --- | --- |
+| LLM 调用（prompt/response/token） | `qed_llm_calls`（DB 共享表） | 全链路统一审计；不另落 JSON 文件 |
+| 探索状态与进度 | `qed_domain`/`qed_course`（DB） | exploration_stage/explore_pending；唯一事实源 |
+| 探索知识正本 | `raw/{domain_id}/`（QED_DATA_ROOT） | REQ-078 例外：domains.json / tutorials.json 为知识正本与重导入输入；状态事实源仍在 DB |
+| 下载书籍/论文 PDF | `raw/<domain_id>/<course_id>/`（QED_DATA_ROOT） | 成品唯一落点；staging（`tmp/qed-tracker/downloads/`）为过渡，任务结束清理 |
+| 书籍元数据（路径/状态/选用） | `qt_books` + `qt_sources`（DB） | 内容身份（sha256/size）目标落 `qt_books` 三列（QED-071 B 轮）；当前临时在 `meta/resources/` JSON 岛 |
+| 入库页图（ingest 阶段） | `parsed/<domain>/<course>/<book_id>/pages/p*.png`（QED_DATA_ROOT） | 根视图唯一长期文件；版本目录硬链接来源；入库即不移动 |
+| 书籍 ingest 元数据（含内容身份 sha256/ingested_at） | `af_books`（DB） | 唯一正本；根视图不写 book.json/manifest.json，版本内 `book.json` 从 `af_books` 生成 |
+| parse 产物（blocks/Markdown/图像/chunks） | `parsed/<domain>/<course>/<book_id>/versions/<active_job_id>/`（QED_DATA_ROOT） | 唯一正本；版本指针：`af_books.active_job_id`（DB）；激活即删除旧版本目录，磁盘只存当前生效版本 |
+| 解析任务与页状态 | `af_*` 四表（DB） | 唯一事实源；`active_job_id` 设置 = 版本激活确认语义 |
+
+> **野生区警示（ADR 0018）**：`<QED_DATA_ROOT>/qed-tracker/`（含 `meta/resources/<sha256>.json`）不在顶层
+> 白名单，属野生区；该 JSON 岛当前仍在写（书侧内容身份临时载体），随 QED-071 B 轮迁入 DB 后消失——
+> B 轮完成前不得误判为合规落点。
 
 ## 强制规则
 

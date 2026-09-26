@@ -1,12 +1,12 @@
 # 文档解析管理·全链路设计（parsing-flow）
 
 设计状态：Accepted
-实现状态：Implemented
-最后更新：2026-09-23
+实现状态：In Progress
+最后更新：2026-09-26
 确认状态：已确认
 关联代码：8902 侧 `Axiom-Flow/src/axiom_flow/orchestrator/pipeline.py`、`Axiom-Flow/src/axiom_flow/engines/mineru.py`、`Axiom-Flow/src/axiom_flow/normalize/blocks.py`、`Axiom-Flow/src/axiom_flow/ingest/artifacts.py`；8900 侧适配层（api/axiom.py、clients/axiom_client.py）的模块映射与 DesignRef 登记在 [code-map.md](../architecture/code-map.md)，面向前端的端点契约事实源为 [api-contracts.md](../architecture/api-contracts.md) §④
 关联测试：`tests/test_api.py`、`tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
-关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
+关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）、[ADR 0018](../adr/0018-data-root-whitelist-and-meta-json-ban.md)（数据根顶层白名单与元数据 JSON 岛禁止）
 关联设计：[parsing-ui.md](parsing-ui.md)（界面消费）、[dataset-conventions.md](dataset-conventions.md)（数据根三区与产物版本划分约定正文）、
 [local-model-management.md](local-model-management.md)（模型生命周期与槽位）、[llm-gateway.md](llm-gateway.md)（网关与调用记录）、
 [cross-project-contracts.md](cross-project-contracts.md)（三项目对接点总表）
@@ -67,7 +67,7 @@ sequenceDiagram
     GW->>AX: GET /books
     AX-->>GW: af_books 列表
     FE->>GW: POST /books/{id}/ingest
-    GW->>AX: 渲染页图 + book.json（parsed 区）
+    GW->>AX: 渲染页图（parsed 区根视图），元数据落 af_books
     FE->>GW: POST /parse-jobs {book_id, pages?, engine?}
     GW->>AX: 202 任务受理
     AX->>MD: 引擎适配器（页图/PDF）
@@ -85,7 +85,7 @@ sequenceDiagram
 - 同步幂等键 `book_id`（同源 `qt_books.book_id`）；`af_books` 为只读快照语义，qt_books 后续
   变更/删除不影响已同步行；共享 `qed_*` 表只读，表结构变更先登记
   [database-design.md](../architecture/database-design.md)；
-- ingest 只渲染页图 + `book.json`，不调模型；源 PDF 只读不复制；
+- ingest 只渲染页图并把元数据全量落 `af_books`，不调模型；源 PDF 只读不复制；根视图唯一长期驻留文件为 `pages/*.png`；
 - 解析任务受理即 `202`，任务状态机 `queued/running/completed/partial/failed/interrupted`
   （进度与结局分列：`af_books.parse_status` 只表达进度，`last_parse_result` 表达最近结局，
   两列与 `pages_done` 等进度字段均由 Axiom-Flow 自持维护）；
@@ -106,22 +106,37 @@ sequenceDiagram
 
 ## 5. 解析产物布局（`QED_DATA_ROOT/parsed/`）
 
+**产物布局**（根视图最小化 + 版本目录唯一正本）：
+
 ```text
 <QED_DATA_ROOT>/parsed/<domain_id>/<course_id>/<book_id>/
-├── book.json            # BookMeta：book_id/title/authors/page_count/sha256/source_file/engine/ingested_at
-├── manifest.json        # 产物清单（路径 + 大小 + SHA-256）
-└── pages/
-    ├── p0001.png        # 原页图（150 DPI，对照左栏 + bbox 基准）
-    ├── p0001.md         # 页级 Markdown（$$...$$ / $...$ 内嵌公式）
-    └── p0001.blocks.json# 统一 blocks（结构化，含 bbox）
+├── pages/
+│   └── p0001.png        # ingest 产物：原页图（150 DPI，对照左栏 + bbox 基准）← 根视图唯一长期驻留
+└── versions/
+    └── <job_id>/        # parse 产物：一次解析任务 = 一个完整快照版本（激活后磁盘只存当前版本）
+        ├── book.json    # 从 af_books 生成的版本内元数据快照
+        ├── manifest.json# 版本内产物清单（路径相对版本目录）
+        ├── chunks.json  # 知识块（派生，可重建，不入库）
+        └── pages/
+            ├── p0001.png        # 硬链接自根视图 pages/（零额外磁盘）
+            ├── p0001.md         # 页级 Markdown（$$...$$ / $...$ 内嵌公式）
+            └── p0001.blocks.json# 统一 blocks（结构化，含 bbox）
 ```
 
-- `source_file`：源 PDF 的数据根相对路径（同源 `qt_books.file_path`），源 PDF 只读不复制；
+- **根视图只保留 `pages/*.png`**：ingest 不向根视图写任何元数据/清单 JSON 文件；书籍元数据
+  （含 ingest 内容身份 sha256/ingested_at 与 `source_file`——源 PDF 的数据根相对路径，同源
+  `qt_books.file_path`）唯一事实源是 `af_books`，源 PDF 只读不复制；
+- **版本目录为唯一正本**：版本内 `book.json` 由 `af_books` 生成（播种与落盘同口径），产物
+  文件的消费语义（清单相对路径、blocks 格式）不变；
+- **激活即清旧**：新版本激活（`af_books.active_job_id` 置位）后自动删除旧版本目录，磁盘同一
+  本书只保留当前生效版本；删除动作记运行日志；
+- **元数据读取直读 af_books**：书目/元数据读取不设文件系统回落，书不存在即 404；
 - 页图渲染与产物落盘在 Axiom-Flow（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 决定 2）；
 - 目录结构遵循 [dataset-conventions.md](dataset-conventions.md)（`parsed/` 区写入方 Axiom-Flow）；
-- **版本划分**：每次解析 job 产物原子独立落 `<book_id>/versions/<job_id>/`，book_id 根目录
-  保持「当前生效版本」视图（读取方与端点契约不变）；约定正文（生效指针、legacy 哨兵、
-  清单语义）见 [dataset-conventions.md](dataset-conventions.md)。
+- **版本划分**：每次解析 job 产物原子独立落 `<book_id>/versions/<job_id>/`；约定正文
+  （生效指针、legacy 哨兵、清单语义）见 [dataset-conventions.md](dataset-conventions.md)；
+- **生效指针与正式确认**：`af_books.active_job_id` 非 NULL = 版本经激活确认，消费面的
+  唯一读取依据；`NULL` 为 legacy 根视图哨兵（存量兼容）。
 
 ## 6. 统一 blocks schema（页级）
 

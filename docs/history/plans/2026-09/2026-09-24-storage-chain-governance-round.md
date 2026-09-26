@@ -1,8 +1,8 @@
 # 存储链路规范化轮（storage-chain-governance-round）
 
-状态：In Progress
+状态：Completed
 任务类型：B
-最后更新：2026-09-24
+最后更新：2026-09-26
 关联 ADR：`../adr/0018-data-root-whitelist-and-meta-json-ban.md`（数据根顶层白名单与元数据 JSON 岛禁止）
 关联设计：`docs/design/dataset-conventions.md`（白名单节与 tmp 实况修订）、`docs/standards/storage-conventions.md`（规则升格正文落点）
 关联 Tracker：docs/trackers/todo.md ARCH-032 行（支线 REQ-091~096 同节登记，doctor 行 09-24 改号 REQ-090→REQ-096 见其 todo 行）

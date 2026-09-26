@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-24
+最后更新：2026-09-26
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -115,7 +115,7 @@ QED-Tracker（建表维护），其他项目**只读不写**；共享表不复�
   | 能力组 | 消费语义要点 | 形状事实源 |
   | --- | --- | --- |
   | 书目登记与同步 | `af_books` 书目列表/详情（`file_path` 为数据根相对路径 + ingest/解析进度）；书目自 8901 verified 同步（book_id 同源 qt_books、幂等 upsert，由 8900 聚合驱动） | Axiom-Flow `api.md`；`api-contracts.md` §④ |
-  | 入库与解析 | ingest＝渲染页图 + book.json（不调模型），**分钟级同步长请求**（超时分层见 §11）；解析任务 202 提交 + 轮询（`queued/running/completed/failed`，progress `{parsed,total,error}`）——解析本身已是后台任务范式 | Axiom-Flow `api.md`；`api-contracts.md` §④；parsing-flow.md §4 |
+  | 入库与解析 | ingest＝渲染页图（元数据落 af_books，不调模型），**分钟级同步长请求**（超时分层见 §11）；解析任务 202 提交 + 轮询（`queued/running/completed/failed`，progress `{parsed,total,error}`）——解析本身已是后台任务范式 | Axiom-Flow `api.md`；`api-contracts.md` §④；parsing-flow.md §4 |
   | 产物与对照 | 页级 blocks/markdown/原页图读取；manifest 产物清单（路径/大小/哈希）；源 PDF 由 8900 本地端点从数据根取（不经 8902） | `api-contracts.md` §④；parsing-flow.md §5/§7 |
   | 人工编辑落库 | 块级编辑记录（EditRecord）与判定写入；8900 `/review` 门面为过渡兼容，新消费面一律走 edit 契约 | `api-contracts.md` §④ |
   | 预留面 | 版本列表/回滚、chunks（RAG 切片预留）、书目 PATCH/DELETE——8902 侧已实现，8900 透传与前端消费未排期 | `api-contracts.md` §④「规划契约」 |
@@ -216,7 +216,7 @@ QED-030/031 三表端点退役）：
 
 - **异步范式统一声明**：两子项目写操作**均以异步任务 + 轮询为主范式**——8901 全部写操作
   走后台任务（§5）；8902 解析走 ParseJob 提交 + 轮询（§6）。唯一例外是 8902 ingest 为分钟级
-  同步长请求（渲染页图 + book.json，300s 预算），是否收敛为后台任务属后轮候选，本轮不预设。
+  同步长请求（渲染页图，300s 预算），是否收敛为后台任务属后轮候选，本轮不预设。
 
 ## 12. 已知约束与维护规则
 

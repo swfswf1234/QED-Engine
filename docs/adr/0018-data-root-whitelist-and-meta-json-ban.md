@@ -76,7 +76,7 @@ D 类操作须用户明确裁决去向；④ `backups/` 判违规删除——排
 - [存储规范](../standards/storage-conventions.md)（规则正文落点：白名单登记制、JSON 岛
   禁止、tmp 语义收口）；[dataset 目录约定](../design/dataset-conventions.md)（白名单节、
   tmp 实况、指针选版语义）；
-- [ARCH-032 计划壳](../plans/2026-09-24-storage-chain-governance-round.md)（本轮执行记录）；
+- [ARCH-032 计划壳](../history/plans/2026-09/2026-09-24-storage-chain-governance-round.md)（本轮执行记录）；
 - 前序裁决：[ADR 0013](0013-dev-standards-system.md)（存储规范设立）、REQ-032（meta/ 退役）、
   REQ-078（知识正本例外）、[ADR 0014](0014-parsing-ownership-and-model-boundary.md)（解析管线归
   Axiom-Flow）；

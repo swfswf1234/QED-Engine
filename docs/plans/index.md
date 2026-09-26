@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-24
+最后更新：2026-09-26
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -32,11 +32,15 @@
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
+- REQ-098/REQ-099 承载壳（解析页框图编辑与版式重排版设计轮：编辑模式框图工作台＋中文字体排印重排版，
+  蓝图待评审→晋升 parsing-ui.md；配套（请求：Axiom-Flow）区域驱动重解析与块结构编辑讨论稿一份），状态见任务台账
 
 ## 已归档计划（2026-09）
+- [解析产物存储单一事实源优化（parsing-storage-single-truth）](../history/plans/2026-09/2026-09-26-parsing-storage-single-truth.md)（REQ-097，2026-09-26 收口：Axiom-Flow PLAN-017 实施回执 + 根侧 S6 真机回归通过；设计晋升与目标态正文见 parsing-flow.md §5 / dataset-conventions.md）
 - [本地模型启动参数配置（model-startup-params）](../history/plans/2026-09/2026-09-24-model-startup-params-round.md)（ARCH-033，Achieved 2026-09-24：加载层参数挂 registry 身份表全链路生效——lms load 带参 + `-y` 非交互、llamacpp 通道真做（LM Studio 自带二进制与 GGUF）+ 5001 双向互斥让位（unload --all + server stop）；27B@8192/9B@16384 真机读回、三缺陷 TDD 修复；设计事实晋升 [local-model-management.md](../design/local-model-management.md)「本地模型启动参数契约（加载层）」节；收口门禁 569 + 契约 68 绿；壳 Retain 归档）
 - [管理台展示优化（admin-display-optimization）](../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)（REQ-033，Completed 2026-09-24：用户五改验收发令收尾——S1~S5 全达（GPU SWR 提速/增量刷新/在跑标注/三块制五改形态/设计收口），门禁 vitest 239 + tsc -b + build + 全量 pytest 569 + 契约 81 绿 + 浏览器实测；设计事实晋升 [admin-dashboard.md](../design/admin-dashboard.md) 与 [local-model-management.md](../design/local-model-management.md)；壳 Retain 归档）
 - [架构文档契约形态轮（architecture-contract-shape-round）](../history/plans/2026-09/2026-09-24-architecture-contract-shape-round.md)（ARCH-031，Achieved 2026-09-24：api-contracts/database-design 收口为只写当前契约+事实源唯一+门禁防漂移形态，端点总表↔app.routes 85 条双向守护、qed_* 零 DDL+ER 图+读写矩阵，两文档转已确认；收口复跑契约 68 + 全量 483 绿；壳 Retain 归档）
+- [存储链路规范化轮（storage-chain-governance-round）](../history/plans/2026-09/2026-09-24-storage-chain-governance-round.md)（ARCH-032，Achieved 2026-09-26：W1~W8 全达成——ADR 0018 立档、dataset-conventions/storage-conventions 实况化（白名单哨兵/active_job_id 指针/tmp 规则）、契约守护 3 新增、缺口台账 REQ-091~096、两端存储链路设计约束固化（dataset-conventions 新增原则节/exploration-pipeline/download-pipeline 约束注记）；QED-Tracker A 轮回执已收（QED-071：D3 留痕判废+R2 年龄清扫+B 轮设计契约定稿）；门禁 W7：契约 68 + 全量 483 绿；壳 Retain 归档）
 - [跨项目契约总指引轮滚动记录（运行矩阵·契约演进·错误透传·归属指引）（cross-project-contract-guide-round）](../history/plans/2026-09/2026-09-24-cross-project-contract-guide-round.md)（ARCH-030，Achieved 2026-09-24：总指引内容并入 [cross-project-contracts.md](../design/cross-project-contracts.md) §9~§12 与 [four-service-architecture.md](../architecture/four-service-architecture.md) 改动归属判定表；8901/8902 只留能力面（端点详表收回子仓库，ADR 0017 铁律）；壳 Retain 归档）
 - 设计文档结构契约轮（design-doc-structure-contract）（PLAN-053 / ARCH-029，Achieved 2026-09-24：按归档判定 Delete 移除——规范正文并入 [ADR 0017](../adr/0017-design-doc-structure-contract.md) 与 [doc-governance.md](../standards/doc-governance.md)「设计文档结构契约」节，六篇现状以各自文档为准，关闭证据见 completed.md ARCH-029 行）
 - [文档解析管理·与 Axiom-Flow 交互全链路（parsing-flow）](../history/plans/2026-09/2026-09-14-parsing-management-axiom-flow-chain.md)（PLAN-044，Achieved 2026-09-23：用户裁决晋升收口——**独立晋升 [design/parsing-flow.md](../design/parsing-flow.md)**（与 parsing-ui.md 合并评估裁决＝不合并、互链分工）；af_* 全量 DDL 根侧快照吸收版本作用域与结局分列迁移演进；剩余端点（GET /parse-jobs 列表）实现与登记随收口并入；Retain 归档）
