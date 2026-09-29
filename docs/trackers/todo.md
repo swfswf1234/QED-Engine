@@ -1,7 +1,7 @@
 ﻿# 任务台账
 
 状态：Current
-最后更新：2026-09-26
+最后更新：2026-09-29
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
@@ -49,6 +49,12 @@
 | REQ-096 | 支线 | 低 | 待开始 | 存储对账 doctor（前瞻）：库↔盘双向只读核验——幻影记录（DB 有账盘无文件）、孤儿文件（盘有产物库无账）、manifest/`source_sha256` 哈希失配、file_path 三处（qt_books/af_books/book.json）漂移检测；落点建议 8900 只读端点或 CLI，实施另立设计 | 2026-09-24 登记（ARCH-032 勘察：双写面无任何对账机制，漂移无人可发现）；本轮用户裁决只登记不进设计；**2026-09-24 改号 REQ-090→REQ-096**（原登记撞号：REQ-090 已由 learning/ 退役任务使用并关闭，见 completed.md 与 ADR 0015） |
 | REQ-091 | 支线 | 中 | 待开始 | 探索会话持久化（8900）：`services/explore_sessions.py` 纯内存态（重启即丢 report/steps/session_id，前端只能重发）；课程探索失败 error 无列落库（领域侧有 explore_pending，课程侧不对称） | 2026-09-24 登记（ARCH-032 勘察：explore_sessions.py:40 明示内存态；shared_tables.py:306-309 课程失败无写点）；属根仓库代码改动，排期待定 |
 | REQ-092 | 支线 | 低 | 待开始 | 账本保留期策略：`qed_llm_calls`（MEDIUMTEXT prompt/response 只增）、`qt_tasks`/`qt_selections`/`af_parse_jobs` 均无清理/轮转规则，需成文保留期与归档口径（审计线索与磁盘/库容量平衡） | 2026-09-24 登记（ARCH-032 勘察：全仓无 DELETE/保留期代码）；涉及跨项目表，策略先根侧成文再发请求 |
+
+### 普通任务轮（ARCH-035）
+
+| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| --- | --- | --- | --- | --- | --- |
+| ARCH-035 | 主线 | 中 | In Progress | [普通任务轮滚动记录（零散缺陷与小修承载）（ordinary-tasks-round）](../plans/2026-09-29-ordinary-tasks-round.md) —— 承载根仓库零散缺陷与 `design/` 小修的滚动轮次（条目登记表在壳内），目标 = 小改动有条目、有回归测试、有收口证据且不挤占主线轮次边界 | 2026-09-29 立项（用户裁决：DEFECT-006 类零散小修另起普通任务轮承载，不散挂主线轮次）；W1/DEFECT-006 已同轮收口（证据见壳 W1 行与 completed.md 行）；轮次滚动存续，后续零散条目在本壳登记表加行 |
 
 ### 长期任务
 

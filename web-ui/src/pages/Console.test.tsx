@@ -219,6 +219,32 @@ describe('控制台 Console（Phase 2）', () => {
     expect(mockFetch.mock.calls.length).toBe(callsBeforeCancel);
   });
 
+  it('启动确认框正文给启动语义（DEFECT-006：启动不得回落「重启」文案）', async () => {
+    mockApi(baseRoutes);
+    renderConsole();
+    await waitFor(() => {
+      expect(useRuntimeStore.getState().services.length).toBe(4);
+    });
+    const trackerCard = screen.getByText('QED-Tracker 文档下载服务').closest('.ant-card')!;
+    await userEvent.setup().click(within(trackerCard as HTMLElement).getByRole('button', { name: /启动/ }));
+    expect(await screen.findByText(/确认启动「QED-Tracker 文档下载服务」/)).toBeInTheDocument();
+    expect(screen.getByText(/启动该服务，将拉起对应端口进程/)).toBeInTheDocument();
+    expect(screen.queryByText(/重启会中断当前运行中的任务/)).not.toBeInTheDocument();
+  });
+
+  it('重启确认框正文给重启语义（在线服务重启仍提示中断在跑任务）', async () => {
+    mockApi(baseRoutes);
+    renderConsole();
+    await waitFor(() => {
+      expect(useRuntimeStore.getState().services.length).toBe(4);
+    });
+    const axiomCard = screen.getByText('Axiom-Flow 文档解析服务').closest('.ant-card')!;
+    await userEvent.setup().click(within(axiomCard as HTMLElement).getByRole('button', { name: /重启/ }));
+    expect(await screen.findByText(/确认重启「Axiom-Flow 文档解析服务」/)).toBeInTheDocument();
+    expect(screen.getByText(/重启会中断当前运行中的任务/)).toBeInTheDocument();
+    expect(screen.queryByText(/启动该服务，将拉起对应端口进程/)).not.toBeInTheDocument();
+  });
+
   it('确认框「确认停止」→ 调用 operate；8900 重启经 /self-restart（确认后调 API）；8903 在线仅重启、无停止', async () => {
     const routes = {
       '/services': servicesFixture,

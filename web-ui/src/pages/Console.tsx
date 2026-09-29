@@ -506,11 +506,13 @@ export default function Console() {
           onOk={() => confirmTarget && executeConfirm(confirmTarget)}
           onCancel={() => setConfirmTarget(null)}
         >
-          {confirmTarget?.op === 'stop'
-            ? '停止后该服务将不可用，可随时重新启动。'
-            : confirmTarget?.name === 'config'
-              ? '8900 重启将短暂中断所有管理接口，约 3 秒后页面自动刷新恢复。'
-              : '重启会中断当前运行中的任务。'}
+          {confirmTarget?.op === 'start'
+            ? '启动该服务，将拉起对应端口进程，就绪后状态自动转为在线。'
+            : confirmTarget?.op === 'stop'
+              ? '停止后该服务将不可用，可随时重新启动。'
+              : confirmTarget?.name === 'config'
+                ? '8900 重启将短暂中断所有管理接口，约 3 秒后页面自动刷新恢复。'
+                : '重启会中断当前运行中的任务。'}
         </Modal>
 
       {/* ②基础设施（元数据库：只读探测 + 测试，本期不做启停） */}

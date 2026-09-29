@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-24
+最后更新：2026-09-29
 确认状态：已确认
 关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
@@ -56,6 +56,11 @@
 每卡：状态徽章（online/offline/starting/stopping）、端口 + PID（离线时显示）、启动时间、
 操作按钮（按上表规则动态渲染）。操作后前端轮询 `GET /services` 每 1 秒，最多 15 秒，
 直到状态收敛到目标态；`operating` 字段防重入，操作期间禁用其他按钮。
+
+**破坏性操作确认框**（受控 `<Modal>`，标题与确认按钮文案取操作中文名）：正文按操作给专属文案——
+`start` 给启动语义（拉起对应端口进程，就绪后转在线）、`stop` 给停止语义（服务不可用、可随时重启）、
+`restart` 给重启语义（中断当前运行中的任务），`config` 单元重启给自重启专属提示（约 3 秒自动刷新）。
+四段文案互不复用：启动弹窗出现「重启」措辞即为缺陷。
 
 ### 3.2 区 2：基础设施（MySQL）
 

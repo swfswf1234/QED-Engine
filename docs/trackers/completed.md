@@ -1,13 +1,14 @@
 # 已关闭任务台账
 
 状态：Current
-最后更新：2026-09-26
+最后更新：2026-09-29
 
 本文件登记已关闭任务（终态时从[任务台账](todo.md)原子移除并移入本表）。关闭结果枚举：
 Achieved（达成）/ Rejected（未采纳）/ Partial（部分达成）/ Not Applicable（不适用）。
 
 | ID | 类型 | 任务 | 关闭结果 | 证据 |
 | --- | --- | --- | --- | --- |
+| DEFECT-006 | 缺陷 | 控制台（8903）服务卡「启动」确认框正文回落「重启」文案：受控 Modal 正文三元链只特判 `op==='stop'` 与 `name==='config'`，`op==='start'` 落兜底分支，离线服务点「启动」却提示「重启会中断当前运行中的任务。」（用户报「确认没有启动该服务却提示重启」；取证证实非端口占用误判——8901/8902 显示在线是真实孤儿进程，探针判活按设计正确） | Achieved | 2026-09-29 随普通任务轮 ARCH-035 W1 收口：`Console.tsx` 三元链补 `start` 专属分支（正文「启动该服务，将拉起对应端口进程，就绪后状态自动转为在线。」）；TDD 两枚回归用例先红后绿（启动框断言启动文案存在且无「重启」措辞／重启框断言反向）；设计正文晋升 [admin-console.md](../design/admin-console.md) §3.1「破坏性操作确认框」四段文案互不复用契约；台账条目 BUGFIX-023。门禁（QED_env 解释器，收口复跑）：全量 pytest **612 passed / 0 failed** + 契约 **68 passed** + **ruff All checks passed**（本轮首跑曾见 1 红＝并行学习轮在 `docs/architecture/database-design.md` 写入 `qed_learn_course` DDL 触 ARCH-031 只登记守护，本任务未触该文件；复跑时该红已由并行会话自行消除）；前端 **vitest 34 文件 356 passed / tsc -b 零错 / build 成功**；浏览器实测 8903（dist 重建）离线卡点「启动」→ 标题「启动」+ 正文逐字启动语义、无「重启」措辞（截图受 in-app viewport 0x0 限制，以结构断言为证）。附带遗留待裁（不入本轮）：`web-ui/src/stores/runtime.ts` `/services` 轮询失败时保留旧 `services` 态，可致状态短暂陈旧——设计口径待用户另裁 |
 | REQ-097 | 支线 | （请求：Axiom-Flow）解析产物根视图清理——根视图只保留 pages/*.png、版本目录唯一正本、激活即删旧版本、book.json 改从 af_books 生成 | Achieved | 对方 PLAN-017 W1~W6 实施并六步收口（锚点 f2fd689 代码批／6cab58f 文档批，其门禁 548 passed + MySQL 集成 8 passed，S1~S5 逐条达成；偏差 D1 复用 af_books.sha256 列、D2 迁移 20260926_0001 纯加列不回填）；根侧 S6 真机回归通过（经 8900 单入口：书目列表、b05 元数据含 sha256／页 blocks／页图 200、b01 active_job_id 指针读取——消费面无感知）；目标态已晋升设计契约（parsing-flow.md §5、dataset-conventions.md、cross-project-contracts/api-contracts ingest 口径）；存量根视图文件不自动迁移属设计。壳与过程记录见 history/plans/2026-09/2026-09-26-parsing-storage-single-truth.md |
 | REQ-093 | 支线 | （请求：QED-Tracker）存储链路治理请求包——① `meta/resources` JSON 岛退役（先迁列后拆岛）② 下载 staging 清理生命周期 ③ `qt_books` 错误列与时间戳候补 | Achieved | 根判据「B 轮终态回执并关闭」达成：QED-071 A 轮（2026-09-24：D3 传输留痕判废＋R2 staging 年龄清扫 sweep_downloads＋岛死码清理＋存量清理）与 B 轮（2026-09-26：资源岛停写退役、`Inventory` 类删除、读路径全切 DB 无静默回退、内容身份三列 ALTER＋回填 17/17、全局反岛守护、CLI 契约变更与 D17 索引勘正）均以其台账收口（其 completed.md QED-071 行＋归档基线 `history/baselines/2026-09-24-storage-json-island-retirement.md`「B 轮收口记录」六终态回执草稿，根侧自读登记；**Tracker 侧提交锚点 65cff13**（2026-09-26，44 files，B 轮代码+文档+计划归档同一次提交；其门禁定向 191 passed、全量 533 passed（1 例红属其 QED-067 在途件）、ruff 绿、文档门禁 8 passed）；其遗留面归对方台账：③ R3 候补未排期、生产 `qed` 库 ALTER 发布红线、AGENTS 措辞待裁——用户裁决 2026-09-26：根侧不留行 |
 | REQ-095 | 支线 | （请求：Axiom-Flow）ADR 0018 承接确认包——A1~A4 书面判定 + A5 观察预留（零代码） | Achieved | 2026-09-26 对方关闭：其 PLAN-015 壳（锚点 a97ccc7）回执 A1~A4 全「一致」（逐条文件/函数级事实源；例外①清单零漂移；硬链接去重与 active_job_id 指针选版四处逐点对上），A5 只登记触发条件不实施；其 PLAN-016/ARCH-034 同批收口；根判据「A1~A4 回执后关闭」达成 |
