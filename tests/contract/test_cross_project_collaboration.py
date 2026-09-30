@@ -17,11 +17,12 @@ GITIGNORE = ROOT / ".gitignore"
 STANDARD = ROOT / "docs" / "standards" / "cross-project-collaboration.md"
 SUB_PROJECTS = ("Axiom-Flow", "QED-Tracker")
 TARGET_RE = re.compile(r"请求：\s*([A-Za-z-]+)")
+PLAN_LINK_RE = re.compile(r"\(\.\./plans/(?P<file>[^)]+\.md)\)")
 TEMPLATE_FIELDS = ("需求方", "目标项目", "接口面", "评审方", "执行方", "验收标准")
 
 
 def _todo_rows() -> list[dict[str, str]]:
-    columns = ("ID", "类别", "优先级", "状态", "任务", "证据/下一条件")
+    columns = ("ID", "类别", "优先级", "状态", "任务描述", "成功标准")
     lines = TODO.read_text(encoding="utf-8").splitlines()
     header = f"| {' | '.join(columns)} |"
     start = lines.index(header)
@@ -54,13 +55,13 @@ def test_gitignore_keeps_sub_projects_out_of_root_index():
 
 def test_todo_request_rows_annotate_target_project():
     rows = _todo_rows()
-    # 请求行：任务列包含「请求：<目标仓库>」标注（ID 前缀 REQ- 包含实现类，不可靠）
+    # 请求行：任务描述列包含「请求：<目标仓库>」标注（ID 前缀 REQ- 包含实现类，不可靠）
     # 空集合法：请求行全部关闭后 todo 可以没有请求行（判例 2026-09-23 REQ-086/087 收口）；
     # 本测试守护「有请求行时格式必须正确」，不守护「必须存在请求行」。
-    requests = [row for row in rows if TARGET_RE.search(row["任务"])]
+    requests = [row for row in rows if TARGET_RE.search(row["任务描述"])]
     for row in requests:
-        match = TARGET_RE.search(row["任务"])
-        assert match, f"{row['ID']} 任务列缺少「请求：<目标仓库>」标注"
+        match = TARGET_RE.search(row["任务描述"])
+        assert match, f"{row['ID']} 任务描述列缺少「请求：<目标仓库>」标注"
         assert match.group(1) in SUB_PROJECTS, row["ID"]
 
 
@@ -86,12 +87,19 @@ def test_collaboration_standard_declares_execution_boundary():
 
 
 def test_todo_request_rows_track_receipt_progress():
-    """请求行的证据/下一条件列必须体现对方承接或回执（推动回执闭环，防请求悬空）。"""
+    """请求行的承接/回执状态必须可在承载壳中查到（推动回执闭环，防请求悬空）。
+
+    ADR 0023 后对方承接与回执属执行进展，落承载壳的 `## 过程与证据` 节而不落 todo 行，
+    故本守护改判为：请求行所链接的壳必须含「承接 / 回执 / 对方执行 / 待开始」之一。
+    """
     rows = _todo_rows()
-    requests = [row for row in rows if TARGET_RE.search(row["任务"])]
+    requests = [row for row in rows if TARGET_RE.search(row["任务描述"])]
     for row in requests:
-        evidence = row["证据/下一条件"]
-        assert TARGET_RE.search(row["任务"]), f"{row['ID']} 任务列缺少「请求：<目标仓库>」标注"
-        assert any(marker in evidence for marker in ("承接", "回执", "对方执行", "待开始")), (
-            f"{row['ID']} 证据列未体现对方承接/回执状态"
+        assert TARGET_RE.search(row["任务描述"]), f"{row['ID']} 任务描述列缺少「请求：<目标仓库>」标注"
+        match = PLAN_LINK_RE.search(row["任务描述"])
+        assert match, f"{row['ID']} 请求行缺少计划壳链接，承接与回执无处可查"
+        shell = (TODO.parent.parent / "plans" / match.group(1)).resolve()
+        content = shell.read_text(encoding="utf-8")
+        assert any(marker in content for marker in ("承接", "回执", "对方执行", "待开始")), (
+            f"{row['ID']} 承载壳 {shell.name} 未记录对方承接/回执状态"
         )

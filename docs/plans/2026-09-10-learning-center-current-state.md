@@ -2,7 +2,7 @@
 
 状态：In Progress
 任务类型：A
-最后更新：2026-09-22
+最后更新：2026-09-30
 关联 ADR：`../history/adr/v0.1/0011-pending-design-location.md`（不确定文档暂居 plans/，设计确定后晋升 design/）、`../history/adr/v0.1/0012-ai-development-conduct.md`（REQ-070 重组轮置空依据）
 关联设计：`../design/downloads-flow.md`（知识探索已实现设计）、`../design/downloads-ui.md`（知识探索 UI）、切分与召回规划已整合入 `2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md`（原 REQ-082 草案壳 2026-09-22 归档）、`../standards/doc-governance.md`（晋升规则）
 关联 Tracker：docs/trackers/todo.md（REQ-070-LEARN 登记）
@@ -18,8 +18,9 @@ REQ-070 设计文档体系重组轮将 design/ 固定为五组语义名文档集
 1. 课程学习/课后练习后续设计工作（第五轮主线方向）的唯一现状基座；
 2. 设计确定后晋升 `design/` 固定文档的事实来源。
 
-成功标准：现状与代码一致（`#/knowledge` 框架）；工具链结论变化时
-本文档同步更新；晋升时本文档正文可直接迁入设计文档。
+**成功标准正本在台账行**（ADR 0023）：验收判据逐条见[任务台账](../trackers/todo.md)
+`REQ-070-LEARN` 行的「成功标准」列（现状与代码一致 / 变化时同步 / 晋升时可直迁三条），
+本壳不复制判据条目；对拍与检查手段见「验证与验收」节，执行进展与证据见「过程与证据」节。
 
 ## 范围与非目标
 
@@ -97,6 +98,17 @@ QED-Tracker（教材/习题集收集）→ Axiom-Flow（解析产物 + 知识图
 - 功能里程碑：M1 数据管线贯通（教材下载 + 解析 + 高保真渲染）→ M2 单课程试点（知识点
   图谱 + 进度编排 + 基础问答）→ M3 全课程推广（13 门 + 多 Agent 问答 + 检索 99%）→
   M4 学习闭环（刷题模式、温故知新、进度追踪）。
+
+## 过程与证据
+
+- **2026-09-10**：REQ-070 设计文档体系重组轮把 `design/learning-center.md` 移入 `plans/`
+  改造为本现状壳（学习功能位在 design/ 暂置空，门槛不满足 ADR 0010/0011 的「相对确定」）。
+- **2026-09-22**：随重组轮收尾，本行移挂学习设计轮节，作为 ARCH-027 及 M1~M5 重设计的
+  现状基座；同日 learning/ 类目退役（[ADR 0015](../adr/0015-learning-category-retirement.md)），
+  笔记清单对拍取消。
+- **2026-09-30**：台账结构改判（[ADR 0023](../adr/0023-todo-row-carries-scope-and-criteria.md)）——
+  验收判据正本移入 todo 行「成功标准」列，原行内「REQ-089 已收口、判定表落主链壳」等叙述
+  迁入本节；REQ-089 收口证据见 completed.md 对应行。
 
 ## 验证与验收
 

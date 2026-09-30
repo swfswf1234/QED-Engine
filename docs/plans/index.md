@@ -1,7 +1,7 @@
 # 计划索引
 
 状态：Current
-最后更新：2026-09-29
+最后更新：2026-09-30
 
 本目录保存对应**进行中任务的讨论与计划**（不确定文档，ADR 0010）；待评审设计随计划承载，
 确定后按 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 迁入 `design/` 或合并固定文档。
@@ -25,20 +25,26 @@
 - ARCH-025 任务行承载壳（Axiom-Flow（V1.0）优化轮解析+知识库两线滚动优化记录，
   启动门槛＝对方达 V1.0，启动前预承接 REQ-089 调研），状态见任务台账
 
-### 学习设计轮（2026-09-22 并轮、2026-09-23 重划：主链路 + M1~M4 模块；原 ARCH-022 + ARCH-026）
+### 学习设计轮（2026-09-22 并轮、2026-09-23 重划、2026-09-30 增 M5：主链路 + M1~M5 模块；原 ARCH-022 + ARCH-026）
 - ARCH-027 主链任务行承载壳（课程注册·链路编译·判分推进，含 L1~L9/R1 判定表与模块壳一览），状态见任务台账
-- ARCH-027-M1~M4 模块任务行各配固定壳（学习面 UI 与渲染基线 / 练习与复习 / 本地模型适配层 / 知识探索），状态见任务台账
+- ARCH-027-M1~M5 模块任务行各配固定壳（学习面 UI 与渲染基线 / 练习与复习 / 本地模型适配层 / 知识探索 /
+  知识点体系与知识梳理星图），状态见任务台账
 
 ### 其他
 - [AI Agent 知识收件箱](ai-agent-knowledge-inbox.md)（REQ-062，**长期滚动收件箱**：agent
   利用经验捕获 → 审核三判据 → 批量晋升正式文档 → 体系优化；**不随任务归档**，例外依据见其头部声明）
-- REQ-098/REQ-099 承载壳（解析页框图编辑与版式重排版设计轮：编辑模式框图工作台＋中文字体排印重排版，
-  蓝图待评审→晋升 parsing-ui.md；配套（请求：Axiom-Flow）区域驱动重解析与块结构编辑讨论稿一份），状态见任务台账
+- REQ-099 请求承载壳（（请求：Axiom-Flow）解析页区域驱动重解析与块结构编辑讨论稿，R1~R6），状态见任务台账；
+  其来源任务 REQ-098 承载壳已 2026-09-29 收口归档（见下方「已归档计划」）
 
-### 普通任务轮（2026-09-29 立项）
-- ARCH-035 任务行承载壳（普通任务轮滚动记录：零散缺陷与 `design/` 小修的条目登记表），状态见任务台账
+
+### 普通任务轮（2026-09-29 立项，2026-09-30 定为默认承载轮）
+- ARCH-035 任务行承载壳（普通任务轮滚动记录：零散缺陷、`design/` 小修与治理/规范化批次的条目登记表；
+  ADR 0021 起为新增小任务的**默认落点**，并入的已关闭轮残余支线在本壳加条目），状态见任务台账
+- ARCH-036 运行时产物与备份面规范化轮承载壳（logs/tmp/scripts/backups 落点收口），按 ADR 0021
+  「归并不删壳」保留执行与取证面，todo 行已并入普通任务轮节，状态见任务台账
 
 ## 已归档计划（2026-09）
+- [解析页框图编辑与版式重排版设计（parsing-region-edit-typography）](../history/plans/2026-09/2026-09-26-req098-parsing-region-edit-typography.md)（REQ-098，Achieved 2026-09-29：框图工作台＋版式重排版＋W8 顶栏四行重排＋W9 撤销缩放落地，W5 按降级稳态移交 ARCH-025 线 1）
 - [解析产物存储单一事实源优化（parsing-storage-single-truth）](../history/plans/2026-09/2026-09-26-parsing-storage-single-truth.md)（REQ-097，2026-09-26 收口：Axiom-Flow PLAN-017 实施回执 + 根侧 S6 真机回归通过；设计晋升与目标态正文见 parsing-flow.md §5 / dataset-conventions.md）
 - [本地模型启动参数配置（model-startup-params）](../history/plans/2026-09/2026-09-24-model-startup-params-round.md)（ARCH-033，Achieved 2026-09-24：加载层参数挂 registry 身份表全链路生效——lms load 带参 + `-y` 非交互、llamacpp 通道真做（LM Studio 自带二进制与 GGUF）+ 5001 双向互斥让位（unload --all + server stop）；27B@8192/9B@16384 真机读回、三缺陷 TDD 修复；设计事实晋升 [local-model-management.md](../design/local-model-management.md)「本地模型启动参数契约（加载层）」节；收口门禁 569 + 契约 68 绿；壳 Retain 归档）
 - [管理台展示优化（admin-display-optimization）](../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)（REQ-033，Completed 2026-09-24：用户五改验收发令收尾——S1~S5 全达（GPU SWR 提速/增量刷新/在跑标注/三块制五改形态/设计收口），门禁 vitest 239 + tsc -b + build + 全量 pytest 569 + 契约 81 绿 + 浏览器实测；设计事实晋升 [admin-dashboard.md](../design/admin-dashboard.md) 与 [local-model-management.md](../design/local-model-management.md)；壳 Retain 归档）

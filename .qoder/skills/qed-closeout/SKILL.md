@@ -6,30 +6,38 @@ description: Use when a QED task is implemented and gates pass — runs the full
 # QED 任务收尾（门禁 → 关闭 → 同步）
 
 声称完成前先调用 `verification-before-completion`，本技能负责流程性收尾。
+判据正文只在 `docs/standards/task-lifecycle.md`（收口节拍与关闭判定）与
+`docs/standards/doc-governance.md`（归档与删除），本技能只给步骤与指针。
 
 ## 1. 门禁全绿
 
-运行当前仓库 `AGENTS.md`「标准映射」表中「开发/联调门禁」对应指南的「验证门禁」节全部命令，保留真实输出（各仓库命令不同，以本仓库指南为准）。
+运行当前仓库 `AGENTS.md`「标准映射」表中「开发/联调门禁」对应指南（根仓库为
+`docs/guides/development.md`）「门禁与证据」+「环境速查与命令矩阵」两节所列命令，保留真实输出
+（各仓库命令不同，以本仓库指南为准）。
 
-## 2. 计划关闭两态判定
+## 2. 逐条对照关闭
 
-按标准映射「文档治理」的归档与删除节：
-
-- **Retain**：记录已执行数据操作、迁移/发布里程碑、事故复盘或不可替代外部证据 → 归档 `history/` 对应目录。
-- **Delete**：事实已并入固定文档或同步于 tracker，且 Git 锚点有效 → 删除计划壳。
-- 用户在任务关闭时可指定；未指定时按默认规则建议，经用户确认后执行。
-- 两态均从 todo 移除该任务的唯一任务行（一任务一行一壳，ADR 0016），并在 `plans/index.md` 登记去处。
+1. 打开该任务台账行的 `成功标准` 列，逐条核对 S 条目是否达成，把每条的达成证据写进承载壳的
+   `## 过程与证据` 节（带日期戳）。
+2. 关闭结果取值按 task-lifecycle「关闭判定」节：行内 S 条目全达成 → `Achieved`；有未做的核心项
+   → `Partial`。
+3. 证据允许「待提交」占位（无 hash 不构成拒绝关闭的理由），提交后由收尾会话补登。
+4. 壳的归档判定（Retain / Delete）按 doc-governance「归档与删除」节执行，用户可指定；
+   两态均从 todo 移除该任务的唯一任务行，并在 `docs/plans/index.md` 登记去处。
 
 ## 3. 台账与文档同步
 
-- 完成任务从 `todo.md` 原子移除并写入 `completed.md`（关闭结果 + 证据）。
-- 检查涉及模块的 `architecture/`、`design/` 文档是否需增改删；契约变化同步对应文档。
-- `design/` 三态梳理（Superseded 删除 / 存档移 `history/` / 有效保持）。
-- 主线任务另按标准映射「文档治理」做文档一致性梳理。
+- 完成任务从 `todo.md` 原子移除并写入 `completed.md`（关闭结果 + 证据摘要）；**不把进展写回 todo**。
+- 顺带自查（判据与守护名见 task-lifecycle「收口节拍、薄登记上限与承载归属」表）：状态枚举（G1）、
+  成功标准列格式与上限（G2）、达成即收（G3）、长期线豁免边界（G4）、行内文档锚（G5）、
+  关闭轮不留节（G6）、在途壳有带日期戳的过程与证据节（G7）。
+- 检查涉及模块的 `architecture/`、`design/` 文档是否需增改删；契约变化同步对应文档；
+  `design/` 做三态梳理（Superseded 删除 / 存档移 `history/` / 有效保持）。
 
 ## 4. 跨项目回执
 
-跨项目任务向需求方回执：本仓库提交号 + 门禁输出 + 联调结果（按标准映射「跨项目协作」）。
+跨项目任务向需求方回执：本仓库提交号 + 门禁输出 + 联调结果（按
+`docs/standards/cross-project-collaboration.md`）；回执与承接记录写承载壳的过程与证据节。
 
 ## 5. git
 

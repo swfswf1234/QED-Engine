@@ -50,6 +50,15 @@ PLAN-050）。该形态暴露两类问题：① todo 行成为计划壳内容的
 
 - 标准：[task-lifecycle.md](../standards/task-lifecycle.md)、[doc-governance.md](../standards/doc-governance.md)
 - 测试：`tests/contract/test_tracker_governance.py`（任务列镜像规则）
+- 后续部分补充：[ADR 0020](0020-task-closure-cadence-and-thin-registration.md)（为本决策的薄登记与
+  收口义务补机械防线 G1/G2/G3 与长期线形态，不改变本 ADR 的决定与状态）
+- 后续部分补充：[ADR 0021](0021-round-proliferation-cap-and-per-row-doc-anchor.md)（轮次非必要不增设
+  与 todo 行文档锚义务 G5/G6，含「锚与镜像分工」口径，不改变本 ADR 的决定与状态）
+- 后续部分补充：[ADR 0022](0022-task-chain-clarifications.md)（澄清缺陷登记是 B 类计划准入的已裁决
+  例外、缺陷与设计小修两通道判据、成功标准冻结与归并他轮须用户裁决，不改变本 ADR 的决定与状态）
+- 后续结构改判：[ADR 0023](0023-todo-row-carries-scope-and-criteria.md)（本决策「一任务一行一壳」与
+  文档锚口径不变，行的承载内容由「任务 + 证据/下一条件」改判为「任务描述 + 成功标准」，过程与证据
+  改落计划壳，不改变本 ADR 的决定与状态）
 - 任务：ARCH-024、ARCH-025（改造后单行，见 [任务台账](../trackers/todo.md)）
 - 壳：[QED-Tracker V1.0 持续优化滚动记录](../plans/2026-09-22-tracker-v1-continuous-optimization.md)、
   [Axiom-Flow（V1.0）解析与知识库优化滚动记录](../plans/2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md)

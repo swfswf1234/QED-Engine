@@ -1,15 +1,15 @@
 # 解析页框图编辑与版式重排版设计（parsing-region-edit-typography）
 
-状态：In Progress
+状态：Completed
 任务类型：A
-最后更新：2026-09-26
-关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（待评审设计随本壳承载）、
-[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属）、
-[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
-[ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md)（一任务一行一壳）、
-[ADR 0017](../adr/0017-design-doc-structure-contract.md)（晋升目标文档结构契约）
-关联设计：[parsing-ui.md](../design/parsing-ui.md)（本任务评审通过后的大幅改写对象）、
-[parsing-flow.md](../design/parsing-flow.md)（blocks 产物 schema 与任务状态机事实源）
+最后更新：2026-09-29
+关联 ADR：[ADR 0011](../../../history/adr/v0.1/0011-pending-design-location.md)（待评审设计随本壳承载）、
+[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属）、
+[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
+[ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md)（一任务一行一壳）、
+[ADR 0017](../../../adr/0017-design-doc-structure-contract.md)（晋升目标文档结构契约）
+关联设计：[parsing-ui.md](../../../design/parsing-ui.md)（本任务评审通过后的大幅改写对象）、
+[parsing-flow.md](../../../design/parsing-flow.md)（blocks 产物 schema 与任务状态机事实源）
 关联 Tracker：docs/trackers/todo.md REQ-098（挂 ARCH-025「Axiom-Flow（V1.0）优化轮」节）
 归档判定：Retain（设计蓝图与实施记录随壳追溯；关闭时归档 history/plans/2026-09/）
 
@@ -29,7 +29,7 @@
 
 1. 本壳设计蓝图 §4 经用户评审确认，按 ADR 0011 晋升改写 `design/parsing-ui.md`；
 2. Axiom-Flow 配合项已成文请求文档
-   [2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md](2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)
+   [2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md](../../../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)
    并经用户确认复制对方仓库登记，回执跟踪入 ARCH-025 滚动壳；
 3. （实施阶段，待发令）编辑模式四类框操作在 8903 可完成且刷新后回显；版式重排符合
    §4.4 字号/字体/层级规格，文字无任何截断；门禁全绿 + 浏览器实测。
@@ -50,7 +50,7 @@
 2. **代码阶段硬门禁**：文档评审通过且用户明确发「开始执行」前不动码（2026-09-24 用户守则）。
 3. 8902 侧 R1/R2（区域驱动解析、块结构编辑）实施归对方仓库；根侧实施不以其为阻塞——
    未承接期按 §4.5 降级口径（拉伸走既有 `corrected_bbox` 链，结构操作禁用并提示）。
-4. 端点增删先落 [api-contracts.md](../architecture/api-contracts.md) §④ 再实施（事实源唯一铁律）。
+4. 端点增删先落 [api-contracts.md](../../../architecture/api-contracts.md) §④ 再实施（事实源唯一铁律）。
 
 ## 设计蓝图（待评审）
 
@@ -70,7 +70,7 @@
 
 ### 4.2 框图操作（D2）
 
-坐标一律沿用 §现契约：原页图像素坐标 `[x0,y0,x1,y1]`、overlay 百分比定位、随缩放自适应。
+坐标一律沿用 §现契约：原页图像素坐标 `[x0,y0,x1,y1]`、overlay 百分比定位、随栏宽自适应（页图保持自然比例）。
 
 | 操作 | 交互 | 数据语义 | 落库通道 |
 | --- | --- | --- | --- |
@@ -95,7 +95,7 @@
 
 ### 4.4 版式重排版（D3，替换现「版式」bbox 定位渲染）
 
-**页面形态**：单栏 A4 纸面流（宽 794px 基准，随顶栏缩放整体缩放；**高度不限**——
+**页面形态**：单栏 A4 纸面流（宽 794px 基准固定，容器窄于纸面时出横向滚动；**高度不限**——
 内容多长排多长，超原页属正常）。块按阅读序（`order`）连续排版，非绝对定位。
 **文字展示完全**：任何块不得 `overflow:hidden`、截断或 ellipsis；公式 KaTeX、表格 HTML
 渲染保留。
@@ -142,17 +142,68 @@
 | 框图写库失败 | 请求非 2xx | 本地回滚 + 错误 toast；不污染页缓存 |
 | 版式渲染 | 纯前端能力 | 与 8902 无耦合，可先行实施与验收 |
 
+### 4.6 对照区顶栏四行重排与编辑两口径（2026-09-28 用户四点改法 + 四裁决）
+
+**用户改法四点**：① 书目名居左、单独一行；② 书页入库／解析本页／全本解析这类动作**全部前置确认弹窗**，
+按钮文案按状态选择（解析本页／重新解析本页、全本解析／重新全部解析、书页入库／重新书页入库）；
+③ 行3＝开启／取消编辑模式、单页／连续，**缩放放最右**（该项已由同日追改②撤销）；④ 编辑模式分**框图修改**与**解析修正**两口径——
+框图修改＝新建框 + 右键框删除／修改 + 多选合并（故行4 只需「新增」「合并」两按钮）；
+解析修正＝可编辑 + 整页确认 + 单分块确认。
+
+**四裁决**（同日）：未点名控件摆法＝页码导航→行2 尾部、滚动同步与流式／版式→行3、审阅统计→行4；
+确认弹窗**全覆盖**（含低风险动作）且右键菜单可行；「解析全部未完成页」数据源＝移交
+[REQ-099 R6](../../../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)（现响应面只有
+`pages_done` 计数），承接前按钮禁用 + tooltip；「确认」语义＝复用既有 `verdict=ok`，不新增状态。
+
+**四行布局**（`ParseToolbar`，行4 仅编辑模式出现）：
+
+| 行 | 内容（左→右） |
+| --- | --- |
+| 1 | 书名（§7 `parsingBookLabel` 口径）独行 |
+| 2 | 动作族（三态文案 + 确认弹窗）｜在飞任务进度条／错误文本｜页码导航（尾部靠右） |
+| 3 | 编辑模式开关｜单页／连续｜滚动同步｜流式／版式（版式态带「排版」面板）——**不设缩放控件**（2026-09-28 追改，见下「撤销缩放」） |
+| 4 | 口径 Segmented（框图修改｜解析修正）＋该口径动作：框图=「新增」（画框模式开关）＋「合并」（多选 ≥2）＋有草稿时「清空草稿」与降级说明；解析修正=「整页确认」；行尾审阅统计「已判定 x / 共 y 块」 |
+
+**动作三态判定**：
+
+| 动作 | 文案选择判据 | 确认弹窗正文口径 |
+| --- | --- | --- |
+| 书页入库／重新书页入库 | `ingest_status=ingested` → 重新 | 未入库＝逐页渲染书页图并登记页数（不调模型）；已入库＝将重渲染并覆盖全部页图，已解析页的页图与块 bbox 基准可能错位 |
+| 解析本页／重新解析本页 | 当前页 `pages[n].parsed` → 重新 | 未解析＝识别第 n 页并生成块；已解析＝将覆盖第 n 页现有解析结果 |
+| 全本族 | `pages_done=0` → 全本解析；`0<pages_done<page_count` → 解析全部未完成页（禁用，待 R6）＋ 重新全部解析；`pages_done=page_count` → 重新全部解析 | 全本＝将解析全部 N 页并生成解析产物；重新全部＝将覆盖全部 N 页现有解析结果并生成新版本 |
+
+**追改裁决（2026-09-28 ②：撤销缩放）**：现 `zoom` 只改页图容器宽高（794×1123 基准 × z%，
+且 `img` 以 `objectFit: fill` 铺满容器）——放大不出细节、不产生滚动，等于**纯拉伸变形**
+（真实页图比例非 794:1123 时更是恒变形），故按用户裁决撤除该控件。替代口径＝**双栏按栏宽自适应**：
+左页图宽＝宿主列宽、高＝宽 ×（自然 h／自然 w）（图未载入前按 A4 比例回退）。右栏纸面维持 794px 基准（缩放本就未作用于它，实测口径不变）。
+`zoom` 状态、`setZoom` 与逐层 prop 一并移除；bbox 坐标与换算不受影响（overlay 百分比定位、
+`clientToNaturalPx` 以宿主 rect 归一到原图像素系）。
+
+**编辑两口径交互**：
+
+- **框图修改**：「新增」开启画框模式（页图空白处拖拽画新框，进 `regionDraft.added` 本地预览；按钮 primary
+  表开关态）；框**右键菜单**＝修改（选中该框出 8 手柄）／删除（进 `deleted` 草稿，框淡出虚线），
+  已删除框右键＝恢复；Ctrl/Shift 多选 ≥2 →「合并」出并集预览；草稿非空 →「清空草稿」+
+  降级说明（结构操作落库待 REQ-099 R1/R2，§4.5）；拉伸／移动仍即时落 `corrected_bbox`。
+- **解析修正**：右栏块可编辑（BlockEditor 弹层）；**单块确认**＝未 `ok` 块逐块出「确认」钮，
+  写 `verdict=ok` 且必须合并既有 `corrected_text`/`note`/`corrected_bbox`（`PUT …/edit` 是整条替换）；
+  **整页确认**＝弹窗一次写完本页，已 `ok` 块静默跳过、当前选中块跳过并计入回执 toast。
+- **不变式**：右键菜单点击不得冒泡回页图容器（否则 `onPaneClick` 的「就近选块」覆盖菜单动作）——
+  菜单 `onClick` 内 `domEvent.stopPropagation()`（2026-09-28 浏览器实测发现并修）。
+
 ## 工作项（滚动登记表）
 
 | # | 工作项 | 责任侧 | 状态 |
 | --- | --- | --- | --- |
 | W1 | 设计蓝图 §4 用户评审（含 §4.1「左/右修改」口径解释确认） | 根（用户） | 完成（2026-09-26 用户裁决：左＝框图修改、右＝内容替换；正文默认五号；页眉页脚版式态默认隐藏；发「开始执行」） |
-| W2 | 评审通过 → 晋升改写 [design/parsing-ui.md](../design/parsing-ui.md)（§4 组件树、§5 状态模型、§8 顶栏、§9 双栏、§10 bbox 规范大改 + 新增「版式重排版」节；去过程化，只写设计态） + `help/sections.ts` 解析节同步 | 根 | 完成（parsing-ui.md §1/§4/§5/§8/§9/§9.1/§10/§12/§13 按蓝图去过程化改写；help/sections.ts 新增「文档解析管理」节） |
-| W3 | Axiom-Flow 请求讨论稿（R1 区域驱动解析 / R2 块结构编辑 / R3 页框图读取 / R4 目录类型 / R5 节题与多栏取字）由 **REQ-099 请求行**承载（[2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md](2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)）；已复制移交，回执跟踪挂对方 PLAN-018 壳 | 根→对方 | 移交完成 2026-09-26（对方承接登记 PLAN-018/REQ-099，其契约 181 绿）；待逐条回执 |
+| W2 | 评审通过 → 晋升改写 [design/parsing-ui.md](../../../design/parsing-ui.md)（§4 组件树、§5 状态模型、§8 顶栏、§9 双栏、§10 bbox 规范大改 + 新增「版式重排版」节；去过程化，只写设计态） + `help/sections.ts` 解析节同步 | 根 | 完成（parsing-ui.md §1/§4/§5/§8/§9/§9.1/§10/§12/§13 按蓝图去过程化改写；help/sections.ts 新增「文档解析管理」节） |
+| W3 | Axiom-Flow 请求讨论稿（R1 区域驱动解析 / R2 块结构编辑 / R3 页框图读取 / R4 目录类型 / R5 节题与多栏取字）由 **REQ-099 请求行**承载（[2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md](../../../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)）；已复制移交，回执跟踪挂对方 PLAN-018 壳 | 根→对方 | 移交完成 2026-09-26（对方承接登记 PLAN-018/REQ-099，其契约 181 绿）；待逐条回执 |
 | W4 | 8903 实现：框编辑工作台（手柄拉伸/移动/多选合并/画新框 + 双口径切换）、版式重排版渲染器 + 样式面板（§4.4 全量）、store 扩展（regions/pending/structure 动作）——**发令后开工**；T1（拉伸+版式重排，纯前端+既有 edit 链）可先于对方承接 | 根 | 完成（2026-09-26：typography.ts/regions.ts 纯函数 + TypographyPanel + BlockList 版式重排渲染器 + PageImagePane 八手柄拉伸/移动即落库/画新框/多选删合本地草稿 + store editPane/boxSelection/regionDraft/typography + ParseToolbar 口径与操作条；结构操作按 §4.5 降级稳态=禁用+tooltip，落库随 W5） |
-| W5 | 8900 门面：`…/structure` 透传与 `…/pages/{no}` regions 合并视图；api-contracts.md §④ 登记 | 根 | 待 W3 回执 |
+| W9 | **撤销顶栏缩放**＋双栏按栏宽自适应（§4.6 追改裁决，2026-09-28 用户发令：缩放＝纯拉长无意义）：行3 去滑杆、`zoom`/`setZoom`/prop 移除、`PageImagePane` 改宿主宽自适应＋自然比例（A4 回退）、`objectFit` 不再拉伸；`ParseToolbar.test.tsx`/`PageImagePane.test.tsx` 用例随步 | 根 | 完成（2026-09-28 发令后实施；收尾批 2026-09-29 复验：vitest 353/353 + tsc -b 零错 + build 成功；浏览器实测 8903（dist 重建）b05 页＝顶栏无缩放文案与 `.ant-slider`、页图容器 `aspect-ratio 1699/2399`（自然尺寸）＋宽 100%，块列表正常出字） |
+| W5 | 8900 门面：`…/structure` 透传与 `…/pages/{no}` regions 合并视图；api-contracts.md §④ 登记 | 根 | 移交（2026-09-29 用户裁决收口：根侧关闭条件按 §4.5 降级稳态成立，本项随对方 REQ-099 R1/R2/R3 回执另起，残余移交 ARCH-025 滚动壳线 1；根侧已留 §4.5 禁用+tooltip 降级面与对方壳 §10 根侧待办清单作承接锚点） |
 | W7 | 版式可读性增强批（2026-09-26 实测 b05 p5/p7 后四裁决落笔，规格见 parsing-ui.md §9/§9.1）：①换行保真 pre-wrap（流式+版式两档）②节题白名单类标题（仅全文命中，兼作目录组触发扩展）③符号表行式识别 + 三列对齐④REQ-099 请求稿扩写 R5（节题类型修正 + 多栏取字丢失） | 根 | 完成（2026-09-26 发令后 TDD：typography.ts 白名单/行式判定 + BlockList SymbolRows/pre-wrap/空块跳过，新增 14 用例；vitest 324/324 + tsc 零错 + build；浏览器复验 b05 p5（重要符号表类标题黑体+52 行三列页码对齐）与 p7（目录 65 条目点线拆行、右栏空块不再占位），控制台零报错） |
-| W6 | 验收：vitest（框几何钳制/手柄命中/合并并集/字号级差映射/标题推导/目录启发式/无截断断言）+ 浏览器实测（qed-frontend-check）+ 契约门禁；R1/R2 以对方回执为据 | 根 | 本轮批次已过（2026-09-26：vitest 全量 310/310 + tsc -b 零错 + build 成功 + pytest 根套件 566 过（2 红为并行轮 ARCH-032 未提交壳所致，归因不修）+ ruff 全绿；浏览器实测：版式五号 14px 正文统一、页眉默认隐藏/开关回显、框图口径 8 手柄、保存框图修改禁用+tooltip、请求全指向 8900、控制台零报错） |
+| W6 | 验收：vitest（框几何钳制/手柄命中/合并并集/字号级差映射/标题推导/目录启发式/无截断断言）+ 浏览器实测（qed-frontend-check）+ 契约门禁；R1/R2 以对方回执为据 | 根 | 批次一已过（2026-09-26：vitest 全量 310/310 + tsc -b 零错 + build 成功 + pytest 根套件 566 过（2 红为并行轮 ARCH-032 未提交壳所致，归因不修）+ ruff 全绿；浏览器实测：版式五号 14px 正文统一、页眉默认隐藏/开关回显、框图口径 8 手柄、保存框图修改禁用+tooltip、请求全指向 8900、控制台零报错）。**收尾批次（W8/W9 这批，2026-09-29）**：收口后端到端复跑＝pytest 全量 611 passed / 1 failed + 契约 67 passed / 1 failed + ruff All checks passed（唯一红＝并行学习轮在 database-design.md 写入 qed_learn_course DDL，非本任务触面，归因不修）+ vitest 353/353 + tsc -b 零错 + build 成功；浏览器实测 8903（dist 重建）W9 撤销缩放口径成立（顶栏无缩放文案与滑杆、页图容器 `aspect-ratio` 自然比例＋栏宽 100%、块列表出字正常，截图受 in-app viewport 0x0 限制以结构断言为证）；R1/R2 无对方回执 ⇒ 按 §4.5 降级稳态判定验收成立 |
+| W8 | 对照区顶栏**四行重排**与编辑两口径交互（§4.6，2026-09-28 用户四点改法 + 四裁决发令）：书名独行；动作三态文案 + 全动作确认弹窗；页码导航入行2 尾、滚动同步/流式版式入行3、缩放最右、审阅统计入行4；框图口径改「新增（画框模式）/合并」+ 框右键菜单（修改/删除/恢复）；解析修正口径单块确认 + 整页确认（复用 `verdict=ok`，整条替换须合并 prev 字段）；「解析全部未完成页」= REQ-099 R6 承接前禁用 + tooltip | 根 | 完成（2026-09-28 TDD：新增 `ParseToolbar.test.tsx` 9 用例（三态文案、确认弹窗、页码导航、R6 禁用分支、口径动作）+ `PageImagePane.test.tsx` 画框/右键/弹层冒泡用例 + `BlockList.test.tsx` 单块确认用例 + store `drawMode`/`deleteRegion`/`confirmPageBlocks` 用例；**实测发现缺陷并修**：右键菜单点击经 React 弹层树冒泡回页图，触发「就近选块」覆盖菜单动作（修改/删除/恢复一律落到块 1）→ 菜单 `onClick` 加 `domEvent.stopPropagation()`，两条用例先红后绿（jsdom 需 mock `HTMLImageElement.naturalWidth` 才能进入页图点击分支）；`deleteSelectedBlocks` 移除，删除一律走框右键菜单；门禁：vitest 351/351 + tsc -b 零错 + build 成功；浏览器实测 8903（dist 重建）三书三态与禁用分支、确认弹窗取消不落库、画新框像素换算 7.38%/42.7%/11.1% 与拖拽一致、右键改/删/恢复与合并并集、整页确认弹窗文案，49 请求全指 8900 全 200、控制台零消息；截图受 in-app 浏览器 viewport 0x0 限制不可用，以结构断言为证） |
 
 ## 验证与验收
 
@@ -170,3 +221,10 @@
 关闭条件：W2 晋升完成 + W3 移交并回执跟踪建立 + W4/W6 实施验收通过（R1/R2 若长期未承接，
 按 §4.5 降级口径为稳态亦可收口，残余移交 ARCH-025 滚动壳线 1）。
 关闭时本壳 Retain 归档 `history/plans/2026-09/`，todo REQ-098 行移 completed.md。
+
+**关闭结论（2026-09-29 用户裁决「现在收尾」）**：关闭条件四支全部成立——W2 晋升、W3 移交并
+建 PLAN-018 回执跟踪、W4/W6 两轮批次验收、W5 未随对方承接故按 §4.5 降级稳态收口。判据＝
+结构操作禁用+tooltip 已在 8903 成为用户可见稳态（W8 顶栏口径文案亦按此口径），R1/R2/R3 回执
+与 W5 落库链路整体移交 ARCH-025 滚动壳线 1（对方 PLAN-018 壳 §10「根侧待办」清单为其承接
+锚点）；REQ-099 保持 `Accepted` 继续跟踪，回执到达后 W5 另起任务承接。本批未提交改动
+（W8/W9 前端 + 文档）与收尾台账随收口提交；本壳 Retain 归档 `history/plans/2026-09/`。

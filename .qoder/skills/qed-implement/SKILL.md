@@ -11,7 +11,9 @@ description: Use when implementing code in the QED repos — locates the module 
 2. **先写测试**：涉及契约/状态机/迁移/行为变化，先写会失败的测试（调用 `test-driven-development`），再写实现使其通过。
 3. **遵循分层**：按标准映射「测试门禁」的测试分层与治理契约测试规范。
 4. **同步映射**：模块新增/移动/删除时，同一变更内同步 code-map 与关联设计文档；先用 `rg "旧路径"` 全库确认无残余引用。
-5. **验证**：运行 `qed-closeout` 中列出的门禁。
+5. **记录过程**：每批实现与取证的进展写入承载壳的 `## 过程与证据` 节（带日期戳），
+   不写回 todo 行（ADR 0023）。
+6. **验证**：运行 `qed-closeout` 中列出的门禁。
 
 ## 隔离铁律（必须遵守）
 

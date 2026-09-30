@@ -1,7 +1,7 @@
 # 开发指南
 
 状态：Current
-最后更新：2026-09-24
+最后更新：2026-09-30
 依据 ADR：[0001 契约测试](../history/adr/v0.1/0001-root-contract-tests.md)、
 [0012 AI 开发守则](../adr/0012-ai-development-conduct.md)
 
@@ -57,12 +57,18 @@
 | 2 定级 | 判变更对象与 A/B/C/D 分类，给出方案 | **拍板定级**（未定级不实施） | [AGENTS.md](../../AGENTS.md)、[task-lifecycle](../standards/task-lifecycle.md) | `qed-intake` |
 | 3 立项 | 写 `plans/` 计划 + todo 登记（元数据/章节/关联 Tracker） | **评审计划** | [task-lifecycle](../standards/task-lifecycle.md)、[doc-governance](../standards/doc-governance.md) | `qed-plan` |
 | 4 实现 | 用 code-map 定位模块，先测试后实现（TDD） | 抽查/评审 | [code-map](../architecture/code-map.md)、`design/`、[testing](../standards/testing.md) | `qed-implement` |
-| 5 验证 | 跑完整门禁，整理证据（测试数字/提交 hash） | **验收** | [testing](../standards/testing.md)、[local-dev](../standards/local-dev.md) | `verification-before-completion` |
+| 5 验证 | 跑完整门禁，整理证据（测试数字/提交 hash） | **验收** | [testing](../standards/testing.md)、[local-dev](../standards/local-dev.md) | `verification-before-completion`、`qed-frontend-check`（前端条目） |
 | 6 收尾 | 计划两态判定、todo 移 `completed.md`、同步设计/架构/索引 | **确认关闭** | [task-lifecycle](../standards/task-lifecycle.md)、[doc-governance](../standards/doc-governance.md) | `qed-closeout` |
 
-- 大修改先建 todo + `plans/` 计划，评审后才动文档与代码；design 小修/bug 登记
-  [设计类小修与 bug 修复台账](../plans/design-bugfix-log.md)；豁免级直接实施，以差异与验证
-  记录承接。
+- **本指南不复述治理规则**：变更分级判据在根 [AGENTS.md](../../AGENTS.md)「变更分级与边界」表；
+  登记与收口细则（行的两列承载口径、400 上限与禁进展词、达成即收、一行一文档锚、轮次不增设与
+  归并不删壳、关闭取值与证据落点，由 `tests/contract/` 的 G1~G7 守护）**唯一正文在**
+  [任务生命周期](../standards/task-lifecycle.md)。历史决策按编号读
+  [ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md) /
+  [0020](../adr/0020-task-closure-cadence-and-thin-registration.md) /
+  [0021](../adr/0021-round-proliferation-cap-and-per-row-doc-anchor.md) /
+  [0022](../adr/0022-task-chain-clarifications.md) /
+  [0023](../adr/0023-todo-row-carries-scope-and-criteria.md)，不在本指南重述。
 - **裁决先落笔**：会话内的设计裁决（含验收改判、多选问答拍板）必须**先登记为计划壳
   （或对应设计文档）的裁决记录行，再开始改代码**；收口时补文档不算数。多轮改判每轮各记
   一行（判据：2026-09-24 REQ-033 二改/三改轮，裁决只存对话导致事实源断档）。
@@ -72,23 +78,17 @@
 
 ## 门禁与证据
 
-```powershell
-# 全量测试（根）
-conda run -n QED_env python -m pytest tests -q
-
-# 契约治理测试（standards/ADR/计划/台账/文档结构/架构设计语义/代码映射）
-conda run -n QED_env python -m pytest tests/contract -q
-
-# 代码质量
-conda run -n QED_env python -m ruff check backend tests
-```
+命令原文只在「环境速查与命令矩阵」节维护，本节不重复：完成前跑**全量测试** +
+**契约门禁** + **代码质量**三行，命令逐条取自该表（解释器与环境事实见
+[本地开发环境](../standards/local-dev.md)）。
 
 - 分层：单元/集成测试 `tests/`（根）+ 契约测试 `tests/contract/`；规则见
   [测试架构与门禁](../standards/testing.md)。
 - 使用 `--strict-markers`，标记需在 `pyproject.toml` 注册；当前测试不使用 marker。
 - 文档治理规则变更必须同步运行 `tests/contract/` 守护测试。
 - 前端门禁（web-ui 改版后）：`cd web-ui && npm run build && npm test`（vitest）+ `tsc` 无错。
-- 证据格式：提交 hash、测试结果数字、验收记录；关闭计划时写入 todo 证据列。
+- 证据格式：门禁数字、提交 hash、验收记录写入承载壳的 `## 过程与证据` 节；任务关闭时该批
+  证据随 `completed.md` 行摘要承接，**不写回 todo 行**（[ADR 0023](../adr/0023-todo-row-carries-scope-and-criteria.md)）。
 
 ## 文档与映射同步
 

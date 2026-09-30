@@ -1,84 +1,88 @@
 ﻿# 任务台账
 
 状态：Current
-最后更新：2026-09-29
+最后更新：2026-09-30
 
 本文件登记根仓库未关闭任务，是活跃计划的镜像。详细计划见 [计划索引](../plans/index.md)；
 已关闭任务见 [completed.md](completed.md)。
 
+**行的承载口径**（ADR 0023）：每行只写**任务描述**（做什么 + 目标/效果 + 文档锚）与**成功标准**
+（`S1…` 固定验收判据，正本在此、写定不改）。执行进展、取证细节、裁决记录与「待提交」占位一律
+写在承载壳的 `## 过程与证据` 节——日常推进不改本表。
+
 ## 未关闭任务
 
-### 学习设计轮（第五轮·2026-09-23 重划：主链路主任务 + M1~M4 模块各配固定壳；原名学习中心轮，2026-09-22 并轮自原 ARCH-022 + 原 ARCH-026）
+### 学习设计轮（第五轮：ARCH-027 主链路 + M1~M5 五模块，各配固定壳；轮名沿革与重划裁决见主链壳）
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-027 | 主线 | 高 | In Progress | [学习设计轮·主链路（课程注册·链路编译·判分推进）（learning-design-mainline）](../plans/2026-09-22-learning-design-mainline.md) —— 第五轮主任务：QED-Engine 只做学习链路的展示与编排（检索下载归 Tracker、知识整理归 Axiom-Flow），主链路＝课程注册→链路编译→块学习推进→判分与掌握门→派生进度结课（掌握门与判分入主链，用户裁决 2026-09-23）；目标 = 一条课程链路端到端可用并向学习中心形态收敛 | 2026-09-22 并轮立项（ARCH-022/026、PLAN-051 Superseded 见 completed.md）+ 2026-09-23 用户裁决重划改名学习设计轮：M-1~M-3 拆解、L1~L9/R1 判定表（含各条承接壳列）与「只排根仓库、暂不向子项目发请求」边界由本壳承载；模块工作流迁 M1~M4 各壳 |
-| ARCH-027-M1 | 支线 | 高 | Accepted | [学习设计轮 M1·学习面 UI 与渲染基线（learning-ui-rendering）](../plans/2026-09-23-learning-ui-rendering.md) —— 8903 学习面（书架/链路视图/看板/错题本页面）+ 渲染基线滚动线（承接原 PLAN-051/ARCH-026 渲染线与原 W6） | 2026-09-23 重划建壳；UI-1 渲染基线无前置可立即滚动，UI-2~4 前置＝主链 M-1 契约冻结 + M-2 首本编译产物；L9 选区追问交互在本壳评估 |
-| ARCH-027-M2 | 支线 | 中 | Accepted | [学习设计轮 M2·练习与复习（出题·间隔复习·错题本）（practice-review）](../plans/2026-09-23-practice-review.md) —— 课后练习面：出题管线（L6）+ 间隔复习调度（L3 MySQL 化）+ 错题双写题库与错题本端点 | 2026-09-23 重划建壳（切分裁决＝判分/掌握门留主链 M-3 单一事实源，本模块只管题从哪来、何时复、错在哪）；前置＝主链 M-1 表契约 + M-3 判分规则层；真实出题调用依赖 M3 开关 |
-| ARCH-027-M3 | 支线 | 高 | Accepted | [学习设计轮 M3·本地模型适配层（local-model-adaptation）](../plans/2026-09-23-local-model-adaptation.md) —— 网关降级组合移植（L7）：本地 binding 能力表、文本工具协议、JSON 容错+一次 repair、thinking 清洗、饥饿降 effort 重试、task model 兜底 | 2026-09-23 重划建壳（承载原 W5）；无排程前置可立即滚动，地基＝ARCH-023 registry 已交付；本壳开关全绿是主链 M-2 与 M2 出题的验收前置；与 ARCH-028 稳定性轮分轮：那边管服务启停/探测/水位，这边管调用协议与容错 |
-| ARCH-027-M4 | 支线 | 低 | Accepted | [学习设计轮 M4·知识探索（问答与召回消费面，后置）（knowledge-exploration）](../plans/2026-09-23-knowledge-exploration.md) —— 轻形态先行（知识体系浏览维持 + ask_questions 澄清访谈入主链提案），对话式 RAG 问答消费面后置 | 2026-09-23 重划建壳；E3 启动条件＝Axiom-Flow 检索端点（其 PLAN-009 线）就绪且用户发令联调，届时按跨项目协作规范另发请求；本轮不发请求（用户裁决 2026-09-22） |
-| REQ-070-LEARN | 支线 | 高 | In Progress | [学习功能现状（知识探索/课程学习/课后练习）](../plans/2026-09-10-learning-center-current-state.md) | REQ-070 重组轮 learning-center.md 移入改造的现状承载（知识探索已固定 + 课程学习探索 + 课后练习无设计声明）；**2026-09-22 随重组轮收尾移挂本节**（重组轮节退役）：作为学习设计轮（ARCH-027 及 M1~M4）重设计的现状基座（REQ-089 已收口，判定表落主链壳），设计确定后按 ADR 0011 晋升 design/，本现状壳退役 |
-| REQ-006 | 主线 | 中 | 进行中 | QED-Engine 前端（8903）：主体学习界面 + 后台管理（仪表盘/知识体系/解析进度/文档对照/追溯） | 期次里程碑：三期（ARCH-003，111 passed）→ 四期（ARCH-004，119）→ 五期~十三期（ARCH-005，127→140，a5ce8c1 已验收）→ 十四期（ARCH-006，141，人工评审优化）→ 十五期（ARCH-007，150，文档下载课程分页）；逐期界面细节见 project-status 前端行与 history/plans/；管理后台已随 web-ui React 重构落地（ARCH-011 已实施）；学习中心部分归学习设计轮收尾（界面实施在其 M1 模块） |
-| REQ-031 | 支线 | 低 | 待开始 | 使用手册完善（前端 web-ui）：当前手册（HELP_SECTIONS 迁移六节）内容粗略，待学习中心各功能稳定后逐界面细化（操作截图/分步图文/FAQ 扩充/五阶段流程配图） | 2026-08-16 用户标注：使用手册还不完善，**低优先级**，等后续完善；暂不阻塞前端重构主轮 |
+| ARCH-027 | 主线 | 高 | In Progress | [学习设计轮·主链路（课程注册·链路编译·判分推进）（learning-design-mainline）](../plans/2026-09-22-learning-design-mainline.md) —— 第五轮主任务：QED-Engine 只做学习链路的展示与编排（检索下载归 Tracker、知识整理归 Axiom-Flow），主链路＝课程注册→链路编译→块学习推进→判分与掌握门→派生进度结课；目标 = 一条课程链路端到端可用并向学习中心形态收敛 | S1 契约先行：学习域表 + 8900 REST 契约（课程引用式注册、syllabus 勾选权归人、进度派生）契约测试先行全绿；S2 链路编译：任一课程可产出「大纲（两级人工确认）→ 块序列（text/公式/图/quiz/flashcard）」，断点续编、源漂移可标记；S3 门与判分：四分类知识点 + 双门槛（量化 0.9 / 质性 Feynman）+ 确定性判分 + 服务端 expected_answer + 防蒙对权重，推进由门算出而非游标；S4 端到端：现有生效版本产物 + 本地模型下一门课「注册→编译→学习→判分→推进→结课」跑通（消费 M1 界面、M2 出题、M3 开关）；S5 M-1/M-2/M-3 三子壳各自收口 |
+| ARCH-027-M1 | 支线 | 高 | Accepted | [学习设计轮 M1·学习面 UI 与渲染基线（learning-ui-rendering）](../plans/2026-09-23-learning-ui-rendering.md) —— 8903 学习面（书架/链路视图/看板/错题本页面）+ 渲染基线滚动线；目标 = 主链块序列与解析产物在学习界面回原样、可操作、可断点续学 | S1 渲染基线：公式 KaTeX、表格、图片、版面四面对照回原样，BUGFIX-011 的 `$$$` 双定界符防护维持，老代产物核销有记录；S2 课程面可用：书架→链路视图→块学习三步在真实课程数据上跑通，含断点标记与续学；S3 看板与结课视图可渲染派生进度接口，只读消费不改任务状态 |
+| ARCH-027-M2 | 支线 | 中 | Accepted | [学习设计轮 M2·练习与复习（出题·间隔复习·错题本）（practice-review）](../plans/2026-09-23-practice-review.md) —— 课后练习面：出题管线 + 间隔复习调度 + 错题双写题库与错题本端点；目标 = 为链路块序列供给题目源并按节律回流复习（判分与掌握门归主链 M-3，本模块不复制语义） | S1 出题管线：三向位 Explore/Plan/Verify loop + 严格 JSON + normalize/校验/一次 repair，知识点四分类标注，服务端生成 expected_answer；S2 间隔复习 MySQL 化：调度表与队列持久化、到期出题，重启不丢进度；S3 错题双写题库：判分结果 best-effort upsert（user_answer/correct_answer/is_correct/score_trend）+ 错题本查询端点可用 |
+| ARCH-027-M3 | 支线 | 高 | Accepted | [学习设计轮 M3·本地模型适配层（local-model-adaptation）](../plans/2026-09-23-local-model-adaptation.md) —— 网关本地降级组合移植（L7）：能力表、JSON 容错 + 一次 repair、thinking 清洗、饥饿降 effort 重试、task model 兜底；目标 = 本地模型下学习链路调用可靠且可一键回退 | S1 A-5/A-6 两项适配落地且对应开关全绿（A-2 工具协议段按裁决后置，不入本任务判据）；S2 能力表 + 降级路径：四类 binding 的 `supports_tools:False` 走文本协议段，JSON 模式渠道走 response_format + 降级；S3 容错三件套：JSON 修复 + 一次 repair、thinking/scratchpad 清洗、reasoning 预算饥饿降 effort 重试，各有单元用例；S4 真机冒烟：本地模型下出题与判分链路各跑通一次，且一键回退可验证 |
+| ARCH-027-M4 | 支线 | 低 | Accepted | [学习设计轮 M4·知识探索（问答与召回消费面，后置）（knowledge-exploration）](../plans/2026-09-23-knowledge-exploration.md) —— 知识探索消费面：轻形态（知识体系浏览维持 + ask_questions 澄清访谈入主链提案）先行，对话式 RAG 问答后置；目标 = 学习链路旁路的问答与召回消费面 | S1 轻形态维持：知识体系浏览面可用、无回归，8903 只连 8900；S2 澄清访谈入主链提案：ask_questions 在课程/链路立项前做一次访谈式问答；S3（后置）对话式 RAG 问答：8902 检索端点打通后 chunk 级 self_ref 溯源可跳回原页原文，前置＝对方端点就绪 + 用户发令联调 |
+| ARCH-027-M5 | 支线 | 高 | In Progress | [学习设计轮 M5·知识点体系与知识梳理星图（knowledge-point-star-map）](../plans/2026-09-30-knowledge-point-star-map.md) —— 补齐「领域→课程→知识点」三层数据体系：新增第四张共享知识点表（只存已确认知识点）与根私有知识点 detail 表（生成待选、多版本多叙述），并把学习中心首页演进为按 track 星云聚类、按学习顺序成有向图、可下钻知识点掌握详情的知识梳理星图；目标 = 知识点有主数据、三层体系可导航 | S1 两表契约成文且与既有表无冲突（共享知识点表 + 根私有 detail 表，含读写矩阵）；S2 星图数据形状与端点面成文，与 api-contracts 口径一致；S3 星图 UI 设计可实施：纯函数布局 + ECharts graph，按 track 星云聚类、按学习顺序成有向图、可下钻掌握详情；S4 本轮只出设计与空态，`backend/` 与 `web-ui/src/` 无本任务改动；S5 待裁清单 D1~D6 全部批复并留裁决记录 |
+| REQ-070-LEARN | 支线 | 高 | In Progress | [学习功能现状（知识探索/课程学习/课后练习）](../plans/2026-09-10-learning-center-current-state.md) —— 学习三功能现状基座承载行，为学习设计轮（ARCH-027 及 M1~M5）重设计提供现状事实源；目标 = 现状描述可被设计直接引用，设计定稿后按 ADR 0011 晋升 design/ 并退役本壳 | S1 现状描述与真实代码一致（`#/knowledge` 框架、课程学习在探索、课后练习无设计声明三点）；S2 相关功能变化时本壳同步更新，不留过期描述；S3 设计定稿时文档内容可直接迁入 design/ 固定文档，本壳随之退役 |
 
 ### 本地模型稳定性轮（ARCH-028）
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-028 | 主线 | 高 | In Progress | [本地模型稳定性轮滚动记录（仪表盘状况卡·监督器·掉线根因·批次水位）（local-model-stability-round）](../plans/2026-09-23-local-model-stability-round.md) —— 本地模型服务稳定性轮：仪表盘「本地模型状况」卡（api 模式隐藏、单活守卫下跟踪当前在跑模型，互斥被绕过并列多跑时并列呈现不隐藏）+ 8900 常驻监督器（分级探测/防抖事件账/非在飞自动重启在飞只告警/显存水位门/掉线诊断包）+ 50 页/窗批次（根 .env 配 `AXIOM_PARSE_WINDOW_SIZE=50`）+ 图像模型掉线根因定谳；目标 = 本地模型「看得见、管得住、喂不饱不死、等不到快挂」 | 2026-09-23 立项（用户三裁决：另开稳定性轮不入 ARCH-027 适配层／批次走 .env 配置不向对方发 REQ／恢复策略=非在飞自动重启+在飞只告警）；W0~W6 拆解与界面/监督器设计蓝图全部由壳承载；仪表盘状况卡自本行起由本轮承接（REQ-033 余下大盘优化仍低优先）；另承接原第三轮遗留观察项——根侧业务口径**全本解析实测**（连带老代 `$$$` 产物数据侧自愈核验）随首次真机演练顺带做；真机演练前置=Docker Desktop 起（用户侧）；**2026-09-24 增强轮裁决（用户）**：新增 W7 启动宽限/W8 恢复闩锁（演练暴露 09-23 启动窗口误判）/W9 水位门收口/W10 诊断包取证补强/W11 网关请求侧熔断（实施在本项目、归属 ARCH-027-M3 之说先记录），Docker 层兜底不做、空闲驱逐挂观察项，细则与 S5~S7 判据由壳承载；**2026-09-24 W12 直修**：期望状态（desired）门——人工停止后永不自动复活（每 Episode 仅告警）、「api 来源观测暂停清位」（不冻结旧「就绪」、切回 local 不自动起模型）、状况卡未加载态徽章（一裁说明文案→二轮改中性「未加载（服务存活）」，见壳监督器设计 §8/W12 行与 BUGFIX-018/020）；**2026-09-24 支线挂账**：本地模型启动参数配置（ARCH-033）经用户裁定不独立成轮、并入本轮作支线；**同日收口 Achieved**（加载层参数全链路生效 + 两渠道真机验证 + 设计节晋升，行移 completed.md，独立任务壳 Retain 归档）；**2026-09-26 增强批实施**：W7 启动宽限（QED_MODEL_START_GRACE_SECONDS 默认 180s，窗口内不判掉线/不耗预算/不触发诊断包，快照 starting＋仪表盘「启动中」第四态）+ W8 恢复闩锁单发（含死赋值清理）+ W10 全量收口（诊断包增采 docker inspect OOMKilled/ExitCode/RestartCount）+ DEFECT-005 启动关键段进程级互斥串行化，S5 单测形态达成；剩余＝W9 水位门/W11 熔断（代码）+ 真机演练场（S2/S3/S4/W6）|
-| DEFECT-005 | 支线 | 中 | 已实施 | 监督器受控恢复与单活仲裁竞态：双槽位并发退避重启绕过 QED_RESOURCE_GUARD，导致文字+图像模型双跑（修向：ensure_local_ready/模型操作进程级互斥串行化 + 回归测试；随 ARCH-028 主线支线修复，不另立计划） | 2026-09-24 登记。证据：logs/config.log WSL 恢复期 text/vision 同报 HTTP 502 掉线后「模型恢复尝试 slot=text/vision attempt=1/3」交替，仲裁依据瞬时探针（对方未就绪＝判不在跑）互斥被绕过；实况 /config/keys resource_guard=true 且 /models/text+vision 双 ready（llama-server 9.7GB + mineru 容器，合计 ≈12/16GB）；风险=解析真机演练期显存挤兑（ARCH-028 S4 观察窗）。**2026-09-26 修复落地（稳定性轮增强批同提交）**：ensure_local_ready 启动关键段（持锁复核+单活仲裁+start）进程级锁串行化，回归用例断言双槽位并发恢复关键段零重叠且最终在跑 ≤1（test_concurrent_ensure_serialized_never_two_running）；真机复核（WSL 恢复期双槽位并发告警实况不再双跑）留待演练窗口顺带观察 |
+| ARCH-028 | 主线 | 高 | In Progress | [本地模型稳定性轮滚动记录（仪表盘状况卡·监督器·掉线根因·批次水位）（local-model-stability-round）](../plans/2026-09-23-local-model-stability-round.md) —— 本地模型服务稳定性轮：仪表盘「本地模型状况」卡（api 模式隐藏、单活守卫下跟踪当前在跑模型，互斥被绕过并列多跑时并列呈现不隐藏）+ 8900 常驻监督器（分级探测/防抖事件账/非在飞自动重启在飞只告警/显存水位门/掉线诊断包）+ 50 页/窗批次（根 .env 配 `AXIOM_PARSE_WINDOW_SIZE=50`）；目标 = 本地模型「看得见、管得住、喂不饱不死、等不到快挂」 | S1 状况卡按显隐/单卡规则实时反映状态（含降级态与失败原因），API 模式整卡隐藏；S2 监督器闭环：探针翻转防抖 + 事件账 + 非在飞自动重启（退避≤3 次）+ 在飞只告警，注入杀容器可观测恢复；S3 图像模型掉线三类假设定谳——移交 REQ-100 L1，不作本行关闭前置；S4 全本解析按 ≤50 页/窗执行且 OOM 不再现；S5 冷启动不误判掉线、恢复不叠发（宽限窗内不推进防抖、不耗恢复预算、不发诊断包；restart 闩锁单发）；S6 显存水位门：空闲显存低于阈值（默认 12GB）拒起并记事件，探针失败按不达标处理（fail-closed）；S7 请求侧熔断快挂（W11）有回归用例 |
 
 ### QED-Tracker（V1.0）持续优化轮（ARCH-024）
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-024 | 主线 | 中 | In Progress | [QED-Tracker V1.0 持续优化滚动记录（tracker-v1-continuous-optimization）](../plans/2026-09-22-tracker-v1-continuous-optimization.md) —— QED-Tracker（V1.0）持续优化轮：为其探索/下载链路的三线优化（本地模型链路、论文探索和下载、下载链路评估与 bug 修复）做逐条登记与跟踪，目标 = 8901 检索/下载链路持续改进并向 V1.0 收敛 | 2026-09-22 立项 + 同轮按新登记方式改单行（ADR 0016，原 ARCH-024 主线行 + PLAN-049 镜像行合并；三线定义、范围边界与进度全部由壳承载）；子项目侧实施归 QED-Tracker 仓库（根侧只登记请求与跟踪，见跨项目协作规范） |
+| ARCH-024 | 主线 | 中 | In Progress | [QED-Tracker V1.0 持续优化滚动记录（tracker-v1-continuous-optimization）](../plans/2026-09-22-tracker-v1-continuous-optimization.md) —— QED-Tracker（V1.0）持续优化轮：为其探索/下载链路的三线优化（本地模型链路、论文探索和下载、下载链路评估与 bug 修复）做逐条登记与跟踪，目标 = 8901 检索/下载链路持续改进并向 V1.0 收敛 | S1 三线（本地模型链路／论文探索与下载／下载链路与 bug 修复）的登记表条目状态与对方台账实际一致；S2 涉及子项目的工作按跨项目协作规范向 QED-Tracker 登记请求并可跟踪回执；S3 根侧修复类条目（8900 适配、前端消费面）回归门禁全绿并留证据 |
 
 ### Axiom-Flow（V1.0）优化轮（解析 + 知识库）（ARCH-025）
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-025 | 主线 | 中 | In Progress | [Axiom-Flow（V1.0）解析与知识库优化滚动记录（axiom-flow-v1-parsing-knowledge-optimization）](../plans/2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md) —— Axiom-Flow（V1.0）优化轮（解析 + 知识库）：对解析产物「大模型易消费 JSON」与知识库面（af_* 演进、RAG 切片和检索预留）两线优化做逐条登记与跟踪，目标 = 解析管线与知识库面向 V1.0 收敛（优化项目划分 P1~P5/R1~R6 与 V1.0 目标形态见壳） | 2026-09-22 立项 + 同日裁决（**启动门槛＝对方达 V1.0**；整合承接原 ARCH-021 的 RAG 切片与检索规划；**知识图谱暂不做**）+ 同轮按新登记方式改单行（ADR 0016，原 ARCH-025 主线行 + PLAN-050 镜像行合并；范围边界、渲染归学习设计轮（ARCH-027-M1，原 ARCH-026）、REQ-086/087 复测三前置等细节全部由壳承载）；子项目侧实施归 Axiom-Flow 仓库；2026-09-22 用户裁决：优化项 P1~P3/R1~R4 已下沉 Axiom-Flow 登记为其 1.0 版本任务（该仓库 ARCH-021/022/023 + PLAN-009，只立项不排期），本壳转消费/联调验证跟踪 |
-| REQ-098 | 支线 | 中 | In Progress | [解析页框图编辑与版式重排版设计（parsing-region-edit-typography）](../plans/2026-09-26-req098-parsing-region-edit-typography.md) —— 文档解析管理页两块新能力设计：①编辑模式框图工作台（页图上拉伸/删除/新增/合并取字框，左框图/右内容双口径，框图全部落库并驱动「解析本页」区域重识别）②版式＝重新排版（大标题/小标题/正文/目录层级中文字体排印：正文统一字号手动选（五号～一号）、标题自动推上限一号，黑体/楷体/宋体＋英文 Times New Roman，文字展示完全、长度超原页属正常，替换现 bbox 定位版式）；目标＝取字范围可控、排版可读，重排版不按原书复刻 | 2026-09-26 用户发令（挂 ARCH-025 节）；同轮四裁决＝框图全部落库驱动重解析／新框画后「解析本页」自动识别／正文手动选标题自动推／直接替换现版式模式；设计蓝图已晋升 parsing-ui.md（W1/W2 完成），W4 前端首批实施完成（版式重排＋框图工作台，结构操作按 §4.5 降级稳态）；剩余：W3 请求稿复制移交（待用户确认）＋W5 承接后落库链路；Axiom-Flow 配合项 R1～R4 由 REQ-099 请求行承载；新增 **W7 可读性增强批**（换行保真 pre-wrap 流式+版式／节题白名单类标题／符号表三列对齐，REQ-099 稿扩 R5）已实施并复验（b05 p5/p7 浏览器实测，2026-09-26） |
-| REQ-099 | 支线 | 中 | Accepted | [（请求：Axiom-Flow）解析页区域驱动重解析与块结构编辑（parsing-region-edit-request）](../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md) —— 承 REQ-098 的跨项目请求（R1 区域驱动页解析/R2 块结构编辑 API/R3 页框图读取视图/R4 目录类型/R5 节题与多栏取字），目标 = 框图落库后「解析本页」按区域出字 | 2026-09-26 已复制移交 Axiom-Flow（对方承接壳 PLAN-018 + 支线行登记，其契约 181 绿）；R1～R3 回执落地后 REQ-098 结构操作全量启用；R4/R5 可独立晚接不阻塞；实施与回执事实源=对方台账 |
-
-### 存储链路规范化轮（ARCH-032）
-
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
-| --- | --- | --- | --- | --- | --- |
-| REQ-096 | 支线 | 低 | 待开始 | 存储对账 doctor（前瞻）：库↔盘双向只读核验——幻影记录（DB 有账盘无文件）、孤儿文件（盘有产物库无账）、manifest/`source_sha256` 哈希失配、file_path 三处（qt_books/af_books/book.json）漂移检测；落点建议 8900 只读端点或 CLI，实施另立设计 | 2026-09-24 登记（ARCH-032 勘察：双写面无任何对账机制，漂移无人可发现）；本轮用户裁决只登记不进设计；**2026-09-24 改号 REQ-090→REQ-096**（原登记撞号：REQ-090 已由 learning/ 退役任务使用并关闭，见 completed.md 与 ADR 0015） |
-| REQ-091 | 支线 | 中 | 待开始 | 探索会话持久化（8900）：`services/explore_sessions.py` 纯内存态（重启即丢 report/steps/session_id，前端只能重发）；课程探索失败 error 无列落库（领域侧有 explore_pending，课程侧不对称） | 2026-09-24 登记（ARCH-032 勘察：explore_sessions.py:40 明示内存态；shared_tables.py:306-309 课程失败无写点）；属根仓库代码改动，排期待定 |
-| REQ-092 | 支线 | 低 | 待开始 | 账本保留期策略：`qed_llm_calls`（MEDIUMTEXT prompt/response 只增）、`qt_tasks`/`qt_selections`/`af_parse_jobs` 均无清理/轮转规则，需成文保留期与归档口径（审计线索与磁盘/库容量平衡） | 2026-09-24 登记（ARCH-032 勘察：全仓无 DELETE/保留期代码）；涉及跨项目表，策略先根侧成文再发请求 |
+| ARCH-025 | 主线 | 中 | In Progress | [Axiom-Flow（V1.0）解析与知识库优化滚动记录（axiom-flow-v1-parsing-knowledge-optimization）](../plans/2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md) —— Axiom-Flow（V1.0）优化轮（解析 + 知识库）：对解析产物「大模型易消费 JSON」与知识库面（af_* 演进、RAG 切片和检索预留）两线优化做逐条登记与跟踪，目标 = 解析管线与知识库面向 V1.0 收敛 | S1 两线（解析产物 JSON／知识库面 af_* 与 RAG 预留）登记表条目状态与对方台账实际一致；S2 涉及子项目的工作按跨项目协作规范向 Axiom-Flow 登记请求并可跟踪回执；S3 根侧修复类条目（8900 消费适配、af_* 骨架文档）回归门禁全绿并留证据；S4 启动门槛＝对方达 V1.0 版本，未达前只预存承接行不实施；S5 渲染面归 ARCH-027-M1、知识图谱与对话问答不在本线判据内；S6 上游关联项（如 REQ-086/087）收口时同步回填本壳对应条目 |
+| REQ-099 | 支线 | 中 | Accepted | [（请求：Axiom-Flow）解析页区域驱动重解析与块结构编辑（parsing-region-edit-request）](../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md) —— 承 REQ-098 的跨项目请求（R1 区域驱动页解析/R2 块结构编辑 API/R3 页框图读取视图/R4 目录类型/R5 节题与多栏取字/R6 未完成页清单或 skip_parsed），目标 = 框图落库后「解析本页」按区域出字 | S1 R1~R6 逐条有对方回执（落地／推后／拒绝 + 排期）；S2 R1~R3 回执落地后根侧框图结构操作（画框/删除/合并）全量启用，且「画 N 框→解析本页→出 N 块且 bbox 与框一致」判据跑通；S3 R4/R5 可独立晚接不阻塞主判据；S4 实施与回执事实源在对方台账与承接壳 PLAN-018，根侧不双写 |
 
 ### 普通任务轮（ARCH-035）
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| ARCH-035 | 主线 | 中 | In Progress | [普通任务轮滚动记录（零散缺陷与小修承载）（ordinary-tasks-round）](../plans/2026-09-29-ordinary-tasks-round.md) —— 承载根仓库零散缺陷与 `design/` 小修的滚动轮次（条目登记表在壳内），目标 = 小改动有条目、有回归测试、有收口证据且不挤占主线轮次边界 | 2026-09-29 立项（用户裁决：DEFECT-006 类零散小修另起普通任务轮承载，不散挂主线轮次）；W1/DEFECT-006 已同轮收口（证据见壳 W1 行与 completed.md 行）；轮次滚动存续，后续零散条目在本壳登记表加行 |
+| ARCH-035 | 主线 | 中 | In Progress | [普通任务轮滚动记录（零散缺陷·小修·治理与规范化批次承载）（ordinary-tasks-round）](../plans/2026-09-29-ordinary-tasks-round.md) —— 台账的**默认承载轮**：零散缺陷、`design/` 小修、治理小批次、规范化批次与已关闭轮次残留支线一律在本壳登记表开条目，目标 = 小改动有条目、有回归测试、有收口证据，且不为此另立主线轮（ADR 0021 第 1 条） | S1 每条工作在承载壳登记表有条目行（缺陷 ID + 现象一句话 + 涉及文件）；S2 每条代码修复有回归测试、先红后绿，并同步受影响设计文档；S3 每条关闭写入 completed.md（关闭结果 + 门禁证据），todo 不留尾行；S4 滚动存续由登记表「（待登记）」占位行声明，占位行消失且条目全达成即须关闭本壳 |
+| REQ-091 | 支线 | 中 | 待开始 | 探索会话持久化（8900）：会话纯内存态重启即丢、课程侧探索失败无列落库（与领域侧不对称）；根因与落点见 [普通任务轮壳 W4](../plans/2026-09-29-ordinary-tasks-round.md) | S1 探索会话按 session_id 持久化，8900 重启后可取回会话；S2 课程侧探索失败与领域侧对称落库（有列可查）；S3 重启恢复路径有回归测试且门禁全绿 |
+| REQ-092 | 支线 | 低 | 待开始 | 账本保留期策略：LLM 调用账本与任务/选书/解析作业表均无清理或轮转规则，需成文保留期与归档口径；范围与跨项目约束见 [普通任务轮壳 W5](../plans/2026-09-29-ordinary-tasks-round.md) | S1 保留期与归档口径成文（调用账本 + 任务/选书/解析作业表逐一有规则）；S2 落点与 storage-conventions 口径一致、无冲突表述；S3 涉及跨项目表的约束已向对方登记请求并可跟踪 |
+| REQ-096 | 支线 | 低 | 待开始 | 存储对账 doctor（前瞻）：库↔盘双向只读核验（幻影记录、孤儿文件、哈希失配、file_path 三处漂移），实施另立设计；登记缘由与判据见 [普通任务轮壳 W6](../plans/2026-09-29-ordinary-tasks-round.md) | S1 四类漂移（幻影记录／孤儿文件／哈希失配／file_path 漂移）各有检出路径与判据；S2 只读核验设计与实施范围成文并经用户评审；S3 默认不写数据根，纯只读且有测试 |
+| OPS-001 | 支线 | 低 | 待开始 | 服务域 stop 对外部实例失效：非经服务域启动的 8901 被 stop 时 pid=null 杀不到真进程，修向＝stop 前端口探测补全 pid；复现记录与修复方向见 [普通任务轮壳 W7](../plans/2026-09-29-ordinary-tasks-round.md) | S1 stop 前按端口探测补全 pid，非经服务域启动的实例可被 stop 命中；S2 「pid=null 但端口在听」场景有回归测试且门禁全绿；S3 四单元 stop 行为经真机复核 |
+| REQ-031 | 支线 | 低 | 待开始 | 使用手册完善（8903）：HELP_SECTIONS 六节内容粗略，待学习中心功能稳定后逐界面细化（截图/分步图文/FAQ/五阶段配图）；细化面见 [普通任务轮壳 W8](../plans/2026-09-29-ordinary-tasks-round.md) | S1 HELP_SECTIONS 六节逐节有实质内容（截图或分步图文）；S2 覆盖五阶段配图与 FAQ；S3 描述与当前界面对应，无过期说法 |
+| ARCH-036 | 支线 | 中 | In Progress | [运行时产物与备份面规范化（logs/tmp/scripts/backups 落点收口）（runtime-artifact-placement-round）](../plans/2026-09-29-runtime-artifact-placement-round.md) —— 仓库根运行面落点收口：日志只写 `logs/`、临时产物只写 `tmp/`、`scripts/` 只留必要面、仓库内不设备份位；目标 = 散落可判定、长期日志清单正向声明、备份不再沉积 | S1 ADR 0019 立档 + 标准补节 + adr/index 登记；S2 契约守护先红后绿：哨兵区与正文 ADR 引用双向一致、`*.log`/`*.pid` 只在 `logs/`+`tmp/`、仓库内备份位不存在；S3 8900 日志读取按实际写入点，四单元 `log_path` 指向真实文件；S4 存量清理：`logs/` 只剩长期清单、`scripts/` 只留必要面、`.gitignore` 相关条目移除；S5 文档（设计/契约/运维/code-map）日志口径与实际一致；S6 `dataset/backups/` 清空与 8900 重启后日志视图真机复核 |
+| DEFECT-007 | 支线 | 中 | 待验收 | 8900 日志视图读到陈旧/不存在文件：`/logs/{service}` 与 `/services` 的 `log_path` 按 `logs/<log_name>.log` 猜测命名，tracker/axiom/web 三单元实写各自生命周期脚本产物（`qed-*-serve.log`，8901/8902 在子仓库 `logs/`）；修向＝按 spec workdir 派生实际写入点、缺失文件空态返回（随 [ARCH-036 壳 W2](../plans/2026-09-29-runtime-artifact-placement-round.md) 承载，不另立计划） | S1 tracker/axiom/web/qed 四单元的日志路径按 spec workdir 派生且指向真实存在的文件；S2 目标文件缺失时返回空态而非猜测路径；S3 `tests/test_log_viewer.py` 与 `tests/test_api.py` 有先红后绿的回归用例；S4 8900 重启后经 `GET /services` 与 `GET /logs/` 三口真机复核通过 |
 
 ### 长期任务
 
-| ID | 类别 | 优先级 | 状态 | 任务 | 证据/下一条件 |
+| ID | 类别 | 优先级 | 状态 | 任务描述 | 成功标准 |
 | --- | --- | --- | --- | --- | --- |
-| REQ-062 | 长期 | 中 | 进行中 | **AI 开发指引优化（2026-08-26 登记，同日用户裁决改收件箱机制）**：四段式——① **捕获**：大任务完成后把 agent 利用经验写入 [ai-agent-knowledge-inbox.md](../plans/ai-agent-knowledge-inbox.md)（长期滚动收件箱，不随任务归档；可手动要求补充）；② **审核**：三判据（复用价值/非瞬时状态/未被正式文档覆盖）逐条过，任一不满足不入池；③ **批量晋升触发**：待评审 ≥10 条或单主题聚集 ≥3 条或每月例行（先到为准）；④ **体系优化**：分析轮聚类产出结构性结论，修订正式文档乃至开发流程。首批内容已落 development.md「环境准备（AI 开发速查）」节 | 收件箱已建立 + 首批 1 条待评审（8900 改码后须重启）；持续进行无单一终态；每次入池/晋升后运行 tests/contract 门禁；**2026-09-10 体系优化轮执行**：REQ-069 AI 开发守则整合轮（AGENTS.md 变更分级边界 + development.md 六步流程 + design-bugfix-log 台账，ADR 0012） |
-| REQ-046 | 长期 | 高 | 进行中 | API 接口开发：先确定接口类型，按类型写 API 文档落入各自项目——① QED-Engine 前端无 API（静态页面只连 8900，声明于 [api-contracts](../architecture/api-contracts.md)）；② QED-Engine 后端三类（控制域启停/重启/健康、QED-Tracker 透传及相关处理、Axiom-Flow 透传及相关处理）；③ QED-Tracker 三类（自身生命周期+健康、数据库知识查询传递、LLM 检索课程教程/选书业务）；④ Axiom-Flow 四类（生命周期+健康、数据查询、解析结果与 PDF 对照、未来 RAG/知识图谱预留）；检查是否有遗漏；关联 ARCH-012（全流程跑通 + Axiom-Flow 完成前端验收 + 流程完整走完为止） | 接口类型确认 + QED-Engine 文档落位已完成（architecture/api-contracts.md 按五类组织、前端无 API 已声明）；8902 契约唯一事实源在 Axiom-Flow docs/architecture/api.md（根侧消费视图已按 ADR 0017 删除，指针见 [parsing-flow.md](../design/parsing-flow.md) §2）；子项目 API 文档经请求由对方执行（Axiom-Flow / QED-Tracker todo 承接） |
-| REQ-047 | 长期 | 高 | 进行中 | 数据库设计：QED-Engine [database-design](../architecture/database-design.md) 为总纲（纯登记层：零 DDL，全部表结构指针到所有权方文档，含 mermaid 关系视图与表×项目读写矩阵，ARCH-031）；QED-Tracker 定义自身完整数据库定义（docs/architecture/database-private-tables.md（qt_*）与 database-shared-tables.md（qed_*）为其结构唯一事实源）；Axiom-Flow 定义 af_* 完整数据库定义（database-design.md 为 af_* 结构唯一事实源），通过文档 + 单独数据库管理体系管理 | QED-Engine 总纲已落位（ADR 0010 版本机制）；af_* 结构唯一事实源在 Axiom-Flow 侧 database-design.md（根侧 DDL 快照已按 ADR 0017 删除，指针见 [parsing-flow.md](../design/parsing-flow.md) §2）；子项目数据库文档由各自仓库维护（各项目 Alembic 独立初始化自己的表，qed_* 共享表所有权 QED-Tracker） |
-| REQ-050 | 长期 | 中 | 进行中 | 版本更新文档体系重新梳理（2026-08-21 ARCH-018 收尾登记，ADR 0010 版本机制）：每次版本更新（用户确认升版本时）按 ADR 0010 重新梳理三项目文档体系——architecture/ 固定化维护（总体/服务架构/API/数据库/code-map）、guides 操作与开发文档、trackers 主线归并（完成→completed.md）、design 三态梳理、plans 归档、子项目范本对齐跟进（REQ-048/049 同源） | 随 ARCH-018 关闭登记；每次版本末期触发，不单独设排期；子项目对齐经请求由对方执行 |
-| OPS-001 | 支线 | 低 | 待开始 | 服务域 stop 对外部实例失效（2026-09-22 长期审核改类：实缺陷待排期非无终态流程，类别长期→支线，暂留本节便于排期）（2026-08-26 两次复现：REQ-061 验证轮 + Phase A 清库轮）：外部启动的 8901 被 POST /services/tracker/stop 时记录 pid=null，杀不到真进程（stop 返回 stopping 但端口仍监听）；需直杀监听 PID 后服务域 start 重新纳管 | 复现条件：8901 非经服务域启动（如手动 python -m uvicorn 或脚本单元启停语义缺陷导致的孤儿进程）；修复方向：stop 前先做端口探测补全 pid 记录（属 8900 控制域代码改动，需排期） |
+| REQ-062 | 长期 | 中 | 进行中 | **AI 开发指引优化（收件箱机制）**：四段式——① **捕获**：大任务完成后把 agent 利用经验写入 [ai-agent-knowledge-inbox.md](../plans/ai-agent-knowledge-inbox.md)（长期滚动收件箱，不随任务归档）；② **审核**：三判据逐条过；③ **批量晋升触发**：达阈值或每月例行；④ **体系优化**：聚类产出结构性结论，修订正式文档乃至开发流程；目标 = 经验不重复踩、正式文档随实践收敛 | S1 大任务完成后经验条目进入收件箱；S2 入池三判据（复用价值／非瞬时状态／未被正式文档覆盖）逐条过，任一不满足不入池；S3 触发条件（待评审 ≥10 条、单主题聚集 ≥3 条或每月例行，先到为准）达成时产出聚类结论并修订正式文档；S4 每次入池/晋升后 `tests/contract` 门禁全绿 |
+| REQ-046 | 长期 | 高 | 进行中 | API 接口开发：先确定接口类型，按类型写 API 文档落入各自项目——① QED-Engine 前端无 API（静态页面只连 8900，声明于 [api-contracts](../architecture/api-contracts.md)）；② QED-Engine 后端三类（控制域启停/重启/健康、QED-Tracker 透传及相关处理、Axiom-Flow 透传及相关处理）；③ QED-Tracker 三类（自身生命周期+健康、数据库知识查询传递、LLM 检索课程教程/选书业务）；④ Axiom-Flow 四类（生命周期+健康、数据查询、解析结果与 PDF 对照、未来 RAG/知识图谱预留）；检查是否有遗漏；关联 ARCH-012（全流程跑通 + Axiom-Flow 完成前端验收 + 流程完整走完为止） | S1 四类接口在 api-contracts 有归类且与真实实现一致、无遗漏项；S2 8901/8902 契约唯一事实源在子项目侧文档，根侧只留指针无副本；S3 子项目 API 文档的补充经请求由对方执行并可跟踪回执 |
+| REQ-047 | 长期 | 高 | 进行中 | 数据库设计：QED-Engine [database-design](../architecture/database-design.md) 为总纲（纯登记层：零 DDL，全部表结构指针到所有权方文档，含 mermaid 关系视图与表×项目读写矩阵，ARCH-031）；QED-Tracker 定义自身完整数据库定义（docs/architecture/database-private-tables.md（qt_*）与 database-shared-tables.md（qed_*）为其结构唯一事实源）；Axiom-Flow 定义 af_* 完整数据库定义（database-design.md 为 af_* 结构唯一事实源），通过文档 + 单独数据库管理体系管理 | S1 总纲保持零 DDL 纯登记层，表结构指针与实际表一致；S2 表×项目读写矩阵与关系视图随建表同步更新；S3 af_*/qt_* 结构唯一事实源在各自仓库，根侧无 DDL 快照副本；S4 版本机制（ADR 0010）下的迁移与所有权变更可追溯 |
+| REQ-050 | 长期 | 中 | 进行中 | 版本更新文档体系重新梳理：每次版本更新（用户确认升版本时）按 [文档治理规范](../standards/doc-governance.md) 的 ADR 0010 版本机制重新梳理三项目文档体系——architecture/ 固定化维护（总体/服务架构/API/数据库/code-map）、guides 操作与开发文档、trackers 主线归并（完成→completed.md）、design 三态梳理、plans 归档、子项目范本对齐跟进（REQ-048/049 同源）；目标 = 版本边界处文档体系与代码不漂移 | S1 每次版本收口触发一轮五面梳理（architecture/guides/trackers/design/plans）并留记录；S2 完成任务归并进 completed.md、todo 无滞留行；S3 design 三态梳理与 plans 归档执行到位、链接门禁全绿；S4 子项目范本对齐经请求由对方执行 |
+| REQ-100 | 长期 | 中 | In Progress | [本地模型调试与优化（长期滚动）（local-model-debug-optimization-longterm）](../plans/2026-09-29-local-model-debug-optimization-longterm.md) —— 本地模型服务栈（LM Studio / llama.cpp / MinerU 容器）的持续调试、取证与参数标定长期线：掉线三类假设定谳、水位/宽限/退避阈值标定、空闲驱逐观察、吞吐与延迟画像；目标 = 稳定性轮交付的监督器与闸门有现场数据可依、默认值可调准 | S1 每次取证（命令／事件账／评分记录）落壳一行，含时间、命令与结论，结论回写设计文档已知约束（壳判据 J1）；S2 参数标定（水位阈值、宽限时长、退避节奏）改动默认值时带现场数据证据并同批改设计节（J2）；S3 移交承接项与原出处（ARCH-028 / DEFECT-005）口径一致、不双写事实（J3）；S4 观察窗发现新缺陷时按缺陷通道另登 DEFECT 行、不在本行直接覆盖（J4） |
 
 ## 规则
 
-- 任务 ID 使用稳定格式 `前缀-三位序号[-后缀]`（后缀可选，用于子项分组，如 `REQ-070-PARS`）；前缀自然表达任务类型（ARCH=主线实现、REQ=请求、PLAN=计划、DEFECT=缺陷；ADR 0016 起 `PLAN` 前缀不再新发用于任务行，存量行保留至关闭）。
-- **类别**只允许 `主线 / 支线 / 长期`：主线 = 大类目标（由活跃计划/大任务承载，聚合多条支线）；
-  支线 = 主线任务的细则，可独立完成；长期 = 持续存在、无单一终态的任务。定义与归属原则见
-  [任务生命周期](../standards/task-lifecycle.md)。
-- 状态只允许 `待开始 / 进行中 / In Progress / Blocked / 已完成`；阻塞必须声明证据、恢复条件
-  和责任位置。
-- 优先级只允许 `高 / 中 / 低`。
-- 涉及子项目改造的请求在根仓库登记并标注目标仓库（`请求：<目标仓库>`），子项目在自己的 todo
-  承接；根仓库不直接修改子项目文件（见
-  [跨项目协作规范](../standards/cross-project-collaboration.md)）。
-- 每个活跃计划由其**唯一任务行**镜像 `docs/plans/` 计划正文（标题、链接、状态、关联 Tracker）；
-  任务列链接后可用「——」追加一句话任务定义/目标效果，不再另设 PLAN 镜像行（ADR 0016，
-  一任务一行一壳；进度与细节由计划壳承载）。
-- 任务终态时从本表原子移除并写入 completed.md。
+本节**只放指针，不复述判据正文**（同一规则有两处正文即视为漂移）。登记与收口细则的唯一正文是
+[任务生命周期](../standards/task-lifecycle.md)（其「目的与边界」节载有全链路叙述分工表）；变更
+分级判据在根 [AGENTS.md](../../AGENTS.md)，六步流程与门禁命令在[开发指南](../guides/development.md)，
+跨项目请求行的「（请求：<目标项目>）」标注与回执口径在
+[跨项目协作规范](../standards/cross-project-collaboration.md)。
+
+| 本表条目 | 判据唯一正文（任务生命周期） | 机械守护 |
+| --- | --- | --- |
+| ID（格式与前缀清单） | 强制规则·任务台账结构 | `test_task_ids_are_stable_unique_and_rows_are_complete` |
+| 类别（主线 / 支线 / 长期） | 强制规则·任务层级（todo 类别列） | `test_task_categories_follow_hierarchy_enum` |
+| 优先级（高 / 中 / 低） | 强制规则·优先级规则 | 行完整性守护（同上） |
+| 状态（只允许进行中态，终态词即移除本行） | 状态导航·todo 状态 | G1 `test_todo_status_column_uses_open_status_enum_only` |
+| 任务描述（一句话「做什么 + 目标」 + 文档锚；镜像行整格链壳） | 任务台账结构 + 收口节拍、薄登记上限与承载归属 | G5 `test_todo_task_rows_carry_a_document_anchor`、`test_todo_plan_rows_exactly_mirror_active_plan_bodies` |
+| 成功标准（S 条目化、≤400、禁日期与进展词；正本在行、写定不改） | 任务台账结构 + 状态导航·成功标准列格式 | G2 `test_todo_success_criteria_column_is_fixed_and_bounded` |
+| 过程与证据（逐批进展、裁决、门禁输出、「待提交」占位的唯一落点） | 计划契约与状态·过程与证据落壳 | G7 `test_active_plans_carry_a_dated_process_log_section` |
+| 分节标题（关闭轮不留节、归并不删壳） | 收口节拍、薄登记上限与承载归属 | G6 `test_todo_section_headings_point_at_live_rounds_or_generic_sections` |
+| 收口与扩载（达成即收、长期线豁免、成功标准冻结、改判须用户裁决） | 收口节拍、薄登记上限与承载归属 | G3 / G4（`tests/contract/test_plan_governance.py`） |
+| 活跃计划的状态事实源 | 状态导航·事实源规则 | `test_todo_plan_rows_exactly_mirror_active_plan_bodies` |

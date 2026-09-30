@@ -110,12 +110,16 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 每项目独立走六步：**进场读必读 → 定级 → 立项 → 实现（TDD）→ 验证 → 收尾**；流程正文见[开发指南·开发流程（六步）](docs/guides/development.md)。
 
-- 技能清单（全局 `~/.config/opencode/skills/`）：
-  - 项目本地：`qed-intake`（进场/定级/立项）、`qed-plan`（计划契约）、`qed-implement`（code-map + TDD）、`qed-closeout`（收尾/台账/文档同步）。
+- 技能清单（正本在项目 `.qoder/skills/`，见下方「技能正本」条目）：
+  - 项目本地：`qed-intake`（进场/定级/立项）、`qed-plan`（计划契约）、`qed-implement`（code-map + TDD）、`qed-closeout`（收尾/台账/文档同步）、`qed-frontend-check`（前端浏览器实测）。
   - 通用保留：`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`dispatching-parallel-agents`、`requesting-code-review`、`receiving-code-review`。
   - 已停用：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`using-superpowers`、`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
 - **工具链**：默认开发 agent 提示与技能在全局 `~/.config/opencode/`（见其 `README.md`）；技能只做薄触发与指路，正文以本仓库 docs 为准。
-- **Qoder 侧工具层**：技能在项目 `.qoder/skills/`（与 opencode 同源移植 + Qoder 适配，另含 `qed-frontend-check` 浏览器验证技能）；权限边界在 `.qoder/settings.json`（复刻只读放行 / git 写与 rm·mv 询问 / `dataset/**` 写入拦截）；GitHub MCP 配在 user 全局 `~/.qoder/settings.json`（OAuth，密钥不落盘）。正文仍以本仓库 docs 为准。
+- **技能正本（ADR 0022 决定 6）**：本仓库治理技能（`qed-intake` / `qed-plan` / `qed-implement` /
+  `qed-closeout` / `qed-frontend-check`）以项目 `.qoder/skills/` 为**唯一正本**，随 ADR 同批更新；
+  其他 agent 侧的副本（如全局 `~/.config/opencode/skills/`）不由本仓库 agent 维护或校验，其差异不计为
+  缺陷。技能只做薄触发与指路，口径正文以本仓库 `docs/` 为准。
+- **Qoder 侧工具层**：权限边界在 `.qoder/settings.json`（复刻只读放行 / git 写与 rm·mv 询问 / `dataset/**` 写入拦截）；GitHub MCP 配在 user 全局 `~/.qoder/settings.json`（OAuth，密钥不落盘）。
 - 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
 - **跨项目协作**：规则见[跨项目协作规范](docs/standards/cross-project-collaboration.md)。
   核心要点：① 根仓库 agent 在子项目工作区只读+写文档，不得产生代码改动；② 子项目 git
@@ -138,6 +142,13 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 | 一般小改（措辞、链接、错别字、无行为修正） | 豁免 | 差异 + 验证记录承接，不入 todo |
 
 - **未定级不实施**：无法判定属于哪级时询问用户，不擅自降级或跳过前置动作。
+- **本节只保留边界判据，不重述登记与收口细则**：缺陷与小修的分通道、移交型关闭取值、成功标准
+  冻结、改判他轮/他行归属须用户裁决、薄登记上限与文档锚等执行细则的唯一正文在
+  [任务生命周期](docs/standards/task-lifecycle.md)（决策记录见
+  [ADR 0020](docs/adr/0020-task-closure-cadence-and-thin-registration.md) /
+  [0021](docs/adr/0021-round-proliferation-cap-and-per-row-doc-anchor.md) /
+  [0022](docs/adr/0022-task-chain-clarifications.md) /
+  [0023](docs/adr/0023-todo-row-carries-scope-and-criteria.md) 与其索引）。
 - 任务分类器（[任务生命周期](docs/standards/task-lifecycle.md)）的 A/B/C/D 分类与
   准入规则可随守则演进重构，调整走 `plans/` 计划（ADR 0012）。
 
