@@ -95,8 +95,10 @@ IDENTITIES: dict[str, Identity] = {
             "Qwen3.5 9B，轻量本地模型",
             local={"lmstudio": "qwen/qwen3.5-9b",
                    "llamacpp": "lmstudio-community/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0.gguf"},
-            params={"lmstudio": {"context": 16384, "gpu": "max"},
-                    "llamacpp": {"ctx": 16384, "ngl": -1, "fa": True}},
+            # 9B@40960 实占 12879 MiB（4080 16GB，2026-10-01 逐档实测见 REQ-100 壳）：
+            # 16384 档容不下长文 + 思考链，定档 40960（llamacpp 渠道同档，未真机复测）
+            params={"lmstudio": {"context": 40960, "gpu": "max"},
+                    "llamacpp": {"ctx": 40960, "ngl": -1, "fa": True}},
         ),
         Identity(
             "qwen-vl-plus", "vision", "通义千问 VL Plus，云端视觉模型", api=("qwen", "qwen-vl-plus")

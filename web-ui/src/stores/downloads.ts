@@ -15,7 +15,7 @@
 import { create } from 'zustand';
 import { message } from 'antd';
 import {
-  listCourseSystem, listKnowledge, getKnowledge,
+  listCourseSystem, listKnowledge, getKnowledge, listPaperBooks,
 } from '../api/tracker';
 import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
 
@@ -121,6 +121,58 @@ export function sortBooks(books: BookRecord[]): BookRecord[] {
     if (na !== nb) return na - nb;
     return (a.title ?? '').localeCompare(b.title ?? '', 'zh-Hans-CN');
   });
+}
+
+// --- 发现论文展示行分组（REQ-102 W3，downloads-ui.md §4.4） ---
+
+export interface PaperBookGroups {
+  /** refs=domain_id 的发现论文（领域级落位） */
+  byDomain: Record<string, BookRecord[]>;
+  /** refs=course_id 的发现论文（pick 逐条落位到课程） */
+  byCourse: Record<string, BookRecord[]>;
+}
+
+/**
+ * 发现论文书行分组（纯函数）：kind=paper 且无 knowledge_id（教程附属论文归教程行，
+ * 以 refs 区分互不混列）、retired 不展示；course_id 非空进 byCourse，否则 domain_id 进 byDomain；
+ * 组内出版年倒序、同年按 book_id 稳定序（不参与 sortBooks 三组组序）。
+ */
+export function groupPaperBooks(books: BookRecord[]): PaperBookGroups {
+  const byDomain: Record<string, BookRecord[]> = {};
+  const byCourse: Record<string, BookRecord[]> = {};
+  const yearOf = (b: BookRecord): number => (typeof b.year === 'number' ? b.year : -1);
+  for (const b of books) {
+    if (b.kind !== 'paper' || b.knowledge_id || b.status === 'retired') continue;
+    const courseId = typeof b.course_id === 'string' ? b.course_id : '';
+    if (courseId) (byCourse[courseId] ??= []).push(b);
+    else if (b.domain_id) (byDomain[b.domain_id] ??= []).push(b);
+  }
+  const sortGroup = (arr: BookRecord[]) =>
+    arr.sort((a, b) => yearOf(b) - yearOf(a) || String(a.book_id).localeCompare(String(b.book_id), 'en'));
+  Object.values(byDomain).forEach(sortGroup);
+  Object.values(byCourse).forEach(sortGroup);
+  return { byDomain, byCourse };
+}
+
+/** 论文展示行徽标：书籍五档口径 + 平行读物（§4.4 五档映射照用） */
+export function paperStatusBadge(status: string): string {
+  switch (status) {
+    case 'candidate':
+    case 'decided':
+      return '待下载';
+    case 'downloading':
+      return '下载中';
+    case 'downloaded':
+      return '待验证';
+    case 'verified':
+      return '已完成';
+    case 'failed':
+      return '失败';
+    case 'parallel':
+      return '平行读物';
+    default:
+      return status;
+  }
 }
 
 // --- 树结构（v2：领域 → 课程 → 教程，无分类层） ---
@@ -232,6 +284,8 @@ export interface DownloadsStore {
   knowledge: KnowledgeRecord[];
   /** 详情缓存（knowledge_id → 含 books），拉取失败的教程无条目 */
   details: Record<string, KnowledgeDetail>;
+  /** 发现论文书行（GET /papers/books；端点未实装/失败=空集，论文行隐藏） */
+  paperBooks: BookRecord[];
   loading: boolean;
   /** 整体错误（8900 不可达） */
   error: string | null;
@@ -252,6 +306,8 @@ export interface DownloadsStore {
   fetchAll: () => Promise<void>;
   /** 局部刷新单个教程详情（操作成功后调用） */
   refreshDetail: (knowledgeId: string) => Promise<void>;
+  /** 刷新发现论文书行（REQ-102 W3；失败静默空集，不进错误横幅） */
+  refreshPapers: () => Promise<void>;
   /** REQ-067 B8：启动 exploration_stage 轮询（5s 间隔） */
   startPolling: () => void;
   /** 停止轮询 */
@@ -272,6 +328,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
   domains: [],
   knowledge: [],
   details: {},
+  paperBooks: [],
   loading: false,
   error: null,
   systemError: null,
@@ -328,6 +385,8 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     const [list, knErr] = await listKnowledge()
       .then((k) => [k, null] as const)
       .catch((err) => [null, err] as const);
+    // 发现论文书行：独立静默降级（404/失败=空集→论文行隐藏，不影响其余数据与错误口径）
+    const paperBooks = await listPaperBooks().catch(() => [] as BookRecord[]);
 
     // 并行拉取每行详情（含 books），逐行独立降级：失败仅该行书籍缺失
     let details: Record<string, KnowledgeDetail> = {};
@@ -352,6 +411,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       domains: newDomains,
       knowledge: list ?? get().knowledge,
       details,
+      paperBooks,
       systemError: sysErr ? messageOf(sysErr) : null,
       knowledgeError: knErr ? messageOf(knErr) : null,
       error: sysErr && knErr ? '8900 数据获取失败（课程体系与教程均不可达）' : null,
@@ -373,6 +433,11 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     } else if (err) {
       set({ knowledgeError: messageOf(err) });
     }
+  },
+
+  refreshPapers: async () => {
+    const books = await listPaperBooks().catch(() => [] as BookRecord[]);
+    set({ paperBooks: books });
   },
 
   // --- REQ-067 B8 + PLAN-033 §6：exploration_stage 轮询（5s 间隔） ---

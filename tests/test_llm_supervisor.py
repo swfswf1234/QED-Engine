@@ -541,3 +541,196 @@ def test_note_desired_ignores_unknown_slot_and_value():
     sup.note_desired("text", "bogus")
     sup.tick()
     assert sup.snapshot("text")["state"] == supervisor.READY  # 非法入参静默忽略不破坏观测
+
+
+# --- W7 启动宽限期 / W8 恢复闩锁（ARCH-028 增强批，壳监督器设计 §6；演练证据 09-23 18:57:27） ---
+
+
+class _Mono:
+    """可推进的单调钟（宽限窗口判据注入，避免测试依赖墙钟）。"""
+
+    def __init__(self, t: float = 1000.0):
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, dt: float) -> None:
+        self.t += dt
+
+
+def test_note_starting_suppresses_down_observations_in_window(caplog):
+    """宽限窗口内拒连观测不推进 down 防抖、不定态（对照 09-23 启动窗口误判案例）。"""
+    import logging
+
+    mono = _Mono()
+    alive = {"ok": True}
+    sup = _supervisor(lambda slot: (alive["ok"], "拒连" if not alive["ok"] else ""),
+                      mono=mono, start_grace=180)
+    sup.tick()  # ready 定态
+    alive["ok"] = False
+    sup.note_starting("text")
+    with caplog.at_level(logging.INFO, logger="qed_engine.services"):
+        for _ in range(6):  # 远超防抖 N=3 次
+            sup.tick()
+    assert sup.snapshot("text")["state"] == "starting", "窗口内快照以 starting 呈现，不掉线"
+    assert "启动宽限" in " ".join(r.message for r in caplog.records)
+    assert sup.snapshot("vision")["state"] == supervisor.DOWN, "宽限按槽位隔离，他槽照常防抖"
+
+
+def test_grace_expires_then_normal_debounce_flips_down_with_diagnostics():
+    """宽限期满仍未就绪→此后按正常防抖翻 down，翻转才触发诊断包（09-23 18:57:27 案例回归）。"""
+    mono = _Mono()
+    seen: list[str] = []
+    rec: list[str] = []
+    alive = {"text": True}
+    sup = _supervisor(lambda slot: (alive.get(slot, True), "" if alive.get(slot, True) else "拒连"),
+                      diagnostics=seen.append, recover=rec.append,
+                      mono=mono, start_grace=60, debounce=3)
+    sup.tick()  # 双槽位 ready 定态
+    sup.note_desired("text", "running")
+    alive["text"] = False  # restart 派发后加载期拒连
+    sup.note_starting("text")
+    for _ in range(5):  # 窗口内拒连观测全部抑制
+        sup.tick()
+    assert sup.snapshot("text")["state"] == "starting"
+    assert seen == [] and rec == [], "窗口内不触发诊断包、不消耗恢复预算"
+    mono.advance(61)
+    sup.tick()  # 期满观测计入防抖（pending 1）
+    assert sup.snapshot("text")["state"] == supervisor.READY, "期满未凑够同向观测不翻转"
+    sup.tick()
+    sup.tick()  # pending 3 → 翻转 down
+    assert sup.snapshot("text")["state"] == supervisor.DOWN
+    assert seen == ["text"], "期满防抖翻转即触发诊断包"
+
+
+def test_ready_flip_ends_grace_and_unlocks_latch():
+    """宽限内观测到就绪→正常防抖翻回 ready，ready 翻转即解锁（不再显示启动中）。"""
+    mono = _Mono()
+    alive = {"ok": False}
+    sup = _supervisor(lambda slot: (alive["ok"], "拒连" if not alive["ok"] else ""),
+                      mono=mono, start_grace=180, debounce=3)
+    sup.tick()  # 首观测 down 定态
+    sup.note_starting("text")
+    alive["ok"] = True
+    for _ in range(2):  # ready 观测走正常防抖，窗口保持闩住
+        sup.tick()
+        assert sup.snapshot("text")["state"] == "starting"
+    sup.tick()  # 第 3 次同向 → 翻转 ready
+    assert sup.snapshot("text")["state"] == supervisor.READY
+    assert sup._states["text"].starting_until == 0.0, "翻回 ready 即清宽限窗口（W8 解锁）"
+
+
+def test_w8_recovery_latch_single_dispatch_per_grace_window():
+    """恢复派发闩锁：restart 上报宽限后不再叠加派发第二发，期满才继续退避节拍。"""
+    mono = _Mono()
+    calls: list[str] = []
+
+    def _recover_like_production(slot: str) -> None:  # operate_model→note_starting 链
+        calls.append(slot)
+        sup.note_starting(slot)
+
+    sup = _supervisor(lambda slot: (False, "拒连"), recover=_recover_like_production,
+                      recover_cooldown=1, mono=mono, start_grace=90)
+    sup.note_desired("text", "running")
+    sup.note_desired("vision", "running")
+    sup.tick()  # 首观测 down 定态，本 tick 到节拍 → 各槽位第 1 发
+    assert calls == ["text", "vision"]
+    for _ in range(10):
+        sup.tick()
+    assert calls == ["text", "vision"], "闩锁：窗口内不叠加第二发（旧行为＝每拍连发）"
+    assert sup._states["text"].starting_until > 0.0
+    assert sup._states["text"].ticks == 1, "窗口内恢复 tick 冻结不消耗节拍"
+    mono.advance(91)
+    for _ in range(2):
+        sup.tick()
+    assert calls.count("text") == 2, "宽限期满解锁后按退避节拍继续第 2 发"
+
+
+def test_manual_stop_clears_grace_window():
+    """人工停止＝合法终态：desired=stopped 即清宽限窗口，不再以「启动中」遮蔽掉线。"""
+    sup = _supervisor(lambda slot: (False, "拒连"), mono=_Mono(), start_grace=180)
+    sup.tick()
+    sup.note_starting("text")
+    assert sup.snapshot("text")["state"] == "starting"
+    sup.note_desired("text", "stopped")
+    assert sup.snapshot("text")["state"] == supervisor.DOWN
+
+
+def test_api_pause_clears_grace_window(monkeypatch):
+    """api 来源暂停观测：宽限窗口随快照与期望一并清除（不残留「启动中」）。"""
+    from qed_engine.services.llm import registry
+
+    mode = {"src": "local"}
+    monkeypatch.setattr(registry, "configured_source", lambda s, slot: mode["src"])
+    sup = _supervisor(lambda slot: (True, ""), mono=_Mono(), start_grace=180)
+    sup.tick()
+    sup.note_starting("text")
+    mode["src"] = "api"
+    sup.tick()
+    assert sup.snapshot("text")["state"] == ""
+    mode["src"] = "local"
+    sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.READY, "暂停后窗口不复活"
+
+
+def test_note_starting_ignores_unknown_slot():
+    sup = _supervisor(lambda slot: (True, ""))
+    sup.note_starting("embedding")  # 不抛异常即通过
+    sup.tick()
+    assert sup.snapshot("text")["state"] == supervisor.READY
+
+
+def test_dead_assignment_cooldown_attr_removed():
+    """W8 清理：_SlotState 不再有未声明的 cooldown 死赋值（原 supervisor.py:202 遗留）。"""
+    import dataclasses
+
+    field_names = {f.name for f in dataclasses.fields(supervisor._SlotState)}
+    assert "cooldown" not in field_names
+    sup = _supervisor(lambda slot: (False, "拒连"), recover=lambda slot: None,
+                      recover_cooldown=1)
+    for _ in range(3):
+        sup.tick()
+    assert not hasattr(sup._states["text"], "cooldown"), "恢复节拍不写未声明属性"
+
+
+# --- W10 剩余：诊断包增采 docker inspect（OOMKilled/ExitCode/RestartCount 现场定谳） ---
+
+
+def test_default_diagnostics_includes_docker_inspect_forensics(monkeypatch):
+    calls = []
+
+    class _Ok:
+        returncode = 0
+        stdout = b"false 0 0"
+        stderr = b""
+
+    def fake_run(cmd, **kw):
+        calls.append(list(cmd))
+        return _Ok()
+
+    monkeypatch.setattr(supervisor.subprocess, "run", fake_run)
+    sup = _supervisor(lambda slot: (True, ""))
+    sup._default_diagnostics("vision")
+
+    inspect = next(c for c in calls if "inspect" in c)
+    fmt = inspect[inspect.index("--format") + 1]
+    assert "OOMKilled" in fmt and "ExitCode" in fmt and "RestartCount" in fmt, \
+        "被外部杀/OOM 两假设现场直接定谳字段"
+
+
+def test_llm_slot_op_info_reaches_event_log(capsys, monkeypatch):
+    """② DEFECT-008 真机复现：子 logger（qed_engine.llm）未设级别时 INFO 被 root(WARNING) 过滤，
+
+    槽位启停失败原因传了 log 也进不了事件账——事件账落点必须给 qed_engine 包级 logger 设 INFO。
+    """
+    import logging
+
+    from qed_engine.api import control as api_control
+    from qed_engine.api.main import create_app
+
+    monkeypatch.setattr(api_control, "_probe_llm", lambda provider, key, url: (True, ""))
+    monkeypatch.setattr(api_control, "_probe_mysql", lambda settings: (True, ""))
+    create_app(Settings(_env_file=None, qed_model_supervisor=False))
+    logging.getLogger("qed_engine.llm").info("模型槽位操作 slot=text op=start：start 槽位 text 失败：样例原因")
+    assert "模型槽位操作" in capsys.readouterr().err

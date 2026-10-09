@@ -25,7 +25,6 @@ export default function Parsing() {
   const pages = useParsingStore((s) => s.pages);
   const scrollMode = useParsingStore((s) => s.scrollMode);
   const syncScroll = useParsingStore((s) => s.syncScroll);
-  const zoom = useParsingStore((s) => s.zoom);
   const renderMode = useParsingStore((s) => s.renderMode);
   const gotoPage = useParsingStore((s) => s.gotoPage);
   const booksLoading = useParsingStore((s) => s.booksLoading);
@@ -141,7 +140,6 @@ export default function Parsing() {
                 entry={entry}
                 scrollMode={scrollMode}
                 syncScroll={syncScroll}
-                zoom={zoom}
                 renderMode={renderMode}
               />
             </>

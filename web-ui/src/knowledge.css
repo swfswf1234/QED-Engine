@@ -1,63 +1,90 @@
-/* 学习中心·知识结构浏览（#/knowledge） */
+/* 学习中心 · 知识梳理星图（#/knowledge）与课程知识点页（#/knowledge/c/:courseId） */
 
-.kn-layout {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.kn-domain-panel {
-  width: 140px;
-  flex-shrink: 0;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 12px 8px;
+.kn-galaxy {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  padding: 20px 32px 24px;
+  /* 层序自上而下：三档光晕 → 压暗层（保证课程框与标题的可读对比）→ 用户提供的星空图 → 底色兜底
+     图片缺失时只剩渐变与底色，不白屏 */
+  background:
+    radial-gradient(1100px 620px at 16% -8%, rgba(58, 96, 176, 0.5), transparent 62%),
+    radial-gradient(900px 520px at 86% 6%, rgba(104, 66, 160, 0.38), transparent 64%),
+    radial-gradient(1200px 760px at 50% 112%, rgba(20, 62, 120, 0.45), transparent 66%),
+    linear-gradient(rgba(4, 8, 22, 0.5), rgba(4, 8, 22, 0.5)),
+    url('/starfield.jpg') center / cover no-repeat,
+    #070b1c;
 }
 
-.kn-domain-title {
-  padding: 0 8px 8px;
-  border-bottom: 1px solid #f0f0f0;
-  margin-bottom: 4px;
+/* 星光两档：细密小星缓慢漂移 + 亮星呼吸，纯 CSS 背景层（不占图表资源） */
+.kn-galaxy::before,
+.kn-galaxy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
 }
 
-.kn-domain-item {
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #333;
+.kn-galaxy::before {
+  background-image:
+    radial-gradient(1px 1px at 40px 60px, rgba(255, 255, 255, 0.8), transparent 60%),
+    radial-gradient(1px 1px at 180px 240px, rgba(210, 232, 255, 0.65), transparent 60%),
+    radial-gradient(1.2px 1.2px at 320px 90px, rgba(255, 255, 255, 0.7), transparent 60%),
+    radial-gradient(1px 1px at 430px 360px, rgba(190, 215, 255, 0.6), transparent 60%),
+    radial-gradient(1.1px 1.1px at 90px 420px, rgba(255, 255, 255, 0.7), transparent 60%),
+    radial-gradient(1px 1px at 260px 520px, rgba(220, 236, 255, 0.55), transparent 60%);
+  background-size: 540px 560px;
+  animation: kn-drift 260s linear infinite;
 }
 
-.kn-domain-item:hover {
-  background: #f0f7ff;
+.kn-galaxy::after {
+  background-image:
+    radial-gradient(2px 2px at 120px 180px, rgba(255, 255, 255, 0.95), transparent 55%),
+    radial-gradient(2.4px 2.4px at 700px 420px, rgba(180, 214, 255, 0.8), transparent 55%),
+    radial-gradient(1.8px 1.8px at 480px 660px, rgba(255, 244, 214, 0.85), transparent 55%),
+    radial-gradient(2.2px 2.2px at 860px 120px, rgba(255, 255, 255, 0.9), transparent 55%);
+  background-size: 980px 780px;
+  animation: kn-twinkle 9s ease-in-out infinite alternate;
 }
 
-.kn-domain-item.active {
-  background: #e6f4ff;
-  color: #1677ff;
-  font-weight: 600;
+/* 星图内容压在星光层之上，并撑满内容区（星图坐标系＝画布实测宽高） */
+.kn-star-stage {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.kn-main {
-  flex: 1;
-  min-width: 0;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 20px;
-  min-height: 560px;
+.kn-star-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.kn-graph {
-  overflow-x: auto;
+.kn-star-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.kn-structure {
-  min-height: 480px;
+.kn-domain-select {
+  width: 220px;
+}
+
+/* 星图画布：高度由 flex 分配，页面把实测宽高喂给布局纯函数 */
+.kn-star-field {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.kn-star-field .kn-empty {
+  height: 100%;
 }
 
 .kn-empty {
@@ -70,4 +97,73 @@
   justify-content: center;
   background: #fafafa;
   padding: 24px;
+}
+
+.kn-empty-dark {
+  border-color: rgba(150, 180, 230, 0.4);
+  background: rgba(10, 18, 42, 0.55);
+}
+
+@keyframes kn-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-540px, -280px, 0);
+  }
+}
+
+@keyframes kn-twinkle {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kn-galaxy::before,
+  .kn-galaxy::after {
+    animation: none;
+  }
+}
+
+/* 课程知识点页：主列（已确认 + 待选池）+ 右列（候选登记） */
+.kp-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.kp-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.kp-draft {
+  width: 320px;
+  flex-shrink: 0;
+}
+
+.kp-variant {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+@media (max-width: 1080px) {
+  .kp-layout {
+    flex-direction: column;
+  }
+
+  .kp-draft {
+    width: 100%;
+  }
 }

@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import {
-  App, Button, Card, Col, Layout, Modal, Row, Space, Typography,
+  App, Button, Card, Col, Layout, Row, Space, Typography,
 } from 'antd';
 import {
-  BookOutlined, ReadOutlined, ScheduleOutlined, SolutionOutlined,
+  BookOutlined, ReadOutlined, SolutionOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import AppHeader, { AdminEntryButton } from '../components/AppHeader';
+import HelpModal from '../components/HelpModal';
 import { heroGradient } from '../theme';
-import { HELP_SECTIONS } from '../help/sections';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -111,29 +111,8 @@ export default function Home() {
         </Row>
       </Layout.Content>
 
-      {/* 使用手册弹窗（迁移 HELP_SECTIONS） */}
-      <Modal
-        title={<Space><ScheduleOutlined />使用手册</Space>}
-        open={helpOpen}
-        onCancel={() => setHelpOpen(false)}
-        footer={null}
-        width={720}
-      >
-        {HELP_SECTIONS.map((s) => (
-          <div key={s.title} style={{ marginBottom: 20 }}>
-            <Title level={5} style={{ marginBottom: 8 }}>
-              {s.title}
-            </Title>
-            <ol style={{ marginTop: 0, paddingLeft: 22, color: '#000000' }}>
-              {s.steps.map((step, i) => (
-                <li key={i} style={{ marginBottom: 4 }}>
-                  {step}
-                </li>
-              ))}
-            </ol>
-          </div>
-        ))}
-      </Modal>
+      {/* 使用手册弹窗（HELP_SECTIONS 正本，与星图页共用组件） */}
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </Layout>
   );
 }

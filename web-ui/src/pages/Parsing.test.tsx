@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App as AntApp } from 'antd';
 import Parsing from './Parsing';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
@@ -83,9 +83,8 @@ const resetStore = () =>
     error: null, dataError: null,
     syncing: false, syncMessage: null, syncError: null,
     compareBookId: null, compareBook: null, comparePageNo: 1,
-    pages: {}, selectedBlock: -1, editMode: false,
+    pages: {}, selectedBlock: -1, editMode: false, editPane: 'box', drawMode: false,
     scrollMode: 'single', renderMode: 'stream', syncScroll: true,
-    zoom: 100,
     activeJob: null, jobError: null, jobSubmitting: false, ingestBusy: {},
     edits: {}, editSubmitting: false,
   });
@@ -109,7 +108,9 @@ const json = (body: unknown, status = 200) =>
 function renderP() {
   return render(
     <MemoryRouter>
-      <ConfigProvider theme={theme}><Parsing /></ConfigProvider>
+      <ConfigProvider theme={theme}>
+        <AntApp><Parsing /></AntApp>
+      </ConfigProvider>
     </MemoryRouter>,
   );
 }
@@ -266,9 +267,9 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     const user = userEvent.setup();
     await user.click(screen.getByText(TITLE_A));
     await screen.findByText('#2 · 段落');
-    // 开编辑模式（Switch 用 aria-label 定位）；口径切「内容」（默认=框图，REQ-098 双口径）
+    // 开编辑模式（Switch 用 aria-label 定位）；口径切「解析修正」（默认=框图修改，REQ-098 双口径）
     await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
-    await user.click(await screen.findByText('内容'));
+    await user.click(await screen.findByText('解析修正'));
     await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
     await user.click(await screen.findByRole('button', { name: /不一致/ }));
     await waitFor(() => expect(putUrl).not.toBe(''));
@@ -304,13 +305,13 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     await screen.findByText('Test paragraph content.');
     await user.click(screen.getByText('版式'));
     await user.click(document.querySelector<HTMLElement>('[aria-label="编辑模式开关"]')!);
-    await user.click(await screen.findByText('内容'));
+    await user.click(await screen.findByText('解析修正'));
     await user.click(screen.getByRole('button', { name: '块 2（段落）' }));
     await user.click(await screen.findByRole('button', { name: /不一致/ }));
     await waitFor(() => expect(putUrl).not.toBe(''));
   });
 
-  it('「解析本页」→ POST /parse-jobs pages:[n] + 轮询进度', async () => {
+  it('「重新解析本页」确认弹窗后才 POST /parse-jobs pages:[n] + 轮询进度', async () => {
     let posted: { pages?: number[] } | null = null;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -333,7 +334,10 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     const user = userEvent.setup();
     await user.click(screen.getByText(TITLE_A));
     await screen.findByText('#2 · 段落');
-    await user.click(screen.getByText('解析本页'));
+    // W8：已解析页文案「重新解析本页」，确认弹窗通过后才提交任务
+    await user.click(screen.getByRole('button', { name: '重新解析本页' }));
+    expect(posted).toBeNull();
+    await user.click(await screen.findByRole('button', { name: /确\s*认/ }));
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted!.pages).toEqual([1]);
     await waitFor(() => {
@@ -367,8 +371,9 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     await screen.findByText('#2 · 段落');
     const fullBtn = screen.getByRole('button', { name: '全本解析' });
     await user.click(fullBtn);
-    await user.click(fullBtn);
-    await user.click(screen.getByRole('button', { name: '解析本页' }));
+    await user.click(await screen.findByRole('button', { name: /确\s*认/ }));
+    await waitFor(() => expect(postCount).toBe(1));
+    await user.click(screen.getByRole('button', { name: '重新解析本页' }));
     expect(postCount).toBe(1);
     expect(fullBtn).toBeDisabled();
     resolvePost(json({ id: 'j1', book_id: BOOK_A, status: 'running', progress: { parsed: 0, total: 20 } }));
@@ -407,7 +412,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     await screen.findByText('#2 · 段落');
     expect(await screen.findByText('3/20')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '全本解析' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '解析本页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '重新解析本页' })).toBeDisabled();
     await waitFor(() => expect(useParsingStore.getState().activeJob?.id).toBe('j9'));
     // store 级双保险：即便绕过按钮直接提交也被在飞闸门拦下
     await useParsingStore.getState().createParseJob([1]);

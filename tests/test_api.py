@@ -608,6 +608,144 @@ def test_five_layer_offline_returns_503(monkeypatch):
     assert "QED-Tracker" in response.json()["detail"]
 
 
+# ---------- 论文链路透传（REQ-102 W2a/W2b；上游=QED-068 A/B 步，api-contracts §③ 论文探索） ----------
+
+
+def test_paper_books_enumeration_forces_kind_paper(monkeypatch):
+    """GET /api/v1/papers/books：8900 固定 kind=paper 透传 8901 GET /books，scope 参数原样转发。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, dict(request.url.params)))
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "book_id": "math-advanced-b01",
+                    "kind": "paper",
+                    "domain_id": "math-advanced",
+                    "course_id": "",
+                    "title": "Paper A",
+                }
+            ],
+        )
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get("/api/v1/papers/books", params={"domain_id": "math-advanced", "kind": "book"})
+    assert response.status_code == 200
+    assert response.json()[0]["kind"] == "paper"
+    # 调用方传入的 kind 被忽略：本端点语义固定为「发现论文」书行枚举
+    assert seen == [("/api/v1/books", {"domain_id": "math-advanced", "kind": "paper"})]
+
+
+def test_paper_books_offline_returns_503(monkeypatch):
+    """8901 离线：论文枚举同样 503 + 明确提示（前端据此静默空态，论文行整行隐藏）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.get("/api/v1/papers/books")
+    assert response.status_code == 503
+    assert "QED-Tracker" in response.json()["detail"]
+
+
+def test_paper_recommend_passthrough_keeps_body_verbatim(monkeypatch):
+    """POST /papers/recommend：202 + task_id；body 逐字段原样转发，8900 不注入默认值。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, json.loads(request.read())))
+        return httpx.Response(202, json={"task_id": "t-paper-1"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    body = {"domain_id": "math-advanced", "recipe": "core", "categories": ["math.GT"], "years_limit": 0}
+    response = client.post("/api/v1/papers/recommend", json=body)
+    assert response.status_code == 202
+    assert response.json() == {"task_id": "t-paper-1"}
+    assert seen == [("/api/v1/papers/recommend", body)]
+
+
+def test_paper_recommend_missing_domain_passes_upstream_422(monkeypatch):
+    """⑤′ 论文没有默认桶：缺 domain_id 时 8900 不补值，上游 422 原样透传给 8903 提示。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.read()) == {}
+        return httpx.Response(
+            422, json={"detail": {"code": "INVALID_PARAMS", "message": "domain_id 必填"}}
+        )
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    response = client.post("/api/v1/papers/recommend", json={})
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "INVALID_PARAMS", "message": "domain_id 必填"}
+
+
+def test_paper_selections_list_and_detail_passthrough(monkeypatch):
+    """GET /papers/selections（+/{id}）：scope 过滤参数与报告详情透传；404 SELECTION_NOT_FOUND 原样。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/papers/selections":
+            assert dict(request.url.params) == {
+                "domain_id": "math-advanced",
+                "recipe": "frontier",
+                "limit": "5",
+            }
+            return httpx.Response(
+                200, json={"selections": [{"selection_id": "sel-1", "status": "ranked"}]}
+            )
+        if path == "/api/v1/papers/selections/sel-1":
+            return httpx.Response(
+                200, json={"selection_id": "sel-1", "status": "ranked", "recommendations": ["1"]}
+            )
+        if path == "/api/v1/papers/selections/nope":
+            return httpx.Response(
+                404, json={"detail": {"code": "SELECTION_NOT_FOUND", "message": "报告不存在"}}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    listed = client.get(
+        "/api/v1/papers/selections",
+        params={"domain_id": "math-advanced", "recipe": "frontier", "limit": 5},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["selections"] == [{"selection_id": "sel-1", "status": "ranked"}]
+    assert client.get("/api/v1/papers/selections/sel-1").json()["status"] == "ranked"
+    missing = client.get("/api/v1/papers/selections/nope")
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "SELECTION_NOT_FOUND"
+
+
+def test_paper_adopt_passthrough_and_conflict(monkeypatch):
+    """POST /papers/selections/{id}/adopt：202 + 逐条落位 picks 原样转发；409 dedup 同码透传。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, json.loads(request.read())))
+        if request.url.path.endswith("/sel-busy/adopt"):
+            return httpx.Response(
+                409,
+                json={"detail": {"code": "TASK_ALREADY_RUNNING", "message": "已有采纳任务在跑"}},
+            )
+        return httpx.Response(202, json={"task_id": "t-adopt-1", "selection_id": "sel-1"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    picks = {"picks": [{"rank": 1, "domain_id": "math-advanced", "course_id": ""}]}
+    ok = client.post("/api/v1/papers/selections/sel-1/adopt", json=picks)
+    assert ok.status_code == 202
+    assert ok.json() == {"task_id": "t-adopt-1", "selection_id": "sel-1"}
+
+    busy = client.post("/api/v1/papers/selections/sel-busy/adopt", json=picks)
+    assert busy.status_code == 409
+    assert busy.json()["detail"]["code"] == "TASK_ALREADY_RUNNING"
+    assert seen == [
+        ("/api/v1/papers/selections/sel-1/adopt", picks),
+        ("/api/v1/papers/selections/sel-busy/adopt", picks),
+    ]
+
+
 # ---------- 服务域（控制中心 /services：service-hosting.md 契约） ----------
 
 
@@ -913,6 +1051,8 @@ def test_services_transition_window_expires_to_probe_result(monkeypatch):
 
     _patch_probe(monkeypatch, False)
     _patch_script(monkeypatch)
+    # 本用例走的是「进程存活而端口未起」的正常 starting 形态（OPS-002 后需显式给存活）
+    monkeypatch.setattr(sm, "_pid_alive", lambda pid: True)
     fake_now = {"t": 1000.0}
     monkeypatch.setattr(sm.time, "monotonic", lambda: fake_now["t"])
     client = _client(monkeypatch)
@@ -925,6 +1065,45 @@ def test_services_transition_window_expires_to_probe_result(monkeypatch):
     services = client.get("/api/v1/services").json()["services"]
     by_name = {s["name"]: s for s in services}
     assert by_name["tracker"]["status"] == "offline"
+
+
+def test_services_start_dead_process_reports_exit_reason_within_window(monkeypatch):
+    """启动后进程即退出：15s 过渡窗口内直接报 offline，reason 给出「进程已退出」+ 日志路径。
+
+    OPS-002 回归（8902 建表失败自杀案例）：修复前 _op_status 在窗口内无条件返回 starting，
+    把「启动即死」压成 15s 静默，窗口过后回落中性的「连接失败」——失败原因界面侧完全不可见。
+    """
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch)
+    monkeypatch.setattr(sm, "_pid_alive", lambda pid: False, raising=False)
+    client = _client(monkeypatch)
+    client.post("/api/v1/services/axiom/start")
+    by_name = {s["name"]: s for s in client.get("/api/v1/services").json()["services"]}
+    unit = by_name["axiom"]
+    assert unit["status"] == "offline"
+    assert "进程已退出" in unit["reason"]
+    assert unit["log_path"] in unit["reason"]
+
+
+def test_services_start_alive_process_keeps_transition_semantics(monkeypatch):
+    """进程存活而端口未起：窗口内仍 starting（原语义不变），窗口过后回落 offline + 连接失败。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch)
+    monkeypatch.setattr(sm, "_pid_alive", lambda pid: True, raising=False)
+    fake_now = {"t": 1000.0}
+    monkeypatch.setattr(sm.time, "monotonic", lambda: fake_now["t"])
+    client = _client(monkeypatch)
+    client.post("/api/v1/services/axiom/start")
+    by_name = {s["name"]: s for s in client.get("/api/v1/services").json()["services"]}
+    assert by_name["axiom"]["status"] == "starting"
+    fake_now["t"] += 30.0
+    by_name = {s["name"]: s for s in client.get("/api/v1/services").json()["services"]}
+    assert by_name["axiom"]["status"] == "offline"
+    assert by_name["axiom"]["reason"] == "连接失败"
 
 
 def test_services_restart_stops_then_starts(monkeypatch):

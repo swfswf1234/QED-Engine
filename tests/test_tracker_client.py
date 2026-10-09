@@ -474,3 +474,74 @@ def test_delete_course_sends_delete():
     client.delete_course("c1")
     assert seen["method"] == "DELETE"
     assert seen["path"] == "/api/v1/courses/c1"
+
+# ---------- 论文探索（REQ-102 W2b 客户端面；上游=QED-068 B 步 8901「⑥ 论文探索」） ----------
+
+
+def test_recommend_papers_posts_body_verbatim():
+    """POST /papers/recommend：请求体逐字段原样发出（8900 不补默认 domain——⑤′ 论文无默认桶）。"""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(202, json={"task_id": "t-paper-1"})
+
+    client = _client(handler)
+    body = {"domain_id": "math-advanced", "recipe": "core", "categories": ["math.GT"]}
+    assert client.recommend_papers(body) == {"task_id": "t-paper-1"}
+    assert (seen["method"], seen["path"]) == ("POST", "/api/v1/papers/recommend")
+    assert seen["body"] == body
+
+
+def test_list_paper_selections_forwards_scope_params():
+    """GET /papers/selections：domain_id/recipe/limit 透传，空值不入参。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"selections": [{"selection_id": "sel-1"}]})
+
+    client = _client(handler)
+    assert client.list_paper_selections(domain_id="math-advanced", limit=5)["selections"] == [
+        {"selection_id": "sel-1"}
+    ]
+    assert seen[0] == {"domain_id": "math-advanced", "limit": "5"}
+    client.list_paper_selections()
+    assert seen[1] == {}
+
+
+def test_get_paper_selection_and_adopt_paths():
+    """GET /papers/selections/{id} 报告详情；POST .../adopt 提交逐条落位 picks。"""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.content))
+        if request.method == "POST":
+            return httpx.Response(202, json={"task_id": "t-adopt-1", "selection_id": "sel-1"})
+        return httpx.Response(200, json={"selection_id": "sel-1", "status": "ranked"})
+
+    client = _client(handler)
+    assert client.get_paper_selection("sel-1")["status"] == "ranked"
+    picks = [{"rank": 1, "domain_id": "math-advanced", "course_id": ""}]
+    assert client.adopt_papers("sel-1", picks) == {"task_id": "t-adopt-1", "selection_id": "sel-1"}
+    assert seen[0][:2] == ("GET", "/api/v1/papers/selections/sel-1")
+    assert seen[1][0] == "POST"
+    assert seen[1][1] == "/api/v1/papers/selections/sel-1/adopt"
+    assert json.loads(seen[1][2].decode("utf-8")) == {"picks": picks}
+
+
+def test_paper_error_carries_status_code_and_structured_detail():
+    """422 上游结构化 detail（{code,message}）随 TrackerError 携带，供 8900 原样透传。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422, json={"detail": {"code": "INVALID_PARAMS", "message": "领域不存在：math"}}
+        )
+
+    client = _client(handler)
+    with pytest.raises(TrackerError) as exc_info:
+        client.recommend_papers({"domain_id": "math"})
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == {"code": "INVALID_PARAMS", "message": "领域不存在：math"}

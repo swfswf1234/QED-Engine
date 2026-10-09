@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildTreeNodes, tutorialLabel,
-  sortBooks, bookInStage, STAGE_OPTIONS,
+  sortBooks, bookInStage, STAGE_OPTIONS, groupPaperBooks,
 } from './downloads';
 import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
 
@@ -200,5 +200,46 @@ describe('状态筛选 bookInStage（书籍生命周期四阶段，2026-08-24 �
     expect(bookInStage(b, '')).toBe(true);
     expect(STAGE_OPTIONS.map((o) => o.label)).toEqual(['待下载', '下载中', '待验证', '已完成', '失败']);
     expect(STAGE_OPTIONS.map((o) => o.value)).toEqual(['to_download', 'downloading', 'to_verify', 'completed', 'failed']);
+  });
+});
+
+describe('发现论文分组 groupPaperBooks（REQ-102 W3，downloads-ui §4.4）', () => {
+  const paper = (id: string, overrides?: Partial<BookRecord>) =>
+    book({ book_id: id, kind: 'paper', domain_id: 'math', status: 'verified', year: 2024, ...overrides });
+
+  it('仅发现论文入组：kind=paper 且无 knowledge_id；非论文/教程附属/retired 排除', () => {
+    const groups = groupPaperBooks([
+      paper('p1'),
+      book({ book_id: 't1', kind: 'textbook', domain_id: 'math' }),           // 非论文
+      paper('p2', { knowledge_id: 'k1' }),                                     // 教程附属论文（refs=knowledge）
+      paper('p3', { status: 'retired' }),                                      // 已退役
+    ]);
+    expect(groups.byDomain['math'].map((b) => b.book_id)).toEqual(['p1']);
+    expect(groups.byCourse).toEqual({});
+  });
+
+  it('落位分桶：course_id 非空进 byCourse，否则 domain_id 进 byDomain', () => {
+    const groups = groupPaperBooks([
+      paper('p1', { course_id: 'c_real' }),
+      paper('p2', { course_id: '' }),
+      paper('p3', { course_id: 'c_real' }),
+    ]);
+    expect(Object.keys(groups.byCourse)).toEqual(['c_real']);
+    expect(groups.byCourse['c_real'].map((b) => b.book_id)).toEqual(['p1', 'p3']);
+    expect(groups.byDomain['math'].map((b) => b.book_id)).toEqual(['p2']);
+  });
+
+  it('组内出版年倒序、同年按 book_id 稳定序；空年排尾', () => {
+    const groups = groupPaperBooks([
+      paper('a', { year: 2023 }),
+      paper('b', { year: 2025 }),
+      paper('c', { year: 2023 }),
+      paper('d', { year: null }),
+    ]);
+    expect(groups.byDomain['math'].map((x) => x.book_id)).toEqual(['b', 'a', 'c', 'd']);
+  });
+
+  it('空输入返回空对象（不虚构键）', () => {
+    expect(groupPaperBooks([])).toEqual({ byDomain: {}, byCourse: {} });
   });
 });

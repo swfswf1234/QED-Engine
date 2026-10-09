@@ -1,129 +1,145 @@
-import { useEffect, useMemo } from 'react';
-import { Alert, Button, Layout, Space, Typography } from 'antd';
-import { ReloadOutlined, LeftOutlined, ReadOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, ConfigProvider, Layout, Select, Space, Typography, theme as antdTheme } from 'antd';
+import { ReloadOutlined, LeftOutlined, QuestionCircleOutlined, StarOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader';
-import CourseGraph from '../components/CourseGraph';
-import { buildCourseGraph, KNOWLEDGE_DOMAINS, useKnowledgeStore } from '../stores/knowledge';
+import HelpModal from '../components/HelpModal';
+import StarMapGraph from '../components/StarMapGraph';
+import { STARMAP_VIEW, starMapLayout } from '../components/starMapLayout';
+import { useStarMapStore } from '../stores/starMap';
+import { usePracticeStore } from '../stores/practice';
 import { describeError } from '../api/client';
+import '../knowledge.css';
 
-const { Title, Text } = Typography;
+const { Title } = Typography;
 
-/** 左侧领域面板（当前数学单领域，未来多领域） */
-function DomainPanel() {
-  const domain = useKnowledgeStore((s) => s.domain);
-  const selectDomain = useKnowledgeStore((s) => s.selectDomain);
-
-  return (
-    <div className="kn-domain-panel">
-      <Text strong className="kn-domain-title">领域</Text>
-      {KNOWLEDGE_DOMAINS.map((d) => (
-        <div
-          key={d}
-          className={`kn-domain-item${domain === d ? ' active' : ''}`}
-          onClick={() => selectDomain(d)}
-          role="button"
-        >
-          {d}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** 知识结构图态：选中课程的章节/知识点（空态，等解析产物管线） */
-function KnowledgeStructure({ courseId }: { courseId: string }) {
-  const catalogTargets = useKnowledgeStore((s) => s.catalogTargets);
-  const selectCourse = useKnowledgeStore((s) => s.selectCourse);
-  const name = catalogTargets.find((t) => t.course_id === courseId)?.course_name ?? courseId;
-
-  return (
-    <div className="kn-structure">
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space>
-          <Button icon={<LeftOutlined />} onClick={() => selectCourse(null)}>
-            返回课程结构
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>《{name}》知识点梳理</Title>
-        </Space>
-        <div className="kn-empty">
-          <ExperimentOutlined style={{ fontSize: 40, color: '#bbb' }} />
-          <Text type="secondary" style={{ marginTop: 8 }}>
-            知识点结构（定义/定理/证明/例题/习题）等待 Axiom-Flow 解析产物管线就绪后填充
-          </Text>
-        </div>
-      </Space>
-    </div>
-  );
-}
+/** 按钮组白字描边（蓝底 Header 上的统一样式） */
+const headerButtonStyle = { color: '#ffffff', borderColor: '#ffffff', background: 'transparent' };
 
 /**
- * 学习中心·知识结构浏览（`#/knowledge`，原型）
- * - 左：领域面板；右：课程结构图（stage 分层泡泡 + 先修依赖连线）⇄ 知识结构图（空态）
- * - 数据：/catalogs/math-qe（唯一后端依赖）；课程依赖/阶段过渡期前端常量
- * - 降级：catalog 不可达 → 课程图空态 + 重试
+ * 学习中心 · 知识梳理星图（`#/knowledge`，M5）
+ * - 信息面收窄：大标题 + 领域下拉，统计数与图例不进画面（图例归使用手册）
+ * - 坐标系＝容器实测宽高（ResizeObserver）：星图套满画布，轨迹列框才持续套住课程卡
+ * - 星图＝纯函数布局（starMapLayout）+ ECharts graph（裁决③：不引新依赖、不用 force）
+ * - 数据＝GET /learn/star-map（qed_domain/qed_course；知识点计数来自 M5 两表，未接入时为 0）
+ * - 复习入口＝按本课课程列表聚合 GET /learn/review/due?course=，条数写进课程节点提示行（0 条不写）
+ * - 点击课程卡 → `#/knowledge/c/{course_id}` 知识点掌握详情
+ * - 降级：8900 或课程目录不可达 → 提示 + 重试，不白屏
  */
 export default function Knowledge() {
-  const catalogTargets = useKnowledgeStore((s) => s.catalogTargets);
-  const courseMetaMap = useKnowledgeStore((s) => s.courseMetaMap);
-  const loading = useKnowledgeStore((s) => s.loading);
-  const error = useKnowledgeStore((s) => s.error);
-  const selectedCourseId = useKnowledgeStore((s) => s.selectedCourseId);
-  const selectCourse = useKnowledgeStore((s) => s.selectCourse);
-  const fetchAll = useKnowledgeStore((s) => s.fetchAll);
+  const domains = useStarMapStore((s) => s.domains);
+  const edges = useStarMapStore((s) => s.edges);
+  const domainId = useStarMapStore((s) => s.domainId);
+  const loading = useStarMapStore((s) => s.loading);
+  const error = useStarMapStore((s) => s.error);
+  const fetchStarMap = useStarMapStore((s) => s.fetchStarMap);
+  const selectDomain = useStarMapStore((s) => s.selectDomain);
+  const courseDueCounts = usePracticeStore((s) => s.courseDueCounts);
+  const refreshCourseDueCounts = usePracticeStore((s) => s.refreshCourseDueCounts);
   const navigate = useNavigate();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [view, setView] = useState(STARMAP_VIEW);
+  const fieldRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void fetchAll();
-  }, [fetchAll]);
+    void fetchStarMap();
+  }, [fetchStarMap]);
 
-  const graph = useMemo(() => buildCourseGraph(catalogTargets, courseMetaMap), [catalogTargets, courseMetaMap]);
+  // 容器尺寸 → 布局坐标系（尺寸未测得时留缺省视口兜底）
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= 480 && rect.height >= 360) {
+        setView({ width: Math.round(rect.width), height: Math.round(rect.height) });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const domain = useMemo(
+    () => domains.find((d) => d.domain_id === domainId) ?? domains[0] ?? null,
+    [domains, domainId],
+  );
+  const layout = useMemo(() => starMapLayout(domain, edges, view), [domain, edges, view]);
+
+  const courseIds = useMemo(
+    () => (domain?.tracks ?? []).flatMap((t) => t.courses.map((c) => c.course_id)),
+    [domain],
+  );
+  useEffect(() => {
+    if (courseIds.length > 0) void refreshCourseDueCounts(courseIds);
+  }, [courseIds, refreshCourseDueCounts]);
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
+    <Layout style={{ height: '100vh', background: '#070b1c', overflow: 'hidden' }}>
       <AppHeader
         actions={
-          <Button
-            type="primary" ghost icon={<ReloadOutlined />} loading={loading}
-            style={{ color: '#ffffff', borderColor: '#ffffff' }} onClick={() => void fetchAll()}
-          >
-            刷新
-          </Button>
+          <Space>
+            <Button icon={<QuestionCircleOutlined />} style={headerButtonStyle} onClick={() => setHelpOpen(true)}>
+              使用手册
+            </Button>
+            <Button icon={<ReloadOutlined />} style={headerButtonStyle} loading={loading} onClick={() => void fetchStarMap()}>
+              刷新
+            </Button>
+            <Button icon={<LeftOutlined />} style={headerButtonStyle} onClick={() => navigate('/')}>
+              返回
+            </Button>
+          </Space>
         }
       />
-      <Layout.Content style={{ padding: 32, maxWidth: 1400, width: '94%', margin: '0 auto' }}>
-        <Space style={{ marginBottom: 16 }}>
-          <ReadOutlined style={{ fontSize: 20, color: '#1677ff' }} />
-          <Title level={2} style={{ margin: 0 }}>学习中心 · 知识结构浏览</Title>
-          <Button size="small" onClick={() => navigate('/')}>返回主界面</Button>
-        </Space>
+      <Layout.Content className="kn-galaxy">
+        <div className="kn-star-stage">
+          <ConfigProvider theme={{ algorithm: antdTheme.darkAlgorithm }}>
+            <div className="kn-star-body">
+              <div className="kn-star-head">
+                <Title level={2} style={{ margin: 0, color: '#f2f6ff' }}>
+                  <StarOutlined /> 学习中心 · 知识梳理星图
+                </Title>
+                <Select
+                  aria-label="领域"
+                  className="kn-domain-select"
+                  value={domain?.domain_id}
+                  placeholder="暂无领域"
+                  onChange={(id: string) => selectDomain(id)}
+                  options={domains.map((d) => ({ value: d.domain_id, label: d.name }))}
+                />
+              </div>
 
-        {error && (
-          <Alert
-            type="warning" showIcon style={{ marginBottom: 16 }}
-            message="课程目录数据不可达"
-            description={`${describeError(error)}。8901 离线时展示降级，不阻塞其他界面。`}
-          />
-        )}
+              {error && (
+                <Alert
+                  type="warning" showIcon
+                  message="星图数据不可达"
+                  description={`${describeError(error)}。8900 / 课程目录离线时降级展示，不阻塞其他界面。`}
+                  action={<Button size="small" onClick={() => void fetchStarMap()}>重试</Button>}
+                />
+              )}
 
-        <div className="kn-layout">
-          <DomainPanel />
-          <div className="kn-main">
-            {selectedCourseId ? (
-              <KnowledgeStructure courseId={selectedCourseId} />
-            ) : (
-              <div className="kn-graph">
-                <CourseGraph graph={graph} selectedId={null} onSelect={(cid) => selectCourse(cid)} />
-                {graph.courses.length > 0 && (
-                  <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 8 }}>
-                    点击泡泡进入知识点梳理；箭头方向为先修 → 后修
-                  </Text>
+              <div ref={fieldRef} className="kn-star-field">
+                {layout.nodes.length > 0 ? (
+                  <StarMapGraph
+                    layout={layout}
+                    height={view.height}
+                    dueCounts={courseDueCounts}
+                    onSelectCourse={(cid) => navigate(`/knowledge/c/${cid}`)}
+                  />
+                ) : (
+                  !loading && (
+                    <div className="kn-empty kn-empty-dark">
+                      <Title level={5} style={{ color: '#a9bde3', fontWeight: 400 }}>
+                        {error ? '课程目录暂不可达，星图无课程可展示' : '课程体系为空：请先在文档下载管理中登记领域与课程'}
+                      </Title>
+                    </div>
+                  )
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          </ConfigProvider>
         </div>
       </Layout.Content>
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </Layout>
   );
 }

@@ -117,3 +117,36 @@ describe('DomainConfirmModal', () => {
     expect(commitImport).not.toHaveBeenCalled();
   });
 });
+
+describe('领域确认弹窗表单口径（downloads-ui.md §3.1）', () => {
+  const FIELD_ORDER = ['领域名', '领域描述', '学科知识', '探索范围', '学习阶段'];
+
+  function renderOpen() {
+    return renderWithProviders(
+      <DomainConfirmModal domain={mockDomain} open={true} onClose={() => {}} />,
+    );
+  }
+
+  it('五个字段依序出现：领域名→领域描述→学科知识→探索范围→学习阶段', () => {
+    renderOpen();
+    const modals = Array.from(document.querySelectorAll('.ant-modal'));
+    const scope = modals.reverse().find((m) => m.querySelector('label')) ?? document.body;
+    const texts = Array.from(scope.querySelectorAll('label')).map((l) => l.textContent ?? '');
+    const idx = FIELD_ORDER.map((w) => texts.findIndex((t) => t.includes(w)));
+    expect(idx.includes(-1), JSON.stringify(texts)).toBe(false);
+    for (let i = 1; i < idx.length; i += 1) expect(idx[i]).toBeGreaterThan(idx[i - 1]);
+  });
+
+  it('标签唯一口径：「探索范围」归 level（回填 本科），scope 称「学科知识」，不再出现「探索范围（scope）」', () => {
+    renderOpen();
+    expect(screen.queryByText('探索范围（scope）')).toBeNull();
+    expect((screen.getByLabelText(/学科知识/) as HTMLTextAreaElement).value).toBe('范围');
+    expect((screen.getByLabelText(/探索范围/) as HTMLInputElement).value).toBe('本科');
+  });
+
+  it('领域描述非必填（无 required 标记）', () => {
+    renderOpen();
+    const label = screen.getByText('领域描述');
+    expect(label.className).not.toContain('ant-form-item-required');
+  });
+});

@@ -10,6 +10,7 @@
 关联测试：tests/test_api.py、tests/test_self_restart.py
 """
 
+import ctypes
 import logging
 import os
 import signal
@@ -42,6 +43,11 @@ CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM)
 RESTART_DELAY_SECONDS = 2.0  # 新进程延迟启动秒数（ping -n N 近似等待，N = delay+1）
 RESTART_EXIT_DELAY_SECONDS = 1.0  # 旧进程延迟退出：先确认新进程 spawn 成功
 SCRIPT_TIMEOUT_SECONDS = 30.0  # 子项目生命周期脚本调用超时（start 拉起即返 / stop 含 5s 宽限 + 强杀）
+
+# PID 存活判定常量（Windows kernel32，口径同 scripts/qed_web_service.py:_proc_alive）
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+STILL_ACTIVE = 259  # 「进程尚未退出」的伪退出码
+ERROR_ACCESS_DENIED = 5
 
 
 @dataclass(frozen=True)
@@ -180,8 +186,49 @@ def _probe_http(port: int) -> bool:
         return False
 
 
+def _pid_alive(pid: int) -> bool:
+    """PID 存活判定（Windows 走 kernel32 句柄，毫秒级、无 WMI/GBK 依赖；其余 os.kill(0)）。
+
+    句柄打开失败按错误码区分：ERROR_ACCESS_DENIED＝存活但无权限查询；其余按已退出。
+    GetExitCodeProcess 查询失败按存活（未知 ≠ 已死：宁可多等一个窗口，不可误报失败）。
+    """
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+        return True
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _managed_alive(managed: ManagedProcess) -> bool:
+    """托管记录存活判定：Popen 单元看 poll()；脚本单元（process=None）看 PID。"""
+    procs = [managed.process, *managed.extra_processes]
+    if any(p is not None for p in procs):
+        return any(p is not None and p.poll() is None for p in procs)
+    return _pid_alive(managed.pid)
+
+
 def _op_status(spec: ServiceSpec) -> tuple[str, str] | None:
-    """过渡态判定：操作后 15s 窗口内的 starting/stopping（返回 status/reason）。"""
+    """过渡态判定：操作后 15s 窗口内的 starting/stopping（返回 status/reason）。
+
+    OPS-002 提前收敛：启动派发后托管进程已退出（如 8902 建表失败自杀）时，窗口内立即结束
+    过渡态并写实失败原因——不压满 15s 再降级成中性的「连接失败」。
+    """
     now = time.monotonic()
     op = _OPS.get(spec.name)
     if op is None:
@@ -191,8 +238,23 @@ def _op_status(spec: ServiceSpec) -> tuple[str, str] | None:
         _OPS.pop(spec.name, None)
         return None
     if op_name in ("start", "restart"):
+        managed = _MANAGED.get(spec.name)
+        if managed is not None and not _managed_alive(managed):
+            _OPS.pop(spec.name, None)
+            managed.reason = f"进程已退出（启动失败，见 {unit_log_path(spec)}）"
+            LOG.warning("服务启动即退出 name=%s pid=%s 日志=%s", spec.name, managed.pid, unit_log_path(spec))
+            return None
         return "starting", "启动中，等待端口就绪"
     return "stopping", "停止中"
+
+
+def unit_log_path(spec: ServiceSpec) -> Path:
+    """单元日志**实际写入点**（ADR 0019 第 3 条）：生命周期脚本托管的单元读其脚本产物
+    `<workdir>/logs/qed-<name>-serve.log`（8901/8902 在各自仓库），其余按注册表命名落根
+    `logs/<log_name>.log`；不按猜测命名读取，避免读到停更文件。"""
+    if spec.lifecycle_script:
+        return Path(spec.workdir) / "logs" / f"qed-{spec.name}-serve.log"
+    return LOG_DIR / f"{spec.log_name}.log"
 
 
 def service_status(spec: ServiceSpec) -> dict:
@@ -201,7 +263,7 @@ def service_status(spec: ServiceSpec) -> dict:
         "name": spec.name,
         "label": spec.label,
         "port": spec.port,
-        "log_path": str(LOG_DIR / f"{spec.log_name}.log"),
+        "log_path": str(unit_log_path(spec)),
     }
     if spec.name == "config":
         return {**base, "status": "online", "pid": None, "started_at": None, "reason": ""}
@@ -356,7 +418,7 @@ def _start(spec: ServiceSpec) -> dict:
         else:
             procs = []
             for cmd in spec.commands:
-                log_file = open(LOG_DIR / f"{spec.log_name}.log", "ab")  # noqa: SIM115 - 随进程生命周期
+                log_file = open(unit_log_path(spec), "ab")  # noqa: SIM115 - 随进程生命周期
                 try:
                     proc = subprocess.Popen(
                         list(cmd),

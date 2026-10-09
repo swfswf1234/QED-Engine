@@ -201,6 +201,8 @@ def _dispatch_model_op(settings: Settings, name: str, op: str) -> None:
 
     未知槽位抛 ValueError（路由映射 404，不进入后台）；同槽位并发操作抛 _ModelOpBusy
     （409）。后台异常只记日志——响应已发出，前端以轮询 GET /models/{slot} ready 收敛判成败。
+    操作过程与 runtime 失败原因经 `log` 一并入日志（DEFECT-008 ②：不传 log 时 model_manager
+    的「start 槽位 … 失败：<原因>」落 _noop_log，界面上只剩超时猜测）。
     """
     slot = mm.SLOT_ALIASES.get(name, name)
     if slot not in mm.SLOTS:
@@ -210,9 +212,12 @@ def _dispatch_model_op(settings: Settings, name: str, op: str) -> None:
             raise _ModelOpBusy(f"槽位 {slot} 操作进行中，请等待收敛后再试")
         _MODEL_OP_INFLIGHT.add(slot)
 
+    def _log(msg: str) -> None:
+        LOG.info("模型槽位操作 slot=%s op=%s：%s", slot, op, msg)
+
     def _run() -> None:
         try:
-            mm.operate_model(name, op, settings)
+            mm.operate_model(name, op, settings, log=_log)
         except Exception:
             LOG.exception("模型槽位操作后台失败：%s %s", slot, op)
         finally:
@@ -452,11 +457,19 @@ def llm_vision(request: Request, payload: LlmVisionRequest) -> LlmCallResponse:
     ))
 
 
+# 验证调用的请求层限长（DEFECT-008 ③）：连通性验证只需模型出一段可观测输出。
+# 思考模型该 prompt 的 reasoning 段实测 170~260+ token：限 256 时 5 次里 2 次整段被
+# 截在思考里（finish=length、正文为空）；限 512 时实测 12~17s 且 finish=stop 出正文。
+# 上限不决定耗时（模型出完即停），所以取「覆盖思考段 + 留余量」的 512。
+LLM_TEST_MAX_TOKENS = 512
+
+
 @router.post("/llm/test/text", response_model=LlmTestResponse)
 def llm_test_text(request: Request) -> LlmTestResponse:
-    """文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因。"""
+    """文字模型测试（控制台测试按钮）：小 prompt 真实调用（限长），成功/失败 + 原因。"""
     resolved: Settings = request.app.state.settings
-    result = gateway_call_text(resolved, prompt="请回复「OK」两个字。", prompt_template="test")
+    result = gateway_call_text(resolved, prompt="请回复「OK」两个字。", prompt_template="test",
+                               max_tokens=LLM_TEST_MAX_TOKENS)
     return LlmTestResponse(ok=result["success"], detail=(result["error"] or "")[:200] or result["reply"][:200],
                            call_id=result["call_id"])
 

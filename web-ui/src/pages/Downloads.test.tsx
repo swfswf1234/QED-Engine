@@ -6,6 +6,7 @@ import Downloads from './Downloads';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDownloadsStore } from '../stores/downloads';
+import { usePaperExploreStore } from '../stores/paperExplore';
 import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from '../stores';
 
 const domainsFixture: DomainSystem[] = [
@@ -663,5 +664,92 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       fireEvent.click(within(dialog).getByRole('button', { name: /查看渠道尝试/ }));
       expect(within(dialog).getByText('暂无渠道尝试记录')).toBeInTheDocument();
     });
+  });
+});
+
+describe('论文探索入口与领域徽标（REQ-102 W4，downloads-ui.md §4.4）', () => {
+  beforeEach(() => {
+    usePaperExploreStore.getState().reset();
+    useDownloadsStore.setState({
+      domains: [], knowledge: [], details: {}, loading: false, error: null,
+      systemError: null, knowledgeError: null, paperBooks: [],
+      filters: { domain: '', course: '', stage: '' }, selected: null, treeWidth: 400,
+    });
+  });
+
+  it('无领域可选时汇总行按钮置灰，点击不打开弹窗', async () => {
+    mockApi({
+      '/courses': [],
+      '/knowledge': [],
+      '/papers/books': [],
+      '/tasks': [],
+      '/papers/selections': { selections: [] },
+    });
+    renderDownloads();
+    const summaryButton = await screen.findByRole('button', { name: '论文探索' });
+    expect(summaryButton).toBeDisabled();
+    fireEvent.click(summaryButton);
+    expect(usePaperExploreStore.getState().modalOpen).toBe(false);
+  });
+
+  it('选中领域后汇总行按钮可点并打开该领域弹窗', async () => {
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+      '/papers/books': [],
+      '/tasks': [],
+      '/papers/selections': { selections: [] },
+    });
+    renderDownloads();
+    // 进入页面默认选中第一个领域 → 按钮即可用
+    const summaryButton = await screen.findByRole('button', { name: '论文探索' });
+    await waitFor(() => expect(summaryButton).not.toBeDisabled());
+    fireEvent.click(summaryButton);
+    await waitFor(() => expect(usePaperExploreStore.getState().modalOpen).toBe(true));
+    expect(usePaperExploreStore.getState().domainId).toBe('dm1');
+    expect(await screen.findByText(/论文探索 · 高等数学/)).toBeInTheDocument();
+  });
+
+  it('课程选中取其所属领域；课程论文行不带探索入口（课程不独立发起）', async () => {
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+      '/papers/books': [
+        { ...book({ book_id: 'dm1-b01', title: '落位到课程的论文', kind: 'paper', domain_id: 'dm1', status: 'verified' }), course_id: '01_math_analysis' },
+      ],
+      '/tasks': [],
+      '/papers/selections': { selections: [] },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('数学分析'));
+    const row = await screen.findByTestId('paper-books-row');
+    expect(within(row).getByText('落位到课程的论文')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: '论文探索' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '论文探索' }));
+    await waitFor(() => expect(usePaperExploreStore.getState().domainId).toBe('dm1'));
+  });
+
+  it('领域级论文行按 §7.2 出徽标：探索中无书行也成行', async () => {
+    mockApi({
+      '/courses': domainsFixture,
+      '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+      '/knowledge': knowledgeFixture,
+      '/papers/books': [],
+      '/tasks': (url: string) => (url.endsWith('/tasks')
+        ? [{
+          task_id: 't-1', type: 'paper_recommend', status: 'running', progress: 40, message: 'arXiv 检索中',
+          created_at: '', updated_at: '', params: { domain_id: 'dm1' }, result: null, error: '',
+        }]
+        : []),
+      '/papers/selections': { selections: [] },
+    });
+    renderDownloads();
+    const tree = await screen.findByRole('tree');
+    fireEvent.click(within(tree).getByText('高等数学'));
+    const row = await screen.findByTestId('paper-books-row');
+    expect(within(row).getByText('探索中')).toBeInTheDocument();
   });
 });

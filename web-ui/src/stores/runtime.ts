@@ -2,12 +2,18 @@
  * 全局运行时 store（原「控制台 store」升格，2026-08-24 用户裁决：全局俯瞰数据层共享）
  * - 挂载策略：AdminLayout 进入管理台时拉取一次；Console 挂载时补拉保新鲜
  *   （fetchAll 带 loading 防重入，双挂载只发一轮请求）；zustand 模块级单例跨页存活
- * - 数据面：服务快照（/services）+ MySQL（/config/database）+ GPU（/monitor/gpu）+
- *   模型三槽位（/models/text|vision|embedding，PLAN-046）+ 运行模式（/config/keys）
- *   七路独立拉取，互不拖累
+ * - 数据面：八路独立拉取，互不拖累＝服务快照（/services）+ MySQL（/config/database）+
+ *   GPU（/monitor/gpu）+ 模型三槽位（/models/text|vision|embedding，PLAN-046）+
+ *   运行模式（/config/keys）+ 模型路由（/config/models）
+ * - 分批刷新（ARCH-038）：在飞路集合 pendingRoutes 逐路落定逐路清，控制台按分区
+ *   （ZONE_ROUTES：服务管理／基础设施／资源监控）各自转圈；loading 只作 fetchAll 防重入旗标
  * - 独立超时：services 5s（本地脚本查询，秒回）；database 10s（后端 3s 探测 + 60s 缓存）；
  *   gpu/槽位状态 8s（后端本地探针 1s，放宽）
  * - 启停操作 + 收敛轮询：服务经 /services 过渡态；模型槽位经 /models/{slot}.ready
+ * - 操作互斥按单元（ARCH-041）：pendingOps 集合内服务各单元一键（四服务并发启停互不受限），
+ *   模型槽位按 model: 前缀整域互斥；两域互不阻塞，收敛判定只看本单元
+ * - 受限启动两段式（ARCH-040）：startLocalModel 先停对方本地槽位、收敛后再启本槽位，
+ *   前段失败即止（后端单活仲裁会静默停他槽，控制台把代价显式化，见 admin-console.md §3.3）
  * - 测试动作：MySQL 即时探测 / 文字 / 图像 / 向量（置 testing 标记 → 调端点 → outcome）
  * - 模型选择：POST /models/{slot}/select（local 模式下拉，写运行态 manifest.active）
  * - 离线降级：8900 不可达 → 整体 error 横幅；database/gpu/槽位 失败 → 仅对应字段降级
@@ -42,8 +48,32 @@ export const GPU_TIMEOUT_MS = 8000;
 export const GPU_REFRESH_INTERVAL_MS = 60_000;
 /** /models/{slot} 槽位状态超时（后端本地探针 1s + 状态汇总，放宽到 8s） */
 export const SLOT_TIMEOUT_MS = 8000;
-/** 测试动作（MySQL 即时探测/文字/图像/向量）超时（真实模型调用，放宽） */
-export const TEST_TIMEOUT_MS = 15000;
+/** 测试动作（MySQL 即时探测/文字/图像/向量）超时（真实模型调用，放宽）。
+ *  文字验证覆盖「冷启动加载 + 请求层限长（LLM_TEST_MAX_TOKENS=512）生成」最坏耗时：
+ *  实测 512 token 上限按 ~13 tok/s 解码约 40s，叠加 40960 档加载 7.3s，故窗口取 60s
+ *  （DEFECT-008 ④；原 15s 只够非思考模型，思考模型必被思考段顶穿）。 */
+export const TEST_TIMEOUT_MS = 60_000;
+
+/** fetchAll 的拉取路（分路 pending 的键，ARCH-038） */
+export const ROUTE_KEYS = [
+  'services', 'db', 'gpu', 'slot:text', 'slot:vision', 'slot:embedding', 'keys', 'models',
+] as const;
+export type RouteKey = typeof ROUTE_KEYS[number];
+
+/** 控制台分区（分区级转圈粒度，2026-10-03 用户裁决） */
+export type PendingZone = 'services' | 'infra' | 'resources';
+
+/** 分区 → 拉取路归属 */
+export const ZONE_ROUTES: Record<PendingZone, RouteKey[]> = {
+  services: ['services'],
+  infra: ['db'],
+  resources: ['gpu', 'slot:text', 'slot:vision', 'slot:embedding', 'keys', 'models'],
+};
+
+/** 分区是否有路在飞：任一路未落定即转圈，别的分区不受慢路拖累 */
+export function isZonePending(pendingRoutes: string[], zone: PendingZone): boolean {
+  return ZONE_ROUTES[zone].some((key) => pendingRoutes.includes(key));
+}
 
 /**
  * 8903 前端服务兜底（原 stores/webService.ts，2026-08-24 并入）。
@@ -80,7 +110,7 @@ export function withWebServiceFallback(services: ServiceStatus[]): ServiceStatus
   return [...merged].sort((a, b) => a.port - b.port);
 }
 
-/** 槽位中文标签（在跑标注/状况卡共用，S3·S4 派生口径） */
+/** 槽位中文标签（状况卡/显存占用行共用） */
 export const SLOT_LABELS: Record<SlotName, string> = { text: '文字', vision: '图像', embedding: '向量' };
 
 export interface RunningModel {
@@ -107,18 +137,6 @@ export function deriveRunningModels(slots: Record<SlotName, SlotStatus | null>):
   return out;
 }
 
-export function formatRunningModels(models: RunningModel[]): string {
-  return models.map((m) => `${m.label}·${m.identity}${m.channel ? `（${m.channel}）` : ''}`).join('、');
-}
-
-/** 「当前在跑」一行文案：本地在跑 → 槽位·身份名（渠道）；全 api 就绪 →（API 模式）；其余 → 无 */
-export function formatRunningSlotLine(slots: Record<SlotName, SlotStatus | null>): string {
-  const running = deriveRunningModels(slots);
-  if (running.length > 0) return formatRunningModels(running);
-  const apiActive = (['text', 'vision', 'embedding'] as SlotName[])
-    .some((slot) => slots[slot]?.source === 'api' && slots[slot]?.ready);
-  return apiActive ? '（API 模式）' : '无';
-}
 
 /** 启停操作收敛结果（2026-08-17：操作成功/失败由收敛结果驱动，前端 message 提示） */
 export interface OperateResult {
@@ -130,6 +148,21 @@ export interface OperateResult {
   status: ServiceStatus['status'] | 'error' | 'timeout' | 'busy';
   /** 失败/超时原因（成功时为 undefined） */
   reason?: string;
+}
+
+/**
+ * 启停操作互斥单元（ARCH-041）：服务每单元一键（`svc:<name>`），彼此并发不受限；
+ * 模型槽位用 `model:<slot>`，判定按 `model:` 前缀整域互斥（单活仲裁下跨槽并发启停不安全）。
+ * 两域互不阻塞——后端四服务单元本就独立派发（api/control.py），守卫只作用本地模型槽位。
+ */
+export const svcOpUnit = (name: string): string => `svc:${name}`;
+export const slotOpUnit = (slot: string): string => `model:${slot}`;
+
+/** 该单元是否被在飞操作挡住 */
+export function isOpBusy(pendingOps: string[], unit: string): boolean {
+  return unit.startsWith('model:')
+    ? pendingOps.some((k) => k.startsWith('model:'))
+    : pendingOps.includes(unit);
 }
 
 /** 操作目标态判定：start→online、stop→offline、restart→online */
@@ -163,7 +196,10 @@ async function runTest(
 export interface RuntimeStore {
   services: ServiceStatus[];
   dbStatus: DatabaseStatus | null;
+  /** 整批拉取中＝fetchAll 防重入旗标（界面转圈看 pendingRoutes 分区，不再全局 loading） */
   loading: boolean;
+  /** 在飞拉取路（ARCH-038）：八路各自落定即从集合移除，分区按 ZONE_ROUTES 聚合出 Spin */
+  pendingRoutes: RouteKey[];
   /** 整体错误（8900 不可达时设置；单个服务离线不算错误） */
   error: string | null;
   /** MySQL 探测独立错误（不影响服务卡展示） */
@@ -180,8 +216,8 @@ export interface RuntimeStore {
   keys: KeysStatus | null;
   /** 模型路由表（/config/models；云端模型名来源，null=未加载） */
   modelsConfig: ModelsConfig | null;
-  /** 操作中（按钮 loading），值为服务名 */
-  operating: string | null;
+  /** 在飞启停操作单元键（ARCH-041）：服务各单元独立、模型槽位整域互斥，落定即移除 */
+  pendingOps: string[];
   /** 测试按钮执行中标记（db=MySQL 即时探测 / text=文字 / vision=图像 / embedding=向量） */
   testing: 'db' | 'text' | 'vision' | 'embedding' | null;
   fetchAll: () => Promise<void>;
@@ -193,6 +229,9 @@ export interface RuntimeStore {
   operate: (name: string, op: ServiceOp) => Promise<OperateResult>;
   /** 本地模型槽位启停/重启：POST /models/{slot}/{op}，收敛于 /models/{slot}.ready */
   operateModel: (slot: ModelSlot, op: ModelOp) => Promise<OperateResult>;
+  /** 受限启动两段式（ARCH-040）：先停 otherSlot，收敛后再启 slot；前段失败即止并透回原因。
+   *  包装层不自占 `model:` 单元键——两段各占各的单元，否则第二段会被自身域互斥挡回。 */
+  startLocalModel: (slot: ModelSlot, otherSlot: ModelSlot) => Promise<OperateResult>;
   /** 槽位运行态选择（来源/渠道/身份）：POST /models/{slot}/select → 重拉槽位状态，返回是否成功 */
   selectModel: (slot: SlotName, patch: SlotSelectPatch) => Promise<boolean>;
   /** MySQL 即时连接测试（测试按钮） */
@@ -209,10 +248,40 @@ export interface RuntimeStore {
 const EMPTY_SLOTS: Record<SlotName, SlotStatus | null> = { text: null, vision: null, embedding: null };
 const EMPTY_SLOT_ERRORS: Record<SlotName, string | null> = { text: null, vision: null, embedding: null };
 
+/**
+ * 分路 pending 集合进出（ARCH-038）：八路拉取各自在飞/落定，界面按分区聚合转圈。
+ * 直接经 setState 改写，供 store 动作与模块级 track 复用。
+ */
+function markPending(...keys: RouteKey[]) {
+  useRuntimeStore.setState((s) => ({
+    pendingRoutes: Array.from(new Set<RouteKey>([...s.pendingRoutes, ...keys])),
+  }));
+}
+
+function track<T>(key: RouteKey, job: Promise<T>): Promise<T> {
+  return job.finally(() =>
+    useRuntimeStore.setState((s) => ({
+      pendingRoutes: s.pendingRoutes.filter((k) => k !== key),
+    })));
+}
+
+/** 启停操作在飞集合进出（ARCH-041）：最后一个操作落定时顺带清 fetchAll 的 loading */
+function markOp(unit: string) {
+  useRuntimeStore.setState((s) => ({ pendingOps: [...s.pendingOps, unit] }));
+}
+
+function clearOp(unit: string) {
+  useRuntimeStore.setState((s) => {
+    const pendingOps = s.pendingOps.filter((k) => k !== unit);
+    return pendingOps.length ? { pendingOps } : { pendingOps, loading: false };
+  });
+}
+
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   services: [],
   dbStatus: null,
   loading: false,
+  pendingRoutes: [],
   error: null,
   dbError: null,
   gpu: null,
@@ -221,16 +290,18 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   slotErrors: { ...EMPTY_SLOT_ERRORS },
   keys: null,
   modelsConfig: null,
-  operating: null,
+  pendingOps: [],
   testing: null,
 
   fetchAll: async () => {
-    // 防重入：拉取中或操作收敛轮询期间不再叠加重载
+    // 防重入：拉取中或任一操作收敛轮询期间不再叠加重载
     // （AdminLayout 挂载拉取 + Console 挂载补拉场景下只发一轮）
-    if (get().loading || get().operating) return;
+    if (get().loading || get().pendingOps.length) return;
     set({ loading: true });
+    markPending(...ROUTE_KEYS);
     // 八路并行独立拉取 + 逐路增量提交（REQ-033 性能）：快路回包即落库渲染，
     // 不被最慢路（/monitor/gpu 探针 ≈3s）拖累；失败仅置对应字段错误、保留旧值。
+    // 每路落定即出 pendingRoutes（ARCH-038）：分区各按自己的路集合转圈，互不拖累。
     const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
     const setSlot = (slot: SlotName, status: SlotStatus | null, err: unknown | null) => {
       const { slots, slotErrors } = get();
@@ -240,42 +311,43 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       });
     };
     const jobs = [
-      listServices({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+      track('services', listServices({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
         (services) => set({ services, error: null }),
         (err) => set({ error: reason(err) }),
-      ),
-      getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS }).then(
+      )),
+      track('db', getDatabaseStatus({ timeoutMs: DATABASE_TIMEOUT_MS }).then(
         (dbStatus) => set({ dbStatus, dbError: null }),
         (err) => set({ dbError: reason(err) }),
-      ),
-      monitorGpu({ timeoutMs: GPU_TIMEOUT_MS }).then(
+      )),
+      track('gpu', monitorGpu({ timeoutMs: GPU_TIMEOUT_MS }).then(
         (gpu) => set({ gpu, gpuError: null }),
         (err) => set({ gpuError: reason(err) }),
-      ),
-      getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS }).then(
-        (text) => setSlot('text', text, null), (err) => setSlot('text', null, err)),
-      getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS }).then(
-        (vision) => setSlot('vision', vision, null), (err) => setSlot('vision', null, err)),
-      getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS }).then(
-        (embedding) => setSlot('embedding', embedding, null), (err) => setSlot('embedding', null, err)),
-      getKeys({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
-        (keys) => set({ keys }), () => undefined),
-      fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
-        (modelsConfig) => set({ modelsConfig }), () => undefined),
+      )),
+      track('slot:text', getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (text) => setSlot('text', text, null), (err) => setSlot('text', null, err))),
+      track('slot:vision', getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (vision) => setSlot('vision', vision, null), (err) => setSlot('vision', null, err))),
+      track('slot:embedding', getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS }).then(
+        (embedding) => setSlot('embedding', embedding, null), (err) => setSlot('embedding', null, err))),
+      track('keys', getKeys({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+        (keys) => set({ keys }), () => undefined)),
+      track('models', fetchModelsConfig({ timeoutMs: SERVICES_TIMEOUT_MS }).then(
+        (modelsConfig) => set({ modelsConfig }), () => undefined)),
     ];
     await Promise.all(jobs);
-    if (!get().operating) set({ loading: false });
+    if (!get().pendingOps.length) set({ loading: false });
   },
 
   fetchSlots: async () => {
     // 三槽位独立重拉（选择/操作后刷新）：失败仅置对应 slotError，保留旧值
+    markPending('slot:text', 'slot:vision', 'slot:embedding');
     const fetchOne = <T,>(call: () => Promise<T>): Promise<readonly [T | null, unknown | null]> =>
       call().then((v) => [v, null] as const).catch((err) => [null, err] as const);
     const reason = (err: unknown) => (err instanceof Error ? err.message : String(err));
     const [[text, textErr], [vision, visionErr], [embedding, embeddingErr]] = await Promise.all([
-      fetchOne(() => getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS })),
-      fetchOne(() => getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS })),
-      fetchOne(() => getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS })),
+      track('slot:text', fetchOne(() => getSlotStatus('text', { timeoutMs: SLOT_TIMEOUT_MS }))),
+      track('slot:vision', fetchOne(() => getSlotStatus('vision', { timeoutMs: SLOT_TIMEOUT_MS }))),
+      track('slot:embedding', fetchOne(() => getSlotStatus('embedding', { timeoutMs: SLOT_TIMEOUT_MS }))),
     ]);
     set({
       slots: {
@@ -293,25 +365,25 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
 
   fetchGpu: async () => {
     // 独立 GPU 拉取（60s 定时刷新）：失败仅置 gpuError，保留旧值（与 fetchAll 单路降级语义一致）
-    try {
-      const gpu = await monitorGpu({ timeoutMs: GPU_TIMEOUT_MS });
-      set({ gpu, gpuError: null });
-    } catch (err) {
-      set({ gpuError: err instanceof Error ? err.message : String(err) });
-    }
+    markPending('gpu');
+    await track('gpu', monitorGpu({ timeoutMs: GPU_TIMEOUT_MS }).then(
+      (gpu) => set({ gpu, gpuError: null }),
+      (err) => set({ gpuError: err instanceof Error ? err.message : String(err) }),
+    ));
   },
 
   operate: async (name, op): Promise<OperateResult> => {
-    const { operating } = get();
-    if (operating) {
-      // 防重入：另一操作进行中，直接返回失败结果（不阻塞现有操作）
-      return { name, op, success: false, status: 'busy', reason: '另一服务操作进行中，请稍后再试' };
+    const unit = svcOpUnit(name);
+    if (isOpBusy(get().pendingOps, unit)) {
+      // 防重入只挡**同一单元**：其它服务/槽位在飞不挡本服务（ARCH-041 四服务互不受限）
+      return { name, op, success: false, status: 'busy', reason: '该服务上一次操作仍在收敛中，请稍后再试' };
     }
-    set({ operating: name, error: null });
+    markOp(unit);
+    set({ error: null });
     try {
       await operateService(name, op);
     } catch (err) {
-      set({ operating: null, loading: false });
+      clearOp(unit);
       return {
         name,
         op,
@@ -330,11 +402,11 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
         try {
           const services = await listServices();
           set({ services });
-          const inTransition = services.some((s) => s.status === 'starting' || s.status === 'stopping');
+          // 收敛判定只看本单元：跨服务并发时对方仍在过渡不挡本服务落定（ARCH-041）
           const svc = services.find((s) => s.name === name);
-          if (!inTransition && svc && svc.status !== 'starting' && svc.status !== 'stopping') {
+          if (svc && svc.status !== 'starting' && svc.status !== 'stopping') {
             const success = svc.status === target;
-            set({ operating: null, loading: false });
+            clearOp(unit);
             resolve({
               name,
               op,
@@ -348,7 +420,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
             setTimeout(poll, POLL_INTERVAL_MS);
             return;
           }
-          set({ operating: null, loading: false });
+          clearOp(unit);
           resolve({
             name,
             op,
@@ -357,7 +429,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
             reason: `收敛超时（${POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
           });
         } catch (err) {
-          set({ operating: null, loading: false });
+          clearOp(unit);
           resolve({
             name,
             op,
@@ -372,15 +444,17 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   operateModel: async (slot, op): Promise<OperateResult> => {
-    const { operating } = get();
-    if (operating) {
-      return { name: slot, op, success: false, status: 'busy', reason: '另一操作进行中，请稍后再试' };
+    const unit = slotOpUnit(slot);
+    if (isOpBusy(get().pendingOps, unit)) {
+      // 槽位域整域互斥（单活仲裁下跨槽并发启停彼此不安全），但不受服务操作影响
+      return { name: slot, op, success: false, status: 'busy', reason: '另一模型操作进行中，请稍后再试' };
     }
-    set({ operating: slot, error: null });
+    markOp(unit);
+    set({ error: null });
     try {
       await operateModelApi(slot, op);
     } catch (err) {
-      set({ operating: null, loading: false });
+      clearOp(unit);
       return {
         name: slot, op, success: false, status: 'error',
         reason: err instanceof Error ? err.message : String(err),
@@ -400,7 +474,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
             ready = false;
           }
           if (ready === targetReady) {
-            set({ operating: null, loading: false });
+            clearOp(unit);
             void get().fetchSlots();
             resolve({ name: slot, op, success: true, status: op === 'stop' ? 'offline' : 'online' });
             return;
@@ -409,13 +483,13 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
             setTimeout(poll, POLL_INTERVAL_MS);
             return;
           }
-          set({ operating: null, loading: false });
+          clearOp(unit);
           resolve({
             name: slot, op, success: false, status: 'timeout',
             reason: `收敛超时（${MODEL_POLL_TIMEOUT_MS / 1000}s 内未稳定），请点「刷新」确认`,
           });
         } catch (err) {
-          set({ operating: null, loading: false });
+          clearOp(unit);
           resolve({
             name: slot, op, success: false, status: 'error',
             reason: err instanceof Error ? err.message : String(err),
@@ -424,6 +498,14 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
       };
       setTimeout(poll, POLL_INTERVAL_MS);
     });
+  },
+
+  startLocalModel: async (slot, otherSlot): Promise<OperateResult> => {
+    // 受限启动（ARCH-040）：单活下启动本槽位要先卸对方模型，故按 stop→start 顺序两段派发。
+    // 前段不成功即止——对方停不下来时继续启动等于静默夺显存（正是本任务要消除的行为）。
+    const stopped = await get().operateModel(otherSlot, 'stop');
+    if (!stopped.success) return stopped;
+    return get().operateModel(slot, 'start');
   },
 
   selectModel: async (slot, patch) => {

@@ -38,8 +38,11 @@
 
 - `axiom` 作为**单一启停单元**（2026-08-17 起经生命周期脚本）：Axiom-Flow v2 无独立 Worker
   进程（v1 时代 `axiom_flow.worker` 已退役），脚本管理 API 单进程；启停/重启由脚本自含。
-- 启动命令中的 Python 解释器、工作目录、环境变量注入由 8900 服务定义表配置；日志重定向到
-  根仓库 `logs/<unit>.log`（Git 忽略），8900 启动时确保目录存在。
+- 启动命令中的 Python 解释器、工作目录、环境变量注入由 8900 服务定义表配置；**日志读取按
+  实际写入点解析**（ADR 0019 第 3 条）：生命周期脚本托管的单元读其脚本产物
+  `<workdir>/logs/qed-<unit>-serve.log`（tracker/axiom 在**各自仓库** `logs/`，web 在根
+  `logs/`），8900 自身读根 `logs/config.log`（uvicorn stderr 并入）；根 `logs/` 由 8900 启动时
+  确保存在，长期保留清单见[存储规范](../standards/storage-conventions.md)。
 - 8900 自身由用户手动启动（终端/脚本）；控制中心对其**不提供启动/停止按钮**（避免自掘——
   停止 8900 即断掉整个控制中心），仅提供**重启**（经 `/self-restart`，见
   [../architecture/api-contracts.md](../architecture/api-contracts.md)）。8903 前端**不提供停止**（停止即断掉界面），
@@ -60,17 +63,17 @@
     {
       "name": "tracker", "label": "QED-Tracker 文档下载服务", "port": 8901,
       "status": "online", "pid": 6772, "started_at": "2026-08-09T10:00:00+08:00",
-      "log_path": "D:/coding/QED-Engine/logs/tracker.log", "reason": ""
+      "log_path": "D:/coding/QED-Engine/QED-Tracker/logs/qed-tracker-serve.log", "reason": ""
     },
     {
       "name": "axiom", "label": "Axiom-Flow 文档解析服务", "port": 8902,
       "status": "offline", "pid": null, "started_at": null,
-      "log_path": "D:/coding/QED-Engine/logs/axiom.log", "reason": "未启动"
+      "log_path": "D:/coding/QED-Engine/Axiom-Flow/logs/qed-axiom-serve.log", "reason": "未启动"
     },
     {
       "name": "web", "label": "QED 前端服务", "port": 8903,
       "status": "online", "pid": 2341, "started_at": "2026-08-17T10:00:00+08:00",
-      "log_path": "D:/coding/QED-Engine/logs/web.log", "reason": ""
+      "log_path": "D:/coding/QED-Engine/logs/qed-web-serve.log", "reason": ""
     }
   ]
 }
@@ -80,7 +83,12 @@
   启动后 15s 内探测窗口）/ `stopping`（停止中）。
 - `pid`：8900 托管记录的主 PID（`axiom` 为 API 进程 PID；8900 重启后 PID 记录丢失，以端口
   探测为准，pid 可为 null）。
-- `reason`：offline 的补充原因（未启动 / 连接失败 / 停止超时强杀）。
+- `reason`：offline 的补充原因（未启动 / 连接失败 / 停止超时强杀 / 进程已退出（启动失败，见
+  <log_path>））。
+- **启动失败提前收敛**（OPS-002）：`starting` 窗口内每轮状态判定先查托管进程存活（Popen 单元看
+  poll，生命周期脚本单元看 PID 句柄）——进程已退出即结束过渡态并按 offline 报「进程已退出」+
+  实际日志路径，不等 15s 耗尽后降级成中性的「连接失败」。判据只认「进程确定已退出」：查询失败与
+  无权限查询一律按存活（宁可等满窗口，不可把在启动的服误报为退出）。
 - 状态判定**优先端口探测**（socket 预检 0.5s + HTTP 确认 1s，双重探测：未监听端口快速
   判定 offline，已监听端口再 HTTP 健康确认），不依赖 PID 文件；8900 自身被探测时永远
   online。注：Windows 上未监听 loopback 端口可能被防火墙静默丢弃（非 RST），曾致 httpx
@@ -142,7 +150,8 @@
    uvicorn 捕获 KeyboardInterrupt 触发优雅关闭；5s 宽限后 `taskkill /PID <pid> /T /F`
    强杀兜底。
 4. **状态探测**：socket 预检（0.5s 超时）→ HTTP 健康确认（1s 超时，200 即 online）；
-   `starting`/`stopping` 为过渡态（操作后 15s 内探测仍失败则回落 offline 并附 reason）。
+   `starting`/`stopping` 为过渡态（操作后 15s 内探测仍失败则回落 offline 并附 reason）；
+   `starting` 窗口内先查托管进程存活，进程已退出即提前结束过渡态并报退出原因（OPS-002）。
 5. **8900 重启恢复**：8900 重启后子进程可能仍在运行——状态以端口探测为准（探测到 online
    即视为在管，重启按钮直接生效）；不持久化 PID 文件。
 6. **并发安全**：同一服务同时启停返回 409；操作幂等（重复 stop 未运行返回 409 而非崩溃）。
@@ -168,8 +177,9 @@
 
 - 端点族实现于 `backend/qed_engine/api/service_manager.py`，接入 `backend/qed_engine/api/main.py`；
   服务注册表自 `Settings`（QED_*_URL）解析端口（config 8900 / tracker 8901 / axiom 8902，均可
-  被 `.env` 覆盖），日志落根 `logs/<unit>.log`（启动时确保目录存在）。
-- 状态判定：config 恒 online；其余优先 15s 过渡窗口（starting/stopping），其次双重端口
+  被 `.env` 覆盖），日志读取按实际写入点解析（`service_manager.unit_log_path`，见「运行单元」节）。
+- 状态判定：config 恒 online；其余优先 15s 过渡窗口（starting/stopping；starting 内托管进程已退出
+  则提前收敛为 offline 并附「进程已退出」+ 日志路径），其次双重端口
   探测（socket 0.5s + HTTP 1s）；8900 重启后 PID 记录丢失，以探测为准（pid 可为 null）。
 - 启停：Popen（CREATE_NEW_PROCESS_GROUP）+ 根 `.env` 环境继承；优雅停止 CTRL_BREAK 5s 宽限后
   taskkill 强杀（`停止超时强杀` reason）；同一服务 15s 窗口内重复同向操作 409；restart 先停后启
@@ -187,7 +197,9 @@
   （成功 3s 自动刷新）、8903 卡在线重启/离线启动（无停止），后端离线时本地判定兜底 + 去重；
   ⑥ **axiom 单元脚本化**：经 `scripts/axiom_flow_service.py` 黑盒调用（Axiom-Flow v2 无独立
   Worker），8900 可经 /services 停止/重启脚本启动的 8902；`serve_web.py` 服务目录为
-  `web-ui/dist/`；`scripts/` 仅留 qed_web_service.py + serve_web.py。
+  `web-ui/dist/`；`scripts/` 只留被 docs/tests/code-map 引用的必要脚本（启停三件
+  `qed_engine_service.py`/`qed_web_service.py`/`serve_web.py` + 本地模型服务脚本），一次性诊断
+  脚本与其输出不落 `scripts/`（ADR 0019 第 5 条）。
 
 ## 验证
 

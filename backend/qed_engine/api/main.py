@@ -46,6 +46,11 @@ def _ensure_event_log_handler() -> None:
     h.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
     h.qed_engine_stream = True
     eng.addHandler(h)
+    # 级别同批设到包级 logger：只挂 handler 不设级别时，未显式设过级别的子 logger
+    # （如 control.py 的 qed_engine.llm）仍按 root 的 WARNING 过滤，INFO 到不了 handler
+    # （DEFECT-008 ② 真机复现：槽位启停失败原因传了 log 也不落事件账）
+    if eng.level == logging.NOTSET or eng.level > logging.INFO:
+        eng.setLevel(logging.INFO)
 
 
 def _startup_db_check(settings: Settings) -> dict:
@@ -75,8 +80,17 @@ def create_app(
     settings: Settings | None = None,
     tracker_client: TrackerClient | None = None,
     axiom_client: AxiomClient | None = None,
+    learn_store: object | None = None,
+    knowledge_store: object | None = None,
+    practice_store: object | None = None,
 ) -> FastAPI:
-    """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。"""
+    """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。
+
+    learn_store：学习域存储注入点（测试用 InMemoryLearnStore，隔离铁律）；
+    缺省 None 时由首个 /learn 课程请求懒建 qed_learn_* 三表并挂载 MySQL 存储（判例 qed_llm_calls）。
+    knowledge_store：M5 知识点两表存储注入点（测试用 InMemoryKnowledgeStore）；
+    缺省 None 时由首个 /learn 知识点请求懒建两表并挂载（判例 qed_llm_calls）。
+    """
     # 配置 qed_engine.services 日志级别：探测失败等诊断信息需要 DEBUG 可见
     _ensure_event_log_handler()
     logging.getLogger("qed_engine.services").setLevel(logging.DEBUG)
@@ -99,6 +113,14 @@ def create_app(
     )
     # 领域探索原生任务登记表（domain_id → task_id，内存态；8901 侧任务存活不受影响）
     app.state.domain_explore_tasks = {}
+    # 学习域存储（M-1）：测试注入内存实现；生产由首个 /learn 课程请求懒建三表并挂载
+    # （api/learn.py 内，建表失败按 LEARN_MOUNT_RETRY_SECONDS 短窗重试，判例 qed_llm_calls）。
+    # 启动路径不触碰 MySQL，保测试与真实库隔离。
+    app.state.learn_store = learn_store
+    # M5 知识点两表存储：测试注入内存实现；生产由首个请求懒建表挂载（api/learn.py 内，
+    # 建表失败按 KNOWLEDGE_MOUNT_RETRY_SECONDS 短窗重试）
+    app.state.knowledge_store = knowledge_store
+    app.state.practice_store = practice_store
     configure_services(resolved)
     try:
         llm_call_log.ensure_table(resolved)
@@ -131,6 +153,7 @@ def create_app(
     app.include_router(axiom_router)
     from qed_engine.api.domain_explore import router as domain_explore_router
     from qed_engine.api.explore import router as explore_router
+    from qed_engine.api.learn import router as learn_router
     from qed_engine.services.llm import supervisor as llm_supervisor
 
     # 本地模型监督器（ARCH-028）：观测型常驻线程（先等一个周期再首探测）；
@@ -143,6 +166,7 @@ def create_app(
 
     app.include_router(explore_router)
     app.include_router(domain_explore_router)
+    app.include_router(learn_router)
     return app
 
 

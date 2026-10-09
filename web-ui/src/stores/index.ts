@@ -488,4 +488,86 @@ export interface ModelActionResponse {
   pid?: number | null;
 }
 
+// --- 论文链路（REQ-102 W4；契约正本=architecture/api-contracts.md §③ 论文探索） ---
+
+/** GET /tasks/{id} 任务详情（8901 qt_tasks 透传；paper_recommend / paper_adopt 轮询复用） */
+export interface TaskRecord {
+  task_id: string;
+  type: string;
+  status: string;          // queued / running / completed / failed
+  progress: number;
+  message: string;
+  created_at: string;
+  updated_at: string;
+  params?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  error?: string;
+}
+
+/** GET /papers/selections 摘要行 */
+export interface PaperSelectionSummary {
+  selection_id: string;
+  domain_id: string;
+  recipe: string;
+  status: string;          // planning / ranked / no_candidates / no_recommendations / downloaded
+  created_at: string;
+  recommendation_count: number;
+}
+
+/** 报告候选条目（8901 Candidate + PaperAssessment 的 JSON 形态） */
+export interface PaperCandidateEntry {
+  rank: number;
+  plan_index: number;
+  candidate: {
+    provider: string;
+    provider_id: string;
+    title: string;
+    authors: string[];
+    language: string;
+    year: string;
+    page_url: string;
+    download_url: string;
+    identifiers: Record<string, string>;
+    abstract?: string;
+    published_at?: string;
+  };
+  assessment: {
+    arxiv_id: string;
+    goal_fit: number;
+    foundational_value: number;
+    readability: number;
+    reason: string;
+    risks: string[];
+  };
+  score: number;
+  recommended: boolean;
+}
+
+/** GET /papers/selections/{id} 报告详情（评审段数据源） */
+export interface PaperSelectionDetail {
+  selection_id: string;
+  status: string;
+  created_at: string;
+  domain_id?: string;
+  recipe?: string;
+  assessments: PaperCandidateEntry[];
+  recommendations: number[];
+}
+
+/** POST /papers/selections/{id}/adopt 的单条落位（course_id 空=领域级；⑤′ domain_id 必填） */
+export interface PaperPick {
+  rank: number;
+  domain_id: string;
+  course_id: string;
+}
+
+/** 采纳结果行（paper_adopt 任务 result.adopted 元素；status=created|duplicated） */
+export interface PaperAdoptedRow {
+  rank: number;
+  book_id: string;
+  arxiv_id: string;
+  status: string;
+  reason?: string;
+}
+
 export {};

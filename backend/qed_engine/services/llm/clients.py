@@ -76,6 +76,34 @@ def _extract_content(data: dict) -> str:
         raise RuntimeError("模型响应格式异常（缺 choices[0].message.content）") from exc
 
 
+class ChatReply(str):
+    """chat/completions 正文（str 本体不变）+ 截断判据：`finish_reason`、`reasoning_content`。
+
+    M3 A-5：思考段吃满 max_tokens 时正文为空，只取 content 让该响应与正常响应在网关侧
+    不可分（空正文被记成 success 穿透给调用方）。正文仍是字符串消费面，判据随属性携带。
+    """
+
+    def __new__(cls, content: str = "", *, finish_reason: str = "", reasoning_content: str = ""):
+        reply = super().__new__(cls, content or "")
+        reply.finish_reason = finish_reason or ""
+        reply.reasoning_content = reasoning_content or ""
+        return reply
+
+
+def _extract_reply(data: dict) -> ChatReply:
+    """正文 + 截断判据（缺失字段留空，兼容不回 finish_reason 的端点）。"""
+    try:
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("模型响应格式异常（缺 choices[0].message.content）") from exc
+    return ChatReply(
+        content or "",
+        finish_reason=choice.get("finish_reason") or "",
+        reasoning_content=choice["message"].get("reasoning_content") or "",
+    )
+
+
 def provider_text_chat(
     api_key: str,
     model: str,
@@ -84,7 +112,7 @@ def provider_text_chat(
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
     timeout: float = DEFAULT_TIMEOUT,
     max_tokens: int | None = None,
-) -> str:
+) -> ChatReply:
     """多厂商文字对话（OpenAI 兼容 chat/completions），base_url 由注册表解析后传入。
 
     max_tokens 非 None 时写入请求体（REQ-061：网关透传，不再静默丢弃）。
@@ -101,7 +129,7 @@ def provider_text_chat(
             {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             payload,
         )
-        return _extract_content(data)
+        return _extract_reply(data)
     finally:
         if own:
             http.close()
@@ -115,11 +143,14 @@ def qwen_chat(
     timeout: float = DEFAULT_TIMEOUT,
     max_tokens: int | None = None,
     api_key: str = "",
-) -> str:
+    response_format: dict | None = None,
+    reasoning_effort: str | None = None,
+) -> ChatReply:
     """Qwen 本地文字（OpenAI 兼容）；model 为空时取 /v1/models 第一个已加载模型。
 
     api_key 为 LM Studio API 认证 token（W7 实测：本机开启认证需 Bearer；空=不带头）。
     max_tokens 非 None 时写入请求体（REQ-061：网关透传）。
+    reasoning_effort 非 None 时写入请求体（M3 A-5：饥饿降档单次重试）。
     """
     own = client is None
     http = client or httpx.Client(timeout=timeout, trust_env=False)
@@ -138,8 +169,12 @@ def qwen_chat(
         payload: dict = {"model": model, "messages": messages}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
         data = _post_json(http, f"{base_url.rstrip('/')}/chat/completions", headers, payload)
-        return _extract_content(data)
+        return _extract_reply(data)
     finally:
         if own:
             http.close()

@@ -181,7 +181,8 @@ class SlotStatus(BaseModel):
     ready: bool = False
     availability: str = ""
     # 监督器健康观测（ARCH-028 W1；supervisor 关闭/未观测时 state=""、gpu_visible=None）
-    health_state: str = ""            # ready | degraded | down | ""
+    health_state: str = ""            # ready | degraded | down | starting | ""
+                                      # starting=W7 启动宽限窗口内（不判掉线）
     health_reason: str = ""
     gpu_visible: bool | None = None   # T2 容器内 GPU 可见性（不适用= None）
     last_flip: str = ""               # 最后状态翻转 ISO 时刻

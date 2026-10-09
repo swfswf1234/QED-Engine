@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-24
+最后更新：2026-10-03
 确认状态：已确认
 关联代码：`backend/qed_engine/services/llm/model_manager.py`、`backend/qed_engine/services/llm/supervisor.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。注册表 `services/llm/registry.py` 主登记见 [llm-gateway.md](llm-gateway.md)、runtimes/ 适配器见本设计「槽位与 runtime」节，均在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_supervisor.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
@@ -100,7 +100,7 @@ class LocalRuntime(Protocol):
 | 身份 | lmstudio | llamacpp |
 | --- | --- | --- |
 | qwen3.8-27b | `context: 8192, gpu: max`（16384 档预估 16.10 GiB 超卡，回落 8192） | `ctx: 8192, ngl: -1, fa: true`（同显存约束） |
-| qwen3.5-9b | `context: 16384, gpu: max`（16384 档预估 11.93 GiB 可容纳） | `ctx: 16384, ngl: -1, fa: true` |
+| qwen3.5-9b | `context: 40960, gpu: max`（40960 档实占 12879 MiB / 16376 MiB，逐档实测 16384→12095 / 24576→12351 / 32768→12615 MiB；思考链与长文上下文需 40960 档） | `ctx: 40960, ngl: -1, fa: true`（同档，llamacpp 渠道未真机复测） |
 
 - **真机读回判据**（参数是否生效以此为准，不信任请求侧）：lmstudio =
   `GET /api/v0/models` 目标模型 `loaded_context_length`；llamacpp = `GET /slots` 的 `n_ctx`
@@ -159,7 +159,7 @@ def operate_model(slot: str, op: str) -> dict:
 
 ## 控制台需求（UI 细节归 admin-console.md）
 
-三卡（文字/图像/向量）五字段，数据源 `GET /models/{slot}`（`GET /config/models` 保留为路由表）：
+槽位卡五字段，控制台渲染**文字/图像两卡**（向量卡按 ARCH-039 不出版面，其来源固定 API、验证入口保留在 store 动作层）；数据源 `GET /models/{slot}`（`GET /config/models` 保留为路由表）：
 
 1. **来源**：Select「本地部署 / API 调用」，选择即 `POST /models/{slot}/select {source}` 写运行态。
 2. **模型**：Select 按「来源 × 渠道」过滤的注册表身份，选项带一句话备注；选择即写 `manifest.active`。
@@ -169,7 +169,11 @@ def operate_model(slot: str, op: str) -> dict:
    `POST /llm/test/{slot}` 真实小调用，反馈成功/失败 + 原因。
 5. **备注**：当前身份 `description`（一句话介绍）。
 
-- 启停/重启按钮保留（来源 = local 才渲染，单活仲裁）；向量卡无本地候选（来源固定 api，仅验证）。
+- 启停/重启按钮保留（来源 = local 才渲染，单活仲裁）；向量槽位不出卡（ARCH-039）。
+- **受限启动走前端预检 + 确认两段式（ARCH-040，2026-10-03 用户裁决）**：点「启动」时若对方本地槽位
+  在跑（`source=local` 且 `ready`），先出确认框说明「需先停止 <对方槽位>」，确认后按 stop→start 两段
+  派发、取消则零请求；本模块的仲裁**不改行为**，继续作自动链路与竞态兜底。交互细节见
+  [admin-console.md](admin-console.md) §3.3。
 
 ## 模型文件目录与 manifest 约定
 
@@ -251,8 +255,13 @@ model/
   已就绪则直接返回**；否则遍历注册表**其他全部本地候选槽位**，在跑的一律 stop（LM Studio 按
   模型已加载判定，卸载即释放显存；llamacpp/docker 按探针/进程判定），再启动目标——本地同时
   最多一个模型进 GPU（4080 16GB）。
-- 判定与执行收敛在 `model_manager.ensure_local_ready(slot)`，runtime 细节不外泄。
+- **判定与执行收敛在 `model_manager.ensure_local_ready(slot)`**，runtime 细节不外泄；启动关键段
+  （持锁复核探针 → 单活仲裁 → start）经进程级互斥锁串行化（DEFECT-005，2026-09-26）——双槽位
+  并发退避重启下，后启动者的仲裁必见先启动者在跑并停之，最终在跑 ≤1，不再绕过互斥。
 - `QED_RESOURCE_GUARD=false` 时跳过自动互斥，模型共存由用户自行负责。
+- **仲裁的静默停他槽在控制台已显式化（ARCH-040）**：本地模型卡点「启动」时由前端预检对方槽位并
+  请求确认，取消即不派发；本节的自动互斥语义与 `QED_RESOURCE_GUARD` 取值均不变（前端只负责把代价
+  说清楚，不接管正确性）。
 - 来源/渠道（api/local）语义与调用拓扑见 [llm-gateway.md](llm-gateway.md)：`api` 来源不启动任何
   本地模型；`local` 来源文字走槽位渠道所选 runtime、图像走 MinerU。
 
@@ -273,12 +282,19 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
 - **受控恢复**：槽位处于 down/degraded 期间每 4 个 tick（约 2min）派发一次
   `operate_model(slot, "restart")`（独立线程执行，不阻塞 tick）；连续 ≤3 次仍救不活 → 放弃转纯告警
   （WARNING「模型恢复放弃」），翻回 ready 即重置预算。恢复仅对 desired=running 的槽位派发（期望状态门）；人工停止/未声明不派发，每 Episode 只告警一次（INFO「模型监督告警」）。
+- **启动宽限期与恢复闩锁（W7/W8，2026-09-26 实施）**：`operate_model` 派发 start/restart 即置槽位
+  宽限窗口（`QED_MODEL_START_GRACE_SECONDS` 默认 180s，≤0 关闭）——窗口内 down/degraded 观测一律
+  抑制（不推进防抖、不触发诊断包、冻结恢复 tick＝不消耗预算、不叠发第二发闩锁）；ready 观测走
+  正常防抖，**翻回 ready 才解锁**；期满仍未就绪转正常防抖翻 down。窗口内快照以
+  `health_state="starting"` 呈现（仪表盘徽章「启动中」）；人工 stop（desired=stopped）与 api
+  暂停即时清窗。演练证据：09-23 18:57:27 启动窗口拒连×3 被防抖误定态 down。
 - **在飞门（与已知约束 9 运维约定并行）**：解析在飞时跳过重启只告警。判据仅 vision 适用：
   8902 `GET /api/v1/parse-jobs?status=queued,running`（REQ-088；旧码无端点 404/405 回退书目级
   active_job_id 判定）；8902 连接失败＝不可能有解析在跑 → 不在飞放行；其余查询失败保守按在飞
   （宁可不重启，不可杀在飞解析）。
 - **掉线诊断包**：翻转至非就绪时对 docker 渠道槽位采集 docker events（近 10min）、mineru-api 日志尾
-  （2000 行）与容器内 GPU 可见性，落运行日志（单段截断、内存有界），供掉线根因定谳取证。
+  （2000 行）、容器内 GPU 可见性与 `docker inspect`（`State.OOMKilled`/`ExitCode`/`RestartCount`，
+  W10 补强：「被外部杀」与「vLLM OOM」现场直接定谳），落运行日志（单段截断、内存有界），供掉线根因定谳取证。
 
 ## 仪表盘与控制台双口径契约
 
@@ -287,7 +303,7 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
 | 口径 | 字段 | 语义 | 消费方 |
 | --- | --- | --- | --- |
 | 实时单发探针 | `ready` / `availability` | 请求时刻单发探测（local＝绑定模型探针；api＝API key 已配置即「可用」） | 控制台槽位卡 |
-| 防抖定态 | `health_state` / `health_reason` / `gpu_visible` / `last_flip` | 监督器状态机（30s tick、连续 3 次同向观测才翻转；含降级态） | 仪表盘「本地模型列表」分节 |
+| 防抖定态 | `health_state` / `health_reason` / `gpu_visible` / `last_flip` | 监督器状态机（30s tick、连续 3 次同向观测才翻转；含降级态与 W7 `starting` 宽限态） | 仪表盘「本地模型列表」分节 |
 
 - 允许偏差：状态变更后仪表盘需 3×探测间隔 + 30s 前端轮询（最长约 2 分钟）才收敛；
   GPU blocked 时控制台显示「可用」而仪表盘显示「未加载」（degraded 并入未加载徽章，
@@ -295,8 +311,8 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
 - 两口径不混用：仪表盘徽章以 health_state 为准（仅监督器关闭时按 ready 推导兼容回退）；
   控制台不消费 health_state。仪表盘块一为合卡「服务详情」，其「本地模型列表」常驻分节
   （文字/图像左右两栏，栏内 槽位名→模型名→徽章，模型名 `slot.model` 非空即显示）
-  徽章只显三态（已加载/未加载/未启动，degraded 与全 api 并入未加载），
-  滞后口径不写入卡面，双口径语义以本节为事实源。
+  徽章四态（已加载/未加载/未启动/启动中，degraded 与全 api 并入未加载；「启动中」＝
+  health_state=starting 宽限窗口），滞后口径不写入卡面，双口径语义以本节为事实源。
 - 未加载态呈现：`health_state=ready` 且 `ready=false`（服务存活但模型未加载）时，仪表盘徽章
   呈中性灰色「未加载」，`health_reason` 只进 tooltip；服务与模型双就绪才显示绿色「已加载」。
   该派生仅在前端显示层，监督器状态机与 health_state 字段语义不变。
@@ -350,3 +366,13 @@ false），每 30s 对 **local 来源槽位**分级探测并执行受控恢复�
 10. **控制台视觉直连仍走 MinerU 旧同步协议**：`clients.mineru_parse` 用
     `/file_parse` + `/get_task_results`（新异步 `/tasks` 协议归 Axiom-Flow，REQ-075 对齐）；
     3.4.4 实测旧路由仍在（405/带参 404，未摘除），若引擎未来移除旧端点，本链路需同步对齐。
+11. **回环探针与子进程输出编码（8900 → 本机模型服务）**：`http://127.0.0.1:*` 一律走**显式
+    禁代理**通道（`urllib` 用空 `ProxyHandler` 构造的 opener，共享于
+    `runtimes/base.NO_PROXY_OPENER`）——Windows 注册表代理会命中回环地址，带代理的探针把
+    在线服务读成不可达。`lms` / 脚本子进程捕获输出按 **UTF-8** 解码
+    （`base.CHILD_OUTPUT_ENCODING`，`errors="replace"`），不受系统 ANSI 代码页影响——模型 key
+    含中文时按 GBK 解码会在读取线程抛 `UnicodeDecodeError`，启停结果永久丢失。
+12. **槽位启停过程与失败原因入事件账**：`/models/{slot}/{op}` 派发与监督器恢复都必须把
+    `log` 回调传到 `operate_model`，落 `qed_engine` logger（`create_app` 同时设该 logger 级别为
+    INFO 并挂 stderr handler，否则子 logger 的 INFO 被 root WARNING 丢弃）；只回 `ok/false` 而
+    不落日志时，界面侧唯一可观测的是超时。

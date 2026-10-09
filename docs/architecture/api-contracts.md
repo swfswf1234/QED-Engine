@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-24
+最后更新：2026-09-30
 确认状态：已确认
 关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/control.py`、`backend/qed_engine/api/tracker.py`、`backend/qed_engine/api/axiom.py`、`backend/qed_engine/clients/axiom_client.py`、`backend/qed_engine/services/log_viewer.py`、`backend/qed_engine/services/monitor.py`（探索会话与 LLM 网关模块的契约事实源见设计文档，归属见 [code-map.md](code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`、`tests/contract/test_api_endpoint_inventory.py`
@@ -22,7 +22,7 @@
 数据域语义 API、服务托管与监控诊断。**密钥绝不下发**——子项目不经过中心获取 key，而是直读
 根 `.env`，中心只回答"用哪个模型、是否已配置"。
 
-8900 是 `.env` 的唯一只读语义代理。接口按类型分为**五类**（共 85 端点，清单与状态见
+8900 是 `.env` 的唯一只读语义代理。接口按类型分为**六类**（共 106 端点，清单与状态见
 「端点总表」，逐端点语义见对应分节）：
 
 | 类型 | 范围 | 端点数 |
@@ -32,6 +32,7 @@
 | ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程 + 探索会话与领域探索门面（8900 自有） | 41 |
 | ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块编辑与判定/ingest/parse-jobs/parsing-tree | 16 |
 | ⑤ 监控诊断与 LLM 网关 | 日志/GPU/槽位探针与启停/选择 + LLM 调用族 + MySQL 即时探测 | 19 |
+| ⑥ 学习域（8900 自有） | 课程引用式注册/单元树/编译作业/派生进度（主链 M-1 契约骨架）+ 知识点体系与星图聚合（M5 两表） | 21 |
 
 **启动自检**：LLM 供应商可达性与 MySQL 连接在 8900 启动时各探测一次——LLM
 结果写日志，MySQL 结果为 `/config/database` 启动快照；不提供按需探测端点（MySQL 的
@@ -105,6 +106,11 @@
 | POST | /api/v1/books/{book_id}/verify | ③ | 在用 |
 | POST | /api/v1/books/{book_id}/cancel | ③ | 在用 |
 | POST | /api/v1/knowledge/{knowledge_id}/fetch | ③ | 在用 |
+| GET | /api/v1/papers/books | ③ | 在用 |
+| POST | /api/v1/papers/recommend | ③ | 在用 |
+| GET | /api/v1/papers/selections | ③ | 在用 |
+| GET | /api/v1/papers/selections/{selection_id} | ③ | 在用 |
+| POST | /api/v1/papers/selections/{selection_id}/adopt | ③ | 在用 |
 | GET | /api/v1/courses | ③ | 在用 |
 | GET | /api/v1/domains | ③ | 在用 |
 | POST | /api/v1/domains | ③ | 在用 |
@@ -162,6 +168,38 @@
 | GET | /api/v1/llm/calls | ⑤ | 在用 |
 | PATCH | /api/v1/llm/calls/{call_id}/review | ⑤ | 在用 |
 | POST | /api/v1/database/test | ⑤ | 在用 |
+| GET | /api/v1/learn/courses | ⑥ | 在用 |
+| POST | /api/v1/learn/courses | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
+| PATCH | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
+| DELETE | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{learn_course_id}/units | ⑥ | 在用 |
+| PUT | /api/v1/learn/courses/{learn_course_id}/syllabus | ⑥ | 在用 |
+| PATCH | /api/v1/learn/units/{unit_id} | ⑥ | 在用 |
+| GET | /api/v1/learn/units/{unit_id} | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/{learn_course_id}/compile/propose | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/{learn_course_id}/compile/start | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{learn_course_id}/compile | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{learn_course_id}/progress | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/{learn_course_id}/progress | ⑥ | 在用 |
+| GET | /api/v1/learn/star-map | ⑥ | 在用 |
+| GET | /api/v1/learn/knowledge-points | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{course_ref}/knowledge-points | ⑥ | 在用 |
+| GET | /api/v1/learn/kp-details | ⑥ | 在用 |
+| POST | /api/v1/learn/kp-details | ⑥ | 在用 |
+| POST | /api/v1/learn/kp-details/{detail_id}/confirm | ⑥ | 在用 |
+| POST | /api/v1/learn/kp-details/{detail_id}/reject | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{course_ref}/outline | ⑥ | 在用 |
+| PUT | /api/v1/learn/courses/{course_ref}/outline | ⑥ | 在用 |
+| PATCH | /api/v1/learn/knowledge-points/{kp_id} | ⑥ | 在用 |
+| GET | /api/v1/learn/question-books | ⑥ | 在用 |
+| POST | /api/v1/learn/questions | ⑥ | 在用 |
+| GET | /api/v1/learn/questions | ⑥ | 在用 |
+| PATCH | /api/v1/learn/questions/{question_id} | ⑥ | 在用 |
+| POST | /api/v1/learn/attempts | ⑥ | 在用 |
+| GET | /api/v1/learn/review/due | ⑥ | 在用 |
+| GET | /api/v1/learn/mistakes | ⑥ | 在用 |
+| PATCH | /api/v1/learn/attempts/{attempt_id} | ⑥ | 在用 |
 
 <!-- endpoint-registry:end -->
 
@@ -279,7 +317,7 @@
 （两态终态）；书籍（qt_books）为域级书库——选用态 `candidate/decided/parallel/retired` +
 持有态 `owned/missing` + 下载生命周期 `downloading/downloaded/verified/failed`（QED-060），
 归属由教程 refs 承载；渠道（qt_sources）一次尝试一条，`ok` 表达成败。
-`GET /books` 被数据域·Axiom 预留路由占用（axiom.py，仅 GET，与 tracker 的 POST /books 不冲突）。
+`GET /books` 被数据域·Axiom 预留路由占用（axiom.py，仅 GET，与 tracker 的 POST /books 不冲突）；书库按 kind/域/课枚举在 8901 侧为 `GET /books`，8900 论文面另以 `GET /papers/books` 承接（见「论文探索」节）。
 
 ### 目录与任务
 
@@ -509,6 +547,62 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 - 端点保留供离线/手动场景；前端「已导入」路径经 `confirm-domain` + `confirm-knowledge`
   桥接收口，`待确认` 状态下调本端点必 409（守卫只收 `已生成/探索中`）。
 
+### 论文探索（REQ-102 W2a 枚举 / W2b 探索面；上游=QED-068 A/B 步）
+
+发现论文＝`qt_books` 中 `kind=paper` 且无教程归属的书行（2026-09-30 裁决①书本化采纳）。
+**论文没有默认桶**——`domain_id` 必填且须为 `qed_domain` 已登记领域；8900 对论文面一律
+**不补默认值、不做二次校验**，上游 422/404/409 原样透传给 8903 提示。链路分段责任与
+展示态派生见 [downloads-flow §7](../design/downloads-flow.md)，UI 消费面见
+[downloads-ui §4.4](../design/downloads-ui.md)。
+
+#### `GET /api/v1/papers/books`
+
+发现论文书行枚举（8903 领域/课程展示行数据源）。固定以 `kind=paper` 透传 8901 `GET /books`
+（调用方传入的 `kind` 被忽略）；**区别于 `GET /api/v1/books`**（Axiom af_books 代理，占用中不可复用）。
+
+**查询参数：** `domain_id`（可选）、`course_id`（可选，AND 过滤；空=领域级）。
+
+**返回：** 200 `QtBook.to_dict()` 全列数组（含 `kind`/`domain_id`/`course_id`＝8903 分桶唯一依据）；
+无命中空数组。**错误：** 503 8901 不可达（前端据此静默空态、整行隐藏）。
+
+#### `POST /api/v1/papers/recommend`
+
+领域级论文探索任务提交（202，任务类型 `paper_recommend`）。请求体逐字段原样转发 8901。
+
+**请求体：** `domain_id`（必填）、`recipe`（`frontier`\|`core`）、`goal`、`categories`、
+`top`/`limit`/`years_limit`（缺省由 8901 配方决定）。
+
+**返回：** 202 `{"task_id": "..."}`；进度经 `GET /api/v1/tasks/{task_id}` 轮询，
+完成后经 `GET /api/v1/papers/selections/{selection_id}` 读报告。
+
+**错误：** 422 领域缺失/不存在、`recipe` 非法、领域映射不到 arXiv 分类（须显式给 `categories`）；
+409 同 scope 任务在跑（`TASK_ALREADY_RUNNING`）。
+
+#### `GET /api/v1/papers/selections`
+
+选书报告摘要列表（created_at 倒序）。**查询参数：** `domain_id`、`recipe`（AND 过滤，空值不过滤）、
+`limit`。**返回：** 200 `{"selections": [{selection_id, domain_id, recipe, status, created_at,
+recommendation_count}]}`。
+
+#### `GET /api/v1/papers/selections/{selection_id}`
+
+报告详情（候选 + 评分 + `status`）。**错误：** 404 `SELECTION_NOT_FOUND`。
+评分理由只存报告侧（对方裁决 #3，书行 `notes` 不含模型判断）——8903 要显示「为什么推荐」须读本端点。
+
+#### `POST /api/v1/papers/selections/{selection_id}/adopt`
+
+显式 pick → 8901 建 `kind=paper` 书行（202，任务类型 `paper_adopt`）。
+
+**请求体：** `picks: [{rank, domain_id, course_id}]` 逐条落位——`domain_id` 必填且须已登记，
+`course_id` 空=领域级（课程归属为纯逻辑分组，物理仍落领域级 `_general/papers/`）。
+**返回：** 202 `{"task_id": "...", "selection_id": "..."}`。
+**错误：** 422 picks 为空/rank 不在推荐内/落位领域或课程不存在或课程不属该领域；
+404 报告不存在；409 同报告任务在跑。
+
+**采纳不自动下载**（对方裁决 #5）：新行停在 `candidate`，取书须由调用方显式调
+`POST /api/v1/books/{book_id}/fetch`（§③ 书籍面；8901 侧按 `kind=paper` 分叉直取 arXiv，
+不做书名多渠道检索）。
+
 ### 探索会话（8900 自有）
 
 会话态内存存储（进程重启即失，前端刷新后重新发起），TTL 2 小时惰性清理；管线执行中 8901
@@ -622,6 +716,9 @@ courses.json 合成 `{"kind":"review_results","courses":[...]}`（原生任务�
 | `/courses/{domain_id}` | GET | 透传 8901 单领域课程详情 | 无（8901 已就绪） |
 | `/courses/{course_id}` | PATCH | 支持 `exploration_stage` 字段（课程阶段流转经本端点，取消 8900 共享表直写依赖） | 8901 支持（REQ-077） |
 
+> 论文面五行已随 REQ-102 W2a/W2b 实装挪入 §③「论文探索」正文并登记端点总表；
+> 上游（8901 侧）契约事实源=对方 `docs/architecture/api.md`「⑥ 论文探索」。
+
 ### 错误映射（③ 数据透传·QED-Tracker）
 
 8901 返回 4xx（如 409 状态机冲突）→ 8900 同码透传上游 detail（前端既有 409 处理生效）；
@@ -649,7 +746,7 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `GET /books/{book_id}/pages/{page_no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
 | `GET /books/{book_id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{book_id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
 | `GET /books/{book_id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
-| `POST /books/{book_id}/ingest` | ingest 透传（8902 渲染页图 + book.json，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s（通用约定的同步例外） | AxiomClient.ingest_book |
+| `POST /books/{book_id}/ingest` | ingest 透传（8902 渲染页图，元数据落 af_books，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s（通用约定的同步例外） | AxiomClient.ingest_book |
 | `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/edit` | **块编辑门面（本契约消费面一律走 `/edit`）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
 | `GET /books/{book_id}/pages/{page_no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
 | `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**过渡门面**（状态=过渡），内部转 8902 `PUT …/edit`；替代与处置见「退役与过渡」 | AxiomClient.edit_block |
@@ -690,16 +787,17 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 
 ### GET /api/v1/logs/{service}
 
-服务日志查看（错误诊断）：读取 `/services` 注册表声明日志文件（logs/<log_name>.log，
-**白名单**，越权 404）。
+服务日志查看（错误诊断）：读取 `/services` 注册表单元的**实际写入日志**（生命周期脚本托管单元
+读其脚本产物 `<workdir>/logs/qed-<unit>-serve.log`，8901/8902 在各自仓库、8903 在根 `logs/`；
+8900 自身读根 `logs/config.log`；ADR 0019 第 3 条，**白名单**，越权 404；文件不存在返回空行）。
 
 ```json
-{"service": "tracker", "log_path": "D:/coding/QED-Engine/logs/tracker.log",
+{"service": "tracker", "log_path": "D:/coding/QED-Engine/QED-Tracker/logs/qed-tracker-serve.log",
  "lines": ["...", "..."]}
 ```
 
 - 查询参数：`tail`（返回行数，默认 200，上限 1000）、`keyword`（子串过滤，可选）。
-- 白名单 = 服务注册表（service-hosting.md）内各单元 log_name；未知服务 404。
+- 白名单 = 服务注册表（service-hosting.md）内各单元 name；未知服务 404。
 
 ### GET /api/v1/monitor/gpu
 
@@ -795,6 +893,10 @@ GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型
 | `description` | 当前身份一句话备注（控制台「备注」行） |
 | `ready` | api=API_KEY 已配置；local=绑定模型探针就绪 |
 | `availability` | 可用性文本：可用 / 不可用 / 未就绪 |
+| `health_state` | 监督器防抖定态（ARCH-028 W1/W7）：`ready` \| `degraded` \| `down` \| `starting` \| `""`（未观测/监督器关闭）；`starting`＝start/restart 派发后的启动宽限窗口内（`QED_MODEL_START_GRACE_SECONDS` 默认 180s），窗口内不判掉线 |
+| `health_reason` | 定态原因稳定文案（含水位/宽限等），进仪表盘徽章 tooltip |
+| `gpu_visible` | T2 容器内 GPU 可见性（`true`/`false`；不适用＝`null`） |
+| `last_flip` | 最后状态翻转 ISO 时刻 |
 | `source_options` | 来源下拉：`[{value,label,status}]`（status = available / pending；embedding 的本地部署为 pending） |
 | `channel_options` | 渠道下拉：`[{value,label,status}]`（status = available / pending；`default` 为全局默认） |
 | `options` | 模型下拉（按来源 × 渠道过滤）：`[{value,label,description}]` |
@@ -870,7 +972,7 @@ GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061） |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061）。**`response_format` 暂不对外暴露**（用户裁决 2026-09-29）：JSON 模式只是网关内部 `call_text` 参数，经 M3 适配层按能力表与运行时拉黑注入（开关 `QED_LLM_LOCAL_ADAPT`），语义见 [llm-gateway.md](../design/llm-gateway.md)「本地模型适配层」节 |
 | `POST /llm/vision` | 图像模型调用：`{image_base64 或 pdf_base64+pdf_filename, prompt?, prompt_template?, max_tokens?}` → 注册表解析路由 api/local → `{reply, success, call_id?}`；超时与 `max_tokens` 语义同 text（REQ-061） |
 | `POST /llm/embedding` | 向量模型调用（仅 api）：`{input: [str]}` → `{embeddings, success, call_id?}`（顺序与 input 一致）；空 input 422；调用记录 prompt 记 JSON 输入、response 记维度摘要（不存向量本体） |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
@@ -879,6 +981,63 @@ GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回（REQ-060） |
 | `PATCH /llm/calls/{call_id}/review` | 审核标注（REQ-060）：`{review_status, review_note?}` → `{ok, call_id}`；不存在 404 |
 | `POST /database/test` | MySQL 即时连接探测（控制台测试按钮）；`/config/database` 保持启动快照语义不受影响 |
+
+## ⑥ 学习域（8900 自有：主链 M-1 契约骨架 + M5 知识点体系 + M2 练习与复习）
+
+学习链路（课程引用式注册→单元树→编译作业→派生进度）的 8900 自有域，非透传；表语义与
+裁决（D1~D4）事实源＝[学习设计轮主链壳](../plans/2026-09-22-learning-design-mainline.md)
+「M-1/M-2 契约设计稿」节。当前为 M-1 骨架形态：编译=静态兜底出块（不含 LLM 生成，M-2
+接线），存储未接入时（生产 MySQL 存储随 M-2 落地）整域 503。错误包络=8900 自有中文纯文本。
+
+M5 知识点两表（`qed_knowledge_point` 第四张共享表 + `qed_learn_kp_detail` 根私有候选池）由**首个
+知识点端点**懒建表挂载（判例 `qed_llm_calls`，启动路径不触碰 MySQL），数据库不可达时该族端点 503；
+星图端点只读课程目录（8901 透传，离线降级共享表直读），不依赖新表。语义事实源＝
+[M5 知识点体系与星图壳](../history/plans/2026-10/2026-09-30-knowledge-point-star-map.md)。
+
+M2 练习与复习（`qed_learn_question` / `qed_learn_attempt` / `qed_learn_review_task` 三表 + 8 端点）
+由**首个练习端点请求**懒建表挂载（同判例，短窗重试 `PRACTICE_MOUNT_RETRY_SECONDS`）。v1 题源＝**抽取式**
+（现成习题集与教材课后题，`POST /learn/questions` 批量入库），LLM 两段式出题与 `POST /learn/questions/generate`
+归 v2（不在本域登记）；判分＝确定性规则三型（choice/short/open），`method=llm` 分支默认关闭；
+无答案题按裁决 ⑨ 只作 flashcard 自评。语义事实源＝
+[学习设计轮 M2 壳](../history/plans/2026-10/2026-09-23-practice-review.md)。
+
+| 端点 | 语义 |
+| --- | --- |
+| `GET /learn/courses` | 课程列表（含派生态 `derived`） |
+| `POST /learn/courses` | 注册课程：`{name, resources:[{kind,ref_id,label}]≥1, domain_ref?, course_ref?, direction?, instructions?, agent_notes?}`；kind 闭集 `book/af_version/knowledge`；双通道限长 4000；422 |
+| `GET /learn/courses/{learn_course_id}` | 详情聚合（课程行 + derived + unit_count）；404 |
+| `PATCH /learn/courses/{learn_course_id}` | 改元数据与双通道（限长 422、不存在 404） |
+| `DELETE /learn/courses/{learn_course_id}` | 删除（级联清单元树与进度）；编译在跑 409 |
+| `GET /learn/courses/{learn_course_id}/units` | 单元树消费：`?level=section\|unit` 视图过滤；行含 `gen_status/active/confirmed/covered/drift`；422（level 非法）、404 |
+| `PUT /learn/courses/{learn_course_id}/syllabus` | 整树草稿覆写 `{tree:[{title,order?,children?}]}`；最深三级（section→unit→block），空标题/空树 422 |
+| `PATCH /learn/units/{unit_id}` | 字段白名单 `{title,order,confirmed,covered}`（extra 422）；covered 前提=已 confirmed（否则 409，勾选权归学习者） |
+| `GET /learn/units/{unit_id}` | 单元回显；404 |
+| `POST /learn/courses/{learn_course_id}/compile/propose` | 提案入参登记 `{page_windows:[{start,end}]≥1}`（范围非法 422），置 `proposed` 并记源指纹 |
+| `POST /learn/courses/{learn_course_id}/compile/start` | 发起编译 **202**：要求树非空且全节点 confirmed（两级确认齐备，否则 409）；作业态挂课程行（D3 裁决） |
+| `GET /learn/courses/{learn_course_id}/compile` | 作业轮询：`{compile_status, done, total, failure_count}`；无作业=空态（status null） |
+| `GET /learn/courses/{learn_course_id}/progress` | 派生进度（读时重算非累加）：`{total,done,skipped,percent,current_unit_id,completed}` |
+| `POST /learn/courses/{learn_course_id}/progress` | 记学习事件 `{unit_id, status:done\|skipped\|pending}`（pending=撤销该行）；跨课程 unit 404、非 unit 行 409 |
+| `GET /learn/star-map` | 星图一次取全：`?domain=` 过滤（未知领域 404）→ `{domains:[{domain_id,name,level,tracks:[{track,kind:main\|branch\|other,summary,courses:[{course_id,name,track,stage,sort_order,kp_confirmed,kp_candidates}]}]}], edges:[{from,to,domain_id,cross_track}]}`；簇内按 `sort_order`→`course_id` 稳定排序、簇间按成员数降序；目录不可达 503 |
+| `GET /learn/knowledge-points` | 已确认知识点跨课程检索：`?domain=&course=&type=&q=&limit=50&offset=0`（type 闭集非法 422，limit 1..500）→ `{points,total}`；**只出 `node_kind=point` 行**（M6 目录节点不进检索面） |
+| `GET /learn/courses/{course_ref}/knowledge-points` | 课程知识点总览 → `{course:{course_id,name,track,domain_id}, points:[主表行+`candidates`（同 `norm_key` 待选叙述，多版本并存）], total, candidate_total}`；默认只出 point 行，`?include_outline=true` 时带目录节点行；课程不存在 404、存储未接入 503 |
+| `GET /learn/kp-details` | 候选明细池浏览：`?course=&gen_status=&batch=&parent=&limit=100&offset=0`（gen_status 闭集非法 422；`parent=<kp_id>` 取该章候选、`parent=none` 取未归档池）→ `{details,total}` |
+| `POST /learn/kp-details` | 登记候选（生成管线与人工共用写面）`{course_id,name,domain_id?,course_label?,domain_label?,narrative?,type?,payload?,anchors?,gen_batch?,map_seed?,model_ref?,dedup_of?,gen_status:draft\|candidate,parent_kp_id?,intent:summary\|explanation=explanation,book_ref?}`；空 course_id/name、type 或 intent 非法 422；坐标标签缺省从课程目录补齐；**永不写 confirmed** |
+| `POST /learn/kp-details/{detail_id}/confirm` | **人工确认并提升**到共享主表（confirmed 只能由本端点置位）→ `{point,detail}`；同课程重复 `norm_key` 409（合并走 `dedup_of`）、已驳回 409、不存在 404；重复确认幂等返回既有主表行 |
+| `POST /learn/kp-details/{detail_id}/reject` | 候选驳回（不落主表，可重新登记新候选）→ `{detail}`；不存在 404 |
+| `GET /learn/courses/{course_ref}/outline` | 章节树一次取全（M6）：`?book=` 按来源书过滤 → `{course_id,book_ref,outline:[{kp_id,name,depth,parent_kp_id,book_ref,source_ref,point_count,node_kind,type,...}]}`（前序平铺，左栏按 `depth` 缩进）；课程不存在 404、目录不可达 503 |
+| `PUT /learn/courses/{course_ref}/outline` | 目录确认后**整树幂等替换**同 `book_ref` 的 outline 子树 `{book_ref,tree:[{name,page_start,page_end,children?}]}`（页范围＝**PDF 页序**；叶节点常显式带 `children:[]`，空列表不下探层级）；**同父级下**同名节点复用 `kp_id`（跨章同名节各自成行——主表该组合只有普通索引，DEFECT-011 裁决）、未复用旧节点删除，其下 point 行不删而归未归档池（`parent_kp_id=NULL`）；写入即 `confirmed=1` → `{reused,created,dropped,orphaned_points,book_ref,outline}`；404；422（`book_ref` 空、树空、name 空、页范围非法、层级 >2、同一父级下重名） |
+| `PATCH /learn/knowledge-points/{kp_id}` | 人工面移动与改名：白名单 `{parent_kp_id,name,order_hint}`（extra 422；`parent_kp_id=null`=移入未归档池）→ 主表行；404；422（自挂、父非 outline 行、目录成环） |
+| `GET /learn/question-books` | 题源书目（R-10 根侧透传 8901 书库＋8900 应用层过滤）：`?course=&role=` → `{course_id,books:[{book_id,title,roles,course_id,parse_status,page_count,parsed_pages}]}`（`roles` 含 `textbook/exercises/solutions` 其一即认＝R-11 宽容读；**课程归属先取书库行 `course_id`，空则回退解析表 `af_books` 同列**——现网书库行该列全空，故过滤在 8900 侧做、不把 `course_id` 传给 8901；`parsed_pages`＝已解析出产物的页数（取 `pages_done`），`parse_status` 由解析侧维护、现网恒 `pending` 只作展示；解析侧离线按空值降级）；422（role 非闭集）、404（课程无坐标行）、503（目录不可达） |
+| `POST /learn/questions` | 人工确认后**批量入库** `{course_id,gen_batch?,model_ref?,learn_course_id?,questions:[{stem,kind,question_type,options,expected_answer,keywords,explanation,answer_back,difficulty,kp_type,kp_id?,source_kind,book_ref,source_ref,answer_source}]≥1}` → `{created,skipped_duplicates,gen_batch,model_ref,questions}`；`(course_id,stem_hash)` 命中即跳＝幂等，整批同事务（缝 6）；422（stem 空、闭集越界、quiz 缺 expected_answer、choice 选项非 A/B/C/D 四项、open 缺 keywords、`answer_source=none` 配 quiz＝裁决 ⑨）；503 |
+| `GET /learn/questions` | 题库浏览 `?course=&kp=&kind=&question_type=&source_kind=&book=&retired=active\|all\|only&limit=50&offset=0` → `{questions,total}`；**题面投影剔除 `expected_answer`/`keywords`/`explanation`（缝 2）**；422（闭集非法、limit 越界）；503 |
+| `PATCH /learn/questions/{question_id}` | 人工面白名单 `{kind,question_type,stem,options,expected_answer,keywords,explanation,answer_back,difficulty,kp_id,answer_source,retired}`（extra 422）→ 题行投影；**裁决 ⑨ 的升级路径＝补 `expected_answer` + `answer_source=manual` + `kind=quiz`**；合并后的题行必须重新通过入库不变量（否则 422）；`gen_batch/model_ref/stem_hash/course_id/created_at` 不在白名单（产出事实不可改）；404 |
+| `POST /learn/attempts` | 提交作答 `{question_id,user_answer,origin=new\|review\|manual,review_date?,self_result?}` → **同事务**（缝 6）判分＋作答行＋`score_trend/resolved`＋`schedule_next` 回写 → `{attempt_id,question_id,is_correct,method,judge_note,score_trend,resolved,answered_at,expected_answer,explanation,review:{target_kind,target_id,kp_type,interval_index,due_at,next_due_at}}`（判分依据只在作答响应回传＝缝 2）；422（user_answer 空、origin 非闭集、flashcard 缺 `self_result`）；404（题不存在或已 retired）；409（quiz 传 `self_result`、同 `(question_id,review_date,origin)` 重复作答） |
+| `GET /learn/review/due` | 到期队列（`due_at<=now` 且 `status=active`）`?course=&max_tasks=5`（1..100）→ `{course_id,tasks:[{target_kind,target_id,course_id,kp_type,interval_index,due_at,priority,reason:wrong\|type,overdue_days,question}],total_due}`；排序 `(priority,due_at,target_id)`，`total_due`＝截断前全量到期数；422（max_tasks 越界）；503 |
+| `GET /learn/mistakes` | 错题本（J5 读时派生，**不建表**）`?course=&kp=&book=&resolved=true\|false\|all&bookmarked=&trend=&limit=50&offset=0` → `{items:[{question(投影),last_attempt,attempt_count,wrong_count,is_correct,resolved,bookmarked,score_trend,due_today}],total,stats:{total,wrong,unresolved,bookmarked,due_today}}`；候选＝有判错作答历史的题，`resolved`/`trend` 作用在最近一次作答行，`bookmarked` 为题下任一收藏行；422（trend/resolved/bookmarked 非闭集）；503 |
+| `PATCH /learn/attempts/{attempt_id}` | 错题本人工位白名单 `{bookmarked,resolved}`（extra 422）→ 作答行；`is_correct/method/score_trend/user_answer` 不在白名单（判分结果不可手改）；404；422（空体） |
+
+- 源漂移（drift）：`GET …/units` 读时以「页窗+素材引用」源指纹与上次编译比对，失配时活动
+  块行标 `drift=true`（M-2 接线后并入 active_job_id 指纹）。
 
 ## 状态码
 

@@ -4,7 +4,7 @@
  */
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import type { Block } from '../../api/axiom';
+import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 
 /** KaTeX 渲染（失败返回 null，调用方降级原样文本） */
 export function tryRenderKatex(latex: string, displayMode: boolean): string | null {
@@ -88,4 +88,17 @@ const TYPE_COLORS: Record<string, string> = {
 
 export function blockColor(type: string): string {
   return TYPE_COLORS[type] ?? '#1677ff';
+}
+
+/**
+ * 「确认」= verdict=ok（parsing-ui §4.6 解析修正）：PUT /edit 整条替换，
+ * 故须把该块已有的修正文本/备注/范围一并带上，确认动作不抹掉既有修正。
+ */
+export function confirmInput(edit?: BlockEdit): BlockEditInput {
+  return {
+    ...(typeof edit?.corrected_text === 'string' ? { corrected_text: edit.corrected_text } : {}),
+    ...(edit?.note ? { note: edit.note } : {}),
+    ...(edit?.corrected_bbox ? { corrected_bbox: edit.corrected_bbox } : {}),
+    verdict: 'ok',
+  };
 }

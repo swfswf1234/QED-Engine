@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-14
+最后更新：2026-10-03
 确认状态：暂定
 关联代码：`web-ui/`（React 19 + TypeScript + Vite 构建，构建产物 `web-ui/dist/` 由
 `scripts/serve_web.py` 静态托管 8903）、`web-ui/.env.production`（`VITE_API_BASE`）
@@ -59,11 +59,15 @@ web-ui/
   不依赖固定像素布局。
 - **一致性**：全部界面共用 `theme.ts` token 与通用组件，筛选/卡片/状态点风格统一；
   新增界面/组件不得绕过 theme token 自定配色。
+- **暗色承载例外（D5，2026-10-01 批复）**：星图页 `#/knowledge` 用**页面局部** `ConfigProvider` 暗色承载星空背景，不动全局 token、不影响 admin 浅色；其使用手册弹窗渲染在该局部 Provider **之外**走浅色，保证正文黑字的阅读对比。例外只此一处，扩面须重新裁决。
 
 ## 信息架构（hash 路由）
 
 - `#/` 主界面（Home）：学习中心框架（领域→课程→章节/知识点浏览，数学试点）+ 使用手册。
-- `#/knowledge` 学习中心（Knowledge）：课程图 + 教程浏览。
+- `#/knowledge` 学习中心 · 知识梳理星图（Knowledge）：星空背景层上的「层＝行 × 轨迹＝列」森林导航（领域下拉 + 轨迹列框 + 课程框 + 先修连线），点击课程下钻；课程节点提示行按 `GET /learn/review/due?course=` 聚合带出「今日复习 N 条」（0 条不写，画布不加第二枚可点元素）；设计见 [知识梳理星图 UI 设计](../design/learning-star-map.md)。
+- `#/knowledge/c/:courseId` 课程知识点梳理（CourseKnowledge）：该课程已确认知识点卡片列表与候选明细抽屉（无数据走空态）；页头在到期条数 >0 时给「今日复习 N 条」按钮＝复习入口（跳学习工作台）。
+- `#/learn` 学习书架（LearnShelf）：学习课程卡列表（状态徽章词本身承载口径——`draft`＝「待建链路」/「草稿」、`learning`＝「在学 N%」、`completed`＝「已结课」）+ 引用式注册弹窗（选共享课程 + 已激活解析版本的书，只写 `ref_id` 与 label 快照）。弹窗的素材下拉走 8902 透传书目，**独立取数**：解析侧离线只降级该下拉为「书目服务不可达（解析侧离线），暂不能选素材」，书架与星图照常列出（独立性铁律）。
+- `#/learn/c/:courseId` 学习工作台（LearnWorkbench）：三栏同屏 + **阅读／链路双模式**（Segmented 受控切换，右栏 Tab 随模式换面板）——左＝书与导入确认后的章/节目录（链路模式＝章/节单元树带 `confirmed`/`drift`/`gen_status` 标记）、中＝复用解析管理版式（parsing-ui §9.1）的只读正文按 8 页/批懒取 + 正文下方**练习区**（题源书与页范围 → 抽取预览 → 人工确认入库 → 题卡作答；链路模式＝该单元页窗的块序列，image 块按页图 `bbox` 内联裁切）、右＝Tabs「批注与候选」/「本章练习」（到期复习 + 错题本人工位）＋链路模式的**推进面板与看板/结课**（只读消费 `GET /learn/courses/{lc}/progress`，续学定位取 `current_unit_id`）；链路通路＝`GET …/outline` 节级页窗 → `PUT …/syllabus` 写 `source_ref` → `POST …/compile/propose` + `…/compile/start`；设计见 [三栏学习工作台 UI 设计](../design/learning-workbench-ui.md)。
 - `#/admin` 管理后台（AdminLayout 嵌套）：
   - `#/admin` 控制台（Console）：四服务卡（启停/重启 + message 成功失败提示）+ GPU 总览条
     + 依赖组件三卡（MySQL/文字模型/图像模型）+ 模型调用记录检索页（`#/admin/llm-calls`）。

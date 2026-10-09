@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-29
+最后更新：2026-10-03
 确认状态：已确认
 关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
@@ -55,7 +55,13 @@
 
 每卡：状态徽章（online/offline/starting/stopping）、端口 + PID（离线时显示）、启动时间、
 操作按钮（按上表规则动态渲染）。操作后前端轮询 `GET /services` 每 1 秒，最多 15 秒，
-直到状态收敛到目标态；`operating` 字段防重入，操作期间禁用其他按钮。
+直到状态收敛到目标态；收敛判定**只看本单元**（对方服务仍在过渡不挡本服务落定）。
+
+**四服务互不受限（ARCH-041）**：操作互斥按**单元**记账（`pendingOps` 集合，服务单元键
+`svc:<name>`），任一单元在飞只挡**同一单元**的重复点击（回 `busy` 提示「该服务上一次操作
+仍在收敛中」），跨单元并发启停/重启照常派发——与后端语义一致（`api/control.py` 各单元独立
+派发，无跨服务互斥；资源守卫只作用本地模型槽位）。模型槽位单元（`model:<slot>`）按前缀
+**整域互斥**（单活仲裁下跨槽并发启停彼此不安全），且服务域与槽位域互不阻塞。
 
 **破坏性操作确认框**（受控 `<Modal>`，标题与确认按钮文案取操作中文名）：正文按操作给专属文案——
 `start` 给启动语义（拉起对应端口进程，就绪后转在线）、`stop` 给停止语义（服务不可用、可随时重启）、
@@ -70,55 +76,83 @@
 
 本期仅探测 + 测试（无启停）。
 
-### 3.3 区 3：资源监控（GpuOverview + SlotCard 三槽位卡）
+### 3.3 区 3：资源监控（GpuOverview + SlotCard 槽位卡）
 
-展示 GPU 型号、VRAM 已用/总量、利用率、系统内存已用/总量、**当前在跑模型标注行**、
-VRAM 构成三片饼图（模型占用/其他/空闲，仅颜色图例）。**无进程列表与逐任务占比展示**
-（REQ-038 用户裁决「颜色图例即可」；原 §3.3「进程列表」为文档侧过时表述，BUGFIX-017
-随本壳修正，实现一直是三片饼图）。
+展示 GPU 型号、VRAM 已用/总量、**本地模型显存占用**、**显存大户清单（≥10%）**、利用率、
+系统内存已用/总量、VRAM 构成三片饼图（模型占用/其他/空闲，仅颜色图例），总显存 ≥95% 时
+卡顶高位提示条。**占用视角是本卡唯一职责**：回答「谁在吃显存」；「在跑的是 API 还是本地」
+由槽位卡的「来源」字段承担，本卡不设「当前在跑」行。**无逐任务占比展示**（REQ-038 用户
+裁决「颜色图例即可」）。
 
 **显存口径（本机 WDDM 背景）**：
 
 - 指标行（整卡）：`nvidia-smi` **物理驻留口径**（`used`/`total`）。
 - 饼图「模型占用/其他」两片的拆分：**PDH 计数器分配口径**（`\GPU Process Memory(*)\Dedicated Usage`，
-  任务管理器同源），仅按比例分配到 nvidia-smi 驻留总量上，不改变总量；逐进程明细不上 UI，
-  原始进程名保留在 `/monitor/gpu` 响应供诊断（`kind` 字段即「其他」片进程名）。
+  任务管理器同源），仅按比例分配到 nvidia-smi 驻留总量上，不改变总量。
 - **WSL 容器模型**（如 Docker 内 mineru）：显存走驱动侧驻留，计入总量但**不出现在 PDH
-  进程明细**，其占比无法从饼图单独拆认，以「当前在跑」标注行为准。
+  进程明细**，其占比无法从进程明细拆认，占用行如实标「容器内不可见，计入驱动驻留」（不报假 0）。
 - 利用率：`\GPU Engine(*)\Utilization Percentage`（任务管理器同源），响应带 `utilization_source`
   （`pdh` | `nvidia-smi`），不使用 WDDM 下失真的 nvidia-smi 利用率。
 - 显存与利用率两计数器合并为**单次** PowerShell `Get-Counter` 调用（PDH 冷启动 ~1.5s/次，
   合并省一次），实现见 `services/monitor.py` `probe_pdh`。
-- 进程名：`[Insufficient Permissions]` 经 `resolve_process_name`（tasklist CSV）补全真实名
-  （只进 `/monitor/gpu` 响应，供诊断/告警，不上 UI）。
+- 进程名：`[Insufficient Permissions]` 经 `resolve_process_name`（tasklist CSV）补全真实名。
 
-饼图分类：模型占用（蓝）/ 其他（灰）/ 空闲（绿）三片聚合，仅颜色图例。
-刷新：60 秒自动刷新，操作期间暂停（显存 ≥95% 高位告警不在控制台呈现，归解析页
-ResourceWatch 弹窗，见 [parsing-ui.md](parsing-ui.md)）。
+饼图分类：模型占用（蓝）/ 其他（灰）/ 空闲（绿）三片聚合，仅颜色图例；「模型占用」片
+tooltip 追加在跑身份名。刷新：60 秒自动刷新，操作期间暂停。
 
-**当前在跑模型标注（REQ-033 S3）**：指标行下增一行「当前在跑」，数据源为 store 既有
-`slots` 派生（**零新增请求**，`deriveRunningModels`/`formatRunningSlotLine`）：
-`source=local` 且 ready 的槽位逐个显示「槽位·身份名（渠道）」、顿号连接；全 api 且有
-就绪显示「（API 模式）」；否则「无」。饼图「模型占用」片 tooltip 追加在跑身份名。
+**本地模型占用行**（`buildModelShares`）：数据源为 store 既有 `slots` + `/monitor/gpu`
+逐进程明细，**零新增请求**。
 
-**模型三槽位卡（SlotCard，五字段）**：数据源 `GET /models/{slot}`（SlotStatus，三卡并行拉取）。
+- 无 `source=local` 且 ready 的槽位（全 API / 未启用）→ **整行不渲染**。
+- 宿主可见渠道（`lmstudio` / `llamacpp`）：占用 = `kind=model` 进程明细之和，渲染
+  「身份名（GB／占总显存 %）」。
+- `docker` 渠道：按上条口径不可见 → 渲染「容器内不可见，计入驱动驻留」。
+- 单活仲裁下同时最多一个模型进 GPU，可见合计只记给第一个宿主可见槽位（不重复计）。
+
+**显存大户清单**（`buildHeavyProcesses`）：逐进程占总显存 ≥ `HEAVY_VRAM_SHARE_PCT`（10%）
+的应用按占比降序列出「进程名（GB／%）」，名取可执行文件名（`processBasename`，Windows 全
+路径与 WSL 路径均可）；**系统进程（dwm 等）照实列，不做白名单过滤**。
+
+**高位提示**（`vramHighWater`）：`memory_used / memory_total ≥ VRAM_HIGH_WATER_PCT`（95%）
+时卡顶出 warning 提示条「显存已用 NN%（≥95% 提示线），接近占满」。
+**只提示、不做任何自动处置**——不进启停判定、不停服务、无撤下防抖（当次占比即当次结论）。
+解析页 ResourceWatch 的「≥95% 弹警告 / <90% 撤下」是另一路带防抖的告警
+（见 [parsing-ui.md](parsing-ui.md) §12），两者互不替代。
+
+**模型槽位卡（SlotCard，五字段）**：数据源 `GET /models/{slot}`（SlotStatus，三槽位并行拉取）。
 
 | 字段 | 内容 | 交互 |
 | --- | --- | --- |
 | **来源** | 本地部署 / API 调用（Select） | `POST /models/{slot}/select {source}` 写运行态，刷新选项 |
 | **模型** | 按「来源 × 渠道」过滤的身份（Select，选项带一句话备注） | `POST /models/{slot}/select {model}` 写 `manifest.active`，选中后自动探针 |
 | **渠道** | 本地：默认 / LM Studio / Docker / llama.cpp（待上线置灰）；API：直连（只读） | `POST /models/{slot}/select {runtime}` 写运行态 |
-| **可用** | 探针自动判定：可用 / 不可用 / 未就绪；右侧「验证」按钮 | `POST /llm/test/{slot}` 真实小调用，反馈成功/失败 + 原因 |
+| **可用** | 探针自动判定：可用 / 不可用 / 未就绪；右侧「验证」按钮 | `POST /llm/test/{slot}` 真实小调用，反馈成功/失败 + 原因；验证窗口 `TEST_TIMEOUT_MS=60_000`（覆盖「冷启动加载 + 请求层限长生成」最坏耗时，短于启停收敛窗口 `MODEL_POLL_TIMEOUT_MS`） |
 | **备注** | 当前身份 `description`（一句话介绍） | — |
 
 | 槽位卡 | slot | 渠道选项（登记可用 → 可选） | 操作 |
 | --- | --- | --- | --- |
 | 文字模型 | `text` | 默认 / LM Studio / Docker(待上线) / llama.cpp(待上线) | 来源+模型+渠道 + 启停/重启 + 验证 |
 | 图像模型 | `vision` | 默认(=Docker) / Docker / LM Studio(待上线) / llama.cpp(待上线) | 同上 |
-| 向量模型 | `embedding` | 来源固定 API（「本地部署」待上线置灰），渠道「直连」 | 来源/模型只读 + 验证 |
 
+- **向量槽位（`embedding`）不出卡**：界面只渲染文字/图像两卡；`/models/embedding` 仍随
+  `fetchAll` 轮询入 store（`slots.embedding`），验证入口 `POST /llm/test/embedding` 保留在
+  store 动作层，不占控制台版面。
 - **来源 = local 才渲染**启停/重启按钮（`POST /models/{slot}/{start|stop|restart}`，单活仲裁在
   model_manager，见 [local-model-management.md](local-model-management.md)）；来源 = api 时仅验证。
+
+- **启动受限的显式化（ARCH-040：前端预检 + 确认两段式）**：本地模型单活下，点一个槽位的「启动」
+  会静默停掉另一个在跑的本地模型（后端仲裁行为，见 local-model-management.md）。用户裁决
+  2026-10-03 取**前端预检 + 确认两段式**把该代价显式化：
+  - **预检**＝点「启动」时读 store 现值判**对方槽位**（`text`↔`vision`）是否在跑，
+    在跑判据＝`source === 'local' && ready === true`；**不发额外请求**（不用 `slots` 之外的探针）。
+  - **受限分支**＝对方在跑时**不直接派发**，先弹既有受控 `<Modal>`（扩展 slot 分支），
+    正文＝「受限：本地模型单活，启动本槽位需先停止「<对方槽位>」」；
+    确认＝顺序两段派发 `stop`(对方) → `start`(本槽位)，**任一段失败即止并回该段原因**
+    （对方停不下来时绝不继续启动，否则又回到静默夺显存）；取消＝一条请求都不发。
+  - **非受限分支**＝对方未在跑（含对方来源为 api）维持**单击直发**，不加确认框、不改既有手感。
+  - 后端 `ensure_local_ready` 的单活仲裁**不改行为**：保留作 runtime 自动链路兜底与并发竞态兜底，
+    前端预检只是显式化，不承担正确性。互斥面按 ARCH-041 单元键：两段各占各的 `model:<slot>` 单元，
+    包装动作自身**不占单元键**（否则第二段会被自己的域互斥挡回）。
 - 选择（来源/渠道/模型）均写运行态 `manifest.json`（`source`/`runtime`/`active`，重启保留）；
   渠道「待上线」置灰不可选；「默认」= 全局 `QED_API_SELECT` / `QED_LOCAL_RUNTIME` 默认值。
 
@@ -189,23 +223,45 @@ State:
   slotErrors: Record<SlotName, string | null>     // 槽位独立错误
   keys: KeysStatus | null          // 厂商配置 + 运行模式（keys.mode = api|local；resource_guard 单活守卫开关）
   modelsConfig: ModelsConfig | null // 模型注册表运行态（manifest 摘要，PLAN-046）
-  loading: boolean                 // fetchAll 进行中标记
+  loading: boolean                 // fetchAll 防重入旗标（**不**作界面转圈依据，见分批刷新）
+  pendingRoutes: RouteKey[]        // 在飞拉取路集合（八路键，逐路落定逐路移除）
   error: string | null             // 全局错误（8900 不可达）
   dbError: string | null
-  operating: string | null         // 当前操作（服务名/模型槽位 + 操作）
+  pendingOps: string[]             // 在飞启停单元键（svc:<name> / model:<slot>），落定即移除
   testing: 'db' | 'text' | 'vision' | 'embedding' | null
 
 Actions:
   fetchAll()        → 8 路并行请求（services/database/gpu/三槽位/keys/modelsConfig），
                       逐路**增量提交**：每路回包即 set 对应字段（快路不被 /monitor/gpu
                       慢探针拖累），失败仅置对应字段错误并保留旧值；keys/modelsConfig
-                      失败静默；全部落定后清 loading（operating 期间不覆盖）
-  fetchGpu()        → 独立 GPU 刷新（60 秒间隔）
-  fetchSlots()      → 三槽位状态重拉（选择模型/模型操作后刷新）
-  operate(name, op) → 服务启停重启 + 轮询收敛（1s × 15）
+                      失败静默；每路落定同时出 pendingRoutes；全部落定后清 loading
+                      （有在飞操作时不覆盖）。防重入＝loading 或任一操作在飞时直接跳过
+  fetchGpu()        → 独立 GPU 刷新（60 秒间隔），只标/清 gpu 一路
+  fetchSlots()      → 三槽位状态重拉（选择模型/模型操作后刷新），只标/清 slot:* 三路
+  operate(name, op) → 服务启停重启 + 轮询收敛（1s × 15）；互斥按单元（svc:<name>），
+                      收敛判定只看本单元 → 四服务并发启停互不受限（ARCH-041）
   operateModel(slot, op) → 模型槽位操作 + 收敛轮询（GET /models/{slot}.ready 为目标态）
+  startLocalModel(slot, otherSlot) → 受限启动两段式（ARCH-040）：顺序 await
+                      operateModel(otherSlot, 'stop') → operateModel(slot, 'start')，
+                      前段失败即止并透回原因；包装层不自占 model: 单元键（见 §3.3）；
+                      互斥取 model: 前缀整域（跨槽并发不安全），与服务单元互不阻塞
   selectModel(slot, patch) → POST /models/{slot}/select（patch = {source?|runtime?|model?}）+ fetchSlots
   testDatabase() / testText() / testVision() / testEmbedding() → 依赖/槽位测试
+
+**分批刷新（分区级转圈）**：八路拉取各有键（`RouteKey`＝`services | db | gpu | slot:text |
+slot:vision | slot:embedding | keys | models`），在飞集合为 `pendingRoutes`，逐路落定逐路清除。
+分区归属由 `ZONE_ROUTES` 固定，`isZonePending(pendingRoutes, zone)` 聚合出该分区是否转圈：
+
+| 分区 | 归属路 | 界面表现 |
+| --- | --- | --- |
+| 服务管理 | `services` | 标题右侧小 Spin |
+| 基础设施 | `db` | 同上 |
+| 资源监控 | `gpu` + 三槽位 + `keys` + `models` | 同上 |
+
+- 慢路（真机 `/models/vision` ≈1.1s、gpu 探针上限 `GPU_TIMEOUT_MS` 8s）**只让自己分区转圈**，
+  已落定分区立即静置；粒度取分区级，不做卡片级。
+- 「刷新」按钮不挂全局 `loading`：按钮恒可点，是否叠加拉取由 store 的防重入判定
+  （`loading`/`pendingOps` 非空即跳过）。操作收敛轮询期间同样不叠加拉取（原语义保留）。
 
 类型（stores/index.ts）：SlotName = 'text' | 'vision' | 'embedding'；ModelSlot = 'text' | 'vision'；
 ModelOp = 'start' | 'stop' | 'restart'；Source = 'api' | 'local'；
@@ -250,7 +306,7 @@ Browser (8903)
 | 文件 | 职责 |
 | --- | --- |
 | `web-ui/src/pages/Console.tsx` | 主页面：三区布局 + ServiceCard/SlotCard（五字段：来源/模型/渠道/可用/备注） |
-| `web-ui/src/components/GpuOverview.tsx` | 资源监控 GPU 卡：指标行 + 当前在跑标注 + 三片显存饼图（buildVramSlices，PDH 比例拆分） |
+| `web-ui/src/components/GpuOverview.tsx` | 资源监控 GPU 卡：指标行 + 本地模型占用行（buildModelShares）+ 显存大户清单（buildHeavyProcesses）+ ≥95% 高位提示（vramHighWater）+ 三片显存饼图（buildVramSlices，PDH 比例拆分） |
 | `web-ui/src/components/StatusBadge.tsx` | 状态徽章 |
 | `web-ui/src/components/AdminLayout.tsx` | 管理台骨架，mount 时触发 fetchAll |
 | `web-ui/src/stores/runtime.ts` | Zustand store：fetchAll/fetchSlots/operate/operateModel/selectModel/test |
@@ -263,7 +319,9 @@ Browser (8903)
 
 ## 8. 已知约束与约定
 
-1. **防重入**：`fetchAll`/`operate`/`operateModel`/`testing` 状态互斥，防止重复请求。
+1. **防重入**：`fetchAll` 与操作收敛轮询互斥（`pendingOps` 非空不叠加拉取）；启停操作按
+   **单元**互斥（`svc:<name>` 各挡自己、`model:*` 整域互斥），跨单元并发不受限（ARCH-041）；
+   `testing` 单标记防止同一测试按钮重复触发。
 2. **Modal.confirm 兼容**：React 19 下控制台使用受控 `<Modal>` 替代 `Modal.confirm`。
 3. **空态不占位**：未实现的功能不显示占位卡片。
 4. **独立性铁律**：8901/8902 离线 → 降级提示不白屏；8900 离线 → 本地判定 + 错误横幅。

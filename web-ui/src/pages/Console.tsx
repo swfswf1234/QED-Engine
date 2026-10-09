@@ -4,12 +4,12 @@ import {
 } from 'antd';
 import {
   ReloadOutlined, PoweroffOutlined, SyncOutlined, DatabaseOutlined, RobotOutlined, PictureOutlined,
-  ApiOutlined,
 } from '@ant-design/icons';
 import GpuOverview from '../components/GpuOverview';
 import {
-  useRuntimeStore, withWebServiceFallback, GPU_REFRESH_INTERVAL_MS,
-  type OperateResult, type LlmTestOutcome,
+  useRuntimeStore, withWebServiceFallback, GPU_REFRESH_INTERVAL_MS, isZonePending,
+  isOpBusy, svcOpUnit, slotOpUnit,
+  type OperateResult, type LlmTestOutcome, type PendingZone,
 } from '../stores/runtime';
 import { statusBadge } from '../components/StatusBadge';
 import { describeError } from '../api/client';
@@ -376,18 +376,42 @@ function SlotCard({
  *   页面按钮动作下沉（方案 A，2026-08-24）；「重新加载页面」已删（与浏览器刷新等价）
  * - 四服务卡：8900 恒在线（重启经 /self-restart，成功后自动刷新）/ 8901·8902 启停重启（确认框 +
  *   操作后轮询收敛）/ 8903 前端服务（在线重启、离线启动，无停止；web 兜底合并见 runtime store）
- * - 区块顺序：服务管理 → 基础设施 → 资源监控（GPU 状态 + 模型三槽位卡）
+ *   四服务启停互不受限（ARCH-041）：任一单元在飞只挡自己（按钮 loading / busy），跨单元照常派发
+ * - 区块顺序：服务管理 → 基础设施 → 资源监控（GPU 状态 + 模型槽位卡）
  * - GPU 状态卡：/monitor/gpu（组件独立模块 components/GpuOverview）
- * - 槽位卡（PLAN-046 v3）：文字/图像/向量三槽位（/models/{slot}）五字段——来源 / 模型 /
+ * - 槽位卡（PLAN-046 v3）：文字/图像两槽位（/models/{slot}）五字段——来源 / 模型 /
  *   渠道 / 可用 / 备注；来源与渠道槽位级可切换（/models/{slot}/select 写 manifest），
- *   可用行探针判定 + 验证按钮；local 来源渲染启停；向量卡只读（固定 API·直连）+ 验证
+ *   可用行探针判定 + 验证按钮；local 来源渲染启停；向量槽位暂不显示（2026-10-03 用户
+ *   裁决：无必要），状态仍随 /models 轮询入 store
+ * - 受限启动（ARCH-040）：点「启动」时若对方本地槽位在跑（source=local 且 ready），先弹确认框
+ *   说明「需先停止 <对方槽位>」，确认＝store 两段派发 stop(对方)→start(本槽)、取消＝零请求；
+ *   对方未在跑维持单击直发（后端单活仲裁不改，仍作自动链路与竞态兜底）
  * - 离线降级：8900 不可达显示错误横幅，不白屏
+ * - 分批刷新（ARCH-038）：三分区标题各挂分区级 Spin（store 的 pendingRoutes 按 ZONE_ROUTES
+ *   聚合），慢路只让自己分区转圈；「刷新」按钮不背全局 loading，不再等最慢路
  */
+/** 槽位显示名与对位（受限启动预检用，ARCH-040：本地模型单活只发生在 text↔vision 两槽之间） */
+const SLOT_DISPLAY: Record<ModelSlot, string> = { text: '文字模型', vision: '图像模型' };
+const otherSlot = (slot: ModelSlot): ModelSlot => (slot === 'text' ? 'vision' : 'text');
+
+/** 本地槽位是否正在占显存（预检判据＝来源 local 且探针就绪；只读 store 现值，不发额外请求） */
+function isLocalRunning(status: SlotStatus | null): boolean {
+  return !!status && status.source === 'local' && status.ready;
+}
+
+/**
+ * 受控确认框载荷（ARCH-040 扩展 slot 分支）：服务卡与受限启动共用一个 Modal，
+ * 按 kind 取文案与派发路径。
+ */
+type ConfirmTarget =
+  | { kind: 'service'; name: string; op: ServiceOp; display: string }
+  | { kind: 'slot'; slot: ModelSlot; other: ModelSlot };
+
 export default function Console() {
   const {
     services, dbStatus, gpu, gpuError, slots, slotErrors,
-    loading, error, dbError, operating, testing, fetchAll, fetchGpu, operate,
-    operateModel, selectModel, testDatabase, testText, testVision, testEmbedding,
+    error, dbError, pendingOps, testing, pendingRoutes, fetchAll, fetchGpu, operate,
+    operateModel, startLocalModel, selectModel, testDatabase, testText, testVision,
   } = useRuntimeStore();
   const { message } = App.useApp();
 
@@ -398,23 +422,51 @@ export default function Console() {
   /** GPU 显存构成 60s 静默自动刷新（REQ-038）：操作收敛轮询期间跳过，卸载清理 */
   useEffect(() => {
     const timer = setInterval(() => {
-      if (!useRuntimeStore.getState().operating) void fetchGpu();
+      if (!useRuntimeStore.getState().pendingOps.length) void fetchGpu();
     }, GPU_REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [fetchGpu]);
 
   const cards = useMemo(() => withWebServiceFallback(services), [services]);
 
-  /** 槽位操作（/models/{slot}/{op}，消息提示；启动/停止经后端单活仲裁） */
-  const onModelOperate = async (slot: ModelSlot, op: ModelOp) => {
-    const result = await operateModel(slot, op);
-    const label = slot === 'text' ? '文字模型' : '图像模型';
-    const opLabel = OP_LABELS[op];
+  /** 分区级转圈（ARCH-038）：本区任一路在飞即转，慢路不拖累已落定的分区 */
+  const zoneSpin = (zone: PendingZone) => (isZonePending(pendingRoutes, zone)
+    ? <Spin size="small" style={{ marginLeft: 8 }} />
+    : null);
+
+  /** 槽位操作结果提示（两段式失败段按所属槽位取标签） */
+  const notifySlot = (result: OperateResult, slot: ModelSlot, opLabel: string) => {
+    const label = SLOT_DISPLAY[slot];
     if (result.success) {
       message.success(`「${label}」${opLabel}成功（${result.status}）`);
     } else {
       message.warning(`「${label}」${opLabel}未生效：${result.reason ?? '状态未收敛'}`);
     }
+  };
+
+  /** 槽位操作（/models/{slot}/{op}，消息提示；停止/重启直发） */
+  const onModelOperate = async (slot: ModelSlot, op: ModelOp) => {
+    const result = await operateModel(slot, op);
+    notifySlot(result, slot, OP_LABELS[op]);
+  };
+
+  /** 受限启动两段式（ARCH-040）：确认框「确认启动」后派发 stop(对方) → start(本槽) */
+  const onStartAfterStop = async (slot: ModelSlot, other: ModelSlot) => {
+    const result = await startLocalModel(slot, other);
+    const failedAtOther = !result.success && result.name === other;
+    notifySlot(result, failedAtOther ? other : slot, failedAtOther ? '停止' : '启动');
+  };
+
+  /** 点「启动」的入口：对方本地槽位在跑 → 先出受限确认框；未在跑维持单击直发 */
+  const requestModelOperate = (slot: ModelSlot, op: ModelOp) => {
+    if (op === 'start') {
+      const other = otherSlot(slot);
+      if (isLocalRunning(slots[other])) {
+        setConfirmTarget({ kind: 'slot', slot, other });
+        return;
+      }
+    }
+    void onModelOperate(slot, op);
   };
 
   /** 槽位运行态选择（来源/渠道/身份，POST /models/{slot}/select 写 manifest） */
@@ -448,16 +500,36 @@ export default function Console() {
     }
   };
 
-  /** 受控确认框状态：{ 服务名, 操作, 显示名 }；null 表示未打开 */
-  const [confirmTarget, setConfirmTarget] = useState<{ name: string; op: ServiceOp; display: string } | null>(null);
+  /** 受控确认框状态（服务卡 + 受限启动共用，ARCH-040）；null 表示未打开 */
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
 
-  const executeConfirm = (target: { name: string; op: ServiceOp }) => {
+  const executeConfirm = (target: ConfirmTarget) => {
     setConfirmTarget(null);
-    if (target.name === 'config') {
+    if (target.kind === 'slot') {
+      void onStartAfterStop(target.slot, target.other);
+    } else if (target.name === 'config') {
       void doRestartConfig();
     } else {
       void onOperate(target.name, target.op);
     }
+  };
+
+  /** 确认框文案（受限启动给「先停对方」的代价说明，服务卡按操作给语义） */
+  const confirmTitle = (target: ConfirmTarget): string => (
+    target.kind === 'slot'
+      ? `确认启动「${SLOT_DISPLAY[target.slot]}」？`
+      : `确认${OP_LABELS[target.op]}「${target.display}」？`
+  );
+
+  const confirmBody = (target: ConfirmTarget): string => {
+    if (target.kind === 'slot') {
+      return `受限：本地模型单活，启动「${SLOT_DISPLAY[target.slot]}」需先停止「${SLOT_DISPLAY[target.other]}」`
+        + '——对方卸载完成后才开始加载本槽位模型。';
+    }
+    if (target.op === 'start') return '启动该服务，将拉起对应端口进程，就绪后状态自动转为在线。';
+    if (target.op === 'stop') return '停止后该服务将不可用，可随时重新启动。';
+    if (target.name === 'config') return '8900 重启将短暂中断所有管理接口，约 3 秒后页面自动刷新恢复。';
+    return '重启会中断当前运行中的任务。';
   };
 
   return (
@@ -466,7 +538,7 @@ export default function Console() {
         <Title level={2} style={{ marginTop: 0, marginBottom: 0 }}>
           控制台
         </Title>
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void fetchAll()}>
+        <Button icon={<ReloadOutlined />} onClick={() => void fetchAll()}>
           刷新
         </Button>
       </div>
@@ -483,40 +555,35 @@ export default function Console() {
       )}
 
       {/* ①服务管理（四服务卡；web仅重启，config仅重启） */}
-      <Title level={4} style={{ marginTop: 24 }}>服务管理</Title>
+      <Title level={4} style={{ marginTop: 24 }}>服务管理{zoneSpin('services')}</Title>
       <Row gutter={[16, 16]}>
         {cards.map((svc) => (
           <Col xs={24} md={12} xl={6} key={svc.name}>
             <ServiceCard
               svc={svc}
-              operating={operating === svc.name}
-              onConfirm={(op) => setConfirmTarget({ name: svc.name, op, display: displayName(svc) })}
-              onRestartConfig={() => setConfirmTarget({ name: svc.name, op: 'restart', display: displayName(svc) })}
+              operating={isOpBusy(pendingOps, svcOpUnit(svc.name))}
+              onConfirm={(op) => setConfirmTarget({ kind: 'service', name: svc.name, op, display: displayName(svc) })}
+              onRestartConfig={() => setConfirmTarget({ kind: 'service', name: svc.name, op: 'restart', display: displayName(svc) })}
             />
           </Col>
           ))}
         </Row>
 
-      {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应） */}
+      {/* 受控确认框（2026-08-18：替代 Modal.confirm 静态方法——React 19 下静态方法点击无反应；
+          ARCH-040 起兼承载槽位受限启动的「先停对方」确认） */}
       <Modal
           open={confirmTarget !== null}
-          title={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}「${confirmTarget.display}」？` : ''}
-          okText={confirmTarget ? `确认${OP_LABELS[confirmTarget.op]}` : ''}
+          title={confirmTarget ? confirmTitle(confirmTarget) : ''}
+          okText={confirmTarget ? (confirmTarget.kind === 'slot' ? '确认启动' : `确认${OP_LABELS[confirmTarget.op]}`) : ''}
           cancelText="取消"
           onOk={() => confirmTarget && executeConfirm(confirmTarget)}
           onCancel={() => setConfirmTarget(null)}
         >
-          {confirmTarget?.op === 'start'
-            ? '启动该服务，将拉起对应端口进程，就绪后状态自动转为在线。'
-            : confirmTarget?.op === 'stop'
-              ? '停止后该服务将不可用，可随时重新启动。'
-              : confirmTarget?.name === 'config'
-                ? '8900 重启将短暂中断所有管理接口，约 3 秒后页面自动刷新恢复。'
-                : '重启会中断当前运行中的任务。'}
+          {confirmTarget ? confirmBody(confirmTarget) : ''}
         </Modal>
 
       {/* ②基础设施（元数据库：只读探测 + 测试，本期不做启停） */}
-      <Title level={4} style={{ marginTop: 24 }}>基础设施</Title>
+      <Title level={4} style={{ marginTop: 24 }}>基础设施{zoneSpin('infra')}</Title>
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12} xl={8}>
           <DependencyCard
@@ -534,47 +601,36 @@ export default function Console() {
       </Row>
 
       {/* ③资源监控（GPU 状态 + 本地模型） */}
-      <Title level={4} style={{ marginTop: 24 }}>资源监控</Title>
+      <Title level={4} style={{ marginTop: 24 }}>资源监控{zoneSpin('resources')}</Title>
       <GpuOverview gpu={gpu} gpuError={gpuError} slots={slots} />
 
-      {/* 模型三槽位（PLAN-046：渠道/可用状态 + local 模型下拉；向量卡仅测试）——紧跟 GPU 状态卡 */}
+      {/* 模型槽位卡（PLAN-046：渠道/可用状态 + local 模型下拉）——紧跟 GPU 状态卡
+          向量槽位按 2026-10-03 用户裁决暂不显示（状态仍随 /models 轮询落 store，不渲染卡片） */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} md={12} xl={8}>
+        <Col xs={24} md={12}>
           <SlotCard
             label="文字模型"
             icon={<RobotOutlined />}
             status={slots.text}
             statusError={slotErrors.text}
             testing={testing === 'text'}
-            operating={operating === 'text'}
+            operating={isOpBusy(pendingOps, slotOpUnit('text'))}
             onTest={testText}
-            onOperate={(op) => void onModelOperate('text', op)}
+            onOperate={(op) => requestModelOperate('text', op)}
             onSelect={(patch) => onSelectModel('text', patch)}
           />
         </Col>
-        <Col xs={24} md={12} xl={8}>
+        <Col xs={24} md={12}>
           <SlotCard
             label="图像模型"
             icon={<PictureOutlined />}
             status={slots.vision}
             statusError={slotErrors.vision}
             testing={testing === 'vision'}
-            operating={operating === 'vision'}
+            operating={isOpBusy(pendingOps, slotOpUnit('vision'))}
             onTest={testVision}
-            onOperate={(op) => void onModelOperate('vision', op)}
+            onOperate={(op) => requestModelOperate('vision', op)}
             onSelect={(patch) => onSelectModel('vision', patch)}
-          />
-        </Col>
-        <Col xs={24} md={12} xl={8}>
-          <SlotCard
-            label="向量模型"
-            icon={<ApiOutlined />}
-            status={slots.embedding}
-            statusError={slotErrors.embedding}
-            testing={testing === 'embedding'}
-            operating={false}
-            onTest={testEmbedding}
-            onSelect={(patch) => onSelectModel('embedding', patch)}
           />
         </Col>
       </Row>

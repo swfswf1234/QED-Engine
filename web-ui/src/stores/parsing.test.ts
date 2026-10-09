@@ -32,6 +32,7 @@ const reset = () =>
     editPane: 'box',
     boxSelection: [],
     regionDraft: { added: [], deleted: [], merged: [] },
+    drawMode: false,
     typography: { ...DEFAULT_TYPOGRAPHY },
     edits: {},
   });
@@ -95,22 +96,20 @@ describe('regionDraft 本地预览态（§10：删除/合并/新框，落库禁�
     expect(useParsingStore.getState().regionDraft.added).toEqual([[10, 20, 30, 40]]);
   });
 
-  it('deleteSelectedBlocks：多选并入 deleted（去重）、清空选择', () => {
+  it('deleteRegion：逐框进 deleted（去重）、并从多选与选中剔除', () => {
     const s = () => useParsingStore.getState();
     s().toggleBoxSelect(1);
     s().toggleBoxSelect(3);
-    s().deleteSelectedBlocks();
+    s().deleteRegion(1);
+    s().deleteRegion(3);
+    s().deleteRegion(3);
     expect(s().regionDraft.deleted).toEqual([1, 3]);
     expect(s().boxSelection).toEqual([]);
-    s().toggleBoxSelect(1);
-    s().deleteSelectedBlocks();
-    expect(s().regionDraft.deleted).toEqual([1, 3]);
   });
 
   it('restoreDeletedRegion 撤回复活', () => {
     const s = () => useParsingStore.getState();
-    s().toggleBoxSelect(2);
-    s().deleteSelectedBlocks();
+    s().deleteRegion(2);
     s().restoreDeletedRegion(2);
     expect(s().regionDraft.deleted).toEqual([]);
   });
@@ -130,7 +129,7 @@ describe('regionDraft 本地预览态（§10：删除/合并/新框，落库禁�
     const st = useParsingStore.getState();
     st.addRegionDraft([0, 0, 50, 50]);
     st.toggleBoxSelect(2);
-    st.deleteSelectedBlocks();
+    st.deleteRegion(2);
     useParsingStore.getState().resetRegionDraft();
     expect(useParsingStore.getState().regionDraft).toEqual({ added: [], deleted: [], merged: [] });
   });
@@ -157,5 +156,57 @@ describe('regionDraft 本地预览态（§10：删除/合并/新框，落库禁�
     expect(s.boxSelection).toEqual([]);
     expect(s.regionDraft).toEqual({ added: [], deleted: [], merged: [] });
     expect(s.typography.bodyFont).toBe('KaiTi');
+  });
+});
+
+describe('画框模式与右键删除（REQ-098 W8：drawMode / deleteRegion）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    reset();
+  });
+
+  it('setDrawMode 开合；切页与退出编辑模式自动关', async () => {
+    useParsingStore.getState().setEditMode(true);
+    useParsingStore.getState().setDrawMode(true);
+    expect(useParsingStore.getState().drawMode).toBe(true);
+    await useParsingStore.getState().loadPage(2);
+    expect(useParsingStore.getState().drawMode).toBe(false);
+    useParsingStore.getState().setDrawMode(true);
+    useParsingStore.getState().setEditMode(false);
+    expect(useParsingStore.getState().drawMode).toBe(false);
+  });
+});
+
+describe('整页确认（REQ-098 W8：confirmPageBlocks 批量落 verdict=ok）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    reset();
+    useParsingStore.setState({
+      edits: {
+        'b1:1:0': {
+          edit_id: 'e0', book_id: 'b1', page_no: 1, block_index: 0, block_type: 'paragraph',
+          verdict: 'bad', note: '备注', corrected_text: '旧文', corrected_bbox: null,
+        },
+      },
+    });
+  });
+
+  it('未确认块批量 ok（保留既有修正字段）；编辑中块跳过；已 ok 块不重复提交', async () => {
+    const { putBlockEdit } = await import('../api/axiom');
+    const r = await useParsingStore.getState().confirmPageBlocks(3, 1);
+    const calls = vi.mocked(putBlockEdit).mock.calls;
+    expect(calls.map((c) => c[2])).toEqual([0, 2]);
+    expect(calls[0][3]).toEqual({ corrected_text: '旧文', note: '备注', verdict: 'ok' });
+    expect(calls[1][3]).toEqual({ verdict: 'ok' });
+    expect(r).toEqual({ confirmed: 2, skipped: 1 });
+    expect(useParsingStore.getState().edits['b1:1:2']?.verdict).toBe('ok');
+  });
+
+  it('skipIndex=-1：全部未确认块提交', async () => {
+    const { putBlockEdit } = await import('../api/axiom');
+    vi.mocked(putBlockEdit).mockClear();
+    const r = await useParsingStore.getState().confirmPageBlocks(2, -1);
+    expect(r.confirmed).toBe(2);
+    expect(r.skipped).toBe(0);
   });
 });

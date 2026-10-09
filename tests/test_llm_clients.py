@@ -166,6 +166,69 @@ def test_qwen_chat_sends_max_tokens():
     assert '"max_tokens":512' in bodies[0].replace(" ", "").replace("\n", "")
 
 
+def test_qwen_chat_sends_reasoning_effort():
+    """A-5 降档重试：reasoning_effort 非 None 时写入请求体；缺省不入参（饥饿单次重试的落点）。"""
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(handler) as client:
+        clients.qwen_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[{"role": "user", "content": "hi"}],
+            model="qwen3-8b", client=client, reasoning_effort="low",
+        )
+        clients.qwen_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[], model="qwen3-8b", client=client,
+        )
+    assert '"reasoning_effort":"low"' in bodies[0].replace(" ", "")
+    assert "reasoning_effort" not in bodies[1]
+
+
+def test_chat_reply_carries_finish_reason_and_reasoning():
+    """A-5：正文之外的截断判据（finish_reason 与 reasoning_content）随响应返回，缺失字段留空。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "length",
+            "message": {"content": "", "reasoning_content": "一段很长的思考"},
+        }]})
+
+    with _mock_client(handler) as client:
+        reply = clients.qwen_chat(
+            base_url="http://127.0.0.1:5001/v1", messages=[], model="m", client=client,
+        )
+    assert reply == ""  # 仍是字符串正文（旧消费面不变）
+    assert reply.finish_reason == "length"
+    assert reply.reasoning_content == "一段很长的思考"
+
+    def bare(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with _mock_client(bare) as client:
+        plain = clients.qwen_chat(base_url="http://127.0.0.1:5001/v1", messages=[], model="m",
+                                  client=client)
+    assert plain.finish_reason == ""
+    assert plain.reasoning_content == ""
+
+
+def test_provider_text_chat_carries_finish_reason():
+    """api 渠道同样暴露截断判据（网关据空正文/截断判失败，不因渠道豁免）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": "length", "message": {"content": "截半"}}]})
+
+    with _mock_client(handler) as client:
+        reply = clients.provider_text_chat(
+            api_key="sk", model="m", messages=[], client=client,
+            base_url="http://127.0.0.1:5001/v1",
+        )
+    assert reply == "截半"
+    assert reply.finish_reason == "length"
+
+
 def test_provider_vision_chat_sends_max_tokens():
     """多厂商视觉：max_tokens 非 None 时写入请求体。"""
     bodies = []

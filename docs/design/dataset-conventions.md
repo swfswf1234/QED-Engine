@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-26
+最后更新：2026-09-30
 确认状态：已确认
 关联代码：根 `.gitignore`（`/dataset/*` 忽略，仅保留 `.gitkeep` 骨架）、`.env.example`
 （`QED_DATA_ROOT` 变量模板）
@@ -52,8 +52,9 @@
 <!-- data-root-whitelist:end -->
 
 `backups/` 约束：仅供备份/回滚留痕（如清库、批量迁移），命名 `YYYY-MM-DD-<任务标识>`；
-对应操作必须在根 todo/收口记录登记；不承诺长期保留，其删除本身是 D 类操作（备份 + 用户
-确认）。白名单外的一律为野生区，发现即登记处置（数据修复/清理走 REQ 台账）。
+对应操作必须在根 todo/收口记录登记；**不留长期**——快照只服务当次 D 类操作的回滚窗口，验收
+通过即清（其删除本身是 D 类操作：备份 + 用户确认），仓库内不设备份位（ADR 0019 第 4 条）。
+白名单外的一律为野生区，发现即登记处置（数据修复/清理走 REQ 台账）。
 
 ## 目录结构
 
@@ -66,6 +67,7 @@
 │       │   └── tutorials.json        # 课程知识正本（REQ-078 例外）
 │       ├── domains.json              # 领域知识正本（REQ-078 例外）
 │       └── _general/                 # 领域级通用桶：无法归属课程的文件
+│           └── papers/<year>/<arxiv_id>_<sha8>.pdf   # 发现论文物理落位（REQ-101/102）
 ├── tmp/                              # 临时区（终态不保留；用户资产仅 exploration 例外）
 │   ├── qed-tracker/downloads/        # 下载暂存（.part/.download），任务结束必须清理
 │   └── exploration/<对象名>探索.txt   # 探索发起文档（用户手写参考，不参与自动清理）
@@ -100,6 +102,11 @@
 - **教程层的论文/相关资料类别由数据库表达**：教程（qt_knowledge）下的论文/延展资料是
   `qt_books` 行（kind=paper/blog/other）挂该 knowledge_id；界面按类别分组展示、无内容不显示
   该类别。文件系统不再按教程分层，也不设 books/exercises/papers 内容类型目录（元数据入 DB）。
+- **发现论文书本化（REQ-101/102）**：领域级探索、pick 落位的前沿/核心论文，元数据唯一落点
+  是 `qt_books` 行（kind=paper，标识=arXiv ID，refs 承载落位——domain_id **或** course_id）；
+  物理落位维持 `raw/<domain>/_general/papers/`，课程归属为**逻辑分组**，磁盘不设课程级
+  papers 目录；**论文无默认桶**——落位 `domain_id` 必填且须为已登记领域（2026-10-01 裁定）；
+  查重=书库命中（arXiv ID/标题）。与上一条教程附属论文同 kind 值域、以 refs 区分。
 - `parsed/<domain>/<course>/<book_id>/` 内部产物格式（页图/Markdown/blocks.json/manifest）
   见 [文档解析管理·全链路设计](parsing-flow.md)。
 
@@ -109,6 +116,7 @@
 | --- | --- | --- | --- |
 | `raw/<domain>/<course>/`（PDF/快照） | QED-Tracker | Axiom-Flow、QED-Engine 前端 | 原始数据（PDF/快照），保持来源完整性与校验信息；元数据（sha256/路径/状态）在 `qt_books` |
 | `raw/{domain_id}/domains.json`、`raw/{domain_id}/courses.json`（中间态） | QED-Tracker（探索管线） | QED-Tracker（重导入） | 领域知识正本（REQ-078 例外）；`courses.json` 为中间态（领域完成时反写 domains.json 后删除）；状态事实源在 DB |
+| `raw/<domain>/_general/papers/<year>/` | QED-Tracker（论文 recommend/adopt 书本化链） | Axiom-Flow（解析输入）、根侧书目消费面 | 发现论文 PDF 落位；元数据在 `qt_books` kind=paper（refs=落位 domain/course，逻辑分组见上节） |
 | `raw/{domain_id}/{course_id}/tutorials.json` | QED-Tracker（探索管线） | QED-Tracker（重导入） | 课程知识正本（REQ-078 例外）；状态事实源在 DB |
 | `parsed/<domain>/<course>/<book_id>/` | Axiom-Flow | QED-Engine 前端 | 整理后数据资料（页图、Markdown、blocks.json、manifest）；解析任务与页状态在 `af_*` 四表；产物布局见下表 |
 | `tmp/qed-tracker/downloads/` | QED-Tracker 自用 | — | 下载中间产物，任务结束清理 |

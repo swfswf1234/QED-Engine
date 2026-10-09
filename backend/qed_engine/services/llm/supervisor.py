@@ -24,6 +24,14 @@ stop 上报 stopped；自动恢复只对 desired=running 的故障 Episode 生�
 永不复活，只发一次告警）；api 来源暂停观测时清空快照与期望（不冻结旧「就绪」，
 api→local 切换不拉起模型）。
 
+W7 启动宽限期 + W8 恢复闩锁（用户裁决 2026-09-24，演练证据 09-23 18:57:27 启动窗口
+拒连×3 被防抖误定态 down）：operate_model 派发 start/restart 后经 note_starting_active
+置槽位宽限窗口（QED_MODEL_START_GRACE_SECONDS 默认 180s）——窗口内 down/degraded 观测
+不推进防抖、冻结恢复 tick（不消耗预算/不叠发第二发＝闩锁）、不触发诊断包；ready 观测
+走正常防抖，翻回 ready 即解锁；期满仍未就绪转正常防抖翻 down。人工 stop（desired=
+stopped）与 api 暂停即时清窗。快照在窗口内以 health_state="starting" 呈现（仪表盘徽章
+「启动中」）。W10 补强：掉线诊断包增采 docker inspect（OOMKilled/ExitCode/RestartCount）。
+
 设计关联（DesignRef）：docs/design/local-model-management.md、
 docs/plans/2026-09-23-local-model-stability-round.md
 实现状态：Current
@@ -46,6 +54,7 @@ from qed_engine.services.llm import registry
 LOG = logging.getLogger("qed_engine.services")
 
 READY, DEGRADED, DOWN = "ready", "degraded", "down"
+STARTING = "starting"  # W7 宽限窗口内的快照呈现态（非状态机定态）
 # 观测槽位（embedding 无本地候选，天然不入状态机）
 SUPERVISED_SLOTS = ("text", "vision")
 # T2 GPU 可见性适用槽位（当前仅 docker-MinerU；LM Studio/llama.cpp 显存归宿主，探针不适用）
@@ -69,6 +78,7 @@ class _SlotState:
     ticks: int = 0           # W3 非就绪态累计 tick 数（退避节拍：ticks 为 recover_cooldown 整数倍时评估）
     desired: str = ""        # W12 在跑期望：running/stopped/""=未声明（观测采纳或人工上报）
     alerted: bool = False    # W12 本 Episode 非期望态告警只发一次
+    starting_until: float = 0.0  # W7 启动宽限截止（time.monotonic 时基；0=无窗口）
 
 
 # 活跃实例（create_app 接线 start() 时登记；多实例后起者接管意图上报）
@@ -79,6 +89,12 @@ def note_desired_active(slot: str, desired: str) -> None:
     """外部模块（model_manager）上报槽位在跑期望；监督器未启用时静默忽略。"""
     if _ACTIVE is not None:
         _ACTIVE.note_desired(slot, desired)
+
+
+def note_starting_active(slot: str) -> None:
+    """外部模块（model_manager 派发 start/restart 时）上报槽位进入启动宽限窗口。"""
+    if _ACTIVE is not None:
+        _ACTIVE.note_starting(slot)
 
 
 def docker_gpu_visible(runner: Callable = subprocess.run) -> bool:
@@ -105,6 +121,8 @@ class ModelSupervisor:
                  axiom_client_factory: Callable[[], object] | None = None,
                  debounce: int = DEBOUNCE_N, interval: float = TICK_INTERVAL,
                  max_recoveries: int = 3, recover_cooldown: int = 4,
+                 start_grace: float | None = None,
+                 mono: Callable[[], float] = time.monotonic,
                  clock: Callable[[], datetime] = datetime.now):
         self.settings = settings
         self._probe_t1 = probe_t1 or self._default_probe_t1
@@ -118,6 +136,10 @@ class ModelSupervisor:
         self._debounce = debounce
         self._interval = interval
         self._clock = clock
+        # W7 启动宽限窗口秒数（QED_MODEL_START_GRACE_SECONDS，默认 180；<=0 关闭）
+        self._start_grace = (getattr(settings, "qed_model_start_grace_seconds", 180.0)
+                             if start_grace is None else start_grace)
+        self._mono = mono
         self._states: dict[str, _SlotState] = {slot: _SlotState() for slot in SUPERVISED_SLOTS}
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -156,6 +178,7 @@ class ModelSupervisor:
         """api 来源暂停观测：清快照与在跑期望（不冻结旧「就绪」、不携带意图跨切换模式）。"""
         with self._lock:
             s = self._states[slot]
+            s.starting_until = 0.0  # W7：未定态也可能在宽限窗口内，暂停一律清窗
             if s.state == "":
                 return
             LOG.info("模型监督事件 slot=%s %s->∅ reason=观察暂停（api 来源）", slot, s.state)
@@ -165,17 +188,40 @@ class ModelSupervisor:
             s.attempts, s.given_up, s.ticks = 0, False, 0
 
     def tick(self) -> None:
-        """一轮全槽位观测 + 防抖状态机 + 受控恢复（守护线程体；测试直接调用驱动）。"""
+        """一轮全槽位观测 + 宽限门 + 防抖状态机 + 受控恢复（守护线程体；测试直接调用驱动）。"""
         for slot in SUPERVISED_SLOTS:
             observed = self._observe(slot)
             if observed is None:
                 continue
-            if self._apply(slot, *observed):
+            state, reason, gpu = observed
+            if not self._grace_step(slot, state):
+                continue
+            if self._apply(slot, state, reason, gpu):
                 try:
                     self._diagnostics(slot)
                 except Exception:
                     LOG.exception("掉线诊断包采集异常 slot=%s", slot)
             self._recover_step(slot)
+
+    def _grace_step(self, slot: str, state: str) -> bool:
+        """W7 宽限门：False=本观测抑制（不推进防抖/不触发诊断）。
+
+        窗口内仅 ready 观测放行（走正常防抖，翻回 ready 即解锁）；down/degraded 一律
+        抑制；期满清窗并放行后续观测转正常防抖（对照 09-23 18:57:27 启动窗口误判）。
+        """
+        with self._lock:
+            s = self._states[slot]
+            if not s.starting_until:
+                return True
+            if self._mono() >= s.starting_until:
+                s.starting_until = 0.0
+                LOG.info("模型启动宽限期满 slot=%s 转正常防抖", slot)
+                return True
+            if state == READY:
+                if s.state == READY:
+                    s.starting_until = 0.0  # 冗余 start：目标本就就绪定态，即时清窗不遮蔽
+                return True
+            return False
 
     def _apply(self, slot: str, state: str, reason: str, gpu: bool | None) -> bool:
         """返回本 tick 是否翻转到非就绪态（诊断包触发判据）。"""
@@ -205,10 +251,20 @@ class ModelSupervisor:
         s.alerted = False  # 新 Episode 告警位重置
         if state == READY:
             s.attempts, s.given_up, s.ticks = 0, False, 0
+            s.starting_until = 0.0  # W8：翻回 ready 即解除宽限/闩锁
             if s.desired != "stopped":
                 s.desired = "running"  # 观测到在跑即采纳期望；人工 stopped 优先级更高
         # 事件账（结构化行，供日志检索与 W3 恢复决策；吸收 DeepTutor 稳定 reason 形态）
         LOG.info("模型监督事件 slot=%s %s->%s reason=%s", slot, frm or "∅", state, reason or "-")
+
+    def note_starting(self, slot: str) -> None:
+        """W7 启动宽限声明入口（operate_model 派发 start/restart 经 note_starting_active 上报）。"""
+        if slot not in self._states or self._start_grace <= 0:
+            return
+        with self._lock:
+            self._states[slot].starting_until = self._mono() + self._start_grace
+        LOG.info("模型启动宽限 slot=%s 窗口=%ds（窗口内拒连观测不判掉线）",
+                 slot, int(self._start_grace))
 
     def note_desired(self, slot: str, desired: str) -> None:
         """W12 在跑期望声明入口（operate_model 经 note_desired_active 上报；测试可直调）。"""
@@ -216,6 +272,8 @@ class ModelSupervisor:
             return
         with self._lock:
             self._states[slot].desired = desired
+            if desired == "stopped":
+                self._states[slot].starting_until = 0.0  # 人工停止＝合法终态，不留「启动中」
         LOG.info("模型期望状态 slot=%s desired=%s", slot, desired)
 
     # --- W3 受控恢复 ---
@@ -226,6 +284,8 @@ class ModelSupervisor:
             s = self._states[slot]
             if s.state not in (DOWN, DEGRADED):
                 return
+            if s.starting_until and self._mono() < s.starting_until:
+                return  # W7/W8：宽限窗口冻结恢复 tick 与派发（不消耗预算、不叠发第二发）
             if s.desired != "running":
                 if not s.alerted:
                     s.alerted = True
@@ -250,7 +310,6 @@ class ModelSupervisor:
                             slot, s.attempts)
                 return
             s.attempts += 1
-            s.cooldown = self._recover_cooldown
             attempt = s.attempts
         LOG.info("模型恢复尝试 slot=%s attempt=%d/%d op=restart", slot, attempt, self._max_recoveries)
         try:
@@ -264,7 +323,8 @@ class ModelSupervisor:
 
         def run() -> None:
             try:
-                model_manager.operate_model(slot, "restart", self.settings)
+                model_manager.operate_model(slot, "restart", self.settings,
+                                            log=lambda msg: LOG.info("模型恢复过程 slot=%s：%s", slot, msg))
             except Exception:
                 LOG.exception("模型恢复 restart 失败 slot=%s", slot)
 
@@ -319,7 +379,7 @@ class ModelSupervisor:
         return False
 
     def _default_diagnostics(self, slot: str) -> None:
-        """掉线诊断包（W6 取证素材）：docker 槽位采 events + 日志尾 2000 行 + GPU 可见性。"""
+        """掉线诊断包（W6 取证素材）：docker 槽位采 events + 日志尾 2000 行 + GPU 可见性 + inspect。"""
         if registry.slot_runtime(self.settings, slot) != "docker":
             return
         now = int(time.time())
@@ -331,6 +391,10 @@ class ModelSupervisor:
                                "--format", "{{.Action}} {{.Type}} {{.Actor.Attributes.name}}"]),
             ("mineru-logs", ["wsl", "-e", "docker", "logs", "--tail", "2000", "mineru-api"]),
             ("gpu-probe", ["wsl", "-e", "docker", "exec", "mineru-api", "nvidia-smi", "-L"]),
+            # W10 补强：「被外部杀」与「vLLM OOM」两假设现场直接定谳，不等复现
+            ("docker-inspect", ["wsl", "-e", "docker", "inspect", "mineru-api",
+                                "--format",
+                                "{{.State.OOMKilled}} {{.State.ExitCode}} {{.RestartCount}}"]),
         ]
         for name, cmd in captures:
             try:
@@ -345,11 +409,17 @@ class ModelSupervisor:
     # --- 快照（GET /models/{slot} 健康字段数据源） ---
 
     def snapshot(self, slot: str) -> dict:
-        """受监督槽位恒返回完整 dict（未观测时 state=""）；非受监督槽位返回 {}。"""
+        """受监督槽位恒返回完整 dict（未观测时 state=""）；非受监督槽位返回 {}。
+
+        W7：宽限窗口内以 state="starting" 覆盖呈现（含底层旧定态），供仪表盘「启动中」徽章。
+        """
         with self._lock:
             s = self._states.get(slot)
             if s is None:
                 return {}
+            if s.starting_until and self._mono() < s.starting_until:
+                return {"state": STARTING, "reason": "启动派发宽限中（不判掉线）",
+                        "gpu_visible": None, "last_flip": s.last_flip}
             return {"state": s.state, "reason": s.reason,
                     "gpu_visible": s.gpu_visible, "last_flip": s.last_flip}
 

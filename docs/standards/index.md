@@ -16,7 +16,7 @@
 | [ADR 治理规范](adr-governance.md) | ADR 准入、全局编号、元数据、状态、取代关系与归档路径 | ADR 正文及 ADR index | `tests/contract/test_adr_governance.py` |
 | [文档与代码双向追溯规范](code-document-traceability.md) | code-map、模块 DesignRef 和语义同步门禁 | `docs/architecture/code-map.md` | `tests/contract/test_code_document_mapping.py`、`tests/contract/test_api_endpoint_inventory.py` |
 | [代码规范](code-standards.md) | 代码风格、命名、类型与错误处理、日志、依赖声明、前后端分层与允许/禁止清单 | 受管源码与工具配置（`pyproject.toml`、`tsconfig`） | `tests/contract/test_code_standards_governance.py` |
-| [临时目录与数据存储规范](storage-conventions.md) | 统一数据根、顶层白名单、raw/tmp/parsed 三区规则、元数据 JSON 岛禁止、临时目录生命周期、原子落盘、测试隔离与 Agent 工作临时目录 | `dataset/` 目录约定与数据根布局 | `tests/contract/test_storage_conventions_governance.py` |
+| [临时目录与数据存储规范](storage-conventions.md) | 统一数据根、顶层白名单、raw/tmp/parsed 三区规则、元数据 JSON 岛禁止、临时目录生命周期、原子落盘、测试隔离与 Agent 工作临时目录、仓库根运行时产物落点与备份面 | `dataset/` 目录约定、数据根布局与仓库根 `logs/`/`tmp/` 运行面 | `tests/contract/test_storage_conventions_governance.py` |
 | [测试架构与门禁](testing.md) | 测试职责、分层、隔离、替身、门禁与覆盖率证据；治理契约测试的守护面清单、契约头、编写约定与新增流程 | 分层测试目录、`tests/contract/` 契约测试与守护面清单 | `tests/contract/test_test_suite_governance.py` |
 | [跨项目协作规范](cross-project-collaboration.md) | 三项目间的需求传递、评审、执行、验收回执与执行纪律 | 对方项目设计文档 + todo 任务 + 根总台账 | `tests/contract/test_cross_project_collaboration.py` |
 | [本地开发环境](local-dev.md) | 本地机器标识、环境依赖、构建命令与开发约定 | 当前文档 | 无 |

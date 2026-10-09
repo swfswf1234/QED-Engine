@@ -17,6 +17,7 @@ import {
   loadTypographyPrefs, saveTypographyPrefs,
   type TypographyPrefs,
 } from '../components/parsing/typography';
+import { confirmInput } from '../components/parsing/blocks';
 import type { BBox } from '../components/parsing/regions';
 
 export type { ParsingTreeNode } from '../api/axiom';
@@ -80,12 +81,13 @@ export interface ParsingStore {
   editPane: EditPane;
   boxSelection: number[];
   regionDraft: RegionDraft;
+  /** 画框模式（§4.6 框图修改「新增」开关）：开启时空白拖拽才画新框 */
+  drawMode: boolean;
   typography: TypographyPrefs;
   // 工作台视图选项（§7 顶栏；engine 不设选择，走服务端默认；G 轮裁决无视图模式切换）
   scrollMode: ScrollMode;
   renderMode: RenderMode;
   syncScroll: boolean;
-  zoom: number;
   // 解析任务
   activeJob: ParseJob | null;
   jobError: string | null;
@@ -105,13 +107,13 @@ export interface ParsingStore {
   setScrollMode: (m: ScrollMode) => void;
   setRenderMode: (m: RenderMode) => void;
   setSyncScroll: (on: boolean) => void;
-  setZoom: (z: number) => void;
   selectBlock: (index: number) => void;
   setEditMode: (on: boolean) => void;
   setEditPane: (pane: EditPane) => void;
+  setDrawMode: (on: boolean) => void;
   toggleBoxSelect: (index: number) => void;
   addRegionDraft: (bbox: BBox) => void;
-  deleteSelectedBlocks: () => void;
+  deleteRegion: (blockIndex: number) => void;
   restoreDeletedRegion: (blockIndex: number) => void;
   mergeSelectedBlocks: () => void;
   resetRegionDraft: () => void;
@@ -119,6 +121,7 @@ export interface ParsingStore {
   ingestBook: (bookId: string) => Promise<void>;
   createParseJob: (pages?: number[], bookId?: string) => Promise<void>;
   submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
+  confirmPageBlocks: (blockCount: number, skipIndex: number) => Promise<{ confirmed: number; skipped: number }>;
   clearCompare: () => void;
 }
 
@@ -187,11 +190,11 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     editPane: 'box',
     boxSelection: [],
     regionDraft: { added: [], deleted: [], merged: [] },
+    drawMode: false,
     typography: loadTypographyPrefs(),
     scrollMode: 'single',
     renderMode: 'stream',
     syncScroll: true,
-    zoom: 100,
     activeJob: null,
     jobError: null,
     jobSubmitting: false,
@@ -240,6 +243,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
         selectedBlock: -1,
         boxSelection: [],
         regionDraft: { added: [], deleted: [], merged: [] },
+        drawMode: false,
         activeJob: null,
         jobError: null,
         edits: {},
@@ -262,7 +266,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       if (!compareBookId) return;
       const entry = pages[pageNo];
       if (entry?.loading) return;
-      set({ comparePageNo: pageNo, selectedBlock: -1, boxSelection: [], regionDraft: { added: [], deleted: [], merged: [] } });
+      set({ comparePageNo: pageNo, selectedBlock: -1, boxSelection: [], drawMode: false, regionDraft: { added: [], deleted: [], merged: [] } });
       await fetchPage(compareBookId, pageNo);
       if (get().compareBookId === compareBookId) {
         const list = await getPageEdits(compareBookId, pageNo).catch(() => null);
@@ -294,7 +298,6 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     setScrollMode: (m) => set({ scrollMode: m }),
     setRenderMode: (m) => set({ renderMode: m }),
     setSyncScroll: (on) => set({ syncScroll: on }),
-    setZoom: (z) => set({ zoom: z }),
     selectBlock: (index) => set({ selectedBlock: index }),
     setEditMode: (on) => set(on
       ? { editMode: true }
@@ -303,18 +306,20 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
         selectedBlock: -1,
         boxSelection: [],
         regionDraft: { added: [], deleted: [], merged: [] },
+        drawMode: false,
       }),
-    setEditPane: (pane) => set({ editPane: pane }),
+    setEditPane: (pane) => set((s) => ({ editPane: pane, drawMode: pane === 'box' ? s.drawMode : false })),
+    setDrawMode: (on) => set({ drawMode: on }),
     toggleBoxSelect: (index) => set((s) => ({
       boxSelection: s.boxSelection.includes(index)
         ? s.boxSelection.filter((i) => i !== index)
         : [...s.boxSelection, index],
     })),
     addRegionDraft: (bbox) => set((s) => ({ regionDraft: { ...s.regionDraft, added: [...s.regionDraft.added, bbox] } })),
-    deleteSelectedBlocks: () => set((s) => ({
-      regionDraft: { ...s.regionDraft, deleted: Array.from(new Set([...s.regionDraft.deleted, ...s.boxSelection])) },
-      boxSelection: [],
-      selectedBlock: -1,
+    deleteRegion: (blockIndex) => set((s) => ({
+      regionDraft: { ...s.regionDraft, deleted: Array.from(new Set([...s.regionDraft.deleted, blockIndex])) },
+      boxSelection: s.boxSelection.filter((i) => i !== blockIndex),
+      selectedBlock: s.selectedBlock === blockIndex ? -1 : s.selectedBlock,
     })),
     restoreDeletedRegion: (blockIndex) => set((s) => ({
       regionDraft: { ...s.regionDraft, deleted: s.regionDraft.deleted.filter((i) => i !== blockIndex) },
@@ -389,6 +394,31 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       return true;
     },
 
+    /**
+     * 整页确认（§4.6 解析修正）：本页未判定一致的块逐个落 verdict=ok，
+     * 保留该块已有的修正文本/备注/bbox（PUT /edit 为整条替换，须自行合并）。
+     * skipIndex = 编辑弹层打开中的块（其未保存编辑不入账），已 ok 块静默跳过。
+     */
+    confirmPageBlocks: async (blockCount, skipIndex) => {
+      const s = get();
+      const bookId = s.compareBookId;
+      const pageNo = s.comparePageNo;
+      if (!bookId) return { confirmed: 0, skipped: blockCount };
+      let confirmed = 0;
+      let skipped = 0;
+      for (let i = 0; i < blockCount; i += 1) {
+        if (i === skipIndex) {
+          skipped += 1;
+          continue;
+        }
+        const prev = get().edits[editKey(bookId, pageNo, i)];
+        if (prev?.verdict === 'ok') continue;
+        if (await get().submitEdit(i, confirmInput(prev))) confirmed += 1;
+        else skipped += 1;
+      }
+      return { confirmed, skipped };
+    },
+
     clearCompare: () => {
       ++pollToken;
       set({
@@ -398,6 +428,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
         selectedBlock: -1,
         boxSelection: [],
         regionDraft: { added: [], deleted: [], merged: [] },
+        drawMode: false,
         activeJob: null,
         comparePageNo: 1,
       });

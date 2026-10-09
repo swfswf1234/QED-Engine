@@ -23,7 +23,7 @@ REGISTRY_BLOCK = re.compile(
     r"<!-- endpoint-registry:start -->\n(.*?)<!-- endpoint-registry:end -->", re.DOTALL
 )
 REGISTRY_ROW = re.compile(
-    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*(\S+)\s*\|\s*([①②③④⑤])\s*\|\s*(在用|过渡)\s*\|\s*$"
+    r"^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*(\S+)\s*\|\s*([①②③④⑤⑥])\s*\|\s*(在用|过渡)\s*\|\s*$"
 )
 
 
@@ -119,5 +119,5 @@ def test_registry_table_matches_implemented_endpoints():
     )
     for method, path, domain, status in rows:
         assert path.startswith("/api/v1"), f"总表路径必须带 /api/v1 前缀：{method} {path}"
-        assert domain in "①②③④⑤"
+        assert domain in "①②③④⑤⑥"
         assert status in {"在用", "过渡"}

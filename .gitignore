@@ -41,9 +41,7 @@ build/
 # 临时文件
 /tmp/
 
-# 数据库运维产物（备份与清理归档，不入库）
-/backend/database/backups/*
-!/backend/database/backups/.gitkeep
+# 数据库运维产物（清理归档，不入库；备份位已退役，快照唯一落点＝dataset/backups/，ADR 0019）
 /backend/database/*.sql.backup
 
 # 环境变量与密钥
@@ -57,5 +55,4 @@ build/
 Thumbs.db
 .DS_Store
 
-# ARCH-019 data-operation backups (D-class, not tracked)
-/backups/
+# 仓库内备份位已退役（ADR 0019 第 4 条）：不再忽略 /backups/，野生备份目录应在 git status 可见

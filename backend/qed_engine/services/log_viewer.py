@@ -1,9 +1,10 @@
 """服务日志查看能力（控制域监控诊断）：读取服务注册表白名单日志文件。
 
-白名单 = service_manager 注册表内各单元（config/tracker/axiom），日志文件为根
-logs/<log_name>.log；未知服务名抛 LogError（路由层映射 404，越权）；文件不存在视为
-空日志（服务未启动过）。tail 默认 200、上限 1000（超限截断）；keyword 为子串过滤；
-读取 UTF-8 容错（errors=replace）。
+白名单 = service_manager 注册表内各单元（config/tracker/axiom/web），日志路径按**实际写入点**
+解析（service_manager.unit_log_path，ADR 0019 第 3 条）：生命周期脚本托管的单元读其脚本产物
+（8901/8902 在各自仓库 logs/，8903 在根 logs/），8900 自身读 logs/config.log；未知服务名抛
+LogError（路由层映射 404，越权）；文件不存在视为空日志（服务未启动过）。tail 默认 200、
+上限 1000（超限截断）；keyword 为子串过滤；读取 UTF-8 容错（errors=replace）。
 
 设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
@@ -27,7 +28,7 @@ def _log_path(service: str) -> Path:
         spec = service_manager.require_service(service)
     except service_manager.ServiceError as exc:
         raise LogError(f"日志服务不存在：{service}") from exc
-    return service_manager.LOG_DIR / f"{spec.log_name}.log"
+    return service_manager.unit_log_path(spec)
 
 
 def read_log(service: str, tail: int = DEFAULT_TAIL, keyword: str | None = None) -> dict:

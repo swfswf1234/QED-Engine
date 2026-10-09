@@ -54,7 +54,6 @@ interface PagePairProps {
   book: BookMeta;
   pageNo: number;
   entry: PageEntry | undefined;
-  zoom: number;
   renderMode: RenderMode;
   selected: number;
   hovered: number;
@@ -70,7 +69,7 @@ interface PagePairProps {
 /** 单页/连续单元共用的态分流双栏呈现 */
 function PagePair(props: PagePairProps) {
   const {
-    book, pageNo, entry, zoom, renderMode, selected, hovered, editMode,
+    book, pageNo, entry, renderMode, selected, hovered, editMode,
     imageSize, paneRefs, onSubmit, onSelect, onHover, onImageSize,
   } = props;
   const edits = useParsingStore((s) => s.edits);
@@ -79,8 +78,11 @@ function PagePair(props: PagePairProps) {
   const editPane = useParsingStore((s) => s.editPane);
   const typography = useParsingStore((s) => s.typography);
   const regionDraft = useParsingStore((s) => s.regionDraft);
+  const drawMode = useParsingStore((s) => s.drawMode);
   const addRegionDraft = useParsingStore((s) => s.addRegionDraft);
   const toggleBoxSelect = useParsingStore((s) => s.toggleBoxSelect);
+  const deleteRegion = useParsingStore((s) => s.deleteRegion);
+  const restoreDeletedRegion = useParsingStore((s) => s.restoreDeletedRegion);
 
   const blocks = entry?.data ? blocksOf(entry.data) : [];
   const parsed = Boolean(entry?.parsed) && blocks.length > 0;
@@ -105,8 +107,8 @@ function PagePair(props: PagePairProps) {
             blocks={blocks}
             selectedIndex={selected}
             hoveredIndex={hovered}
-            zoom={zoom}
             boxEdit={boxEdit}
+            drawMode={drawMode}
             regionDraft={regionDraft}
             onBoxCommit={(i, bbox, input) => {
               const key = `${book.book_id}:${pageNo}:${i}`;
@@ -119,6 +121,8 @@ function PagePair(props: PagePairProps) {
             }}
             onNewBox={addRegionDraft}
             onMultiSelect={toggleBoxSelect}
+            onDeleteRegion={deleteRegion}
+            onRestoreRegion={restoreDeletedRegion}
             onSelect={onSelect}
             onHover={onHover}
             onImageSize={onImageSize}
@@ -190,12 +194,11 @@ export interface CompareViewProps {
   entry: PageEntry | undefined;
   scrollMode: ScrollMode;
   syncScroll: boolean;
-  zoom: number;
   renderMode: RenderMode;
 }
 
 export default function CompareView(props: CompareViewProps) {
-  const { book, pageNo, entry, scrollMode, syncScroll, zoom, renderMode } = props;
+  const { book, pageNo, entry, scrollMode, syncScroll, renderMode } = props;
   const pages = useParsingStore((s) => s.pages);
   const selectedBlock = useParsingStore((s) => s.selectedBlock);
   const editMode = useParsingStore((s) => s.editMode);
@@ -291,7 +294,6 @@ export default function CompareView(props: CompareViewProps) {
               book={book}
               pageNo={p}
               entry={pages[p]}
-              zoom={zoom}
               renderMode={renderMode}
               selected={p === pageNo ? selectedBlock : -1}
               hovered={p === pageNo ? hovered : -1}
@@ -313,7 +315,6 @@ export default function CompareView(props: CompareViewProps) {
       book={book}
       pageNo={pageNo}
       entry={entry}
-      zoom={zoom}
       renderMode={renderMode}
       selected={selectedBlock}
       hovered={hovered}

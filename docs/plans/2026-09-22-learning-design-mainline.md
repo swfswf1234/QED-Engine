@@ -2,7 +2,7 @@
 
 状态：In Progress
 任务类型：B
-最后更新：2026-09-30
+最后更新：2026-10-01
 关联 ADR：无新增（重划分为台账裁决；登记方式沿用 [ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md) 一任务一行一壳）
 关联设计：[api-contracts.md](../architecture/api-contracts.md)（学习域契约承接位）、
 [frontend-architecture.md](../architecture/frontend-architecture.md)（消费面指针，界面实施归 M1 壳）
@@ -52,11 +52,12 @@
 
 | 模块 | 台账行 | 固定壳 | 承载原工作项 |
 | --- | --- | --- | --- |
-| M1 学习面 UI 与渲染基线 | ARCH-027-M1 | [2026-09-23-learning-ui-rendering.md](2026-09-23-learning-ui-rendering.md) | 原 W1（渲染基线，承接 PLAN-051）+ 原 W6（课程面 UI） |
-| M2 练习与复习 | ARCH-027-M2 | [2026-09-23-practice-review.md](2026-09-23-practice-review.md) | 原 W4 拆出：出题管线（L6）+ 间隔复习/错题本（L3） |
+| M1 学习面 UI 与渲染基线 | ARCH-027-M1 | [2026-09-23-learning-ui-rendering.md](../history/plans/2026-10/2026-09-23-learning-ui-rendering.md) | 原 W1（渲染基线，承接 PLAN-051）+ 原 W6（课程面 UI） |
+| M2 练习与复习 | ARCH-027-M2 | [2026-09-23-practice-review.md](../history/plans/2026-10/2026-09-23-practice-review.md) | 原 W4 拆出：出题管线（L6）+ 间隔复习/错题本（L3） |
 | M3 本地模型适配层 | ARCH-027-M3 | [2026-09-23-local-model-adaptation.md](2026-09-23-local-model-adaptation.md) | 原 W5（L7 全量） |
 | M4 知识探索 | ARCH-027-M4 | [2026-09-23-knowledge-exploration.md](2026-09-23-knowledge-exploration.md) | 问答/召回消费面（后置；L9 澄清访谈 + ARCH-025 检索线对接预留） |
-| M5 知识点体系与知识梳理星图 | ARCH-027-M5 | [2026-09-30-knowledge-point-star-map.md](2026-09-30-knowledge-point-star-map.md) | 2026-09-30 用户发令新增模块：第三层知识点两表（共享主数据 + 根私有候选明细）+ 学习中心星图导航层；DeepTutor 第三切片（KP 建模与图可视化）判定表 K1~K6/R2~R5 在该壳 |
+| M5 知识点体系与知识梳理星图 | ARCH-027-M5 | [2026-09-30-knowledge-point-star-map.md](../history/plans/2026-10/2026-09-30-knowledge-point-star-map.md) | 2026-09-30 用户发令新增模块：第三层知识点两表（共享主数据 + 根私有候选明细）+ 学习中心星图导航层；DeepTutor 第三切片（KP 建模与图可视化）判定表 K1~K6/R2~R5 在该壳。**2026-10-01 收口 Achieved**（用户发令「再整行关闭、不留尾」，D1~D6 全按推荐口径批复；S4 按裁决 ⑦ 改判核销）：星图 UI 面已晋升并确认 [design/learning-star-map.md](../design/learning-star-map.md)，两表与端点契约正式冻结；残余「知识点内容写入候选池」按非目标口径移交本壳 M-2 编译线与 M2 出题线，不留待做项 |
+| M6 书籍目录知识点树与三栏学习工作台 | ARCH-027-M6 | [2026-10-01-toc-knowledge-tree-and-learn-workbench.md](../history/plans/2026-10/2026-10-01-toc-knowledge-tree-and-learn-workbench.md) | 2026-10-01 用户发令新增模块（学习面板三栏形态）：知识点两表层级化重设计（**改判 M5 冻结的两表结构**，按「可删除重建」授权，无数据搬迁、不做 ALTER）+ 目录页文本纯函数解析与 outline 端点 + 8903 三栏工作台与批注登记闭环；M1 判据不改写，渲染组件与其 UI-1 共用 |
 
 ## 范围与非目标
 
@@ -140,7 +141,7 @@
    （新增第四张共享知识点表 + 根私有知识点 detail 表）并按银河/星光星图设计学习中心首页。原非目标
    行「知识图谱（暂不做）」按 R1 本意**窄化为 GraphRAG 式自动图挖掘**，数据导航类星图界面不受该项
    限制；四项批复（表归属、两表按确认态分工、渲染方案、本轮只出设计）见
-   [M5 壳](2026-09-30-knowledge-point-star-map.md) 裁决登记 ①~④（窄化项为其中 ⑤）。主链三表与 M-3
+   [M5 壳](../history/plans/2026-10/2026-09-30-knowledge-point-star-map.md) 裁决登记 ①~④（窄化项为其中 ⑤）。主链三表与 M-3
    「进度行扩列、无需第四张 learn 表」裁决**不变**——新增的第四张表在 `qed_*` 共享族
    （知识点主数据），不是 learn 族的掌握表。
 

@@ -140,6 +140,23 @@ class TrackerClient:
 
     # --- 书籍（qt_books：一册/一卷/一个快照） ---
 
+    def list_books(
+        self,
+        course_id: str | None = None,
+        kind: str | None = None,
+        domain_id: str | None = None,
+    ) -> list:
+        """书库枚举（8901 GET /books，QED-068 A 步）：course_id/kind/domain_id 为 AND 过滤。
+
+        每行为 to_dict() 全列，练习域题源书目取 `roles`（textbook/exercises/solutions）
+        与 `course_id` 两列；对方 `roles` 里 solutions 的口径差异按宽容读处理（R-11）。
+        """
+        params = {}
+        for key, value in (("course_id", course_id), ("kind", kind), ("domain_id", domain_id)):
+            if value:
+                params[key] = value
+        return self._request("GET", f"{API_PREFIX}/books", params=params)
+
     def create_book(self, book_id: str, **kwargs) -> dict:
         """书库化创建（QED-060）：book_id + title 必填；kwargs 透传 8901 /books 字段。
 
@@ -201,6 +218,43 @@ class TrackerClient:
     def cancel_book(self, book_id: str) -> dict:
         """取消下载：downloading → decided（复位，不删除已落盘文件）。"""
         return self._request("POST", f"{API_PREFIX}/books/{book_id}/cancel")
+
+    # --- 论文探索（REQ-102 W2b；上游=QED-068 B 步 8901「⑥ 论文探索」四端点） ---
+
+    def recommend_papers(self, body: dict) -> dict:
+        """POST /papers/recommend：领域级论文探索任务提交（202 `{task_id}`）。
+
+        请求体逐字段原样发出——⑤′ 论文没有默认桶，8900 不补 `domain_id`，
+        缺失/领域不存在的 422 由上游给出并随 TrackerError 透传给 8903。
+        """
+        return self._request("POST", f"{API_PREFIX}/papers/recommend", json=dict(body))
+
+    def list_paper_selections(
+        self, *, domain_id: str = "", recipe: str = "", limit: int = 0
+    ) -> dict:
+        """GET /papers/selections：报告摘要列表（created_at 倒序）；空值不入参。"""
+        params = {}
+        for key, value in (("domain_id", domain_id), ("recipe", recipe), ("limit", limit)):
+            if value:
+                params[key] = value
+        return self._request("GET", f"{API_PREFIX}/papers/selections", params=params)
+
+    def get_paper_selection(self, selection_id: str) -> dict:
+        """GET /papers/selections/{id}：报告详情（候选 + 评分 + status）。"""
+        return self._request("GET", f"{API_PREFIX}/papers/selections/{selection_id}")
+
+    def adopt_papers(self, selection_id: str, picks: list[dict]) -> dict:
+        """POST /papers/selections/{id}/adopt：显式 pick 建 kind=paper 书行（202 任务）。
+
+        picks=[{rank, domain_id, course_id}] 逐条落位；采纳**不**自动下载（对方裁决 #5），
+        取书由调用方显式走 `/books/{book_id}/fetch`。
+        """
+        return self._request(
+            "POST",
+            f"{API_PREFIX}/papers/selections/{selection_id}/adopt",
+            json={"picks": list(picks)},
+        )
+
 
     # --- 领域只读/维护（REQ-059，端点由 QED-Tracker 承接，未上线前 404 透传） ---
     # 注：旧探索方法（start_course_explore/get_explore_run/adopt/discard/list/

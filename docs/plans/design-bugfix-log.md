@@ -1,7 +1,7 @@
 # 设计类小修与 bug 修复台账（design-bugfix-log）
 
 状态：Current（长期滚动台账）
-最后更新：2026-09-29
+最后更新：2026-10-09
 关联任务：REQ-069（见 [todo.md](../trackers/todo.md)）
 
 > **定位声明**：本文档是**长期滚动台账**，不是一次性计划——**不随任务完成归档**
@@ -417,3 +417,84 @@
   门禁：vitest 全量 356 passed + `tsc -b` 零错 + build 重建；浏览器实测（8903 dist）以 mock
   `/services` 将 tracker 置离线后点「启动」，弹窗正文实读为启动语义文案、无「重启」措辞。
 - **状态**：已修复（2026-09-29，随普通任务轮 ARCH-035 W1 收口）
+
+### BUGFIX-024：领域表单默认值与字段消费口径失真——预填套话入库即被覆盖、「学科知识」全程无人消费
+
+- **发现日期**：2026-09-30（用户报「添加领域的描述默认文案与学科知识默认值设计不合理」；只读排查四字段
+  全链路消费点后确认缺陷面大于文案本身）
+- **设计文档**：`../design/downloads-ui.md`（§3.1 新增「领域维护表单（字段口径与默认值）」段 + §2
+  跨项目协作指针；消费现状以「未接通面」显式声明）
+- **问题与根因**：① `web-ui/src/components/DownloadsTree.tsx:751` 预填「这是一个新的学科领域，等待探索完善。」
+  入库后既作为领域卡正文展示（`DomainCard.tsx:171-175`），又被 8901 探索结果无条件覆盖
+  （`QED-Tracker/src/qed_tracker/api/main.py:296`），且与 domain 提示词「不使用空泛套话」要求
+  （`prompt_lab/templates.py:225`）直接对撞；② 五字段只有 `name` 进提示词（`api/main.py:277` 只传
+  `domain.name`，`scope_hint` 取模板内置默认 `pipeline.py:150`），`scope` 全仓无任何提示词消费点、UI 也不
+  展示，`stages` 恒被 `STAGES` 常量覆盖（`pipeline.py:181`）——表单「可选」给人的「填了会引导探索」
+  预期不成立；③ `level` 在两个维护表单标「探索范围」（`DownloadsTree.tsx:763`）、`scope` 在确认弹窗
+  也标「探索范围（scope）」（`DomainConfirmModal.tsx:258`），与 DDL 注释（level=探索范围/scope=学科知识）
+  和提示词（level=默认学习层级）四套口径互斥；④ 描述必填口径分裂：添加表单标「可选」、确认弹窗
+  `required`（`DomainConfirmModal.tsx:252`）；⑤ 存量缺陷：`explore_courses_only` 的
+  `domain_info.get("level", _DEFAULT_SCOPE)` 键存在即不兜底，`level` 空串时把空范围提示送进课程梳理
+  （`pipeline.py:212`）。
+- **修复与验证**：根侧（2026-09-30「开始执行」后已实施）——措辞正本集中到
+  `web-ui/src/components/domainFormDefaults.ts`（`DOMAIN_LABELS` 五标签 + 两条默认句 + `level`/`stages`
+  默认值），三处表单按 `downloads-ui.md` §3.1 统一顺序（领域名→领域描述→学科知识→探索范围→学习阶段）
+  与标签：`DownloadsTree.tsx`（添加领域 + 右键编辑领域知识）、`DomainConfirmModal.tsx`（领域信息确认，
+  提交体补 `level`）；`description` 默认句随领域名插值且**用户手改后不再被覆盖**（`addDescTouchedRef`）、
+  三处统一非必填，`DomainCard.tsx` 空描述显示「（暂无描述，可点『探索领域知识』生成）」；`scope` 默认句
+  写明「中文表述 + 参照美国主流高校本科—硕士通行方案」的边界，`level` 默认 `本科-硕士`、`stages` 默认
+  四档；2026-08-24「领域表单去阶段」裁决按本轮讨论**改判**（阶段字段保留、默认值即四档常量），回归用例
+  `DownloadsTree.explore.test.tsx` 的旧标签断言随之改为本口径断言；新增用例
+  `DownloadsTree.domainForm.test.tsx`（5）与 `DomainCard.test.tsx`（2）、`DomainConfirmModal.test.tsx`
+  追加 3 条口径用例；帮助文案 `help/sections.ts` 领域探索节同步（含「当前仅领域名进探索」的如实说明）。
+  验证：`npx vitest run` 全量 42 files / 417 passed、`tsc -b` 零错、`npm run build` 成功；8903 浏览器实测
+  （添加领域弹窗五字段顺序与默认值逐项核对、领域名「复分析」插值成功、手改描述后改名不被覆盖、
+  右键编辑领域知识弹窗回填与占位一致、请求全部指向 8900、重新加载后控制台仅剩 REQ-102 未实装端点
+  `GET /papers/books` 的 404，归因对方在途 WIP）。对方侧未变——四字段真读取、
+  「用户写过的 description 不被覆盖」与空串兜底三项登记为 QED-Tracker 滚动缺陷台账 BUG-004，代码归其会话。
+- **状态**：根侧已修复（前端 + 设计正文 + 帮助文案）；跨项目侧待对方承接回执，接通前表单默认值只决定
+  入库初值与展示，不影响探索输出（`downloads-ui.md` §3.1「消费现状（未接通面）」）
+
+### BUGFIX-025：local-model-management.md 控制台需求节残留「三卡（含向量）」旧口径——ARCH-039 收口时漏随步
+
+- **发现日期**：2026-10-03（ARCH-040 设计落笔时逐节核对 `admin-console.md` §3.3 与本文的槽位卡口径，
+  发现两文档互斥）
+- **设计文档**：`../design/local-model-management.md`（「控制台需求（UI 细节归 admin-console.md）」节）
+- **问题与根因**：ARCH-039（2026-10-03 收口）裁定控制台资源监控区不再渲染向量槽位卡，随步只改了
+  `admin-console.md` §3.3 槽位卡表与 §7 文件映射行、`help/sections.ts` 控制台节，漏改本文的
+  「三卡（文字/图像/向量）五字段」与「向量卡无本地候选（来源固定 api，仅验证）」两行，
+  按本文读会以为控制台仍有三卡。
+- **修复与验证**：两处按 ARCH-039 口径改写（渲染文字/图像两卡；向量卡不出版面、验证入口留 store 动作层），
+  并在同节补 ARCH-040 受限启动口径与「单活仲裁」节的指针；纯文档修正，无代码与测试改动。
+- **状态**：已修复（2026-10-03，随普通任务轮 ARCH-040 设计落档）
+
+### BUGFIX-026：学习书架把书目（8902 透传）与课程／星图同批取数——解析侧离线时整面报「书架数据不可达」
+
+- **发现日期**：2026-10-09（ARCH-027-M1 学习面真机走查时 8902 尚未起，书架零卡片）
+- **设计文档**：`../architecture/frontend-architecture.md`（学习中心书架面）、
+  `../design/parsing-flow.md`（8900 透传 8902 的书目面）；根纲「独立性铁律」
+- **问题与根因**：`LearnShelf.tsx` 的 `reload()` 把 `listLearnCourses()` / `getStarMap()` /
+  `listBooks()` 放进同一个 `Promise.all` 并在同一 `catch` 里 `setError`。书目是 8900→8902
+  的透传面，8902 离线时 8900 返 503，于是**只该影响「选素材」下拉**的失败被升级成整面错误、
+  课程卡一张不出，违根纲「Axiom-Flow 未启动时前端展示必须正常」。
+- **修复与验证**：书目改独立 `try/catch`（新增 `bookError` 态）——课程与星图照常列出，
+  注册弹窗素材下拉降级为「书目服务不可达（解析侧离线），暂不能选素材」；回归用例
+  `web-ui/src/pages/LearnShelf.test.tsx`（该档 8 passed）断言 8902 返 503 时课程卡与
+  进度徽章仍渲染且无整面错误；8903 真机复验（8902 启动窗口期整面报错→新包两门课正常列出）。
+- **状态**：已修复（2026-10-09，随 ARCH-027-M1 学习面交付轮）
+
+
+### BUGFIX-027：论文链路缺「采纳不自动取书、`verified` 属人工验收档」口径——设计只写「复用书本五层态链」
+
+- **发现日期**：2026-10-09（REQ-102 W5 真机端到端取证：显式 `books fetch` 后自动链只到 `downloaded`，
+  `verified` 由 8903 书目详情「验证通过」按钮置位）
+- **设计文档**：`../design/downloads-flow.md` §7.1（论文链路分段与责任分界）
+- **问题与根因**：§7.1「书本化」行只写「下载/验收复用 §6 书本五层态链」，两件事未写入口径＝
+  ① adopt 之后**不自动取书**（2026-09-30 用户裁决 #5 只落在对方壳与 UI 侧）；
+  ② 五层态里 `verified` 属**人工验收档**、自动化只到 `downloaded`。后果＝论文展示行的「已验收」档
+  在设计上无归属来源，端到端联调时容易被读成「链路没跑完」，也会诱导实现侧自作聪明地补自动验收。
+- **修复与验证**：§7.1 补一条 bullet（显式 `POST /books/{book_id}/fetch`；自动链止于 `downloaded`＝行内
+  「待验证」；`verified`＝「已验收」只由人工验收置位，展示行/透传面/弹窗均不代做验收）。验证＝真机
+  `mathadvanced-b19` 由「待验证」经书目详情按钮转 `verified`、行徽同步为「已完成」；根侧全量 pytest
+  735 passed、文档契约守护无新增红。
+- **状态**：已修复（2026-10-09，随 REQ-102 收口）

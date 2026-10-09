@@ -12,7 +12,7 @@ Axiom-Flow 不做渲染」立项裁决的推导依据）
 
 > **归档说明（2026-09-23 并轮收口）**：本壳随 ARCH-022 + ARCH-026 并轮 Superseded——渲染线
 > 先归学习中心轮 W1，2026-09-23 重划为学习设计轮后由 **M1 壳 UI-1 渲染基线**承接
-> （[learning-ui-rendering](../../../plans/2026-09-23-learning-ui-rendering.md)，
+> （[learning-ui-rendering](../2026-10/2026-09-23-learning-ui-rendering.md)，
 > 轮级判定表见 [主链壳](../../../plans/2026-09-22-learning-design-mainline.md)）
 > （关闭时登记表为空，无遗留条目迁移）；todo 已移除 PLAN-051 与 ARCH-026 行（见
 > completed.md 对应 Superseded 行）。以下为退役前正文快照。

@@ -1,15 +1,16 @@
 # 设计文档索引
 
 状态：Current
-最后更新：2026-09-23
+最后更新：2026-10-03
 
-本目录保存**相对确定的设计文档**，按四组固定职责：
-项目配置 / 模型管理 / 项目协同 / 后台管理。每份职责边界单一，后续 plans/ 计划
+本目录保存**相对确定的设计文档**，按五组固定职责：
+项目配置 / 模型管理 / 项目协同 / 学习中心 / 后台管理。每份职责边界单一，后续 plans/ 计划
 以此为准选择晋升、合并或修补去向；三态梳理与 DesignRef 同步规则见
 [文档治理规范](../standards/doc-governance.md)。
 
 **部分置空**（设计文档暂居 `plans/`，评审确认后晋升）：学习功能（课程学习/课后练习）现状见
-[learning-center-current-state](../plans/2026-09-10-learning-center-current-state.md)；
+[learning-center-current-state](../plans/2026-09-10-learning-center-current-state.md)，其中
+「知识梳理星图」UI 已于 2026-09-30 晋升 [learning-star-map.md](learning-star-map.md)；
 文档切分与召回（原「探索」组，REQ-082）已于 2026-09-22 随 ARCH-021 整合关闭，未来规划
 （RAG 切片与检索 + 解析管线优化项目划分）见
 [ARCH-025 滚动壳](../plans/2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md)「REQ-089
@@ -41,6 +42,13 @@
 | [service-hosting.md](service-hosting.md) | Accepted | Implemented | 服务托管：8900 控制中心对三 Python 服务的注册表/探测/进程管理启停（ARCH-012 已实装） |
 | [dataset-conventions.md](dataset-conventions.md) | Accepted | In Progress | 三项目共享数据根约定：dataset/ raw 原始 + parsed 整理后两区，元数据入 DB（meta/ 退役，REQ-032） |
 | [tech-stack.md](tech-stack.md) | Accepted | In Progress | 跨项目技术选型结论与理由：FastAPI 三服务、React 19 + AntD 前端、MySQL 8 共享 qed 库、单线路模型、MinerU 解析 |
+
+## 学习中心
+
+| 文档 | 设计状态 | 实现状态 | 内容 |
+| --- | --- | --- | --- |
+| [learning-star-map.md](learning-star-map.md) | Accepted | Implemented | 学习中心·知识梳理星图 UI（`#/knowledge` + `#/knowledge/c/:courseId`）：星空图像/CSS 动效背景层、布局纯函数与套满系数契约、「层＝行 × 轨迹＝列」森林版式、三类图元（轨迹列框/课程框/先修连线）、悬停与下钻口径、复习入口（课程框悬停行「今日复习 N 条」＋课程知识点页页头按钮）、状态与降级矩阵 |
+| [learning-workbench-ui.md](learning-workbench-ui.md) | Accepted | Implemented | 学习中心·三栏学习工作台 UI（`#/learn/c/:courseId`：左＝书与章节目录（outline 行 + `source_ref` 页范围）、中＝复用 §9.1 版式的只读正文按 8 页/批懒取＋正文下方练习区（题源抽取→人工确认入库→作答判分回显）、右＝Tabs「批注与候选」/「本章练习」（到期复习＋错题本人工位）；目录页文本解析规格与偏移/未识别行口径、抽取纯函数规格、状态与降级矩阵） |
 
 ## 后台管理
 

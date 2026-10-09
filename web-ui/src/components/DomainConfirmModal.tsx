@@ -8,6 +8,10 @@ import { confirmDomainInfo } from '../api/explore-helpers';
 import type { DomainSystem } from '../stores';
 import { parseExplorePending, useDownloadsStore } from '../stores/downloads';
 import { describeError } from '../api/client';
+import {
+  DOMAIN_DESCRIPTION_PLACEHOLDER, DOMAIN_LABELS, DOMAIN_LEVEL_DEFAULT, DOMAIN_SCOPE_DEFAULT,
+  DOMAIN_STAGES_DEFAULT,
+} from './domainFormDefaults';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -55,6 +59,7 @@ export default function DomainConfirmModal({
       form.setFieldsValue({
         description: domain.description || '',
         scope: domain.scope || '',
+        level: domain.level || DOMAIN_LEVEL_DEFAULT,
         stages: (domain.stages || []).join('、'),
         classic_tracks: (domain.classic_tracks || []).map((t) => ({
           name: t.name || '',
@@ -122,6 +127,7 @@ export default function DomainConfirmModal({
       await updateDomain(domain.domain_id, {
         description: values.description,
         scope: values.scope,
+        level: values.level,
         stages,
         classic_tracks,
       });
@@ -235,8 +241,8 @@ export default function DomainConfirmModal({
             />
           )}
 
-          {/* 领域名称（不可修改） */}
-          <Form.Item label="领域名称">
+          {/* 领域名（只读展示，创建后不可改） */}
+          <Form.Item label={DOMAIN_LABELS.name}>
             <Input
               value={nameChosen === 'accept' && ep?.kind === 'import_courses'
                 ? ep.imported_name
@@ -245,23 +251,24 @@ export default function DomainConfirmModal({
             />
           </Form.Item>
 
-          {/* 描述 */}
-          <Form.Item
-            name="description"
-            label="描述"
-            rules={[{ required: true, message: '请输入领域描述' }]}
-          >
-            <TextArea rows={6} placeholder="请输入领域描述（200字以内为佳）" />
+          {/* 领域描述（非必填：空值由探索生成或保留默认句） */}
+          <Form.Item name="description" label={DOMAIN_LABELS.description}>
+            <TextArea rows={6} placeholder={DOMAIN_DESCRIPTION_PLACEHOLDER} />
           </Form.Item>
 
-          {/* 探索范围 */}
-          <Form.Item name="scope" label="探索范围（scope）">
-            <TextArea rows={3} placeholder="学科知识边界描述" />
+          {/* 学科知识（范围边界，用户填写值优先于内置默认边界） */}
+          <Form.Item name="scope" label={DOMAIN_LABELS.scope}>
+            <TextArea rows={3} placeholder={DOMAIN_SCOPE_DEFAULT} />
+          </Form.Item>
+
+          {/* 探索范围（学习层级） */}
+          <Form.Item name="level" label={DOMAIN_LABELS.level}>
+            <Input placeholder={DOMAIN_LEVEL_DEFAULT} />
           </Form.Item>
 
           {/* 学习阶段 */}
-          <Form.Item name="stages" label="学习阶段">
-            <Input placeholder="基础、主干、分支、前沿（逗号分隔）" />
+          <Form.Item name="stages" label={DOMAIN_LABELS.stages}>
+            <Input placeholder={DOMAIN_STAGES_DEFAULT} />
           </Form.Item>
 
           {/* 课程方向（子表单） */}

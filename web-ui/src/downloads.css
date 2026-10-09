@@ -528,3 +528,43 @@
   font-size: 14px;
   color: #666;
 }
+
+/* 论文展示行（REQ-102 W3，downloads-ui §4.4：领域卡/课程头下挂，空则组件自身隐藏） */
+.dl-paper-row {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+}
+
+.dl-paper-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  margin-right: 12px;
+}
+
+.dl-paper-row-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+
+.dl-paper-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.dl-paper-item:hover {
+  color: #1677ff;
+}
+
+.dl-paper-item-year {
+  color: #9ca3af;
+}

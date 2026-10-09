@@ -15,12 +15,16 @@
 | 服务 | 端口 | 启停方式 | 日志（脚本后台模式） | PID 文件 | 健康端点 |
 | --- | --- | --- | --- | --- | --- |
 | QED-Engine 后端 | 8900 | `scripts/qed_engine_service.py`（推荐）或前台 uvicorn | `logs/qed-engine-serve.log` | `logs/qed-engine.pid` | `GET /api/v1/health` |
-| QED-Tracker（子项目） | 8901 | 子项目脚本 / 8900 控制中心托管 | `logs/tracker.log` | 子项目自管 | `GET /api/v1/health` |
-| Axiom-Flow（子项目） | 8902 | 子项目脚本 / 8900 控制中心托管 | `logs/axiom.log` | 子项目自管 | `GET /api/v1/health` |
+| QED-Tracker（子项目） | 8901 | 子项目脚本 / 8900 控制中心托管 | `QED-Tracker/logs/qed-tracker-serve.log` | `QED-Tracker/logs/qed-tracker.pid` | `GET /api/v1/health` |
+| Axiom-Flow（子项目） | 8902 | 子项目脚本 / 8900 控制中心托管 | `Axiom-Flow/logs/qed-axiom-serve.log` | `Axiom-Flow/logs/qed-axiom.pid` | `GET /api/v1/health` |
 | QED-Engine 前端 | 8903 | `scripts/qed_web_service.py` | `logs/qed-web-serve.log` | `logs/qed-web.pid` | `GET /api/v1/health` |
 
 前端（8903）托管**构建产物 `web-ui/dist/`** 而非源码；前端代码改动后必须重建 dist（冷启动
 `--build` 自动完成，见「服务启动」）。
+
+8900 **应用日志**（uvicorn stderr 并入 + 监督器事件账 + 掉线诊断包）为 `logs/config.log`，
+与脚本产物 `logs/qed-engine-serve.log` 分列；根 `logs/` 长期保留清单与「日志只写 `logs/`/`tmp/`」
+落点规则见[存储规范](../standards/storage-conventions.md)「仓库根运行时产物与备份面」节（ADR 0019）。
 
 ### 生命周期脚本命令矩阵
 
@@ -132,7 +136,8 @@ conda run -n QED_env python scripts/qed_web_service.py start --wait
 
 - **生命周期脚本即后台启动**：Popen 拉起子进程（新进程组）+ 日志落盘 + PID 文件，脚本
   本身立即返回；`--wait` 额外等待健康端点就绪（默认上限 30s）。
-- **8900 Start-Process 备选**（早期方式，日志为 `logs/qed-engine-8900.log` / `.err.log`）：
+- **8900 Start-Process 备选**（早期方式；输出重定向到 `logs/` 下自定义命名的临时文件，属
+  ADR 0019 长期清单**之外**，用完即清；日常请用生命周期脚本）：
 
   ```powershell
   Start-Process "D:\software\anaconda3\envs\QED_env\python.exe" `
@@ -223,11 +228,20 @@ conda run -n QED_env python scripts/qed_engine_service.py restart --wait
 
 | 目标 | 位置 / 命令 |
 | --- | --- |
-| 后端 8900（脚本启动） | `logs/qed-engine-serve.log`（Start-Process 备选为 `qed-engine-8900.log`/`.err.log`） |
+| 后端 8900（脚本启动） | `logs/qed-engine-serve.log`（脚本产物）+ `logs/config.log`（应用日志：uvicorn stderr 并入、监督器事件账、掉线诊断包） |
 | 前端 8903 | `logs/qed-web-serve.log` |
-| 子项目 | `logs/tracker.log`、`logs/axiom.log` |
-| 经 8900 查看日志 | `GET /api/v1/logs/{service}?tail=200&keyword=…`（`service` ∈ config/tracker/axiom/web） |
+| 子项目（8901/8902） | `QED-Tracker/logs/qed-tracker-serve.log`、`Axiom-Flow/logs/qed-axiom-serve.log`（归各自仓库，根侧不留副本） |
+| 经 8900 查看日志 | `GET /api/v1/logs/{service}?tail=200&keyword=…`（`service` ∈ config/tracker/axiom/web，读取按实际写入点） |
 | 组件监控 | `GET /monitor/gpu`、`GET /monitor/qwen`、`GET /monitor/mineru` |
+
+### 数据库快照（回滚窗口，非长期备份）
+
+- 生成工具：`backend/database/backup-qed.ps1`（mysqldump，密码取 `-Password` 或
+  `QED_DB_PASSWORD`），快照唯一落点＝数据根 `<QED_DATA_ROOT>/backups/YYYY-MM-DD-<任务标识>/`
+  （`-TaskId` 指定任务标识，默认 `manual`）。
+- **仓库内不设备份位**（根 `backups/`、`backend/database/backups/` 已于 ARCH-036 退役）；快照只为
+  一次 D 类数据操作的回滚窗口存在，操作验收通过即清（删除亦属 D 类，需用户确认），长期可追溯
+  由台账承载。规则正文见[存储规范](../standards/storage-conventions.md)（ADR 0019 第 4 条）。
 
 本地模型模式（`--mode local`）配套脚本：`scripts/text-model/qed_qwen_service.py`
 （Qwen，llama-server，默认 5001）、`scripts/image-model/qed_mineru_service.py`

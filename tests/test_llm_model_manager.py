@@ -7,6 +7,7 @@ LM Studio 半托管 probe/start/stop 语义。
 被测代码：backend/qed_engine/services/llm/model_manager.py、backend/qed_engine/services/llm/runtimes/
 """
 
+import subprocess
 import sys
 
 import pytest
@@ -16,6 +17,10 @@ from qed_engine.services.llm.runtimes import base as rt_base
 from qed_engine.services.llm.runtimes import llamacpp as lc_mod
 from qed_engine.services.llm.runtimes import lmstudio as lm_mod
 from qed_engine.services.llm.runtimes.base import RuntimeResult
+
+# tests/conftest.py 的 autouse 桩把 subprocess.run 换成抛 FileNotFoundError 的假桩；
+# 本模块的子进程用例需要真实执行，故在模块导入期（早于任何 fixture）留存原始函数。
+_REAL_SUBPROCESS_RUN = subprocess.run
 
 MODEL_27B = "qwen3.8-27b"
 MODEL_MINERU = "mineru"
@@ -584,3 +589,182 @@ def test_lmstudio_start_clears_llama_server_occupation(monkeypatch):
     assert "qed_qwen_service.py" in cmds[0][1] and cmds[0][2] == "stop"
     assert ["server", "start"] in lms_calls
     assert ["load", MODEL_27B, "--gpu", "max", "-y"] in lms_calls
+
+
+# --- W7 operate_model 启动宽限上报（ARCH-028 增强批，壳监督器设计 §6） ---
+
+
+def test_operate_model_start_dispatch_marks_grace(monkeypatch):
+    """start/restart 派发即上报宽限窗口（防冷启动被防抖误判掉线）；stop 不报。"""
+    from qed_engine.services.llm import supervisor
+
+    marks: list[str] = []
+    monkeypatch.setattr(supervisor, "note_starting_active", marks.append)
+    calls: list = []
+    _recorder_rt(monkeypatch, runtimes.get_runtime("lmstudio"), True, "lmstudio", calls)
+    model_manager.operate_model("text", "stop", settings=_settings())
+    assert marks == []
+    model_manager.operate_model("text", "start", settings=_settings())
+    assert marks == ["text"]
+    model_manager.operate_model("vision", "restart", settings=_settings())
+    assert marks == ["text", "vision"]
+
+
+# --- DEFECT-005 监督器退避重启与单活仲裁竞态（进程级互斥串行化） ---
+
+
+class _ConcurrentRt:
+    """共享「在跑」事实源的假 runtime：记录关键段重叠与最终在跑集合。"""
+
+    def __init__(self, name, world):
+        self.name = name
+        self.world = world
+
+    def probe(self, settings, model=""):
+        return self.name in self.world["running"]
+
+    def start(self, settings, model="", log=None, script_runner=None, params=None):
+        self._enter()
+        self.world["running"].add(self.name)
+        self._exit()
+        return RuntimeResult(True, "stub")
+
+    def stop(self, settings, model="", log=None, script_runner=None):
+        self._enter()
+        self.world["running"].discard(self.name)
+        self._exit()
+        return RuntimeResult(True, "stub")
+
+    def _enter(self):
+        self.world["active"] += 1
+        if self.world["active"] > 1:
+            self.world["overlaps"].append(self.name)
+        import time as _t
+        _t.sleep(0.02)  # 放大未串行化时的竞态窗口
+
+    def _exit(self):
+        self.world["active"] -= 1
+
+
+def test_concurrent_ensure_serialized_never_two_running(monkeypatch):
+    """双槽位并发 ensure（监督器退避重启实况）：启动关键段串行化，
+    后启动者的单活仲裁必见先启动者在跑 → 最终在跑 ≤1，关键段零重叠。"""
+    import threading
+
+    world = {"running": set(), "active": 0, "overlaps": []}
+    rts = {"lmstudio": _ConcurrentRt("lmstudio", world), "docker": _ConcurrentRt("docker", world)}
+    monkeypatch.setattr(model_manager, "get_runtime", lambda name: rts[name])
+
+    threads = [threading.Thread(target=model_manager.ensure_local_ready,
+                                args=(_settings(), slot))
+               for slot in ("text", "vision")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert not any(t.is_alive() for t in threads), "串行化不得死锁"
+    assert world["overlaps"] == [], "启动关键段（复核+仲裁+start）进程级互斥"
+    assert len(world["running"]) <= 1, "DEFECT-005 回归：双槽位并发恢复不再绕过单活互斥"
+
+
+# ---------- DEFECT-008 ①⑤：runtime 探针与子进程输出 ----------
+
+
+def test_runtime_probe_bypasses_env_proxy(loopback_ok_server, honored_env_proxy):
+    """① probe_http 不经环境代理：代理端口不可用时 127.0.0.1 健康端点仍判可达。"""
+    assert rt_base.probe_http(loopback_ok_server + "/health") is True
+
+
+def test_lmstudio_get_json_bypasses_env_proxy(loopback_ok_server, honored_env_proxy):
+    """① LM Studio REST v0 读回不经环境代理（urllib 无 loopback 自动 bypass，长驻进程曾误判不可达）。"""
+    payload = lm_mod._get_json(loopback_ok_server + "/api/v0/models", token="t")
+    assert payload["data"][0]["state"] == "loaded"
+
+
+def test_run_script_decodes_utf8_child_output(tmp_path, monkeypatch):
+    """⑤ 生命周期脚本的 UTF-8 中文输出不得让 reader 线程解码崩溃（历史 config.log 同签名）。"""
+    monkeypatch.setattr(rt_base.subprocess, "run", _REAL_SUBPROCESS_RUN)
+    script = tmp_path / "cjk_service.py"
+    script.write_text(
+        "import sys\nsys.stdout.buffer.write('启动中：显存不足·UTF8'.encode('utf-8'))\n",
+        encoding="utf-8",
+    )
+    assert rt_base.run_script(script, "start") == 0
+
+
+def test_run_script_forces_utf8_child_decoding(tmp_path, monkeypatch):
+    """⑤ run_script 显式 UTF-8 + errors=replace：真实子进程里 reader 线程曾抛 UnicodeDecodeError。"""
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(rt_base.subprocess, "run", fake_run)
+    assert rt_base.run_script(tmp_path / "cjk_service.py", "start") == 0
+    assert seen.get("encoding") == "utf-8", "子进程输出按本地编码（Windows GBK）解码即 DEFECT-008 ⑤"
+    assert seen.get("errors") == "replace", "非法字节须替换而非抛错"
+
+
+def test_run_lms_decodes_child_output_as_utf8(monkeypatch):
+    """⑤ lms CLI 子进程显式按 UTF-8 解码（errors=replace），不跟随 Windows 本地编码。"""
+    import subprocess
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(lm_mod.shutil, "which", lambda _name: "C:/lms")
+    monkeypatch.setattr(lm_mod.subprocess, "run", fake_run)
+    assert lm_mod._run_lms(["load", "qwen/qwen3.5-9b"]) == 0
+    assert seen.get("encoding") == "utf-8"
+    assert seen.get("errors") == "replace"
+
+
+@pytest.fixture
+def loopback_ok_server():
+    """本机回环 HTTP 服务（任何 GET 返回 200 JSON），只监听 127.0.0.1 临时端口。"""
+    import http.server
+    import json
+    import threading
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = json.dumps({"data": [{"id": "qwen/qwen3.5-9b", "state": "loaded"}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def honored_env_proxy(monkeypatch):
+    """实况复现：环境代理指向已关闭端口，且 urllib 默认 opener 按环境配置走代理。"""
+    import socket
+    import urllib.request
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+    proxy = f"http://127.0.0.1:{dead_port}"
+    monkeypatch.setenv("HTTP_PROXY", proxy)
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    previous = urllib.request._opener
+    urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler()))
+    try:
+        yield proxy
+    finally:
+        urllib.request.install_opener(previous)

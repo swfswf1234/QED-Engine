@@ -57,10 +57,15 @@ class Settings(BaseSettings):
     qed_resource_guard: bool = True
     # 本地模型监督器开关（ARCH-028：分级探测/防抖状态机/事件账；false=不建监督器，健康字段留空）
     qed_model_supervisor: bool = True
+    # 启动宽限窗口秒数（ARCH-028 W7：start/restart 派发后窗口内拒连观测不判掉线；<=0 关闭）
+    qed_model_start_grace_seconds: float = 180.0
     # LLM 网关地址（子项目 qed-engine 模式读取；api/local 模式忽略）
     qed_llm_gateway_url: str = "http://127.0.0.1:8900"
     # LLM 上游调用超时秒数（QED_LLM_TIMEOUT 可覆盖；REQ-061：原 60s 硬编码导致长生成 ReadTimeout）
     qed_llm_timeout: float = 300.0
+    # 本地模型适配层开关（ARCH-027-M3：能力表/response_format 注入/剥参数重试/运行时拉黑；
+    # false = 全部旁路回退现行为）
+    qed_llm_local_adapt: bool = True
     # 模型选择（空=未配置，实际生效值由厂商注册表兜底；embedding 保持推荐值，RAG 轮再解析）
     qed_model: str = ""
     qed_ocr_model: str = ""

@@ -5,13 +5,13 @@
  *   字号阶梯（五号～一号）+ 标题级差推导 + 字体角色 + 目录启发式，纯函数在 typography.ts
  * - 选中/hover 与左图 PageImagePane 双向联动；内容口径下选中块弹 BlockEditor（只改内容）
  */
-import { useEffect, useMemo, useRef } from 'react';
-import { Popover, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Popover, Tag, Typography } from 'antd';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { editKey } from '../../stores/parsing';
-import { blockText, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
+import { blockText, confirmInput, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
 import { assignRoles, roleTypography, symbolLineParts, tocItemParts, type TypographyPrefs } from './typography';
 import BlockEditor from './BlockEditor';
 
@@ -29,6 +29,8 @@ export interface BlockListProps {
   imageSize: { w: number; h: number } | null;
   /** 版式偏好（§9.1；仅版式模式消费，流式不受影响） */
   typography: TypographyPrefs;
+  /** 整页页图地址（8900 代理）：image 块按 bbox 内联裁切用（判据 S1 图片面）；null＝只出题注 */
+  pageImageUrl?: string | null;
   selectedIndex: number;
   editMode: boolean;
   submitting?: boolean;
@@ -37,9 +39,59 @@ export interface BlockListProps {
   onSubmit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
 }
 
-/** 块内容节点（流式/版式共用；formula=KaTeX、table=HTML、heading=级别标签） */
-function blockBody(block: Block, fontSizePx?: number): React.ReactNode {
+/**
+ * 块图＝整页页图按 bbox 内联裁切（判据 S1 图片面，用户裁决 2026-10-09）：
+ * 8900/8902 只暴露页图端点（块图 path 无 HTTP 路由），故用页图 + 百分比裁切，不改子项目。
+ * 裁切比例在页图 onLoad 量得自然尺寸后换算（未量出前先出整页预览占位）。
+ */
+function ImageCrop({ src, bbox }: { src: string; bbox: [number, number, number, number] }) {
+  const [x0, y0, x1, y1] = bbox;
+  const [page, setPage] = useState<{ w: number; h: number } | null>(null);
+  const bw = x1 - x0;
+  const bh = y1 - y0;
+  const boxStyle: React.CSSProperties = {
+    position: 'relative',
+    display: 'block',
+    width: '100%',
+    overflow: 'hidden',
+    border: '1px solid #f0f0f0',
+    borderRadius: 4,
+  };
+  if (page && bw > 0 && bh > 0) {
+    boxStyle.aspectRatio = `${bw / bh}`;
+  }
+  const imgStyle: React.CSSProperties = page && bw > 0 && bh > 0
+    ? {
+        position: 'absolute',
+        maxWidth: 'none',
+        width: `${(page.w / bw) * 100}%`,
+        height: `${(page.h / bh) * 100}%`,
+        left: `${(-x0 / bw) * 100}%`,
+        top: `${(-y0 / bh) * 100}%`,
+      }
+    : { width: '100%', opacity: 0.35 };
+  return (
+    <span data-testid="block-image-crop" style={boxStyle}>
+      <img
+        src={src}
+        alt="块图（页图裁切）"
+        loading="lazy"
+        style={imgStyle}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalWidth > 0) setPage({ w: img.naturalWidth, h: img.naturalHeight });
+        }}
+      />
+    </span>
+  );
+}
+
+/** 块内容节点（流式/版式共用；formula=KaTeX、table=HTML、heading=级别标签、image=页图裁切） */
+function blockBody(block: Block, fontSizePx?: number, pageImageUrl?: string | null): React.ReactNode {
   const content = blockText(block);
+  if (block.type === 'image' && pageImageUrl && hasBbox(block)) {
+    return <ImageCrop src={pageImageUrl} bbox={block.bbox as [number, number, number, number]} />;
+  }
   if (block.type === 'formula') {
     const body = unwrapMathDelimiters(content);
     const inline = fontSizePx !== undefined;
@@ -129,7 +181,7 @@ function SymbolRows({ block }: { block: Block }) {
 
 export default function BlockList(props: BlockListProps) {
   const {
-    bookId, pageNo, blocks, edits, renderMode, typography,
+    bookId, pageNo, blocks, edits, renderMode, typography, pageImageUrl,
     selectedIndex, editMode, submitting, onSelect, onHover, onSubmit,
   } = props;
 
@@ -141,6 +193,23 @@ export default function BlockList(props: BlockListProps) {
   }, [selectedIndex]);
 
   const keys = useMemo(() => blocks.map((_, i) => editKey(bookId, pageNo, i)), [blocks, bookId, pageNo]);
+
+  /** 单块「确认」= 落 verdict=ok（§4.6 解析修正）；已判定一致的块不再出钮 */
+  const confirmBtn = (idx: number, edit?: BlockEdit) => (
+    editMode && edit?.verdict !== 'ok' ? (
+      <Button
+        size="small"
+        type="link"
+        aria-label={`确认块 ${idx + 1}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          void onSubmit(idx, confirmInput(edit));
+        }}
+      >
+        确认
+      </Button>
+    ) : null
+  );
 
   /** 编辑模式 + 选中 → 弹 BlockEditor（流式/版式两分支共用；外层 div 承载 key） */
   const withEditor = (idx: number, el: React.ReactElement) => {
@@ -199,7 +268,8 @@ export default function BlockList(props: BlockListProps) {
             >
               {role === 'toc' ? <TocRows block={b} />
                 : role === 'symbolTable' ? <SymbolRows block={b} />
-                : blockBody(b, st.fontSizePx)}
+                : blockBody(b, st.fontSizePx, pageImageUrl)}
+              {confirmBtn(idx, edits[keys[idx]])}
             </div>
           ));
         })}
@@ -237,8 +307,9 @@ export default function BlockList(props: BlockListProps) {
               </Text>
               {!hasBbox(b) && <Tag style={{ marginInlineEnd: 0 }}>无坐标</Tag>}
               <EditTags edit={edit} />
+              {confirmBtn(idx, edit)}
             </div>
-            {blockBody(b)}
+            {blockBody(b, undefined, pageImageUrl)}
           </div>
         );
         return (

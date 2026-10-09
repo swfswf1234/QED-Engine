@@ -388,9 +388,9 @@ def test_slot_model_options_filtered_by_source_and_runtime():
 
 
 def test_local_text_identities_declare_lmstudio_params():
-    """text 本地两身份 lmstudio 参数：27B context=8192（R5 显存回落改判）、9B 16384；gpu=max。"""
+    """text 本地两身份 lmstudio 参数：27B context=8192（R5 显存回落改判）、9B 40960（DEFECT-008 实测定档）；gpu=max。"""
     assert registry.IDENTITIES["qwen3.8-27b"].params["lmstudio"] == {"context": 8192, "gpu": "max"}
-    assert registry.IDENTITIES["qwen3.5-9b"].params["lmstudio"] == {"context": 16384, "gpu": "max"}
+    assert registry.IDENTITIES["qwen3.5-9b"].params["lmstudio"] == {"context": 40960, "gpu": "max"}
 
 
 def test_identity_without_params_defaults_empty():
@@ -402,7 +402,7 @@ def test_identity_without_params_defaults_empty():
 def test_binding_params_follows_bound_runtime_and_identity(tmp_path):
     """binding_params：按生效绑定（runtime × 身份）返回参数组；manifest 覆盖生效。"""
     s = _settings(qed_api_select="local", qed_model="qwen3.5-9b")
-    assert registry.binding_params(s, "text", tmp_path) == {"context": 16384, "gpu": "max"}
+    assert registry.binding_params(s, "text", tmp_path) == {"context": 40960, "gpu": "max"}
     _write_manifest(tmp_path, "qwen", {"active": "qwen3.8-27b", "source": "local", "runtime": "lmstudio"})
     assert registry.binding_params(s, "text", tmp_path) == {"context": 8192, "gpu": "max"}
 
@@ -415,9 +415,9 @@ def test_binding_params_empty_for_api_only_and_unknown_binding(tmp_path):
 
 
 def test_text_identities_carry_llamacpp_params():
-    """llamacpp 参数：27B ctx=8192（R5 显存回落改判，双渠道同一显存约束）、9B 16384；ngl -1 + fa。"""
+    """llamacpp 参数：27B ctx=8192（R5 显存回落改判，双渠道同一显存约束）、9B 40960（同档）；ngl -1 + fa。"""
     assert registry.IDENTITIES["qwen3.8-27b"].params["llamacpp"]["ctx"] == 8192
-    assert registry.IDENTITIES["qwen3.5-9b"].params["llamacpp"]["ctx"] == 16384
+    assert registry.IDENTITIES["qwen3.5-9b"].params["llamacpp"]["ctx"] == 40960
     for name in ("qwen3.8-27b", "qwen3.5-9b"):
         lp = registry.IDENTITIES[name].params["llamacpp"]
         assert lp["ngl"] == -1 and lp["fa"] is True

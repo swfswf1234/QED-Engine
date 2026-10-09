@@ -22,6 +22,14 @@ from typing import Protocol
 
 from qed_engine.config import Settings
 
+# 本地健康探测与读回一律不经环境代理：Windows 环境/注册表代理会截走 127.0.0.1 请求，
+# 而 urllib 没有 loopback 自动 bypass（DEFECT-008 ①，与 monitor.py 探针 trust_env=False 同纪律）
+NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+# 子进程输出显式按 UTF-8 解码：脚本与 lms CLI 输出中文，跟随 Windows 本地编码（GBK）
+# 会让 reader 线程抛 UnicodeDecodeError 吞掉返回码（DEFECT-008 ⑤）
+CHILD_OUTPUT_ENCODING = "utf-8"
+
 ROOT = Path(__file__).resolve().parents[5]  # services/llm/runtimes/ → 仓库根
 
 # 生命周期脚本（v1 平移：脚本保留 CLI 入口，runtime 经 subprocess 调用）
@@ -53,7 +61,7 @@ class LocalRuntime(Protocol):
 def probe_http(url: str) -> bool:
     """HTTP 健康探测：200 即就绪；异常 False（v1 model_manager._probe_http 平移）。"""
     try:
-        with urllib.request.urlopen(url, timeout=1.0) as resp:
+        with NO_PROXY_OPENER.open(url, timeout=1.0) as resp:
             return resp.status == 200
     except (OSError, urllib.error.URLError):
         return False
@@ -71,6 +79,8 @@ def run_script(script: Path, command: str, script_runner: Callable | None = None
             [sys.executable, str(script), command, *extra_args],
             capture_output=True,
             text=True,
+            encoding=CHILD_OUTPUT_ENCODING,
+            errors="replace",
             timeout=600,
         )
         return result.returncode

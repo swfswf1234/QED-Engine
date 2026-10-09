@@ -1,0 +1,471 @@
+"""学习域（learn）存储服务基座：异常分层 + MySQL 三表幂等建表 + 三表 MySQL 存储。
+
+模块职责：定义学习域三表（qed_learn_course / qed_learn_unit / qed_learn_unit_progress）
+的存储契约与异常映射（NotFound→404、Conflict→409），并给出 MySQL 实现 `MySQLLearnStore`
+（接口与 `InMemoryLearnStore` 同形，懒挂载见 api/learn.py）；表结构与派生口径事实源＝
+学习设计轮主链壳「M-1/M-2 契约设计稿」节（实现收口后晋升 database-design.md 登记）。
+设计关联（DesignRef）：docs/architecture/database-design.md
+实现状态：Current
+关联测试：tests/test_learn.py
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+import pymysql
+
+CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS qed_learn_course (
+  learn_course_id VARCHAR(64) PRIMARY KEY COMMENT '学习课程 ID（服务端生成，≠共享表 qed_course）',
+  name VARCHAR(255) NOT NULL COMMENT '课程名',
+  domain_ref JSON COMMENT '领域坐标引用 {ref_id,label}（逻辑引用 qed_domain）',
+  course_ref JSON COMMENT '课程坐标引用 {ref_id,label}（逻辑引用 qed_course）',
+  direction VARCHAR(255) DEFAULT '' COMMENT '方向 label 快照（共享表无方向实体，仅存文本）',
+  resources JSON NOT NULL COMMENT '素材引用列表 [{kind,ref_id,label}]，kind 闭集 book/af_version/knowledge',
+  compile_status VARCHAR(16) COMMENT '编译作业态：NULL/proposed/running/completed/failed（D3：课程行自 carry）',
+  compile_done INT NOT NULL DEFAULT 0 COMMENT '已生成活动块数',
+  compile_total INT NOT NULL DEFAULT 0 COMMENT '活动块总数',
+  failure_count INT NOT NULL DEFAULT 0 COMMENT '本作业块级失败计数（熔断判据，M-2 接线）',
+  page_windows JSON COMMENT '人工页窗 [{start,end}]（propose 输入，不依赖检索）',
+  compile_fingerprint VARCHAR(64) COMMENT '上次编译的源指纹（drift 判定）',
+  instructions VARCHAR(4000) DEFAULT '' COMMENT '学习者通道（限长 4000）',
+  agent_notes VARCHAR(4000) DEFAULT '' COMMENT 'agent 通道（限长 4000）',
+  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
+  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='学习课程注册表（引用式，所有权 QED-Engine，主链壳 M-1 契约）';
+
+CREATE TABLE IF NOT EXISTS qed_learn_unit (
+  unit_id VARCHAR(64) PRIMARY KEY COMMENT '单元 ID（服务端生成）',
+  learn_course_id VARCHAR(64) NOT NULL COMMENT '所属学习课程（逻辑引用）',
+  parent_id VARCHAR(64) COMMENT '父节点（unit→section；section 为 NULL）',
+  level VARCHAR(16) NOT NULL COMMENT 'section=章节大纲节点 / unit=最小学习单元（块）',
+  title VARCHAR(500) NOT NULL COMMENT '标题',
+  sort_order INT NOT NULL DEFAULT 0 COMMENT '同级顺序',
+  confirmed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '人工确认位（两级确认：section 与 unit 各自）',
+  covered TINYINT(1) NOT NULL DEFAULT 0 COMMENT '学习者勾选位（agent/编译永不写）',
+  type VARCHAR(16) COMMENT 'unit 行：text/formula/figure/quiz/flashcard',
+  payload JSON COMMENT 'unit 行内容定义（quiz/flashcard 不含判分，判分归 M-3）',
+  source_ref JSON COMMENT 'unit 行溯源 {ref_id,page,block_index}（逻辑引用素材页块）',
+  gen_status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/generated/failed（断点续编位）',
+  active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '当前编译版本位（重编不抹历史，旧行置 0）',
+  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
+  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
+  KEY idx_learn_unit_course (learn_course_id, level, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='学习单元树（章节树+块序列合一，主链壳 M-1/M-2 契约）';
+
+CREATE TABLE IF NOT EXISTS qed_learn_unit_progress (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
+  unit_id VARCHAR(64) NOT NULL COMMENT '单元 ID（逻辑引用 qed_learn_unit）',
+  learn_course_id VARCHAR(64) NOT NULL COMMENT '冗余课程 ID（派生重算按课程聚合）',
+  status VARCHAR(16) NOT NULL COMMENT 'done/skipped（pending=无行，读时派生重算非累加）',
+  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
+  UNIQUE KEY uq_learn_progress_unit (unit_id),
+  KEY idx_learn_progress_course (learn_course_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='学习进度派生基（只记录终态事实，进度=读时重算，主链壳 M-1 契约）';
+"""
+
+
+class LearnNotFound(Exception):
+    """实体不存在 → 404。"""
+
+
+class LearnConflict(Exception):
+    """状态机非法转移 → 409。"""
+
+
+def ensure_tables(settings: Any) -> None:
+    """幂等建表（判例 qed_llm_calls）；数据库不可达由调用方降级。"""
+    from qed_engine.services.llm.call_log import _connect
+
+    conn = _connect(settings)
+    try:
+        with conn.cursor() as cursor:
+            for statement in CREATE_TABLE_SQL.split(";"):
+                sql = statement.strip()
+                if sql:
+                    cursor.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def fingerprint(windows: list[dict[str, int]], resources: list[dict[str, str]]) -> str:
+    """源指纹＝页窗+素材引用摘要（drift 判定输入，M-2 接线后并入 active_job_id）。"""
+    import hashlib
+
+    payload = json.dumps({"w": windows, "r": resources}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+_COURSE_JSON_COLUMNS = ("domain_ref", "course_ref", "resources", "page_windows")
+_UNIT_JSON_COLUMNS = ("payload", "source_ref")
+_COURSE_COLUMNS = (
+    "learn_course_id, name, domain_ref, course_ref, direction, resources, compile_status, "
+    "compile_done, compile_total, failure_count, page_windows, compile_fingerprint, "
+    "instructions, agent_notes, created_at, updated_at"
+)
+_UNIT_COLUMNS = (
+    "unit_id, learn_course_id, parent_id, level, title, sort_order, confirmed, covered, type, "
+    "payload, source_ref, gen_status, active, created_at, updated_at"
+)
+_COURSE_FIELDS = tuple(_COURSE_COLUMNS.replace(" ", "").split(","))
+_UNIT_FIELDS = tuple(_UNIT_COLUMNS.replace(" ", "").split(","))
+_COURSE_UPDATABLE = (
+    "name", "domain_ref", "course_ref", "direction", "resources", "compile_status", "compile_done",
+    "compile_total", "failure_count", "page_windows", "compile_fingerprint", "instructions",
+    "agent_notes",
+)
+_UNIT_UPDATABLE = ("title", "sort_order", "confirmed", "covered", "type", "payload", "gen_status", "active")
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def has_page_window(source_ref: Any) -> bool:
+    """节点已声明页窗（目录导入的块）＝编译不写占位正文，正文由解析产物按页窗渲染。"""
+    return bool(isinstance(source_ref, dict) and (source_ref.get("page_start") or source_ref.get("page_end")))
+
+
+def _to_json(value: Any) -> str | None:
+    return None if value is None else json.dumps(value, ensure_ascii=False)
+
+
+def _from_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
+
+
+def _row_to_course(row: dict[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    out = dict(row)
+    for column in _COURSE_JSON_COLUMNS:
+        if column in out:
+            out[column] = _from_json(out[column])
+    for column in ("created_at", "updated_at"):
+        if out.get(column) is not None:
+            out[column] = out[column].isoformat()
+    return out
+
+
+def _row_to_unit(row: dict[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    out = dict(row)
+    for column in _UNIT_JSON_COLUMNS:
+        if column in out:
+            out[column] = _from_json(out[column])
+    for column in ("confirmed", "covered", "active"):
+        if column in out:
+            out[column] = bool(out[column])
+    for column in ("created_at", "updated_at"):
+        if out.get(column) is not None:
+            out[column] = out[column].isoformat()
+    return out
+
+
+class MySQLLearnStore:
+    """学习域三表 MySQL 存储（qed_learn_course / _unit / _unit_progress）。
+
+    接口与 `InMemoryLearnStore` 同形（公开方法签名由契约测试守护）；派生进度读时重算、
+    课程行自 carry 编译作业态（D3）。
+    """
+
+    def __init__(self, settings: Any) -> None:
+        self._settings = settings
+
+    def _connect(self):
+        from qed_engine.services.llm.call_log import _connect
+
+        return _connect(self._settings)
+
+    # ---------- 课程 ----------
+
+    def create_course(self, *, name: str, resources: list[dict[str, str]], **fields: Any) -> dict[str, Any]:
+        course_id = f"lc-{uuid.uuid4().hex[:12]}"
+        stamp = _now()
+        row = {
+            "learn_course_id": course_id,
+            "name": name,
+            "domain_ref": fields.get("domain_ref"),
+            "course_ref": fields.get("course_ref"),
+            "direction": fields.get("direction", ""),
+            "resources": resources,
+            "compile_status": None,
+            "compile_done": 0,
+            "compile_total": 0,
+            "failure_count": 0,
+            "page_windows": fields.get("page_windows"),
+            "compile_fingerprint": None,
+            "instructions": fields.get("instructions", ""),
+            "agent_notes": fields.get("agent_notes", ""),
+            "created_at": stamp,
+            "updated_at": stamp,
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"INSERT INTO qed_learn_course ({_COURSE_COLUMNS}) VALUES "
+                    f"({', '.join(['%s'] * len(_COURSE_FIELDS))})",
+                    tuple(
+                        _to_json(row[column]) if column in _COURSE_JSON_COLUMNS else row[column]
+                        for column in _COURSE_FIELDS
+                    ),
+                )
+            conn.commit()
+        return _row_to_course(row)
+
+    def get_course(self, course_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    f"SELECT {_COURSE_COLUMNS} FROM qed_learn_course WHERE learn_course_id=%s",
+                    (course_id,),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise LearnNotFound(course_id)
+        return _row_to_course(row)
+
+    def list_courses(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(f"SELECT {_COURSE_COLUMNS} FROM qed_learn_course ORDER BY created_at")
+                rows = cursor.fetchall()
+        return [_row_to_course(row) for row in rows]
+
+    def update_course(self, course_id: str, **fields: Any) -> dict[str, Any]:
+        columns = [key for key in fields if key in _COURSE_UPDATABLE]
+        unknown = set(fields) - set(columns)
+        if unknown:
+            raise LearnConflict(f"课程字段不可写：{sorted(unknown)}")
+        self.get_course(course_id)
+        if columns:
+            assignments = ", ".join(f"{column}=%s" for column in columns)
+            params = [
+                _to_json(fields[column]) if column in _COURSE_JSON_COLUMNS else fields[column]
+                for column in columns
+            ]
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"UPDATE qed_learn_course SET {assignments}, updated_at=%s WHERE learn_course_id=%s",
+                        (*params, _now(), course_id),
+                    )
+                conn.commit()
+        return self.get_course(course_id)
+
+    def delete_course(self, course_id: str) -> None:
+        self.get_course(course_id)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM qed_learn_unit_progress WHERE learn_course_id=%s", (course_id,))
+                cursor.execute("DELETE FROM qed_learn_unit WHERE learn_course_id=%s", (course_id,))
+                cursor.execute("DELETE FROM qed_learn_course WHERE learn_course_id=%s", (course_id,))
+            conn.commit()
+
+    # ---------- 单元树 ----------
+
+    def replace_tree(self, course_id: str, nodes: list[dict[str, Any]]) -> None:
+        """整树草稿覆写：旧行连同进度一并清除（与内存实现同语义，重编换代归 M-2 版本位）。"""
+        self.get_course(course_id)
+        stamp = _now()
+        rows: list[tuple[Any, ...]] = []
+        seq = 0
+
+        def _collect(node: dict[str, Any], parent: str | None, level: str) -> None:
+            nonlocal seq
+            seq += 1
+            unit_id = f"lu-{uuid.uuid4().hex[:12]}"
+            rows.append(
+                (
+                    unit_id, course_id, parent, level, str(node["title"]),
+                    int(node.get("order", seq)), 1 if node.get("confirmed") else 0, 0,
+                    str(node.get("type") or "text"), _to_json(node.get("payload") or {}),
+                    _to_json(node["source_ref"]) if node.get("source_ref") else None,
+                    "pending", 1, stamp, stamp,
+                )
+            )
+            for child in node.get("children") or []:
+                # 深度守卫在路由层（≤3 级）：L1=section，L2/L3=unit（块）
+                _collect(child, unit_id, "unit")
+
+        for n in nodes:
+            _collect(n, None, "section")
+
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM qed_learn_unit_progress WHERE learn_course_id=%s", (course_id,))
+                cursor.execute("DELETE FROM qed_learn_unit WHERE learn_course_id=%s", (course_id,))
+                if rows:
+                    cursor.executemany(
+                        f"INSERT INTO qed_learn_unit ({_UNIT_COLUMNS}) VALUES ("
+                        + ", ".join(["%s"] * len(rows[0]))
+                        + ")",
+                        rows,
+                    )
+            conn.commit()
+
+    def get_unit(self, unit_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    f"SELECT {_UNIT_COLUMNS} FROM qed_learn_unit WHERE unit_id=%s", (unit_id,)
+                )
+                row = cursor.fetchone()
+        if row is None:
+            raise LearnNotFound(unit_id)
+        return _row_to_unit(row)
+
+    def patch_unit(self, unit_id: str, **fields: Any) -> dict[str, Any]:
+        if "order" in fields:
+            fields["sort_order"] = fields.pop("order")
+        columns = [key for key in _UNIT_UPDATABLE if key in fields]
+        unknown = set(fields) - set(columns)
+        if unknown:
+            raise LearnConflict(f"单元字段不可写：{sorted(unknown)}")
+        row = self.get_unit(unit_id)
+        if fields.get("covered") is True and not row["confirmed"]:
+            raise LearnConflict("未 confirmed 的单元不可勾选 covered")
+        if columns:
+            assignments = ", ".join(f"{column}=%s" for column in columns)
+            params = [
+                _to_json(fields[column]) if column in _UNIT_JSON_COLUMNS else fields[column]
+                for column in columns
+            ]
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"UPDATE qed_learn_unit SET {assignments}, updated_at=%s WHERE unit_id=%s",
+                        (*params, _now(), unit_id),
+                    )
+                conn.commit()
+        return self.get_unit(unit_id)
+
+    def list_units(self, course_id: str, level: str | None = None) -> list[dict[str, Any]]:
+        self.get_course(course_id)
+        sql = f"SELECT {_UNIT_COLUMNS} FROM qed_learn_unit WHERE learn_course_id=%s"
+        params: list[Any] = [course_id]
+        if level:
+            sql += " AND level=%s"
+            params.append(level)
+        sql += " ORDER BY sort_order"
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(sql, tuple(params))
+                rows = cursor.fetchall()
+        return [_row_to_unit(row) for row in rows]
+
+    def active_units(self, course_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    f"SELECT {_UNIT_COLUMNS} FROM qed_learn_unit "
+                    "WHERE learn_course_id=%s AND level='unit' AND active=1 ORDER BY sort_order",
+                    (course_id,),
+                )
+                rows = cursor.fetchall()
+        return [_row_to_unit(row) for row in rows]
+
+    # ---------- 编译作业（课程行自 carry，D3 裁决） ----------
+
+    def start_compile(self, course_id: str) -> dict[str, Any]:
+        course = self.get_course(course_id)
+        if course["compile_status"] == "running":
+            raise LearnConflict("已有编译在跑")
+        rows = self.list_units(course_id)
+        if not rows:
+            raise LearnConflict("两级确认未齐备（树为空）")
+        if not all(r["confirmed"] for r in rows):
+            raise LearnConflict("两级确认未齐备（存在未确认节点）")
+        self.update_course(course_id, compile_status="running", failure_count=0)
+        self._recount(course_id)
+        return self.get_course(course_id)
+
+    def finish_compile(self, course_id: str) -> None:
+        """M-1 骨架编译：活动 unit 行逐一置 generated，只补空位不覆写人工/目录已声明的承载位。"""
+        course = self.get_course(course_id)
+        ref_id = (course["resources"] or [{}])[0].get("ref_id")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                for row in self.active_units(course_id):
+                    source_ref = row["source_ref"] or {"ref_id": ref_id, "page": None, "block_index": None}
+                    payload = row["payload"] or {}
+                    if not has_page_window(source_ref) and not str(payload.get("text") or ""):
+                        payload = {"text": f"「{row['title']}」骨架正文（M-1 占位，M-2 接生成管线）"}
+                    cursor.execute(
+                        "UPDATE qed_learn_unit SET gen_status='generated', payload=%s, source_ref=%s, "
+                        "updated_at=%s WHERE unit_id=%s",
+                        (_to_json(payload), _to_json(source_ref), _now(), row["unit_id"]),
+                    )
+            conn.commit()
+        self._recount(course_id)
+        self.update_course(course_id, compile_status="completed")
+
+    def _recount(self, course_id: str) -> None:
+        rows = self.active_units(course_id)
+        self.update_course(
+            course_id,
+            compile_total=len(rows),
+            compile_done=sum(1 for r in rows if r["gen_status"] == "generated"),
+        )
+
+    # ---------- 进度派生基 ----------
+
+    def set_progress(self, course_id: str, unit_id: str, status: str) -> dict[str, Any]:
+        row = self.get_unit(unit_id)
+        if row["learn_course_id"] != course_id:
+            raise LearnNotFound(unit_id)
+        if row["level"] != "unit":
+            raise LearnConflict("进度只可打在 unit（块）行上")
+        stamp = _now()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO qed_learn_unit_progress (unit_id, learn_course_id, status, updated_at) "
+                    "VALUES (%s, %s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE status=VALUES(status), updated_at=VALUES(updated_at)",
+                    (unit_id, course_id, status, stamp),
+                )
+            conn.commit()
+        return {"unit_id": unit_id, "learn_course_id": course_id, "status": status, "updated_at": stamp.isoformat()}
+
+    def derived_progress(self, course_id: str) -> dict[str, Any]:
+        rows = self.active_units(course_id)
+        total = len(rows)
+        statuses: dict[str, str] = {}
+        if rows:
+            placeholders = ", ".join(["%s"] * total)
+            with self._connect() as conn:
+                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                    cursor.execute(
+                        "SELECT unit_id, status FROM qed_learn_unit_progress "
+                        f"WHERE unit_id IN ({placeholders})",
+                        tuple(r["unit_id"] for r in rows),
+                    )
+                    statuses = {row["unit_id"]: row["status"] for row in cursor.fetchall()}
+        done = sum(1 for r in rows if statuses.get(r["unit_id"]) == "done")
+        skipped = sum(1 for r in rows if statuses.get(r["unit_id"]) == "skipped")
+        current = next(
+            (r["unit_id"] for r in rows if statuses.get(r["unit_id"]) not in ("done", "skipped")), None
+        )
+        return {
+            "total": total,
+            "done": done,
+            "skipped": skipped,
+            "percent": round(100.0 * done / total, 1) if total else 0.0,
+            "current_unit_id": current,
+            "completed": total > 0 and done + skipped == total,
+        }

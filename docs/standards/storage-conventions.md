@@ -1,11 +1,12 @@
 # 临时目录与数据存储规范
 
 状态：Current
-最后更新：2026-09-24
+最后更新：2026-09-29
 确认状态：已确认
-治理对象：统一数据根、顶层白名单、raw/tmp/parsed 三区规则、元数据 JSON 岛禁止、临时目录生命周期、原子落盘、测试隔离与 Agent 工作临时目录
+治理对象：统一数据根、顶层白名单、raw/tmp/parsed 三区规则、元数据 JSON 岛禁止、临时目录生命周期、原子落盘、测试隔离与 Agent 工作临时目录、仓库根运行时产物落点与备份面
 依据 ADR：`docs/adr/0013-dev-standards-system.md`、
-`docs/adr/0018-data-root-whitelist-and-meta-json-ban.md`
+`docs/adr/0018-data-root-whitelist-and-meta-json-ban.md`、
+`docs/adr/0019-runtime-artifact-placement-and-no-long-term-backups.md`
 关联测试：`tests/contract/test_storage_conventions_governance.py`
 
 ## 目的与边界
@@ -50,6 +51,37 @@
 - **用户资产不进 tmp**：长期参考材料归 `raw/<domain>/_general/` 或数据根之外；唯一例外是
   `tmp/exploration/`（用户手工维护的探索发起文档，不参与自动清理）。
 
+### 仓库根运行时产物与备份面（ADR 0019）
+
+治理对象是**仓库根**的运行面（`logs/`、`tmp/`、`scripts/`、备份位），与上面数据根
+`dataset/` 三区互不混用：日志不属共享数据面，因此**不并入数据根顶层白名单**。
+
+- **落点唯一**：运行日志只写 `<仓库根>/logs/`；一次性与临时产物只写 `<仓库根>/tmp/`
+  （整目录随时可清，不承诺保留）；状态文件（pid / mode）随其服务日志目录。其它位置
+  （`scripts/`、`backend/`、仓库根散落）出现 `*.log`、`*.pid`、快照 dump 即判违规，
+  发现即清并登记处置。
+- **长期日志清单**（白名单式，清单外视为遗留可整批删）：
+
+  <!-- long-term-runtime-artifacts:start -->
+  - `logs/config.log` —— 8900 自身日志（uvicorn stderr 并入 + 监督器事件账 + 掉线诊断包）
+  - `logs/qed-engine-serve.log` —— 8900 生命周期脚本产物
+  - `logs/qed-web-serve.log` —— 8903 静态服务生命周期脚本产物
+  - `logs/qed-engine.pid` —— 8900 状态文件（随其服务日志目录，非日志）
+  - `logs/qed-web.pid` —— 8903 状态文件（随其服务日志目录，非日志）
+  <!-- long-term-runtime-artifacts:end -->
+
+  子项目服务日志归各自仓库 `logs/`（`QED-Tracker/logs/`、`Axiom-Flow/logs/`），根侧不复制、
+  不镜像、不在根 `logs/` 留副本。
+- **读取按实际写入点**：8900 的 `/logs/{service}` 与 `/services` 响应 `log_path` 必须解析到
+  该单元**实际写入**的文件（生命周期脚本落点，由 spec 的 workdir 派生），不得按
+  `logs/<log_name>.log` 猜测命名；服务未启动而文件缺失时按空态返回，不报错。
+- **备份不留长期**：备份只为一次 D 类数据操作的回滚窗口存在，操作验收通过即清；快照落点
+  唯一＝数据根 `dataset/backups/YYYY-MM-DD-<任务标识>`（ADR 0018 例外区，命名与台账约束不变）。
+  **仓库内不设备份位**（根 `backups/` 与 `backend/database/backups/` 已退役）；长期可追溯由
+  台账（completed.md 与计划壳收口记录）承载，不靠物理 dump。
+- **`scripts/` 只留必要面**：仅存放被 docs / tests / code-map 引用的必要脚本；一次性诊断脚本
+  与其输出落 `tmp/` 用后即清；构建缓存（`__pycache__/`）不属项目资产，随时可清。
+
 ### raw 与元数据
 
 - `raw/` 内文件不可变；改名或删除必须登记（DB `qt_books` 更新）。
@@ -75,9 +107,16 @@
   `tests/contract/test_storage_conventions_governance.py` 守护。
 - 目录结构变更同步[dataset 目录约定](../design/dataset-conventions.md)。
 - 测试隔离由[测试架构与门禁](testing.md)与各仓库测试守护。
+- 仓库根运行时产物（ADR 0019）的守护：标准正文承载长期日志清单、备份面退役与 `scripts/`
+  必要面规则，且全仓 `*.log` / `*.pid` / 快照 dump 只允许出现在 `logs/`、`tmp/` 与数据根
+  白名单区内，由 `tests/contract/test_storage_conventions_governance.py` 断言；8900 日志
+  读取按实际写入点解析由 `tests/test_log_viewer.py`、`tests/test_api.py` 守护。
 
 ## 变更与取代
 
 改变数据根变量、三区语义、顶层白名单、JSON 岛例外清单、tmp 生命周期、原子落盘、测试隔离
 或 Agent 临时目录约定时，先按 [ADR 治理规范](adr-governance.md)新增 ADR；措辞与链接勘误
 可直接修改。
+
+改变仓库根运行时产物落点、长期日志清单、8900 日志读取口径、备份面（是否保留备份、快照
+落点）或 `scripts/` 必要面判据时，同样先新增 ADR（ADR 0019 为其现行决定）。

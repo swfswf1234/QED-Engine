@@ -3,6 +3,7 @@
  * - 分节标题「本地模型列表」居中；文字模型在左、图像模型在右两栏（slot-column 顺序断言）
  * - 每栏顺序＝槽位名 → 模型名称（slot.model 非空即显示，不限已加载）→ 状态徽章；固定列宽
  * - 三态判据不变（四改）：ready→已加载；api/degraded→未加载；down/无数据→未启动
+ * - W7 第四态：health_state=starting →「启动中」（先于 ready 判定）
  * - 四改旧形态退役：「本地模型服务」标题、上下两行布局不再出现
  */
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -51,6 +52,13 @@ describe('slotModelState（三态判据，四改口径不变）', () => {
 
   it('ready=true（local）→ 已加载', () => {
     expect(slotModelState(slot({ slot: 'text', source: 'local', ready: true, health_state: 'ready' }))).toBe('已加载');
+  });
+
+  it('W7 启动宽限：health_state=starting → 启动中（先于 ready 判定，冷启动期实时探针可能先绿）', () => {
+    expect(slotModelState(slot({ slot: 'text', source: 'local', health_state: 'starting' }))).toBe('启动中');
+    expect(slotModelState(slot({ slot: 'text', source: 'local', ready: true, health_state: 'starting' }))).toBe('启动中');
+    // api 来源不参与宽限（启停 409），仍按 api 口径未加载
+    expect(slotModelState(slot({ slot: 'text', source: 'api', health_state: 'starting' }))).toBe('未加载');
   });
 });
 
@@ -124,5 +132,17 @@ describe('仪表盘块一「本地模型列表」分节（五改 F1）', () => {
     expect(screen.getAllByText('未加载')).toHaveLength(2);
     expect(screen.queryByText('容器内 GPU 不可见')).not.toBeInTheDocument();
     expect(screen.queryByText(/显存/)).not.toBeInTheDocument();
+  });
+
+  it('W7 starting → 徽章「启动中」（processing 蓝），不显示掉线红', () => {
+    seed({
+      text: slot({ slot: 'text', source: 'local', model: 'qwen3-32b', health_state: 'starting', health_reason: '启动派发宽限中（不判掉线）' }),
+      vision: slot({ slot: 'vision', source: 'local', health_state: 'down' }),
+    });
+    const { container } = renderSection();
+    const textCol = columns(container)[0];
+    expect(textCol.textContent).toBe('文字模型qwen3-32b启动中');
+    expect(textCol.querySelector('.ant-tag')).toHaveClass('ant-tag-processing');
+    expect(columns(container)[1].textContent).toBe('图像模型未启动');
   });
 });

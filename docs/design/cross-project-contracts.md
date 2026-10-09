@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-26
+最后更新：2026-09-30
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -87,7 +87,8 @@ QED-Tracker（建表维护），其他项目**只读不写**；共享表不复�
   | --- | --- | --- |
   | 领域/课程体系 | `qed_*` 共享表只读 + 领域维护与探索状态迁移（确认/重探/导入为异步语义） | Tracker `api.md`；`api-contracts.md` §③「领域与课程体系」「领域探索五态门面」 |
   | 教程与书库 | 教程两态 `draft→confirmed`（QED-031）；书籍五层语义＝选用态/持有态/下载生命周期（QED-050-D/060，非法迁移 409）；渠道 sources 一次尝试一条、`ok` 表成败 | Tracker `api.md`；`api-contracts.md` §③「教程」「书籍」 |
-  | 搜索与目录 | 教材/论文候选搜索（非主线）；内置 JSON 课程目录 catalogs | Tracker `api.md`；`api-contracts.md` §③「目录与任务」 |
+  | 搜索与目录 | 教材候选搜索（非主线）；内置 JSON 课程目录 catalogs | Tracker `api.md`；`api-contracts.md` §③「目录与任务」 |
+  | 论文发现（领域 scope） | 探索**仅由领域发起**（recommend，recipe `frontier`\|`core`，202 任务）；selections 报告评审 → 显式 pick **落位可选领域或该领域下课程** → 书本化 `qt_books` kind=paper（标识=arXiv ID，复用书籍五层态）；物理落位维持 `_general/papers/`、课程=逻辑分组；**论文无默认桶**——落位 `domain_id` 必填且须为 `qed_domain` 已登记领域，缺失/不存在由 8901 拒绝、8900 原样透传（8900 不补默认值）；链路事实源 [downloads-flow §7](downloads-flow.md) | Tracker `api.md`；`api-contracts.md` §③「规划契约·论文面」 |
   | 后台任务 | 提交立即返回 `task_id`，轮询取状态与结果 | Tracker `api.md`；本节「写操作=后台任务」 |
   | 探索评估 | prompt-explores dry-run 同步、不落库 | Tracker `api.md` |
 

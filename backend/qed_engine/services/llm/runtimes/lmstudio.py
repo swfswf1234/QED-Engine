@@ -25,7 +25,12 @@ import urllib.request
 from collections.abc import Callable
 
 from qed_engine.config import Settings
-from qed_engine.services.llm.runtimes.base import RuntimeResult, probe_http
+from qed_engine.services.llm.runtimes.base import (
+    CHILD_OUTPUT_ENCODING,
+    NO_PROXY_OPENER,
+    RuntimeResult,
+    probe_http,
+)
 
 # REST API v0 探活端点（W7 本机实测：仅 models 可用；load/unload 不存在于本机版本）
 MODELS_PATH = "/api/v0/models"
@@ -59,10 +64,14 @@ def _auth_headers(token: str = "") -> dict:
 
 
 def _get_json(url: str, timeout: float = 2.0, token: str = "") -> dict | None:
-    """GET JSON；任何异常返回 None（调用方视为服务不可达）。"""
+    """GET JSON；任何异常返回 None（调用方视为服务不可达）。
+
+    经 NO_PROXY_OPENER：LM Studio 是本机回环端口，环境代理一旦生效会把请求截走并
+    伪装成不可达（DEFECT-008 ①）。
+    """
     req = urllib.request.Request(url, headers=_auth_headers(token))
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with NO_PROXY_OPENER.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (OSError, ValueError, urllib.error.URLError):
         return None
@@ -72,12 +81,15 @@ def _run_lms(args: list[str], timeout: float = 600.0) -> int:
     """执行 lms CLI 子命令；CLI 不在 PATH 返回 127。
 
     默认超时 600s：`lms load` 大模型（27B Q3_K_XL ≈15GB）加载耗时以分钟计。
+    输出按 UTF-8 解码（DEFECT-008 ⑤）：lms 回中文提示，按 Windows 本地编码解码会在
+    reader 线程抛 UnicodeDecodeError，返回码被吞成异常而看不出失败原因。
     """
     if shutil.which("lms") is None:
         return 127
     try:
         result = subprocess.run(
-            ["lms", *args], capture_output=True, text=True, timeout=timeout,
+            ["lms", *args], capture_output=True, text=True,
+            encoding=CHILD_OUTPUT_ENCODING, errors="replace", timeout=timeout,
         )
         return result.returncode
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):

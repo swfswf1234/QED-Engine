@@ -617,3 +617,54 @@ def test_monitor_slot_unknown_404(monkeypatch):
     client = _client(monkeypatch)
     resp = client.get("/api/v1/monitor/bogus")
     assert resp.status_code == 404
+
+def _drain_model_ops():
+    """等后台派发线程清完槽位 in-flight 标记（防泄漏到下一用例）。"""
+    from qed_engine.api import control as c
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        with c._MODEL_OP_LOCK:
+            if not c._MODEL_OP_INFLIGHT:
+                return
+        time.sleep(0.01)
+    raise AssertionError("槽位 in-flight 标记未清理")
+
+
+def test_models_start_dispatch_passes_log(monkeypatch, caplog):
+    """② 派发线程给 operate_model 带 log：启停失败原因进 8900 日志而非静默丢弃。"""
+    import logging
+
+    from qed_engine.services.llm import model_manager as mm
+
+    monkeypatch.setenv("QED_API_SELECT", "local")
+    captured = {}
+
+    def fake(name, op, settings, **kw):
+        captured["log"] = kw.get("log")
+        if callable(captured["log"]):
+            captured["log"]("start 槽位 text 失败：LM Studio 加载模型失败")
+
+    monkeypatch.setattr(mm, "operate_model", fake)
+    client = _client(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="qed_engine.llm"):
+        assert client.post("/api/v1/models/text/start").status_code == 200
+        _drain_model_ops()
+    assert callable(captured.get("log")), "派发未传 log：失败原因落入 _noop_log 即静默"
+    assert "LM Studio 加载模型失败" in caplog.text
+
+
+def test_llm_test_text_caps_max_tokens(monkeypatch):
+    """③ 文字验证调用带请求层限长：思考模型的 reasoning token 不再拖爆验证窗口。"""
+    from qed_engine.api import control
+
+    seen = {}
+
+    def fake(settings, **kw):
+        seen.update(kw)
+        return {"reply": "OK", "call_id": 1, "success": True, "error": ""}
+
+    monkeypatch.setattr(control, "gateway_call_text", fake)
+    client = _client(monkeypatch)
+    assert client.post("/api/v1/llm/test/text").status_code == 200
+    assert isinstance(seen.get("max_tokens"), int) and 0 < seen["max_tokens"] <= 512

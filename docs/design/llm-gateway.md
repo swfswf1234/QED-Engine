@@ -2,10 +2,10 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-21
+最后更新：2026-09-28
 确认状态：已确认
-关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/registry.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/call_log.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，`model_manager.py` 与本地模型生命周期操作归 [local-model-management.md](local-model-management.md)，本设计只在正文引用）
-关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_registry.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_qwen_service.py`、`tests/test_qed_mineru_service.py`
+关联代码：`backend/qed_engine/services/llm/gateway.py`、`backend/qed_engine/services/llm/registry.py`、`backend/qed_engine/services/llm/clients.py`、`backend/qed_engine/services/llm/call_log.py`、`backend/qed_engine/services/llm/local_adapt.py`、`scripts/qed_engine_service.py`、`scripts/text-model/`、`scripts/image-model/`、根 `.env.example`（`config.py`/`monitor.py`/`control.py` 的改动另归其主设计文档，`model_manager.py` 与本地模型生命周期操作归 [local-model-management.md](local-model-management.md)，本设计只在正文引用）
+关联测试：`tests/test_llm_gateway.py`、`tests/test_llm_local_adapt.py`、`tests/test_llm_registry.py`、`tests/test_llm_clients.py`、`tests/test_llm_model_manager.py`、`tests/test_llm_call_log.py`、`tests/test_llm_endpoints.py`、`tests/test_qed_engine_service.py`、`tests/test_qed_qwen_service.py`、`tests/test_qed_mineru_service.py`
 关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
 关联计划：[PLAN-046](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（定档来源）
 
@@ -238,6 +238,7 @@ backend/qed_engine/services/llm/
 ├── registry.py         # 身份目录 + 槽位解析（唯一事实源，见上节）
 ├── runtimes/           # runtime 同化适配器（lmstudio/llamacpp/docker，见 local-model-management.md）
 ├── model_manager.py    # 槽位生命周期编排 + 单活互斥（QED_RESOURCE_GUARD）
+├── local_adapt.py      # 本地模型适配层（M3：能力表/JSON 容错/清洗，见下节）
 ├── call_log.py         # qed_llm_calls 写入与查询
 └── clients.py          # api 引用地址解析（原厂商注册表 PROVIDERS）+ qwen(OpenAI 兼容) / mineru / embeddings HTTP 客户端
 ```
@@ -246,10 +247,10 @@ backend/qed_engine/services/llm/
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按**槽位来源**路由（api：注册表解析身份 api 引用，按 `QED_API_PROVIDER` 选厂商；local：槽位渠道所选 runtime）；记录调用；`{reply, call_id}`。`max_tokens` 非 None 时透传上游写入请求体，不静默丢弃 |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 按**槽位来源**路由（api：注册表解析身份 api 引用，按 `QED_API_PROVIDER` 选厂商；local：槽位渠道所选 runtime）；记录调用；`{reply, call_id}`。`max_tokens` 非 None 时透传上游写入请求体，不静默丢弃。**`response_format` 不对外暴露**（用户裁决 2026-09-29，v1 端点面不加此参数）：JSON 模式仅为网关内部 `call_text` 参数，供 M-2 编译管线与 M2 出题管线调用，按「本地模型适配层」节注入 |
 | `POST /llm/vision` | 图像模型调用：`{image_url 或 base64, prompt?, prompt_template?, max_tokens?}` → 按**槽位来源**路由（api：注册表解析身份 api 引用，qwen-vl / glm-vl；local：MinerU PDF 解析，deepseek 无视觉）；记录调用；`{reply, call_id}`。`max_tokens` 语义同 text |
 | `POST /llm/embedding` | 向量调用：`{input: [str], }` → 按模式路由（api：text-embedding-v4；local：槽位无本地候选报明确错误）；记录调用（response 记维度摘要，不存向量本体）；`{embeddings, model, call_id}` |
-| `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
+| `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因。**请求层限长** `LLM_TEST_MAX_TOKENS=512`（api/local 两渠道一致）：思考模型连通性验证必须让 reasoning 段跑完才出正文，上限不决定耗时（生成完即 stop），512 覆盖实测 reasoning 170~260+ token 并留余量 |
 | `POST /llm/test/vision` | 图像模型测试：健康探测 + 最小识别调用，成功/失败 + 原因 |
 | `POST /llm/test/embedding` | 向量模型测试：最小 embedding 调用，成功/失败 + 原因 |
 | `GET /llm/calls` | 调用记录检索：`service / mode / model / status / start / end / task / step / prompt_template / review_status / page / size`，分页返回 |
@@ -300,6 +301,52 @@ backend/qed_engine/services/llm/
   `llm_client.py` 自写（`service` 标识自身）。
 - **prompt/response 调优用途**：记录完整提问与回答（响应体过大的可截断，策略实现时定），
   支撑后续 prompt 模板与工具调用调优。
+
+## 本地模型适配层（`services/llm/local_adapt.py`，ARCH-027-M3 A-1/A-3/A-4/A-5）
+
+本地后端（LM Studio / llama.cpp / Ollama 级）对工具调用、结构化输出与长推理的支持
+不一，网关在 local 渠道上按下述约定降级；**全局开关** `QED_LLM_LOCAL_ADAPT`（默认 true）
+置 false 时能力表、注入、重试与拉黑全部旁路，行为回退本节之前的现状。作用面＝**网关内部
+`call_text` 参数**，HTTP 端点 `/llm/text` 不暴露 `response_format`（用户裁决 2026-09-29）；
+文本工具协议（A-2）连同其依赖项整块后置（同批裁决），首批只覆盖结构化 JSON 调用口径。
+
+- **A-1 能力表**（`capabilities_for(channel, provider)`）：
+  - local 渠道一律 `supports_tools=False`（禁原生 tool calling；文本工具协议归 A-2，已后置）；
+    `supports_json_mode` 取 **三态**：local 为 `None`（未知，乐观尝试一次、被拒即拉黑），
+    api 按端点表给 `True/False`（当前 dashscope 兼容模式工具与 JSON 模式均支持）。
+    本批为硬编码表 + 运行时拉黑；探测兜底（启动时探 工具/JSON 能力）随 A-2 后置。
+  - local 身份的 scratchpad 标签集 = `("think",)`（A-4 清洗与 A-5 饥饿判定共用）。
+- **A-3 response_format 契约**（`gateway.call_text(..., response_format="json")`，仅内部调用面）：
+  - local 渠道：`json_mode_allowed()` 通过（能力表非「确认不支持」且未被拉黑）时向请求体
+    注入 `{"type": "json_object"}`；上游抛 `JsonModeUnsupported` 则**剥参数单次重试**并
+    `blacklist(provider, model)`（进程态，重启清零），此后该身份不再注入。
+  - api 渠道：**报错**「api 渠道暂不经网关注入 response_format」（首批口径：不静默丢弃，
+    云端 JSON 模式行为不在本批范围）；开关关闭态同样不注入、不重试、不拉黑。
+  - 开关关闭时 `clients.qwen_chat` 仍接收 `response_format` 参数但网关恒传 None（与现行为等价）。
+- **A-3 JSON 容错三件套 + 一次 repair**（`parse_json_reply(text, repair=None)`，供 M-2 编译器 /
+  M2 出题管线消费，纯函数不改网关返回形态）：先 A-4 清洗，再依次尝试
+  **① 直接解析**→**② 围栏抽取**（```json 围栏内容）→**③ 最外层切片**（引号感知的
+  括号匹配，容忍尾逗号与裸控制字符的宽松解析）；全部失败时若有 `repair` 回调则做
+  **一次**修复重解（回调由调用方注入，A-5 轮接模型修复调用）；仍失败抛
+  `JsonParseError`（`raw` 保留原文供记录与二次修复）。未闭合标签会吃掉尾部正文，
+  此时回退原文交给②③ 处理。
+- **A-4 thinking/scratchpad 清洗**（`scrub_thinking`）：割除成对标签段、未闭合标签到文末、
+  残缺开头/闭合标签残留；`is_reasoning_starved(reply, reasoning)` 判预算饥饿——正文非空但
+  清洗后为空，**或正文为空而思考段落在 `reasoning_content` 独立字段**（两种形状同口径）。
+- **A-5 截断响应判定与饥饿降档重试**（`classify_reply(content, finish_reason, reasoning)` →
+  不可用原因标签，空串＝可作结构化输入）：`clients` 的文字调用返回 `ChatReply`（str 本体＝
+  正文，另携带 `finish_reason` 与 `reasoning_content`），网关在记 success 之前先过判定——
+  **`finish_reason=length` 的响应（正文空或截半）与空正文一律 `success=false`、记 `status=error`，
+  错误文案携带截断判据**；该判定不受 `QED_LLM_LOCAL_ADAPT` 旁路（正确性修复，api 渠道同样适用）。
+  判定为**正文饥饿**且开关开启时，local 渠道按 `reasoning_effort="none"` **降档重试一次**，
+  仍不可用即报错；截断正文（非空）不追发调用，避免二次长耗时空耗。降档取 `none` 而非 `low`：
+  真机 A/B（2026-10-07，`qwen/qwen3.5-9b`）证 `low` 档思考段不缩（reasoning 3431 字，仍
+  `finish_reason=length` 空正文），`none` 才直出正文（`finish_reason=stop`）。`reasoning` /
+  `finish_reason` 只在网关内部返回面携带，`/llm/text` 对外响应字段不扩（与 `response_format`
+  同族的最小面口径）。
+
+隔离与回归：适配层首批规则层纯单测（`tests/test_llm_local_adapt.py`，假 client / 无网络）；
+拉黑清单为进程态，`clear_blacklist()` 供测试与运维复位。
 
 ## 前端控制台（8903，根仓库实现）
 

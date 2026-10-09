@@ -13,6 +13,7 @@ import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useDownloadsStore } from '../stores/downloads';
 import { useExploreUiStore } from '../stores/explore';
+import { usePaperExploreStore } from '../stores/paperExplore';
 import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from '../stores';
 
 function course(courseId: string, name: string, overrides?: Partial<DomainSystem['courses'][0]>) {
@@ -148,13 +149,14 @@ describe('树节点探索入口与状态色 v2', () => {
     });
   });
 
-  it('树底「添加领域」打开纯表单弹窗（只采集名称+描述，无阶段字段；不置探索流目标）', async () => {
+  it('树底「添加领域」打开纯表单弹窗（学习阶段字段保留并带四档默认值；不置探索流目标）', async () => {
     seed([], []);
     renderTree();
     fireEvent.click(screen.getByRole('button', { name: '添加领域' }));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    // 2026-08-24 用户裁决：领域表单去阶段（stages 由探索流产生）
-    expect(screen.queryByText('阶段（逗号分隔，可选）')).toBeNull();
+    const dialog = await screen.findByRole('dialog');
+    // 改判 2026-08-24「领域表单去阶段」裁决（2026-09-30 用户裁决，downloads-ui.md §3.1）：
+    // 阶段字段回归表单、默认值即 QED-Tracker 四档阶段常量，字段口径断言见 DownloadsTree.domainForm.test.tsx
+    expect(dialog.textContent).toContain('学习阶段');
     expect(useExploreUiStore.getState().flowTarget).toBeNull();
   });
 
@@ -195,5 +197,40 @@ describe('树节点探索入口与状态色 v2', () => {
     const addBtn = items.find((el) => el.textContent === '添加课程');
     expect(addBtn).toBeDefined();
     expect(addBtn!).toHaveAttribute('aria-disabled', 'true');
+  });
+});
+
+describe('领域右键「论文探索」入口（REQ-102 W4，§3/§4.4）', () => {
+  beforeEach(() => {
+    usePaperExploreStore.getState().reset();
+  });
+
+  it('菜单含论文探索项，点击打开该领域管理弹窗', async () => {
+    seed(domainFixture([course('01_math_analysis', '数学分析')]), []);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    await screen.findByText('编辑领域知识');
+    fireEvent.click(screen.getByText('论文探索'));
+    await waitFor(() => expect(usePaperExploreStore.getState().modalOpen).toBe(true));
+    expect(usePaperExploreStore.getState().domainId).toBe('dm1');
+    expect(usePaperExploreStore.getState().domainName).toBe('高等数学');
+  });
+
+  it('不受 exploration_stage 门禁：课程知识确认态（待确认）仍可用', async () => {
+    seed([{ ...domainFixture([])[0], exploration_stage: '待确认' }] as DomainSystem[], []);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    await screen.findByText('编辑领域知识');
+    const item = screen.getByText('论文探索').closest('li');
+    expect(item).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('该领域有在跑论文任务时禁用（§4.4 唯一禁用条件）', async () => {
+    usePaperExploreStore.setState({ badges: { dm1: { key: 'running', text: '探索中' } } });
+    seed(domainFixture([]), []);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    await screen.findByText('编辑领域知识');
+    expect(screen.getByText('论文探索').closest('li')).toHaveAttribute('aria-disabled', 'true');
   });
 });

@@ -46,10 +46,16 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     expect(container.querySelector('h2')?.textContent).toBe('模型调用记录');
   });
 
-  it('#/knowledge 渲染学习中心知识结构浏览', () => {
+  it('#/knowledge 渲染知识梳理星图', () => {
     window.location.hash = '#/knowledge';
     const { container } = renderApp();
-    expect(container.querySelector('h2')?.textContent).toBe('学习中心 · 知识结构浏览');
+    expect(container.querySelector('h2')?.textContent).toContain('学习中心 · 知识梳理星图');
+  });
+
+  it('#/knowledge/c/{courseId} 渲染课程知识点梳理', () => {
+    window.location.hash = '#/knowledge/c/01_math_analysis';
+    const { container } = renderApp();
+    expect(container.querySelector('h3')?.textContent).toContain('知识点梳理');
   });
 
   it('主界面「知识探索」卡跳转 #/knowledge', async () => {
@@ -57,6 +63,6 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     const user = userEvent.setup();
     renderApp();
     await user.click(screen.getByText('知识探索'));
-    expect(await screen.findByRole('heading', { name: '学习中心 · 知识结构浏览' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /学习中心 · 知识梳理星图/ })).toBeInTheDocument();
   });
 });

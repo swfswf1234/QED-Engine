@@ -40,6 +40,8 @@
    的 `plans/` 壳、其他事实源文档（`standards/`、`design/`、`architecture/`、`guides/`）或台账文档。
    无链接即红；链接目标不存在亦红。守护：
    `test_tracker_governance.py::test_todo_task_rows_carry_a_document_anchor`（G5）。
+   （勘误：2026-10-01 本条「任务」列已随 [ADR 0023](0023-todo-row-carries-scope-and-criteria.md)
+   更名为「任务描述」列，锚义务与 G5 守护语义不变。）
 4. **锚与镜像的分工**（不破坏既有不变量）：一个壳仍只由一行镜像（整格＝plans 链接）；其余条目行用
    **行内链接**取锚，行内链接不参与镜像校验。因此「多条目共一承载壳」的合法形态＝承载壳的镜像行
    一条 + 各条目行的行内链接，而非多行同时冒充镜像行。

@@ -3,9 +3,9 @@
  * 重排流入纸面（非绝对定位复刻）、字号阶梯与字族、目录拆分、页眉页脚默认隐藏、文字不截断。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import BlockList from './BlockList';
-import type { Block } from '../../api/axiom';
+import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { DEFAULT_TYPOGRAPHY, levelPx, type TypographyPrefs } from './typography';
 
 const mk = (type: string, extra: Partial<Block> = {}): Block => ({
@@ -200,5 +200,96 @@ describe('W7 节题类标题/目录拆行/符号表三列/空块跳过/换行保
     renderW7({}, 'stream');
     const sSpan = [...document.querySelectorAll('span')].find((s) => s.style.whiteSpace === 'pre-wrap' && s.textContent?.includes('第一行正文'));
     expect(sSpan).toBeTruthy();
+  });
+});
+
+/** W8 单块确认（解析修正口径：确认=落 verdict=ok，保留既有修正字段） */
+describe('单块确认按钮（REQ-098 W8）', () => {
+  const mkEdit = (i: number, verdict: 'ok' | 'bad', extra: Partial<BlockEdit> = {}): BlockEdit => ({
+    edit_id: `e${i}`, book_id: 'b', page_no: 1, block_index: i, block_type: 'paragraph',
+    verdict, note: '', corrected_text: null, corrected_bbox: null, ...extra,
+  });
+
+  function renderStream(edits: Record<string, BlockEdit>, editMode: boolean, onSubmit: (i: number, input: BlockEditInput) => Promise<boolean>) {
+    return render(
+      <BlockList
+        bookId="b" pageNo={1} blocks={blocks} edits={edits}
+        renderMode="stream" imageSize={null} selectedIndex={-1} editMode={editMode}
+        typography={DEFAULT_TYPOGRAPHY} onSelect={() => {}} onSubmit={onSubmit}
+      />,
+    );
+  }
+
+  it('未确认块有「确认」钮、已 ok 块无；点击提交合并 prev 字段 verdict=ok', () => {
+    const onSubmit = vi.fn(async () => true);
+    renderStream({ 'b:1:0': mkEdit(0, 'ok'), 'b:1:1': mkEdit(1, 'bad', { corrected_text: '旧文' }) }, true, onSubmit);
+    expect(screen.queryByLabelText('确认块 1')).toBeNull();
+    fireEvent.click(screen.getByLabelText('确认块 2'));
+    expect(onSubmit).toHaveBeenCalledWith(1, { corrected_text: '旧文', verdict: 'ok' });
+  });
+
+  it('只读态无确认钮', () => {
+    renderStream({}, false, vi.fn(async () => true));
+    expect(screen.queryByLabelText('确认块 2')).toBeNull();
+  });
+
+  it('版式态同样逐块出确认钮', () => {
+    renderLayout({}, true);
+    expect(screen.getByLabelText('确认块 2')).toBeTruthy();
+  });
+});
+
+/** 图片面（ARCH-027-M1 判据 S1，用户裁决 2026-10-09）＝整页页图按块 bbox 内联裁切 */
+describe('image 块＝页图 bbox 内联裁切（S1 图片面）', () => {
+  const imageBlocks: Block[] = [
+    mk('image', { bbox: [100, 200, 500, 400], text: '图 1 示意', path: 'pages/images/a.jpg' }),
+  ];
+  const PAGE_IMAGE = 'http://127.0.0.1:8900/api/v1/books/b/pages/32/image';
+
+  function renderImage(pageImageUrl: string | null) {
+    return render(
+      <BlockList
+        bookId="b" pageNo={32} blocks={imageBlocks} edits={{}}
+        renderMode="layout" imageSize={null} selectedIndex={-1} editMode={false}
+        typography={DEFAULT_TYPOGRAPHY} pageImageUrl={pageImageUrl}
+        onSelect={() => {}} onSubmit={vi.fn(async () => true)}
+      />,
+    );
+  }
+
+  it('有页图地址：出内联图，量得页图自然尺寸后按百分比裁出 bbox 区域', () => {
+    renderImage(PAGE_IMAGE);
+    const img = screen.getByAltText('块图（页图裁切）') as HTMLImageElement;
+    expect(img).toHaveAttribute('src', PAGE_IMAGE);
+    Object.defineProperty(img, 'naturalWidth', { value: 1000, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 2000, configurable: true });
+    fireEvent.load(img);
+    // bbox 100,200→500,400＝宽 400 高 200；页图 1000×2000 → 放大 250%/1000%，偏移 −25%/−100%
+    expect(img.style.width).toBe('250%');
+    expect(img.style.height).toBe('1000%');
+    expect(img.style.left).toBe('-25%');
+    expect(img.style.top).toBe('-100%');
+    const box = img.parentElement as HTMLElement;
+    expect(box.style.overflow).toBe('hidden');
+    expect(box.style.aspectRatio && parseFloat(box.style.aspectRatio)).toBeCloseTo(2, 5);
+  });
+
+  it('无页图地址（如书目面未回传）：回退题注文字，不出内联图', () => {
+    renderImage(null);
+    expect(screen.queryByAltText('块图（页图裁切）')).toBeNull();
+    expect(screen.getByText('图 1 示意')).toBeTruthy();
+  });
+
+  it('bbox 缺失或非有限值时不裁切（回退题注，避免 NaN 样式）', () => {
+    render(
+      <BlockList
+        bookId="b" pageNo={32} blocks={[mk('image', { bbox: null as unknown as [number, number, number, number], text: '无框图' })]}
+        edits={{}} renderMode="layout" imageSize={null} selectedIndex={-1} editMode={false}
+        typography={DEFAULT_TYPOGRAPHY} pageImageUrl={PAGE_IMAGE}
+        onSelect={() => {}} onSubmit={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.queryByAltText('块图（页图裁切）')).toBeNull();
+    expect(screen.getByText('无框图')).toBeTruthy();
   });
 });

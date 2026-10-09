@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { App as AntApp, ConfigProvider } from 'antd';
@@ -143,7 +143,7 @@ describe('控制台 Console（Phase 2）', () => {
       gpu: null, gpuError: null,
       slots: { text: null, vision: null, embedding: null },
       slotErrors: { text: null, vision: null, embedding: null },
-      keys: null, modelsConfig: null, testing: null, operating: null,
+      keys: null, modelsConfig: null, testing: null, pendingOps: [],
     });
   });
 
@@ -183,11 +183,13 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.getByText('资源监控')).toBeInTheDocument();
     expect(screen.queryByText('服务监控')).not.toBeInTheDocument();
     expect(screen.queryByText('本地模型')).not.toBeInTheDocument();
-    // 基础设施区：元数据库卡；资源监控区：文字/图像/向量模型三卡（PLAN-046）
+    // 基础设施区：元数据库卡；资源监控区：文字/图像模型卡（向量卡按 2026-10-03 裁决不显示）
     expect(getDepCard('元数据库')).toBeInTheDocument();
     expect(getDepCard('文字模型')).toBeInTheDocument();
     expect(getDepCard('图像模型')).toBeInTheDocument();
-    expect(getDepCard('向量模型')).toBeInTheDocument();
+    expect(screen.queryByText('向量模型')).not.toBeInTheDocument();
+    // 「当前在跑（API/本地）」标注行已删（占用视角取代，ARCH-037）
+    expect(screen.queryByText(/当前在跑/)).not.toBeInTheDocument();
     // 状态与原因
     await waitFor(() => {
       expect(screen.getByText(/离线（未启动）/)).toBeInTheDocument();
@@ -398,7 +400,7 @@ describe('控制台 Console（Phase 2）', () => {
     const result = await opPromise;
     expect(result).toMatchObject({ name: 'tracker', op: 'start', success: true, status: 'online' });
     expect(useRuntimeStore.getState().services.find((s) => s.name === 'tracker')?.status).toBe('online');
-    expect(useRuntimeStore.getState().operating).toBeNull();
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
   });
 
   it('操作请求失败（409）→ message.warning 提示未生效', async () => {
@@ -421,7 +423,161 @@ describe('控制台 Console（Phase 2）', () => {
     const result = await useRuntimeStore.getState().operate('tracker', 'start');
     expect(result).toMatchObject({ name: 'tracker', op: 'start', success: false, status: 'error' });
     expect(result.reason).toContain('服务已在线');
-    expect(useRuntimeStore.getState().operating).toBeNull();
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+
+  it('四服务互不受限（ARCH-041）：axiom 操作在飞时 tracker 启停照常发出而非 busy', async () => {
+    const withAxiomStopping = {
+      services: servicesFixture.services.map((x) => (x.name === 'axiom' ? { ...x, status: 'stopping' } : x)),
+    };
+    mockApi({ '/services': withAxiomStopping, '/config/database': dbFixture, ...slotRoutes });
+    renderConsole();
+    await waitFor(() => {
+      expect(useRuntimeStore.getState().services.length).toBe(4);
+    });
+    // 此后统一用 fake timers：先让 axiom 操作真地在飞（恒 stopping 不收敛）
+    // —— 旧逻辑在此把其它单元的启停全挡成 busy，一条请求都不发
+    vi.useFakeTimers();
+    const pAxiom = useRuntimeStore.getState().operate('axiom', 'restart');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['svc:axiom']);
+
+    const trackerCard = screen.getByText('QED-Tracker 文档下载服务').closest('.ant-card') as HTMLElement;
+    await act(async () => {
+      fireEvent.click(within(trackerCard).getAllByRole('button', { name: /启动/ })[0]);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认启动' }));
+    });
+    expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('/services/tracker/start'))).toBe(true);
+    expect(messageSpies.warning).not.toHaveBeenCalledWith(expect.stringContaining('操作进行中'));
+    expect(useRuntimeStore.getState().pendingOps.sort()).toEqual(['svc:axiom', 'svc:tracker']);
+
+    // 收尾：两路各自轮询收敛（tracker 首轮即定态，axiom 到 15s 窗口上限超时）
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(await pAxiom).toMatchObject({ name: 'axiom', success: false, status: 'timeout' });
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('槽位启动受限预检（ARCH-040）：对方本地槽位在跑 → 弹确认框说明需先停止，取消则一条请求不发', async () => {
+    mockApi({
+      ...baseRoutes,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/vision': { ...slotVisionLocal, ready: true, availability: '可用' },
+    });
+    renderConsole();
+    const textCard = getDepCard('文字模型');
+    await within(textCard as HTMLElement).findByText('qwen3.8-27b');
+    const before = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(textCard as HTMLElement).getByRole('button', { name: /启\s*动/ }));
+    // 受限确认框：说明单活与「先停对方」的代价，并点名对方槽位
+    expect(await screen.findByText(/受限：本地模型单活/)).toBeInTheDocument();
+    expect(screen.getByText(/需先停止「图像模型」/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认启动' })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /取\s*消/ }));
+    const ops = mockFetch.mock.calls.slice(before).filter(
+      (c) => /\/models\/(text|vision)\/(start|stop)/.test(String(c[0])),
+    );
+    expect(ops).toEqual([]);
+    // 不断言「弹框已关」：antd Modal 在 jsdom 真计时器下保留 leave 态 DOM（既有已知坑），
+    // 取消语义的正证是上面「一条启停请求都没发」。
+  });
+
+  it('槽位启动受限双向（ARCH-040 S4）：反向＝图像卡启动被在跑的文字槽位拦下并点名「文字模型」', async () => {
+    mockApi({
+      ...baseRoutes,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/text': { ...slotTextLocal, ready: true, availability: '可用' },
+    });
+    renderConsole();
+    const visionCard = getDepCard('图像模型');
+    await within(visionCard as HTMLElement).findByText('mineru');
+    const before = mockFetch.mock.calls.length;
+    await userEvent.setup().click(within(visionCard as HTMLElement).getByRole('button', { name: /启\s*动/ }));
+    expect(await screen.findByText(/受限：本地模型单活/)).toBeInTheDocument();
+    expect(screen.getByText(/启动「图像模型」需先停止「文字模型」/)).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /取\s*消/ }));
+    const ops = mockFetch.mock.calls.slice(before).filter(
+      (c) => /\/models\/(text|vision)\/(start|stop)/.test(String(c[0])),
+    );
+    expect(ops).toEqual([]);
+  });
+
+  it('槽位启动非受限（ARCH-040）：对方未在跑 → 单击直发启动、不弹确认框', async () => {
+    mockApi({
+      ...baseRoutes,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/text': { ...slotTextLocal, ready: true, availability: '可用' },
+    });
+    renderConsole();
+    const textCard = getDepCard('文字模型');
+    await within(textCard as HTMLElement).findByText('qwen3.8-27b');
+    // fake timers 并在用例内走完收敛轮询：悬挂的 1s 定时器会漏到别的用例（那里按条数断言）
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(textCard as HTMLElement).getByRole('button', { name: /启\s*动/ }));
+    });
+    expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('/models/text/start'))).toBe(true);
+    expect(screen.queryByText(/受限：本地模型单活/)).not.toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('槽位启动受限：确认后按 stop(对方) → start(本槽) 顺序两段派发，前段未落定不抢跑', async () => {
+    // 载入态：对方（图像）本地槽位在跑 → 预检才会拦
+    mockApi({
+      ...baseRoutes,
+      '/monitor/gpu': { available: false, reason: '未检测到显卡' },
+      '/models/vision': { ...slotVisionLocal, ready: true, availability: '可用' },
+    });
+    renderConsole();
+    const textCard = getDepCard('文字模型');
+    await within(textCard as HTMLElement).findByText('qwen3.8-27b');
+    // 可编程 mock：vision 停止派发后回落未就绪，text 启动派发后才就绪
+    const visionRunning = { ...slotVisionLocal, ready: true, availability: '可用' };
+    const respond = (payload: unknown) => Promise.resolve(
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const posts: string[] = [];
+    let visionStopped = false;
+    let textStarted = false;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST' && u.includes('/models/vision/stop')) {
+        posts.push('stop:vision'); visionStopped = true; return respond({ ok: true });
+      }
+      if (init?.method === 'POST' && u.includes('/models/text/start')) {
+        posts.push('start:text'); textStarted = true; return respond({ ok: true });
+      }
+      if (init?.method === 'POST') return respond({ ok: true });
+      if (u.includes('/models/text')) return respond({ ...slotTextLocal, ready: textStarted });
+      if (u.includes('/models/vision')) return respond({ ...visionRunning, ready: !visionStopped });
+      if (u.includes('/models/embedding')) return respond(slotEmbeddingApi);
+      if (u.includes('/services')) return respond(servicesFixture);
+      if (u.includes('/config/database')) return respond(dbFixture);
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(textCard as HTMLElement).getByRole('button', { name: /启\s*动/ }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认启动' }));
+    });
+    expect(posts).toEqual(['stop:vision']);
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['model:vision']);
+
+    await vi.advanceTimersByTimeAsync(1100); // 停止收敛 → 第二派发
+    expect(posts).toEqual(['stop:vision', 'start:text']);
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['model:text']);
+
+    await vi.advanceTimersByTimeAsync(1100); // 启动收敛 → 提示标签取本槽位
+    expect(messageSpies.success).toHaveBeenCalledWith(expect.stringContaining('文字模型'));
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+    vi.useRealTimers();
   });
 
   it('三区结构（2026-09-06）：服务管理在前，资源监控（GPU 状态 + 模型卡）殿后', async () => {
@@ -501,7 +657,7 @@ describe('控制台 Console（Phase 2）', () => {
     expect(screen.queryByText(/已接近满载/)).not.toBeInTheDocument();
   });
 
-  it('显存占用 ≥95%：无警告 Alert（已移除进程清单与警告功能）', async () => {
+  it('显存占用 ≥95%：出高位提示 Alert（只提示不处置），仍无逐任务警告', async () => {
     const gpuRoutes = {
       ...baseRoutes,
       '/monitor/gpu': {
@@ -523,8 +679,9 @@ describe('控制台 Console（Phase 2）', () => {
     mockApi(gpuRoutes);
     renderConsole();
     await screen.findByTestId('echart');
-    // 无警告 Alert（已移除）
-    expect(screen.queryByText(/已接近满载/)).not.toBeInTheDocument();
+    // 高位提示只报占比、不做处置；旧形态（自动告警/逐任务警告）不再出现
+    expect(await screen.findByText(/显存已用 97%/)).toBeInTheDocument();
+    expect(screen.getByText(/仅提示，不做任何自动处置/)).toBeInTheDocument();
     expect(screen.queryByText(/检测到非模型任务占用显存/)).not.toBeInTheDocument();
   });
 
@@ -603,12 +760,11 @@ describe('控制台 Console（Phase 2）', () => {
     };
     mockApi(routes);
     renderConsole();
-    // 四卡齐备
+    // 三卡齐备（向量槽位仍拉状态、不出卡）
     expect(await getDepCard('元数据库')).toBeInTheDocument();
     const dbCard = getDepCard('元数据库');
     const textCard = getDepCard('文字模型');
     const visionCard = getDepCard('图像模型');
-    const embeddingCard = getDepCard('向量模型');
     // 等四路数据落库
     await waitFor(() => {
       const s = useRuntimeStore.getState();
@@ -617,28 +773,24 @@ describe('控制台 Console（Phase 2）', () => {
       expect(s.slots.vision).not.toBeNull();
       expect(s.slots.embedding).not.toBeNull();
     });
-    // 字段行·来源：local 卡显示「本地部署」；api 卡（向量）显示「API 调用」
+    expect(screen.queryByText('向量模型')).not.toBeInTheDocument();
+    // 字段行·来源：local 卡显示「本地部署」
     expect(within(textCard).getByText('本地部署')).toBeInTheDocument();
-    expect(within(embeddingCard).getByText('API 调用')).toBeInTheDocument();
-    // 字段行·渠道：local=渠道下拉（当前 runtime）；api=直连
+    // 字段行·渠道：local=渠道下拉（当前 runtime）
     expect(within(dbCard).getByText('在线 · 未验证')).toBeInTheDocument();
     expect(within(textCard).getByText('LM Studio')).toBeInTheDocument();
     expect(within(visionCard).getByText('Docker')).toBeInTheDocument();
-    expect(within(embeddingCard).getByText('直连')).toBeInTheDocument();
     // 字段行·模型：身份（下拉选中值 / 只读显示）
     expect(within(textCard).getByText('qwen3.8-27b')).toBeInTheDocument();
     expect(within(visionCard).getByText('mineru')).toBeInTheDocument();
-    expect(within(embeddingCard).getByText('text-embedding-v4')).toBeInTheDocument();
-    // 字段行·可用：local 未就绪（探针未通过）；api 已配置 → 可用（选择器避开同文案字段标签）
+    // 字段行·可用：local 未就绪（探针未通过）（选择器避开同文案字段标签）
     expect(within(textCard).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
     expect(within(visionCard).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
-    expect(within(embeddingCard).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
     // 备注：身份一句话介绍
     expect(within(textCard).getByText('Qwen3.8 27B，本机 LM Studio 已下载')).toBeInTheDocument();
-    // 启停按钮仅 local 来源渲染；向量卡无启停
+    // 启停按钮仅 local 来源渲染
     expect(within(textCard as HTMLElement).getByRole('button', { name: /启\s*动/ })).toBeInTheDocument();
     expect(within(visionCard as HTMLElement).getByRole('button', { name: /启\s*动/ })).toBeInTheDocument();
-    expect(within(embeddingCard as HTMLElement).queryByRole('button', { name: /启\s*动/ })).not.toBeInTheDocument();
     // 元数据库「测试」→ POST /database/test → 已验证在线
     await userEvent.setup().click(within(dbCard as HTMLElement).getByRole('button', { name: /测\s*试/ }));
     expect(await within(dbCard as HTMLElement).findByText('已验证在线')).toBeInTheDocument();
@@ -650,10 +802,6 @@ describe('控制台 Console（Phase 2）', () => {
     await waitFor(() => {
       expect(within(textCard as HTMLElement).getByText('可用', { selector: '.ant-typography' })).toBeInTheDocument();
     });
-    // 向量模型「验证」→ POST /llm/test/embedding
-    const callsBeforeEmb = mockFetch.mock.calls.length;
-    await userEvent.setup().click(within(embeddingCard as HTMLElement).getByRole('button', { name: /验\s*证/ }));
-    expect(String(mockFetch.mock.calls[callsBeforeEmb][0])).toContain('/llm/test/embedding');
   });
 
   it('槽位级选择·模型：下拉选择 → POST /models/{slot}/select {model} → 重拉槽位状态', async () => {
@@ -788,6 +936,42 @@ describe('控制台 Console（Phase 2）', () => {
     await waitFor(() => {
       const card = getDepCard('文字模型');
       expect(within(card).getByText('未就绪', { selector: '.ant-typography' })).toBeInTheDocument();
+    });
+  });
+
+  it('分批刷新（ARCH-038）：慢路只让自己分区转圈，「刷新」不等最慢路', async () => {
+    let resolveVision: ((r: Response) => void) | undefined;
+    const visionPending = new Promise<Response>((res) => { resolveVision = res; });
+    const json = (body: unknown) => Promise.resolve(
+      new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    mockFetch.mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('/models/vision')) return visionPending;
+      if (u.includes('/monitor/gpu')) return json({ available: false, reason: '未检测到显卡' });
+      if (u.includes('/services')) return json(servicesFixture);
+      if (u.includes('/config/database')) return json(dbFixture);
+      if (u.includes('/models/text')) return json(slotTextLocal);
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const zoneTitle = (t: string) => screen.getByText(t).closest('h4') as HTMLElement;
+    renderConsole();
+    // 快路分区（服务管理／基础设施）落定即静，慢路分区（资源监控＝槽位）仍转圈
+    await waitFor(() => expect(useRuntimeStore.getState().services).toHaveLength(4));
+    expect(useRuntimeStore.getState().pendingRoutes).toContain('slot:vision');
+    expect(zoneTitle('服务管理').querySelector('.ant-spin')).toBeNull();
+    expect(zoneTitle('基础设施').querySelector('.ant-spin')).toBeNull();
+    expect(zoneTitle('资源监控').querySelector('.ant-spin')).not.toBeNull();
+    // 「刷新」按钮不背全局 loading：路还在飞也不置 loading
+    const refreshBtn = screen.getByRole('button', { name: /刷\s*新/ });
+    expect(refreshBtn.className).not.toContain('ant-btn-loading');
+    const callsBefore = mockFetch.mock.calls.length;
+    await userEvent.setup().click(refreshBtn);
+    expect(mockFetch.mock.calls.length).toBe(callsBefore); // 防重入语义保留（store 侧挡住叠加拉取）
+    resolveVision!(new Response(JSON.stringify(slotVisionLocal), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await waitFor(() => {
+      expect(useRuntimeStore.getState().pendingRoutes).not.toContain('slot:vision');
+      expect(zoneTitle('资源监控').querySelector('.ant-spin')).toBeNull();
     });
   });
 });

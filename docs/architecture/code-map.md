@@ -28,10 +28,11 @@
 | `backend/qed_engine/api/main.py` | 后端 API 入口（三域组装） | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 组装控制域与数据域路由，CORS 8900-8903，state 注入；配置五端点已拆至 control.py。 |
 | `backend/qed_engine/api/control.py` | 控制域路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_llm_endpoints.py` | /services 端点族 + 配置五端点 + 监控诊断路由 + /models 槽位端点族（PLAN-046 v3：GET 五字段卡数据源 + select 写 source/runtime/active + 按槽位来源 409）+ /llm 网关端点。 |
 | `backend/qed_engine/api/schemas.py` | API 请求与响应模型 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 健康、模型路由、密钥布尔状态、数据库状态与 LLM 可达性；SlotStatus（v3 五字段卡：source/channel/description/availability + 三下拉）、ModelSelectRequest（source/runtime/model）。 |
-| `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | catalogs/tasks/三表契约归 8900，内部经 tracker_client.py 适配 8901。 |
+| `backend/qed_engine/api/tracker.py` | 数据域·QED-Tracker 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | catalogs/tasks/三表/论文面契约归 8900，内部经 tracker_client.py 适配 8901。 |
 | `backend/qed_engine/api/explore.py` | 数据域·探索会话路由 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | /explore-sessions 五端点，取代旧 explore-runs 透传。 |
 | `backend/qed_engine/api/domain_explore.py` | 数据域·领域探索五态门面路由 | Current | `docs/design/downloads-flow.md` | `tests/test_domain_explore.py` | 五端点委托 8901 原生任务链：task_id 登记、courses.json→课程行桥接、explore_pending 合成与离线降级（PLAN-034 已落地）。 |
 | `backend/qed_engine/api/axiom.py` | 数据域·Axiom-Flow 适配路由 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | books/单本详情/PDF 流/pages/manifest/parse-jobs（含 `GET /parse-jobs` 列表透传，前端重开工作台恢复在飞任务）/parsing-tree 契约归 8900，内部经 axiom_client.py 适配 8902；`GET /books/{id}/file` 为 8900 本地端点（af_books.file_path 数据根相对路径 + 边界校验，见 [dataset 目录约定](../design/dataset-conventions.md)）；含 `POST /books/{id}/ingest` 透传 + 块编辑门面 `PUT …/blocks/{i}/edit`/`GET …/pages/{no}/edits`（/review 门面过渡保留）；剩余规划透传 PATCH/DELETE/versions/chunks 见 [api-contracts.md](api-contracts.md) §④ 规划契约。 |
+| `backend/qed_engine/api/learn.py` | 学习域路由（8900 自有，非透传） | Current | `docs/architecture/api-contracts.md` | `tests/test_learn.py`、`tests/test_learn_knowledge.py`、`tests/test_learn_practice.py` | /api/v1/learn/* 32 端点：课程引用式注册（kind 闭集/双通道限长）、单元树（最深三级、covered 学习者独占）、编译作业（202+轮询、课程行自 carry）、派生进度只读（主链 M-1 契约骨架，静态兜底编译，LLM 生成归 M-2）。含 M5 知识点族与 M6 层级化端点（星图聚合、候选池登记、人工确认提升；outline 整树幂等替换 GET/PUT、point 归属移动 PATCH、`include_outline`/`parent` 过滤）。含 M2 练习与复习 8 端点（题源书目透传、批量入库幂等跳重、题面敏感列投影、作答同事务判分、到期队列、错题本派生查询与人工位）；练习三表由首个练习请求懒挂载。 |
 | `backend/qed_engine/clients/tracker_client.py` | QED-Tracker 服务客户端 | Current | `docs/design/cross-project-contracts.md` | `tests/test_tracker_client.py` | 8901 HTTP 客户端：资源/任务/三表，transport 可注入。 |
 | `backend/qed_engine/clients/axiom_client.py` | Axiom-Flow 服务客户端 | Current | `docs/architecture/api-contracts.md` | `tests/test_api.py` | 8902 HTTP 客户端：books/单本详情(get_book)/ingest_book/pages/manifest/parse-jobs（含列表 list_parse_jobs）/sync/edit（engine/id/progress 对象按 8902 v2 契约；edit_block verdict 可选支持部分修正），transport 可注入；/review 门面内部转 /edit。 |
 
@@ -39,8 +40,8 @@
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `backend/qed_engine/services/service_manager.py` | 服务控制能力层 | Current | `docs/design/service-hosting.md` | `tests/test_api.py`、`tests/test_self_restart.py` | 注册表/HTTP 探测/Popen 启动/优雅停止/自身重启。 |
-| `backend/qed_engine/services/log_viewer.py` | 服务日志查看能力 | Current | `docs/architecture/api-contracts.md` | `tests/test_log_viewer.py` | 白名单 tail/keyword；未知服务 LogError→404。 |
+| `backend/qed_engine/services/service_manager.py` | 服务控制能力层 | Current | `docs/design/service-hosting.md` | `tests/test_api.py`、`tests/test_self_restart.py`、`tests/test_log_viewer.py` | 注册表/HTTP 探测/Popen 启动/优雅停止/自身重启；`unit_log_path` 解析单元日志实际写入点（脚本托管＝`<workdir>/logs/qed-<name>-serve.log`，ADR 0019）。 |
+| `backend/qed_engine/services/log_viewer.py` | 服务日志查看能力 | Current | `docs/architecture/api-contracts.md` | `tests/test_log_viewer.py` | 白名单 tail/keyword；未知服务 LogError→404；路径经 `service_manager.unit_log_path`（不按命名猜测），文件缺失返回空行。 |
 | `backend/qed_engine/services/monitor.py` | 组件监控探测 | Current | `docs/architecture/api-contracts.md` | `tests/test_monitor.py` | GPU + 槽位泛化探测（probe_slot：text 探 `QED_MODEL_URL` / vision 探 `QED_OCR_MODEL_URL`（5002）；qwen/mineru 旧函数保留别名）；尽力报告不抛 5xx。 |
 
 ### 服务层·数据域
@@ -49,20 +50,28 @@
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/services/explore_sessions.py` | 探索会话管理 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | 内存会话 + 后台线程调 8901 dry-run；状态机 + TTL 2h。 |
 | `backend/qed_engine/services/shared_tables.py` | 共享表 exploration_stage 直读写层 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | 领域/课程 stage 状态流转；QED_DB_PASSWORD 未配置时静默跳过。 |
+| `backend/qed_engine/services/learn/base.py` | 学习域存储基座（三表 DDL+异常+源指纹+MySQL 存储） | Current | `docs/architecture/database-design.md` | `tests/test_learn.py` | qed_learn_* 三表幂等建表 SQL（D3 编译态挂课程行）与 NotFound/Conflict 异常映射；`MySQLLearnStore`＝三表 MySQL 实现，接口与内存实现同形（公开方法签名由 parity 测试守护），由首个 /learn 课程请求懒挂载（`LEARN_MOUNT_RETRY_SECONDS` 短窗重试，判例 DEFECT-009）。 |
+| `backend/qed_engine/services/learn/memory.py` | 学习域存储内存实现 | Current | `docs/architecture/database-design.md` | `tests/test_learn.py` | InMemoryLearnStore：三表接口的进程内实现（契约测试注入 + 生产存储未接入期降级），线程锁保护编译后台读写。 |
+| `backend/qed_engine/services/learn/knowledge.py` | 学习域知识点两表存储（M5/M6 v2 层级化） | Current | `docs/architecture/database-design.md` | `tests/test_learn_knowledge.py` | qed_knowledge_point（第四张共享表=已确认知识点主数据，M6 v2 加 `node_kind`/`parent_kp_id`/`depth`/`book_ref`/`source_ref`，唯一键 `(course_id, book_ref, norm_key)`）与 qed_learn_kp_detail（根私有候选明细池，多版本多叙述 + `intent`/`parent_kp_id`/`book_ref`）幂等建表、norm_key 规范化去重、人工确认提升（同课程同名 409）、星图计数只数 point、`flatten_outline` 前序展开（两级、PDF 页序溯源）、`replace_outline` 同名复用 kp_id、`patch_point` 归属移动（MySQLKnowledgeStore）。 |
+| `backend/qed_engine/services/learn/knowledge_memory.py` | 知识点两表存储内存实现 | Current | `docs/architecture/database-design.md` | `tests/test_learn_knowledge.py` | InMemoryKnowledgeStore：与 MySQL 存储层**同形接口**（含 M6 v2 outline/point 层级、未归档池、`node_kind` 过滤），供契约测试注入（隔离铁律不写运行库）。 |
+| `backend/qed_engine/services/learn/grading.py` | 练习域确定性判分纯函数 | Current | `docs/architecture/api-contracts.md` | `tests/test_learn_practice.py` | M-3 判分接口缝 1 的规则层：闭集三型定档（choice 全等且 expected∈A/B/C/D、short 全等或相似度 ≥0.85 且 expected ≤30 字、open 关键词命中比 ≥0.6），未知型与空 expected 一律判 False 不猜，残余问题记进 `question.meta.issues`；无 LLM 无数据库，`method=llm` 分支不在本文件（缝 3 v1 关闭）。 |
+| `backend/qed_engine/services/learn/practice.py` | 练习域三表 MySQL 存储与调度纯函数 | Current | `docs/architecture/database-design.md` | `tests/test_learn_practice.py` | qed_learn_question/attempt/review_task 幂等建表 SQL 与 `MySQLPracticeStore`：批量入库 `(course_id,stem_hash)` 跳重、`SENSITIVE_COLUMNS` 投影（缝 2）、`schedule_next` 间隔升降档（DeepTutor 序列逐值直译，按 `kp_type` 取序列表并钳位）、`resolve_trend`、错题本派生查询与统计、到期队列优先级即时派生（错题 1 先于类型档 2~5）；判分与调度回写同事务（缝 6）。 |
+| `backend/qed_engine/services/learn/practice_memory.py` | 练习域三表内存实现 | Current | `docs/architecture/database-design.md` | `tests/test_learn_practice.py` | InMemoryPracticeStore：与 MySQL 存储层**同形接口**（parity 测试守护），整批构造后落＝原子入库、被拒绝的作答不留痕、时钟由 `now=` 注入（不移植 `time.time()` 直取）；供契约测试注入与存储未接入期降级。 |
 
 ### 服务层·LLM 网关
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `backend/qed_engine/services/llm/registry.py` | 模型身份注册表 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_registry.py` | PLAN-046 v3：身份目录（身份→api/本地引用 + description）+ 槽位级来源/渠道运行态（manifest.source/runtime/active）+ 渠道/模型选项派生，gateway/model_manager 统一消费。ARCH-033：Identity.params 加载层参数（runtime→参数组，唯一事实源）+ binding_params 解析注入。 |
-| `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py` | 文字/视觉/向量统一入口，经注册表解析按 QED_API_SELECT 路由 api/local（local 经单活仲裁拉起）。 |
-| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen 文字/视觉、MinerU、provider_embeddings（向量）；httpx transport 可注入。 |
-| `backend/qed_engine/services/llm/model_manager.py` | 本地模型服务维护（启停与单活仲裁） | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 v3：ensure_local_ready(slot) 单活仲裁（槽位渠道 manifest.runtime > 全局默认）；operate_model 槽位化 + qwen/mineru 旧名别名。 |
+| `backend/qed_engine/services/llm/gateway.py` | LLM 网关 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_gateway.py`、`tests/test_llm_local_adapt.py` | 文字/视觉/向量统一入口，经注册表解析按 QED_API_SELECT 路由 api/local（local 经单活仲裁拉起）。A-5：success 前过 `classify_reply` 截断/空正文判定，local 正文饥饿按 `reasoning_effort=none` 单次降档重试。 |
+| `backend/qed_engine/services/llm/clients.py` | LLM 供应商客户端 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_clients.py` | qwen 文字/视觉、MinerU、provider_embeddings（向量）；httpx transport 可注入。文字调用返回 `ChatReply`（正文 str + `finish_reason`/`reasoning_content`，A-5 判定输入面）。 |
+| `backend/qed_engine/services/llm/local_adapt.py` | 本地模型适配层（M3） | Current | `docs/design/llm-gateway.md` | `tests/test_llm_local_adapt.py` | 能力表（本地无工具 / JSON 模式三态）、response_format 注入判定与运行时拉黑、JSON 容错三件套 + 一次 repair、thinking 清洗、A-5 `classify_reply` 截断判定与饥饿口径；开关 `QED_LLM_LOCAL_ADAPT`。 |
+| `backend/qed_engine/services/llm/model_manager.py` | 本地模型服务维护（启停与单活仲裁） | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 v3：ensure_local_ready(slot) 单活仲裁（槽位渠道 manifest.runtime > 全局默认）；operate_model 槽位化 + qwen/mineru 旧名别名。ARCH-028 增强批：start/restart 派发经 note_starting_active 置启动宽限窗口（W7）；启动关键段进程级锁串行化（DEFECT-005，双槽位并发恢复不再绕过单活互斥）。 |
 | `backend/qed_engine/services/llm/runtimes/base.py` | 本地 runtime 基座 | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：LocalRuntime 协议（probe/start/stop，start 带 params 关键字）+ RuntimeResult + 脚本型基类（llamacpp/docker 复用 scripts/ 生命周期脚本；extra_start_args 钩子注入参数旗标）。 |
 | `backend/qed_engine/services/llm/runtimes/lmstudio.py` | LM Studio 半托管 runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046 + W7 实测：probe=REST v0 `state=loaded`；start=lms server start + `lms load`（ARCH-033：按身份 params 带 `-c/--gpu/--parallel/--ttl`，缺省 `--gpu max` 不变；先卸载其他已加载；5001 被 llama-server 占位时脚本 stop 反向清位，裁决 R3）；stop=`lms unload`（server 保留）；端点 `QED_MODEL_URL`；探活经 QED_LMSTUDIO_TOKEN 带认证。 |
 | `backend/qed_engine/services/llm/runtimes/llamacpp.py` | llamacpp runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | ARCH-033 真做：llama-server 生命周期复用 text-model 脚本（端点 `QED_MODEL_URL`，与 LM Studio 共用 5001）；身份表已挂 llamacpp GGUF 引用（~/.lmstudio/models 相对）+ 加载参数；启动前探测常驻 LM Studio server 占位 → 自动 `lms unload --all` + `lms server stop` 让位（裁决 R3；W7 真机修正：单独 stop 不释放 worker 显存）。 |
 | `backend/qed_engine/services/llm/runtimes/docker.py` | docker runtime | Current | `docs/design/local-model-management.md` | `tests/test_llm_model_manager.py` | PLAN-046：MinerU 容器生命周期复用 image-model 脚本（infra-*.ps1）；端点 `QED_OCR_MODEL_URL`（5002）；vision 槽位默认 runtime。 |
-| `backend/qed_engine/services/llm/supervisor.py` | 本地模型服务维护·健康监督 | Current | `docs/design/local-model-management.md` | `tests/test_llm_supervisor.py` | ARCH-028 W2：T1（probe_slot）+T2（容器内 nvidia-smi，fail-closed）分级探测、ready/degraded/down 状态机 N=3 防抖、翻转事件日志，供 /models/{slot} health_* 字段与仪表盘状况卡消费；`QED_MODEL_SUPERVISOR` 默认开。W3 受控恢复：非就绪退避节拍（每 4 tick≈2min）派发 restart、≤3 次转纯告警、ready 翻转重置；在飞门双路（REQ-088 列表端点，旧码回退 active_job_id；8902 离线放行/查询失败保守在飞）；非就绪翻转采掉线诊断包（docker events+日志尾+GPU）。只维护模型服务本身，不涉及 prompt。 |
+| `backend/qed_engine/services/llm/supervisor.py` | 本地模型服务维护·健康监督 | Current | `docs/design/local-model-management.md` | `tests/test_llm_supervisor.py` | ARCH-028 W2：T1（probe_slot）+T2（容器内 nvidia-smi，fail-closed）分级探测、ready/degraded/down 状态机 N=3 防抖、翻转事件日志，供 /models/{slot} health_* 字段与仪表盘状况卡消费；`QED_MODEL_SUPERVISOR` 默认开。W3 受控恢复：非就绪退避节拍（每 4 tick≈2min）派发 restart、≤3 次转纯告警、ready 翻转重置；在飞门双路（REQ-088 列表端点，旧码回退 active_job_id；8902 离线放行/查询失败保守在飞）；非就绪翻转采掉线诊断包（docker events+日志尾+GPU+inspect OOMKilled/ExitCode/RestartCount，W10 补强）。W7/W8 启动宽限与恢复闩锁：operate_model start/restart 派发后窗口内（QED_MODEL_START_GRACE_SECONDS 默认 180s）down/degraded 观测抑制、恢复 tick 冻结（不叠发第二发），翻回 ready 或期满解锁，期满转正常防抖；快照以 health_state=starting 呈现（仪表盘「启动中」）。只维护模型服务本身，不涉及 prompt。 |
 | `backend/qed_engine/services/llm/call_log.py` | LLM 调用记录 | Current | `docs/design/llm-gateway.md` | `tests/test_llm_call_log.py` | qed_llm_calls 幂等建表/写入/分页检索；DB 不可达降级。 |
 
 ### 测试·根目录
@@ -72,6 +81,9 @@
 | `tests/test_config.py` | 配置读取单元测试 | Current | `docs/design/project-configuration.md` | — | 默认值与空值降级。 |
 | `tests/test_cli.py` | 统一 CLI 契约测试 | Current | `docs/design/project-configuration.md` | — | 子命令、服务地址与尾注提醒。 |
 | `tests/test_tracker_client.py` | QED-Tracker 客户端契约测试 | Current | `docs/design/cross-project-contracts.md` | — | 方法/路径/请求体、错误响应与任务轮询。 |
+| `tests/test_learn.py` | 学习域契约测试 | Current | `docs/architecture/api-contracts.md` | — | M-1 冻结契约：kind 闭集/限长/树深/covered 前提/编译状态机 202+轮询/在跑禁删 409/派生进度重算。 |
+| `tests/test_learn_knowledge.py` | 学习域知识点（M5）契约测试 | Current | `docs/architecture/api-contracts.md` | — | 7 端点契约：星图聚合形状与跨 track 边、norm_key 规范化、确认提升与重复 409、驳回不提升、检索过滤与分页、存储未接入 503。 |
+| `tests/test_learn_practice.py` | 学习域练习与复习（M2）契约测试 | Current | `docs/architecture/api-contracts.md` | — | 8 端点契约：批量入库幂等与闭集/不变量 422、题面敏感列投影、人工面白名单与裁决 ⑨ 升级路径、作答同事务判分与 `score_trend/resolved`、间隔调度升降档与钳位、到期队列形状与优先级、错题本派生查询与统计、题源书目 roles 过滤与 8902 解析态联查、两实现同形与 503 降级。 |
 | `tests/test_api.py` | 配置中心 API 契约测试 | Current | `docs/architecture/api-contracts.md` | — | 密钥值不泄露。 |
 | `tests/test_web.py` | 8903 前端契约测试 | Current | `docs/architecture/frontend-architecture.md` | — | serve_web.py + web-ui/src 源码契约。 |
 | `tests/test_log_viewer.py` | 日志查看契约测试 | Current | `docs/architecture/api-contracts.md` | — | 白名单/tail/keyword/越权/编码容错。 |
@@ -84,7 +96,8 @@
 | `tests/test_qed_qwen_service.py` | 本地文字模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
 | `tests/test_qed_mineru_service.py` | 本地图像模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | infra-*.ps1 编排/健康探测/子命令。 |
 | `tests/test_llm_gateway.py` | LLM 网关契约测试 | Current | `docs/design/llm-gateway.md` | — | api/local 路由、调用记录字段。 |
-| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | Current | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、Qwen、MinerU。 |
+| `tests/test_llm_local_adapt.py` | M3 适配层契约测试 | Current | `docs/design/llm-gateway.md` | — | 能力表、response_format 注入/拉黑/剥参数重试、JSON 三件套与修复回调、scratchpad 清洗、A-5 截断与空正文判失败 + 饥饿降档单次重试（假 client，不触网）。 |
+| `tests/test_llm_clients.py` | LLM 供应商客户端契约测试 | Current | `docs/design/llm-gateway.md` | — | qwen 文字/视觉、Qwen、MinerU；`ChatReply` 截断判据抽取与 `reasoning_effort` 入请求体。 |
 | `tests/test_llm_model_manager.py` | 本地模型资源互斥契约测试 | Current | `docs/design/local-model-management.md` | — | api 模式不启本地模型/互斥；operate_model 端点路径（start/stop/restart）。 |
 | `tests/test_llm_registry.py` | 模型身份注册表契约测试 | Current | `docs/design/llm-gateway.md` | — | 身份目录覆盖、来源/渠道/身份三级运行态优先级、渠道与模型选项派生、api/local 解析与回退。 |
 | `tests/test_llm_call_log.py` | LLM 调用记录契约测试 | Current | `docs/design/llm-gateway.md` | — | 建表 SQL、写入字段、分页检索。 |

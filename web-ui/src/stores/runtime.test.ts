@@ -3,10 +3,13 @@
  * - withWebServiceFallback：web 兜底合并 + 端口排序
  *   （原 Console.tsx / Dashboard.tsx 各自重复实现，2026-08-24 收敛于此）
  * - fetchAll loading 防重入：AdminLayout 挂载拉取 + Console 挂载补拉去重
+ * - 分路 pending（ARCH-038）：pendingRoutes 八路逐路落定逐路清 + ZONE_ROUTES 分区聚合
+ * 操作互斥按单元（ARCH-041）：pendingOps 服务各单元一键（跨服务并发不受限）、模型槽位
+ *   整域互斥、两域互不阻塞；busy 只在同单元复现
  * 操作收敛 / 测试动作等行为级覆盖在 Console.test.tsx（经界面驱动），此处不重复。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useRuntimeStore, withWebServiceFallback, deriveRunningModels, formatRunningModels, formatRunningSlotLine } from './runtime';
+import { useRuntimeStore, withWebServiceFallback, deriveRunningModels, isZonePending, ZONE_ROUTES, TEST_TIMEOUT_MS, MODEL_POLL_TIMEOUT_MS } from './runtime';
 import { mockFetch } from '../test/setup';
 import type { ServiceStatus, SlotStatus, SlotName } from './index';
 
@@ -60,7 +63,7 @@ describe('useRuntimeStore', () => {
       gpu: null, gpuError: null,
       slots: { text: null, vision: null, embedding: null },
       slotErrors: { text: null, vision: null, embedding: null },
-      operating: null, testing: null, keys: null,
+      pendingOps: [], testing: null, keys: null,
     });
   });
 
@@ -143,7 +146,7 @@ function slotSt(over: Partial<SlotStatus> & { slot: SlotName }): SlotStatus {
   return { source: 'local', channel: 'lmstudio', ready: true, ...over } as SlotStatus;
 }
 
-describe('deriveRunningModels / formatRunningModels（S3·S4 共用派生：本地在跑槽位身份）', () => {
+describe('deriveRunningModels（本地在跑槽位身份：显存占用行数据源）', () => {
   it('仅 source=local 且 ready 的槽位入选，顺序固定 文字→图像→向量', () => {
     const running = deriveRunningModels({
       text: slotSt({ slot: 'text', identity: 'qwen3.8-27b', channel: 'lmstudio' }),
@@ -151,29 +154,288 @@ describe('deriveRunningModels / formatRunningModels（S3·S4 共用派生：本�
       embedding: slotSt({ slot: 'embedding', ready: false }),
     });
     expect(running).toEqual([{ slot: 'text', label: '文字', identity: 'qwen3.8-27b', channel: 'lmstudio' }]);
-    expect(formatRunningModels(running)).toBe('文字·qwen3.8-27b（lmstudio）');
   });
 
-  it('identity 缺失回落 model；channel 缺失省略括号；空列表返回空串', () => {
+  it('identity 缺失回落 model；channel 缺失即原样留空', () => {
     const running = deriveRunningModels({
       text: null,
       vision: slotSt({ slot: 'vision', model: 'minicpm-v', identity: undefined, channel: '' }),
       embedding: null,
     });
-    expect(formatRunningModels(running)).toBe('图像·minicpm-v');
-    expect(formatRunningModels(deriveRunningModels({ text: null, vision: null, embedding: null }))).toBe('');
+    expect(running).toEqual([{ slot: 'vision', label: '图像', identity: 'minicpm-v', channel: '' }]);
+    expect(deriveRunningModels({ text: null, vision: null, embedding: null })).toEqual([]);
   });
 });
 
-describe('formatRunningSlotLine（当前在跑一行文案）', () => {
-  it('有 local ready 槽位时列出身份名；全 api 就绪显示（API 模式）；无就绪槽位显示 无', () => {
-    expect(formatRunningSlotLine({
-      text: slotSt({ slot: 'text', identity: 'qwen3.8-27b' }), vision: null, embedding: null,
-    })).toBe('文字·qwen3.8-27b（lmstudio）');
-    expect(formatRunningSlotLine({
-      text: slotSt({ slot: 'text', source: 'api', channel: 'direct', model: 'glm-4v' }),
-      vision: null, embedding: null,
-    })).toBe('（API 模式）');
-    expect(formatRunningSlotLine({ text: null, vision: null, embedding: null })).toBe('无');
+describe('测试动作超时口径（DEFECT-008 ④）', () => {
+  it('验证窗口覆盖「冷启动加载 + 请求层限长生成」最坏耗时，且短于启停收敛窗口', () => {
+    // 512 token 上限实测解码约 40s，加 40960 档加载 7.3s → 窗口不得小于 45s
+    expect(TEST_TIMEOUT_MS).toBeGreaterThanOrEqual(45_000);
+    expect(TEST_TIMEOUT_MS).toBeLessThan(MODEL_POLL_TIMEOUT_MS);
+  });
+});
+
+describe('分路 pending 与分区聚合（ARCH-038 分批刷新）', () => {
+  const json = (body: unknown) => new Response(JSON.stringify(body), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+
+  beforeEach(() => {
+    useRuntimeStore.setState({
+      services: [], dbStatus: null, loading: false, pendingRoutes: [], error: null, dbError: null,
+      gpu: null, gpuError: null,
+      slots: { text: null, vision: null, embedding: null },
+      slotErrors: { text: null, vision: null, embedding: null },
+      pendingOps: [], testing: null, keys: null, modelsConfig: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('isZonePending 按分区归属聚合：gpu 在飞不拖累服务管理/基础设施区', () => {
+    expect(isZonePending(['gpu', 'slot:vision'], 'services')).toBe(false);
+    expect(isZonePending(['gpu', 'slot:vision'], 'infra')).toBe(false);
+    expect(isZonePending(['gpu', 'slot:vision'], 'resources')).toBe(true);
+    expect(isZonePending(['db'], 'infra')).toBe(true);
+    expect(isZonePending(['services'], 'resources')).toBe(false);
+    expect(isZonePending([], 'resources')).toBe(false);
+    expect(ZONE_ROUTES.resources).toContain('models');
+  });
+
+  it('fetchAll：八路全置 pending，逐路落定只清自己那路，全落定后清空', async () => {
+    let resolveVision: ((r: Response) => void) | undefined;
+    const visionPending = new Promise<Response>((res) => { resolveVision = res; });
+    mockFetch.mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('/models/vision')) return visionPending;
+      if (u.includes('/services')) return json({ services: [svc('config', 8900, 'online')] });
+      if (u.includes('/config/database')) return json({ reachable: true, reason: '', checked_at: '' });
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const p = useRuntimeStore.getState().fetchAll();
+    expect(useRuntimeStore.getState().pendingRoutes).toHaveLength(8);
+    await new Promise((r) => setTimeout(r, 0));
+    const after = useRuntimeStore.getState().pendingRoutes;
+    expect(after).toContain('slot:vision'); // 慢路仍在飞
+    expect(after).not.toContain('services'); // 快路自清
+    expect(after).not.toContain('db');
+    expect(useRuntimeStore.getState().loading).toBe(true); // 防重入旗标整批保持
+    resolveVision!(json({ slot: 'vision', source: 'local', ready: false }));
+    await p;
+    expect(useRuntimeStore.getState().pendingRoutes).toEqual([]);
+    expect(useRuntimeStore.getState().loading).toBe(false);
+  });
+
+  it('fetchGpu / fetchSlots 单独刷新只标自己那路（资源区转圈、服务区不转）', async () => {
+    let resolveGpu: ((r: Response) => void) | undefined;
+    const gpuPending = new Promise<Response>((res) => { resolveGpu = res; });
+    mockFetch.mockImplementation(() => gpuPending);
+    const p = useRuntimeStore.getState().fetchGpu();
+    expect(useRuntimeStore.getState().pendingRoutes).toEqual(['gpu']);
+    resolveGpu!(json({ available: true, name: 'RTX 4080', memory_total_mb: 16376 }));
+    await p;
+    expect(useRuntimeStore.getState().pendingRoutes).toEqual([]);
+    let resolveSlot: ((r: Response) => void) | undefined;
+    const slotPending = new Promise<Response>((res) => { resolveSlot = res; });
+    mockFetch.mockImplementation(() => slotPending);
+    const p2 = useRuntimeStore.getState().fetchSlots();
+    expect(useRuntimeStore.getState().pendingRoutes.sort()).toEqual(
+      ['slot:embedding', 'slot:text', 'slot:vision']);
+    expect(isZonePending(useRuntimeStore.getState().pendingRoutes, 'services')).toBe(false);
+    resolveSlot!(json({ slot: 'text', source: 'local', ready: false }));
+    await p2;
+    expect(useRuntimeStore.getState().pendingRoutes).toEqual([]);
+  });
+});
+
+describe('操作互斥按单元（ARCH-041 四服务互不受限）', () => {
+  const ok = (payload: unknown) => Promise.resolve(
+    new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  );
+  const servicesPayload = (axiomStatus: string) => ({
+    services: [
+      svc('config', 8900, 'online'),
+      svc('tracker', 8901, 'online'),
+      svc('axiom', 8902, axiomStatus),
+      svc('web', 8903, 'online'),
+    ],
+  });
+
+  beforeEach(() => {
+    useRuntimeStore.setState({
+      services: [], dbStatus: null, loading: false, error: null, dbError: null,
+      gpu: null, gpuError: null, pendingRoutes: [],
+      slots: { text: null, vision: null, embedding: null },
+      slotErrors: { text: null, vision: null, embedding: null },
+      pendingOps: [], testing: null, keys: null, modelsConfig: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('两服务并发操作：第二个照常派发，且一方未收敛不挡另一方收敛', async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    let polls = 0;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') { posts.push(u); return ok({ ok: true }); }
+      if (u.includes('/services')) {
+        polls += 1;
+        // axiom 前两轮仍在 stopping（在飞），tracker 恒 online
+        return ok(servicesPayload(polls >= 3 ? 'online' : 'stopping'));
+      }
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const pTracker = useRuntimeStore.getState().operate('tracker', 'start');
+    const pAxiom = useRuntimeStore.getState().operate('axiom', 'restart');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts).toHaveLength(2); // 两个 POST 都真发出去，第二条没被挡
+    await vi.advanceTimersByTimeAsync(3200);
+    expect(await pTracker).toMatchObject({ name: 'tracker', op: 'start', success: true, status: 'online' });
+    expect(await pAxiom).toMatchObject({ name: 'axiom', op: 'restart', success: true, status: 'online' });
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+
+  it('同一单元重复操作仍被挡（busy 语义保留），收敛超时后解锁', async () => {
+    vi.useFakeTimers();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') return ok({ ok: true });
+      if (u.includes('/services')) return ok(servicesPayload('stopping')); // 永不收敛
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const p = useRuntimeStore.getState().operate('axiom', 'restart');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['svc:axiom']);
+    const second = await useRuntimeStore.getState().operate('axiom', 'start');
+    expect(second).toMatchObject({ success: false, status: 'busy' });
+    expect(second.reason).toContain('该服务上一次操作');
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(await p).toMatchObject({ success: false, status: 'timeout' });
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+
+  it('服务域与槽位域互不阻塞；槽位之间仍整域互斥', async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    let textPolls = 0;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') { posts.push(u); return ok({ ok: true }); }
+      if (u.includes('/models/text')) {
+        textPolls += 1;
+        return ok({ slot: 'text', source: 'local', ready: textPolls >= 3 });
+      }
+      if (u.includes('/models/')) return ok({ slot: 'vision', source: 'local', ready: false });
+      if (u.includes('/services')) return ok(servicesPayload('online'));
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const pModel = useRuntimeStore.getState().operateModel('text', 'start');
+    await vi.advanceTimersByTimeAsync(0);
+    // 槽位在飞：另一服务的启停必须照常派发
+    const pSvc = useRuntimeStore.getState().operate('tracker', 'restart');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts.some((u) => u.includes('/services/tracker/restart'))).toBe(true);
+    // 服务在飞期间槽位域内第二发被挡（单活仲裁不允许跨槽并发启停）
+    const crossSlot = await useRuntimeStore.getState().operateModel('vision', 'start');
+    expect(crossSlot).toMatchObject({ name: 'vision', success: false, status: 'busy' });
+    expect(crossSlot.reason).toContain('模型');
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(await pSvc).toMatchObject({ name: 'tracker', op: 'restart', success: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await pModel).toMatchObject({ name: 'text', op: 'start', success: true });
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+
+  it('在飞操作期间 fetchAll 防重入仍生效，操作清空后恢复', async () => {
+    vi.useFakeTimers();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') return ok({ ok: true });
+      if (u.includes('/services')) return ok(servicesPayload('stopping'));
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const p = useRuntimeStore.getState().operate('axiom', 'restart');
+    await vi.advanceTimersByTimeAsync(0);
+    await useRuntimeStore.getState().fetchAll();
+    expect(useRuntimeStore.getState().pendingRoutes).toEqual([]); // 一条路都没标＝整批被挡
+    await vi.advanceTimersByTimeAsync(16000);
+    await p;
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+});
+
+describe('受限启动两段式（ARCH-040 先停对方再启本槽）', () => {
+  const ok = (payload: unknown) => Promise.resolve(
+    new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  );
+  const tail = (u: string) => u.slice(u.indexOf('/models/'));
+
+  beforeEach(() => {
+    useRuntimeStore.setState({
+      services: [], dbStatus: null, loading: false, error: null, dbError: null,
+      gpu: null, gpuError: null, pendingRoutes: [],
+      slots: { text: null, vision: null, embedding: null },
+      slotErrors: { text: null, vision: null, embedding: null },
+      pendingOps: [], testing: null, keys: null, modelsConfig: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('startLocalModel(text, vision)：前段只发停止，对方收敛后才发启动，结果取启动段', async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') { posts.push(tail(u)); return ok({ ok: true }); }
+      if (u.includes('/models/text')) return ok({ slot: 'text', source: 'local', ready: true });
+      if (u.includes('/models/vision')) return ok({ slot: 'vision', source: 'local', ready: false });
+      if (u.includes('/models/embedding')) return ok({ slot: 'embedding', source: 'api', ready: true });
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const p = useRuntimeStore.getState().startLocalModel('text', 'vision');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts).toEqual(['/models/vision/stop']); // 对方未落定前不抢跑启动
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['model:vision']);
+
+    await vi.advanceTimersByTimeAsync(1100); // 停止收敛 → 第二派发启动
+    expect(posts).toEqual(['/models/vision/stop', '/models/text/start']);
+    expect(useRuntimeStore.getState().pendingOps).toEqual(['model:text']);
+
+    await vi.advanceTimersByTimeAsync(1100); // 启动收敛
+    expect(await p).toMatchObject({ name: 'text', op: 'start', success: true, status: 'online' });
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
+  });
+
+  it('前段停止失败即止：一条启动请求都不发，失败原因原样透回', async () => {
+    const posts: string[] = [];
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (init?.method === 'POST') {
+        posts.push(tail(u));
+        if (u.includes('/models/vision/stop')) {
+          return Promise.resolve(new Response(
+            JSON.stringify({ detail: '对方模型正在卸载中，请稍候' }),
+            { status: 409, headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+        return ok({ ok: true });
+      }
+      if (u.includes('/models/')) return ok({ slot: 'vision', source: 'local', ready: false });
+      return Promise.reject(new TypeError(`no route: ${u}`));
+    });
+    const result = await useRuntimeStore.getState().startLocalModel('text', 'vision');
+    expect(posts).toEqual(['/models/vision/stop']); // 无 /models/text/start
+    expect(result).toMatchObject({ name: 'vision', op: 'stop', success: false, status: 'error' });
+    expect(result.reason).toContain('对方模型正在卸载中');
+    expect(useRuntimeStore.getState().pendingOps).toEqual([]);
   });
 });

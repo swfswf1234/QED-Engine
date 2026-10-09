@@ -2,7 +2,7 @@
 
 状态：In Progress
 任务类型：B
-最后更新：2026-09-30
+最后更新：2026-10-01
 关联 ADR：[ADR 0020](../adr/0020-task-closure-cadence-and-thin-registration.md)（长期线形态与达成即收豁免）
 关联设计：[local-model-management.md](../design/local-model-management.md)（槽位/runtime/单活互斥与已知约束节）、
 [llm-gateway.md](../design/llm-gateway.md)（调用侧观测）、[service-hosting.md](../design/service-hosting.md)（启停单元口径）
@@ -67,6 +67,8 @@
   J1~J4 滚动判据正本移入 todo 行「成功标准」列（承接为 S1~S4），本壳保留执行口径与工作项登记表；
   此后每次取证/标定/移交在本节追加一行（时间 + 命令 + 结论）。
 - **2026-09-30 现状**：尚无取证条目行落地，L1 等待真崩或注入杀容器窗口（采集能力见 L1 行）。
+- **2026-10-01 上下文档位实测（L5 前置数据，供 DEFECT-008 ⑥ 定档）**：LM Studio 渠道 qwen/qwen3.5-9b，GPU 总显存 16376 MiB，空载基线 2519 MiB；逐档 `lms load -c N --gpu max -y` 后读回 `loaded_context_length` 一致——16384→占用 12095 MiB、24576→12351、32768→12615、40960→12879 MiB，40960 首载耗时 7.3 s（16k 档 14.5 s 系含 server 冷启），40960 档小 prompt（「请回复 OK」）生成 5.4~6.3 s（含约 200 reasoning tokens）。**结论**：40960 可容纳（余量 3497 MiB），加载层参数定档 16384→40960（改动落 `registry.IDENTITIES` 与设计参数档案，代码修复走 DEFECT-008 / 普通任务轮 W13，本壳不直接改码）；思考 token 开销导致的验证超时归 W13 ③④，非本线判据。
+- **2026-10-01 思考段耗时与验证限长定档（L5 前置数据）**：同一 prompt 的 reasoning 段实测 170~260+ token、解码约 13 tok/s，请求层限长 256 时 5 次有 2 次 `finish=length` 正文为空，400/512 三档均 `finish=stop` 出正文（12~17s，上限不决定耗时）；LM Studio 请求体的 `chat_template_kwargs.enable_thinking=false` / `thinking.type=disabled` / 提示词 `/no_think` / 系统提示四条路数实测**均不关闭思考**（reasoning tokens 恒等于上限）→ 思考开关只在应用侧或模型侧，不在本仓请求层。定档 `LLM_TEST_MAX_TOKENS=512` + 前端 `TEST_TIMEOUT_MS=60_000`（改动落 W13 / DEFECT-008，本壳只留数据）。
 
 ## 验证与验收
 

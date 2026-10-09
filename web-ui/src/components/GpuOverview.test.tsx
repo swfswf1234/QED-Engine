@@ -7,7 +7,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import GpuOverview, { buildVramSlices, formatGb } from './GpuOverview';
+import GpuOverview, {
+  buildVramSlices, buildModelShares, buildHeavyProcesses, processBasename, vramHighWater,
+  HEAVY_VRAM_SHARE_PCT, VRAM_HIGH_WATER_PCT, formatGb,
+} from './GpuOverview';
+import { deriveRunningModels } from '../stores/runtime';
 import type { GpuStatus } from '../stores';
 
 // ECharts 依赖 canvas，jsdom 不可用；以占位组件透出 option.series 供断言
@@ -127,28 +131,85 @@ describe('GpuOverview 渲染', () => {
   });
 });
 
-describe('当前在跑标注行（REQ-033 S3 / BUGFIX-017）', () => {
+describe('本地模型占用与显存大户（ARCH-037）', () => {
   const slotsLocal = {
-    text: { slot: 'text', source: 'local', channel: 'lmstudio', identity: 'qwen3.8-27b', ready: true },
+    text: { slot: 'text', source: 'local', channel: 'lmstudio', identity: 'qwen3.5-9b', ready: true },
     vision: null, embedding: null,
   } as unknown as Record<import('../stores').SlotName, import('../stores').SlotStatus | null>;
+  const slotsDocker = {
+    text: null,
+    vision: { slot: 'vision', source: 'local', channel: 'docker', identity: 'mineru', ready: true },
+    embedding: null,
+  } as unknown as Record<import('../stores').SlotName, import('../stores').SlotStatus | null>;
+  const gpuWithModel: GpuStatus = {
+    ...gpuBase,
+    memory_used_mb: 15020,
+    processes: [
+      { pid: 1, name: 'C:\\Program Files\\LM Studio\\LM Studio.exe', memory_mb: 12879, kind: 'model' },
+      { pid: 2, name: 'dwm.exe', memory_mb: 2297, kind: 'other' },
+      { pid: 3, name: 'chrome.exe', memory_mb: 454, kind: 'other' },
+    ],
+  };
 
-  it('GPU 可用时指标行下渲染「当前在跑：槽位·身份名（渠道）」，零新增请求', () => {
-    render(<GpuOverview gpu={gpuBase} gpuError={null} slots={slotsLocal} />);
-    expect(screen.getByText(/当前在跑/)).toBeInTheDocument();
-    expect(screen.getByText('文字·qwen3.8-27b（lmstudio）')).toBeInTheDocument();
+  it('buildModelShares：宿主可见渠道取模型进程和并算占总显存比例；docker 渠道标注不可见', () => {
+    const [share] = buildModelShares(gpuWithModel, deriveRunningModels(slotsLocal));
+    expect(share.mb).toBe(12879);
+    expect(share.pct).toBeCloseTo(78.6, 1);
+    expect(share.model.identity).toBe('qwen3.5-9b');
+    const [docker] = buildModelShares(gpuWithModel, deriveRunningModels(slotsDocker));
+    expect(docker.mb).toBeNull();
+    expect(docker.pct).toBeNull();
   });
 
-  it('无本地在跑槽位：文案回落（API 模式）/无', () => {
-    render(
-      <GpuOverview
-        gpu={gpuBase}
-        gpuError={null}
-        slots={{ text: null, vision: null, embedding: null } as never}
-      />,
-    );
-    expect(screen.getByText('当前在跑：')).toBeInTheDocument();
-    expect(screen.getByText('无')).toBeInTheDocument();
+  it('buildHeavyProcesses：≥10% 逐条列出并按占比降序（系统进程照实列），<10% 不列', () => {
+    const heavy = buildHeavyProcesses(gpuWithModel);
+    expect(heavy.map((h) => processBasename(h.name))).toEqual(['LM Studio.exe', 'dwm.exe']);
+    expect(heavy[0].pct).toBeCloseTo(78.6, 1);
+    expect(heavy[1].pct).toBeCloseTo(14.0, 1);
+  });
+
+  it('vramHighWater：总显存占比 ≥95% 为真，否则为假；阈值是具名常量', () => {
+    expect(VRAM_HIGH_WATER_PCT).toBe(95);
+    expect(HEAVY_VRAM_SHARE_PCT).toBe(10);
+    expect(vramHighWater({ ...gpuBase, memory_used_mb: 15560 })).toBe(true);
+    expect(vramHighWater(gpuWithModel)).toBe(false);
+    expect(vramHighWater({ available: true, memory_total_mb: 0 })).toBe(false);
+  });
+
+  it('本地模型未启用（未取到槽位）时占用行整行不渲染，「当前在跑」不再出现', () => {
+    render(<GpuOverview gpu={gpuWithModel} gpuError={null} slots={null} />);
+    expect(screen.queryByText(/本地模型占用/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/当前在跑/)).not.toBeInTheDocument();
+  });
+
+  it('本地模型启用时渲染占用行：身份 + 占总显存比例', () => {
+    render(<GpuOverview gpu={gpuWithModel} gpuError={null} slots={slotsLocal} />);
+    expect(screen.getByText(/本地模型占用/)).toBeInTheDocument();
+    expect(screen.getByText(/qwen3\.5-9b/)).toBeInTheDocument();
+    // 「 总显存」后缀专属占用行，与显存大户清单的同值条目区分
+    expect(screen.getByText(/12\.6 GB／78\.6% 总显存/)).toBeInTheDocument();
+  });
+
+  it('docker 渠道（WSL 容器内模型）占用如实标不可见，不报假 0', () => {
+    render(<GpuOverview gpu={gpuWithModel} gpuError={null} slots={slotsDocker} />);
+    expect(screen.getByText(/容器内不可见/)).toBeInTheDocument();
+    expect(screen.queryByText(/总显存/)).not.toBeInTheDocument();
+  });
+
+  it('显存大户清单渲染 ≥10% 的应用名与占比，10% 以下不出现', () => {
+    render(<GpuOverview gpu={gpuWithModel} gpuError={null} slots={null} />);
+    expect(screen.getByText(/显存大户/)).toBeInTheDocument();
+    expect(screen.getByText(/dwm\.exe/)).toBeInTheDocument();
+    expect(screen.queryByText(/chrome\.exe/)).not.toBeInTheDocument();
+  });
+
+  it('总显存 ≥95% 出提示文案，未达线不出现（只提示，无任何自动处置）', () => {
+    const high = { ...gpuWithModel, memory_used_mb: 15600 };
+    const r1 = render(<GpuOverview gpu={high} gpuError={null} slots={null} />);
+    expect(r1.getByText(/显存已用/)).toBeInTheDocument();
+    r1.unmount();
+    const r2 = render(<GpuOverview gpu={gpuWithModel} gpuError={null} slots={null} />);
+    expect(r2.queryByText(/显存已用/)).not.toBeInTheDocument();
   });
 });
 

@@ -1,12 +1,17 @@
 /**
  * 原文页 + bbox 叠加（parsing-ui §9/§10 PageImagePane）：
  * - 页图 URL 直构（不依赖页数据请求成功）；自然尺寸回传父级做坐标换算
+ * - 尺寸口径（§4.6 追改：无缩放控件）：容器宽＝宿主栏宽 100%，高由 `aspect-ratio` 按自然尺寸推
+ *   （未载入前按 A4 比例回退）；bbox 仍百分比定位，坐标换算走宿主 rect→原图像素
  * - 每块一框按类型着色；hover/选中双向联动；点击空白 → 选中最近块
  * - 框编辑口径（boxEdit）：8 手柄拉伸 + 框体拖移（松手经 onBoxCommit 落 corrected_bbox）、
- *   空白拖拽画新框（onNewBox→regionDraft 本地预览）、Ctrl/Shift 多选（onMultiSelect）
+ *   **画框模式（drawMode）**下空白拖拽画新框（onNewBox→regionDraft 本地预览）、
+ *   Ctrl/Shift 多选（onMultiSelect）、**右键菜单**（修改=选中出手柄 / 删除 / 恢复，§4.6）
  * - regionDraft 预览：新框虚线（draft-added-*）、删除块淡出虚线、合并组并集框（draft-merged-*）
  */
 import { useRef, useState } from 'react';
+import { Dropdown } from 'antd';
+import type { MenuProps } from 'antd';
 import type { Block, BlockEditInput } from '../../api/axiom';
 import { bookPageImageUrl } from '../../api/axiom';
 import { blockColor, effectiveBbox, hasBbox } from './blocks';
@@ -27,37 +32,47 @@ export interface PageImagePaneProps {
   onImageSize?: (size: { w: number; h: number }) => void;
   selectedIndex: number;
   hoveredIndex: number;
-  zoom: number;
   onSelect: (index: number) => void;
   onHover: (index: number) => void;
-  /** 编辑口径=框图时开启（parsing-ui §10） */
+  /** 编辑口径=框图修改时开启（parsing-ui §10） */
   boxEdit?: boolean;
+  /** 画框模式（§4.6「新增」开关）：仅开启时空白拖拽画新框 */
+  drawMode?: boolean;
   /** 本地预览草稿（新框/删除/合并组） */
   regionDraft?: RegionDraft;
   /** 拉伸/移动提交（原图像素 bbox；父级落 submitEdit corrected_bbox） */
   onBoxCommit?: (blockIndex: number, bbox: BBox, input?: BlockEditInput) => void;
-  /** 空白拖拽画新框（进 regionDraft.added，落库禁用） */
+  /** 画框模式空白拖拽画新框（进 regionDraft.added，落库禁用） */
   onNewBox?: (bbox: BBox) => void;
   /** Ctrl/Shift 点框多选 */
   onMultiSelect?: (blockIndex: number) => void;
+  /** 右键菜单「删除」→ 入删除草稿 */
+  onDeleteRegion?: (blockIndex: number) => void;
+  /** 右键菜单「恢复」→ 撤出删除草稿 */
+  onRestoreRegion?: (blockIndex: number) => void;
 }
 
+// 位移判定用**屏像素**（cx/cy 为按下时 client 坐标）：页图按栏宽自适应后 1 屏 px ≠ 1 自然 px，
+// 用自然像素阈值会把点击抖动误判成拖拽并落库。
 type Drag =
-  | { kind: 'resize'; index: number; handle: HandleId; start: BBox; sx: number; sy: number }
-  | { kind: 'move'; index: number; start: BBox; sx: number; sy: number }
-  | { kind: 'new'; sx: number; sy: number }
+  | { kind: 'resize'; index: number; handle: HandleId; start: BBox; sx: number; sy: number; cx: number; cy: number }
+  | { kind: 'move'; index: number; start: BBox; sx: number; sy: number; cx: number; cy: number }
+  | { kind: 'new'; sx: number; sy: number; cx: number; cy: number }
   | null;
 
+const movedByClient = (e: MouseEvent, d: NonNullable<Drag>, min: number) =>
+  Math.abs(e.clientX - d.cx) > min || Math.abs(e.clientY - d.cy) > min;
+
 export default function PageImagePane({
-  bookId, pageNo, blocks, onImageSize, selectedIndex, hoveredIndex, zoom, onSelect, onHover,
-  boxEdit = false, regionDraft, onBoxCommit, onNewBox, onMultiSelect,
+  bookId, pageNo, blocks, onImageSize, selectedIndex, hoveredIndex, onSelect, onHover,
+  boxEdit = false, drawMode = false, regionDraft, onBoxCommit, onNewBox, onMultiSelect,
+  onDeleteRegion, onRestoreRegion,
 }: PageImagePaneProps) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [live, setLive] = useState<BBox | null>(null); // 在途拖拽预览
+  const [ctxIdx, setCtxIdx] = useState<number | null>(null); // 右键菜单打开的框
   const dragRef = useRef<Drag>(null);
   const movedRef = useRef(false);
-  const width = Math.round(A4_W * (zoom / 100));
-  const height = Math.round(A4_H * (zoom / 100));
   const base: Bounds = natural ?? { w: A4_W, h: A4_H };
 
   const toNatural = (clientX: number, clientY: number) => {
@@ -85,7 +100,7 @@ export default function PageImagePane({
     movedRef.current = false;
     const start = effectiveBbox(blocks[idx]);
     const p0 = toNatural(e.clientX, e.clientY);
-    dragRef.current = { kind: 'move', index: idx, start, sx: p0.x, sy: p0.y };
+    dragRef.current = { kind: 'move', index: idx, start, sx: p0.x, sy: p0.y, cx: e.clientX, cy: e.clientY };
     beginWindowDrag(
       (ev) => {
         const d = dragRef.current;
@@ -93,7 +108,7 @@ export default function PageImagePane({
         const p = toNatural(ev.clientX, ev.clientY);
         const dx = p.x - d.sx;
         const dy = p.y - d.sy;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) movedRef.current = true;
+        if (movedByClient(ev, d, 3)) movedRef.current = true;
         setLive(moveBbox(d.start, dx, dy, base));
       },
       (ev) => {
@@ -117,7 +132,7 @@ export default function PageImagePane({
     movedRef.current = false;
     const start = effectiveBbox(blocks[idx]);
     const p0 = toNatural(e.clientX, e.clientY);
-    dragRef.current = { kind: 'resize', index: idx, handle, start, sx: p0.x, sy: p0.y };
+    dragRef.current = { kind: 'resize', index: idx, handle, start, sx: p0.x, sy: p0.y, cx: e.clientX, cy: e.clientY };
     beginWindowDrag(
       (ev) => {
         const d = dragRef.current;
@@ -125,7 +140,7 @@ export default function PageImagePane({
         const p = toNatural(ev.clientX, ev.clientY);
         const dx = p.x - d.sx;
         const dy = p.y - d.sy;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) movedRef.current = true;
+        if (movedByClient(ev, d, 3)) movedRef.current = true;
         setLive(applyResize(d.start, d.handle, dx, dy, base));
       },
       (ev) => {
@@ -141,20 +156,20 @@ export default function PageImagePane({
   };
 
   const onPaneMouseDown = (e: React.MouseEvent) => {
-    if (!boxEdit || e.button !== 0) return;
+    if (!boxEdit || !drawMode || e.button !== 0) return;
     const p0 = toNatural(e.clientX, e.clientY);
     // 命中已有框（含草稿）的按下交给框自身处理
     const hit = blocks.some((b) => hasBbox(b) && pointInBbox(p0.x, p0.y, effectiveBbox(b)))
       || (regionDraft?.added ?? []).some((bb) => pointInBbox(p0.x, p0.y, bb));
     if (hit) return;
     movedRef.current = false;
-    dragRef.current = { kind: 'new', sx: p0.x, sy: p0.y };
+    dragRef.current = { kind: 'new', sx: p0.x, sy: p0.y, cx: e.clientX, cy: e.clientY };
     beginWindowDrag(
       (ev) => {
         const d = dragRef.current;
         if (!d || d.kind !== 'new') return;
         const p = toNatural(ev.clientX, ev.clientY);
-        movedRef.current = Math.abs(p.x - d.sx) > 4 || Math.abs(p.y - d.sy) > 4;
+        movedRef.current = movedByClient(ev, d, 2);
         setLive(clampBbox([Math.min(d.sx, p.x), Math.min(d.sy, p.y), Math.max(d.sx, p.x), Math.max(d.sy, p.y)], base));
       },
       (ev) => {
@@ -214,7 +229,7 @@ export default function PageImagePane({
       data-testid={`page-image-${pageNo}`}
       onClick={onPaneClick}
       onMouseDown={onPaneMouseDown}
-      style={{ position: 'relative', width, height, background: '#fff', border: '1px solid #eee', borderRadius: 4, cursor: boxEdit ? 'crosshair' : 'default' }}
+      style={{ position: 'relative', width: '100%', aspectRatio: `${base.w} / ${base.h}`, background: '#fff', border: '1px solid #eee', borderRadius: 4, cursor: boxEdit && drawMode ? 'crosshair' : 'default' }}
     >
       <img
         src={bookPageImageUrl(bookId, pageNo)}
@@ -236,9 +251,8 @@ export default function PageImagePane({
         const active = idx === selectedIndex || idx === hoveredIndex;
         const selected = idx === selectedIndex;
         const inBoxEdit = boxEdit && selected && !deleted;
-        return (
+        const box = (
           <div
-            key={idx}
             role="button"
             aria-label={`bbox ${idx + 1}`}
             onClick={(e) => {
@@ -282,6 +296,36 @@ export default function PageImagePane({
               />
             ))}
           </div>
+        );
+        if (!boxEdit) return <div key={idx}>{box}</div>;
+        // 右键菜单（§4.6 框图修改）：修改=选中出 8 手柄 / 删除 / 恢复（草稿已删框）
+        const items: MenuProps['items'] = deleted
+          ? [{ key: 'restore', label: '恢复' }]
+          : [
+            { key: 'edit', label: '修改' },
+            { key: 'delete', label: '删除' },
+          ];
+        return (
+          <Dropdown
+            key={idx}
+            trigger={['contextMenu']}
+            open={ctxIdx === idx}
+            onOpenChange={(open) => setCtxIdx(open ? idx : null)}
+            destroyOnHidden
+            menu={{
+              items,
+              onClick: ({ key, domEvent }) => {
+                // 弹层经 React 树冒泡回页图，不停止会触发「空白就近选块」覆盖菜单动作
+                domEvent.stopPropagation();
+                setCtxIdx(null);
+                if (key === 'edit') onSelect(idx);
+                else if (key === 'delete') onDeleteRegion?.(idx);
+                else if (key === 'restore') onRestoreRegion?.(idx);
+              },
+            }}
+          >
+            {box}
+          </Dropdown>
         );
       })}
       {draft.added.map((bb, i) => (

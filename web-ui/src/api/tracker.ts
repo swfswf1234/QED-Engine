@@ -9,7 +9,8 @@
 import { api, type ApiRequestOptions } from './client';
 import type {
   BookRecord, Catalog, CourseRecord, DomainSystem, ExploreApplyResult, ExploreLaunchMode,
-  ExploreSessionRecord, KnowledgeDetail, KnowledgeRecord, SourceRecord,
+  ExploreSessionRecord, KnowledgeDetail, KnowledgeRecord, PaperPick, PaperSelectionDetail,
+  PaperSelectionSummary, SourceRecord, TaskRecord,
 } from '../stores';
 
 /** 内置目录 id（冻结目录 math-qe，QED-Tracker catalog.py） */
@@ -201,6 +202,81 @@ export interface CreateBookBody {
 /** POST /api/v1/books：书库化创建（book_id {abbr}-b{NN} 与 title 必填 422；重复 409） */
 export function createBook(body: CreateBookBody, opts?: ApiRequestOptions): Promise<BookRecord> {
   return api.post<BookRecord>('/books', body, opts);
+}
+
+/**
+ * GET /api/v1/papers/books：发现论文书行枚举（kind=paper，refs=domain_id/course_id）。
+ * 注意与 `GET /books` 不同——后者为 Axiom af_books 代理。端点失败时调用方静默按空集降级
+ * （论文行隐藏）。
+ */
+export function listPaperBooks(
+  params?: { domain_id?: string; course_id?: string },
+  opts?: ApiRequestOptions,
+): Promise<BookRecord[]> {
+  return api.get<BookRecord[]>('/papers/books', { ...opts, params: params as Record<string, string | undefined> });
+}
+
+// --- 论文探索面（REQ-102 W4；契约=api-contracts.md §③ 论文探索） ---
+// ⑤′ 论文没有默认桶：domain_id 一律由界面显式给出，前端/8900 都不补默认值，
+// 上游 422/404/409 结构化 detail 原样透出供弹窗提示。
+
+export interface PaperRecommendBody {
+  domain_id: string;
+  recipe: 'frontier' | 'core';
+  goal?: string;
+  categories?: string[];
+  top?: number;
+  limit?: number;
+  years_limit?: number;
+}
+
+/** POST /api/v1/papers/recommend：领域级论文探索提交（202 `{task_id}`，进度经 /tasks/{id}） */
+export function recommendPapers(body: PaperRecommendBody, opts?: ApiRequestOptions): Promise<{ task_id: string }> {
+  return api.post<{ task_id: string }>('/papers/recommend', body, { timeoutMs: 20000, ...opts });
+}
+
+/** GET /api/v1/papers/selections：报告摘要列表（created_at 倒序） */
+export function listPaperSelections(
+  params?: { domain_id?: string; recipe?: string; limit?: number },
+  opts?: ApiRequestOptions,
+): Promise<{ selections: PaperSelectionSummary[] }> {
+  return api.get<{ selections: PaperSelectionSummary[] }>('/papers/selections', {
+    ...opts,
+    params: {
+      domain_id: params?.domain_id,
+      recipe: params?.recipe,
+      limit: params?.limit === undefined ? undefined : String(params.limit),
+    },
+  });
+}
+
+/** GET /api/v1/papers/selections/{id}：报告详情（候选 + 评分 + 理由；理由只存报告侧） */
+export function getPaperSelection(selectionId: string, opts?: ApiRequestOptions): Promise<PaperSelectionDetail> {
+  return api.get<PaperSelectionDetail>(`/papers/selections/${selectionId}`, { timeoutMs: 20000, ...opts });
+}
+
+/**
+ * POST /api/v1/papers/selections/{id}/adopt：显式 pick 建 kind=paper 书行（202 任务）。
+ * 采纳不自动下载（裁决 #5）：新行停在 candidate，取书另由 `fetchBook` 显式发起。
+ */
+export function adoptPapers(
+  selectionId: string,
+  picks: PaperPick[],
+  opts?: ApiRequestOptions,
+): Promise<{ task_id: string; selection_id: string }> {
+  return api.post<{ task_id: string; selection_id: string }>(
+    `/papers/selections/${selectionId}/adopt`, { picks }, { timeoutMs: 20000, ...opts },
+  );
+}
+
+/** GET /api/v1/tasks/{task_id}：任务详情（论文探索/采纳轮询复用） */
+export function getTask(taskId: string, opts?: ApiRequestOptions): Promise<TaskRecord> {
+  return api.get<TaskRecord>(`/tasks/${taskId}`, opts);
+}
+
+/** GET /api/v1/tasks：任务列表（领域论文行徽标联立用） */
+export function listTasks(opts?: ApiRequestOptions): Promise<TaskRecord[]> {
+  return api.get<TaskRecord[]>('/tasks', opts);
 }
 
 /** GET /api/v1/books/{id}/sources：书籍渠道尝试列表 */

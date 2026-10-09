@@ -1,4 +1,4 @@
-"""数据域·QED-Tracker 适配路由：catalogs / tasks / knowledge / books 归 8900 所有。
+"""数据域·QED-Tracker 适配路由：catalogs / tasks / knowledge / books / papers 归 8900 所有。
 
 前端（8903）只连 8900（ADR 0007）：目录、任务、五层语义（教程 qt_knowledge / 书籍
 qt_books / 渠道 qt_sources，QED-031 知识层次模型，取代三表 qt_selections/qt_downloads）
@@ -528,3 +528,68 @@ def verify_book(book_id: str, request: Request) -> dict:
 def cancel_book(book_id: str, request: Request) -> dict:
     """取消下载：downloading → decided（复位，不删除已落盘文件）。"""
     return _call(request, _tracker(request).cancel_book, book_id)
+
+
+# --- 论文链路（REQ-102 W2a 枚举 / W2b 探索面；上游=QED-068 A/B 步，⑤′ 论文没有默认桶） ---
+
+
+@router.get("/papers/books")
+def list_paper_books(
+    request: Request,
+    domain_id: str | None = None,
+    course_id: str | None = None,
+) -> list:
+    """发现论文书行枚举（固定 `kind=paper`，透传 8901 `GET /books`）。
+
+    区别于 `GET /api/v1/books`（Axiom af_books 代理，占用中不可复用）。响应行携带 `kind`
+    与落位字段（`domain_id` / `course_id`，课程为空即领域级）——8903 展示行分桶唯一依据。
+    """
+    return _call(
+        request,
+        _tracker(request).list_books,
+        kind="paper",
+        domain_id=domain_id,
+        course_id=course_id,
+    )
+
+
+@router.post("/papers/recommend", status_code=202)
+def paper_recommend(payload: dict, request: Request) -> dict:
+    """领域级论文探索任务提交（纯透传；`domain_id` 必填且须已登记，8900 不补默认值）。"""
+    return _call(
+        request, _tracker(request).recommend_papers, dict(payload), _status_code=202
+    )
+
+
+@router.get("/papers/selections")
+def paper_selections(request: Request, domain_id: str = "", recipe: str = "", limit: int = 0) -> dict:
+    """选书报告摘要列表（`domain_id`/`recipe` AND 过滤 + `limit`，透传 8901）。"""
+    return _call(
+        request,
+        _tracker(request).list_paper_selections,
+        domain_id=domain_id,
+        recipe=recipe,
+        limit=limit,
+    )
+
+
+@router.get("/papers/selections/{selection_id}")
+def paper_selection_detail(selection_id: str, request: Request) -> dict:
+    """报告详情（候选 + 评分 + status）；404 SELECTION_NOT_FOUND 原样透传。"""
+    return _call(request, _tracker(request).get_paper_selection, selection_id)
+
+
+@router.post("/papers/selections/{selection_id}/adopt", status_code=202)
+def paper_adopt(selection_id: str, payload: dict, request: Request) -> dict:
+    """显式 pick → 8901 落 kind=paper 书行（202 任务）；422/409 原样透传，不补落位默认值。
+
+    采纳不自动下载（对方裁决 #5）：书行停在 candidate 态，取书由前端显式调
+    `POST /api/v1/books/{book_id}/fetch`。
+    """
+    return _call(
+        request,
+        _tracker(request).adopt_papers,
+        selection_id,
+        list(payload.get("picks") or []),
+        _status_code=202,
+    )

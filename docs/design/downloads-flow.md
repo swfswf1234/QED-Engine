@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-23
+最后更新：2026-10-09
 确认状态：已确认
 关联代码：backend/qed_engine/api/domain_explore.py、backend/qed_engine/api/explore.py、backend/qed_engine/services/explore_sessions.py、backend/qed_engine/services/shared_tables.py、backend/qed_engine/clients/tracker_client.py、web-ui/src/pages/Downloads.tsx、web-ui/src/components/{DownloadsTree,DomainCard,DomainConfirmModal,CourseConfirmModal,ExploreFlowModal}.tsx、web-ui/src/api/{tracker,explore-helpers}.ts、web-ui/src/stores/downloads.ts（端点请求/返回细节见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：tests/test_domain_explore.py、tests/test_explore_sessions.py、web-ui/src/pages/Downloads.test.tsx、web-ui/src/components/DownloadsTree.state.test.tsx
@@ -10,6 +10,7 @@
 关联文档：[downloads-ui.md](downloads-ui.md)（UI 展示规范与异常降级的用户可见表现唯一事实源）、[api-contracts](../architecture/api-contracts.md)（8900 端点请求/返回细节唯一事实源）；8901 原生契约以 QED-Tracker `docs/architecture/api.md` 为事实源（不复制）
 关联计划：[arch019-explore-ui-logic](../history/plans/2026-09/2026-09-08-arch019-explore-ui-logic.md)、
 [arch019-explore-backend-chain](../history/plans/2026-09/2026-09-08-arch019-explore-backend-chain.md)（PLAN-033/034 晋升来源）；
+论文链路（§7）设计态承载＝任务台账 REQ-101（8901 侧请求）/REQ-102（根侧消费面）两行及其计划壳；
 链路演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 1. 定位与目标
@@ -22,7 +23,8 @@
 设计取向：等待可观测（5s 轮询）、中断可恢复（刷新直读共享表）、失败可重试
 （异常态落库）。8900 对 8901 **纯透传 + 信任**。
 
-链路总图（前端 → 8900 编排层 → 8901/共享表；8900 是唯一写点，前端与 8901 无直连）：
+链路总图（前端 → 8900 编排层 → 8901/共享表；探索链路 8900 是唯一写点，前端与 8901 无直连；
+论文链路的落库写点在 8901，见 §7.3）：
 
 ```mermaid
 flowchart LR
@@ -58,7 +60,8 @@ flowchart LR
 ## 2. 范围与非目标
 
 **范围内**：探索状态机与操作×状态×接口矩阵、8900 后端链路与终态写点矩阵、
-explore-status 口径、降级链路规则、课程收集业务流程规则（五阶段）。
+explore-status 口径、降级链路规则、课程收集业务流程规则（五阶段）、
+论文链路（§7，领域级发起·领域/课程落位·展示态派生）。
 **非目标**：不含 UI 展示规范与异常降级的用户可见表现；不含 8900 端点请求/返回字段级
 契约；不涉及 8901 内部实现与其原生契约细节。
 
@@ -317,7 +320,59 @@ flowchart LR
 已登记 REQ-020（请求：QED-Tracker）；产出回填阶段 1 选书规则与 QED-Tracker 来源评估矩阵，
 根仓库不建界面、不重复登记数据。
 
-## 7. 已知约束与维护规则
+## 7. 论文链路（领域级探索与领域/课程沉淀）
+
+论文链路为领域与课程持续沉淀**前沿/核心论文**，与课程收集五阶段（§6）并行：探索
+**仅由领域语境发起**（goal 取领域描述），确认后的论文可落位到**领域或该领域下课程**
+（逻辑分组）。本节定义链路、展示状态派生与写点归属；界面形态见
+[downloads-ui.md](downloads-ui.md) §4.4，端点形状见
+[api-contracts](../architecture/api-contracts.md) §③「规划契约」。本节为设计态，
+实施承载＝任务台账 REQ-101（8901 侧）/REQ-102（根侧）。
+
+### 7.1 分段与责任分界
+
+| 段 | 执行方 | 要点 |
+| --- | --- | --- |
+| 探索发起 | 8903→8900 透传→8901 | `papers/recommend`（domain_id + recipe `frontier\|core`），202 返回 task_id；8901 执行 LLM 计划→arXiv 检索→相关性评估 |
+| 报告 | 8901 | `qt_selections` 携带领域 scope，状态 `planning→ranked`；候选评分（goal_fit/foundational_value/readability） |
+| 评审与 pick | 8903 | 候选清单 + **逐条落位选择（领域\|该领域下课程）**；显式采纳（adopt）由人确认，模型不写任何资源事实 |
+| 书本化 | 8901 | adopt 生成 `qt_books` kind=paper 行（标识=arXiv ID、refs=落位 domain_id/course_id），下载/验收复用 §6 书本五层态链；查重=书库命中（arXiv ID/标题） |
+| 透传 | 8900 | papers 面纯透传+信任，对 DB 与数据根零写点 |
+
+- 课程**不独立发起论文探索**；课程级论文仅来自 pick 落位（展示行两级都挂，见 downloads-ui §4.4）；
+- 论文**没有默认落盘桶**（2026-10-01 用户裁定，正本=对方 QED-068 壳「F9 裁定」）：`domain_id`
+  必填且须为 `qed_domain` 已登记领域，领域不存在即拒绝落盘/建书行；8900/8903 透传**不补默认值**，
+  论文只会落在真实领域的 `raw/<domain>/_general/papers/`，与书行 `domain_id` 天然一致；
+- 报告状态只是审计快照，落位完成后消费侧长期状态一律以**书行五层态**为事实源。
+- 采纳（adopt）**不自动取书**：取书须显式 `POST /books/{book_id}/fetch`（8900 透传），自动下载链止于 `downloaded`（展示行「待验证」）；`verified`（展示行「已验收」）是**人工验收档**，只由书目详情「验证通过」置位，展示行、透传面与探索弹窗均不代做验收。
+
+### 7.2 论文行展示态派生（不引入第四套状态机）
+
+领域/课程论文展示行为**派生视图**，来源字段与显示一一对应：
+
+| 展示态 | 派生条件（任务态 × 报告态 × 书行态） |
+| --- | --- |
+| 隐藏 | 该 refs 下无 kind=paper 书行，且领域无活动报告/任务 |
+| 探索中 | 最近论文任务 `queued/running` 且报告 `planning` |
+| 待评审 | 最近报告 `ranked`（有 N 条未处理候选） |
+| 已沉淀 k 篇 | 该 refs 下存在 k 条 kind=paper 书行（内部按书五档细分：待下载/下载中/待验证/已验收/失败，口径同 §6） |
+| 失败 | 最近任务 `failed`（带 error 原因，重试入口=论文探索管理弹窗） |
+
+论文行**不进入**领域 6 态/课程 5 态 `exploration_stage` 状态机（§3），不写 `explore_pending`；
+教程附属论文（kind=paper 挂 knowledge）与本链路发现论文（refs=domain/course）以 refs 区分，互不混列。
+
+同一领域同时命中多态时按**探索中 > 待评审 > 失败 > 已沉淀 > 隐藏**取一（任务发起即就地转
+「探索中」，不等任务列表回读）；「待评审」「失败」两态徽标可点击直达管理弹窗——待评审续看候选
+评审与落位，失败为改目标/分类后重试的入口。
+
+### 7.3 写点与降级
+
+- 论文链路落库写点（报告生成、书本化、文件登记）全部在 8901；8900/8903 **零写点**，
+  本链路不新增也不改动任何 `set_*_stage`；
+- 8901 离线：书行清单经 DB 直读仍显示，探索发起入口禁用（口径与 §5.4 降级规则一致）；
+- 8900 重启：论文任务事实源在 8901 `qt_tasks`，弹窗按 task_id 续轮询，展示行派生不受影响。
+
+## 8. 已知约束与维护规则
 
 1. **8900 唯一写点**：前端与 8901 均不直写 `exploration_stage`（§3.4）；共享表是唯一恢复源。
 2. **内存会话可丢**：`ExploreSessionManager` 会话为 2h TTL 内存态，丢失由

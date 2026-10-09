@@ -38,6 +38,7 @@
 | `QED_API_SELECT` | 默认模型来源 | `api` | `api`（默认，API key 调用）/ `local`（本地模型）/ `qed-engine`（仅子项目，经 8900 网关）；**槽位未选择时的默认来源**（槽位级运行态 `manifest.source` 优先） |
 | `QED_LLM_GATEWAY_URL` | 网关地址 | `http://127.0.0.1:8900` | 子项目 `qed-engine` 模式读取；api/local 模式忽略 |
 | `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉/向量上游透传；按需调大 |
+| `QED_LLM_LOCAL_ADAPT` | 本地模型适配层开关 | `true` | ARCH-027-M3：true 时 local 渠道按能力表注入 `response_format`、上游拒绝剥参数单次重试并运行时拉黑；false 全部旁路（回退现行为）。正文见 [llm-gateway.md](llm-gateway.md)「本地模型适配层」节 |
 | `QED_DATA_ROOT` | 三项目统一数据根目录 | `<进程工作目录>/dataset/` | 解析优先级：**真实环境变量 > 自身 `.env` > 向上走查父目录 `.env` > 内置默认**；顶层布局 `raw\|tmp\|parsed/<领域>/<课程>/`（派生路径表见 [dataset-conventions.md](dataset-conventions.md)）；推荐 `D:\coding\QED-Engine\dataset` |
 | `QED_PROXY` | 本地代理 | 空 | 污染/限流的 archive.org、openlibrary.org 走代理（Clash 默认混合端口 `http://127.0.0.1:7890`） |
 

@@ -8,11 +8,18 @@ runtime 细节（LM Studio 半托管 / llama.cpp / docker）归 services/llm/run
 v1 兼容：ensure_text_ready / ensure_image_ready 保留为槽位包装；MODEL_SCRIPTS 与旧名
 qwen/mineru 经 SLOT_ALIASES 过渡（deprecated，端点层同步提供别名）。
 
+ARCH-028 增强批：operate_model start/restart 派发即经 supervisor.note_starting_active 置
+启动宽限窗口（W7，防冷启动被监督器防抖误判掉线）；ensure_local_ready 启动关键段进程级
+互斥串行化（DEFECT-005，双槽位并发退避重启不再绕过单活仲裁）。
+
 设计关联（DesignRef）：docs/design/local-model-management.md
 实现状态：Current
 关联测试：tests/test_llm_model_manager.py
 """
 
+from __future__ import annotations
+
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -23,6 +30,10 @@ from qed_engine.services.llm.runtimes import get_runtime
 ROOT = Path(__file__).resolve().parents[4]  # services/llm/ → 仓库根
 TEXT_SCRIPT = ROOT / "scripts" / "text-model" / "qed_qwen_service.py"
 IMAGE_SCRIPT = ROOT / "scripts" / "image-model" / "qed_mineru_service.py"
+
+# DEFECT-005：启动关键段（复核探针 + 单活仲裁 + start）进程级互斥——双槽位并发
+# 退避重启（监督器恢复派发）不再互相看不见对方而绕过 QED_RESOURCE_GUARD 双跑
+_LOCAL_START_LOCK = threading.Lock()
 
 # 本地候选槽位（embedding 无本地候选，天然跳过仲裁）
 SLOTS = ("text", "vision")
@@ -83,13 +94,16 @@ def ensure_local_ready(settings: Settings, slot: str, script_runner: Callable | 
     rt = get_runtime(rt_key)
     if rt.probe(settings, model):
         return
-    if settings.qed_resource_guard:
-        stop_other_local_slots(settings, slot, script_runner=script_runner, log=log)
-    # 加载层参数注入（ARCH-033：registry 身份表 = 唯一事实源，监督器恢复重启同链路）
-    params = registry.binding_params(settings, slot)
-    result = rt.start(settings, model, log=log, script_runner=script_runner, params=params)
-    if not result.ok:
-        log(f"start 槽位 {slot} 失败：{result.detail}")
+    with _LOCAL_START_LOCK:  # DEFECT-005：并发恢复派发下串行化启动关键段
+        if rt.probe(settings, model):  # 持锁复核：等锁期间对方可能已把本槽位拉起
+            return
+        if settings.qed_resource_guard:
+            stop_other_local_slots(settings, slot, script_runner=script_runner, log=log)
+        # 加载层参数注入（ARCH-033：registry 身份表 = 唯一事实源，监督器恢复重启同链路）
+        params = registry.binding_params(settings, slot)
+        result = rt.start(settings, model, log=log, script_runner=script_runner, params=params)
+        if not result.ok:
+            log(f"start 槽位 {slot} 失败：{result.detail}")
 
 
 # --- v1 兼容包装（gateway 现有调用点；W3 切槽位路由后可退场） ---
@@ -131,6 +145,7 @@ def operate_model(name: str, op: str, settings: Settings,
     model = binding[1] if binding else ""
 
     if op == "start":
+        supervisor.note_starting_active(slot)  # W7：派发即置启动宽限窗口（防冷启动误判掉线）
         ensure_local_ready(settings, slot, script_runner=script_runner, log=log)
         supervisor.note_desired_active(slot, "running")
         return
@@ -139,6 +154,7 @@ def operate_model(name: str, op: str, settings: Settings,
         supervisor.note_desired_active(slot, "stopped")
         return
     # restart：先停本槽位再走 ensure（单活仲裁）
+    supervisor.note_starting_active(slot)  # W7
     rt.stop(settings, model, log=log, script_runner=script_runner)
     ensure_local_ready(settings, slot, script_runner=script_runner, log=log)
     supervisor.note_desired_active(slot, "running")

@@ -1,103 +1,148 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import Knowledge from './Knowledge';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
-import { useKnowledgeStore } from '../stores/knowledge';
-import type { Catalog } from '../stores';
+import { useStarMapStore } from '../stores/starMap';
+import type { StarMapResponse } from '../api/learn';
 
-const catalogFixture: Catalog = {
-  id: 'math-qe',
-  name: '突破朗道位垒',
-  description: '博士资格考试目录',
-  status: 'frozen',
-  targets: [
-    { id: '01-rudin', course_id: '01_math_analysis', course_name: '数学分析', kind: 'book', title: '数学分析原理', authors: [], language: 'zh', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'] },
-    { id: '02-axler', course_id: '02_linear_algebra', course_name: '线性代数', kind: 'book', title: '线性代数应该这样学', authors: [], language: 'zh', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'] },
-    { id: '03-munkres', course_id: '03_topology', course_name: '点集拓扑', kind: 'book', title: 'Topology', authors: [], language: 'en', edition: '', query: '', required: true, file_hint: '', note: '', roles: ['textbook'] },
+// ECharts 依赖 canvas，jsdom 不可用：以按钮列表替身透出布局节点（同 Dashboard/GpuOverview 处理）
+vi.mock('../components/StarMapGraph', () => ({
+  default: ({
+    layout, onSelectCourse,
+  }: {
+    layout: { nodes: Array<{ id: string; name: string; track: string }> };
+    onSelectCourse: (id: string) => void;
+  }) => (
+    <div aria-label="星图">
+      {layout.nodes.map((n) => (
+        <button key={n.id} onClick={() => onSelectCourse(n.id)}>课程卡 {n.name}（{n.track}）</button>
+      ))}
+    </div>
+  ),
+}));
+
+function LocationProbe() {
+  const { pathname } = useLocation();
+  return <span data-testid="location">{pathname}</span>;
+}
+
+const STAR_MAP: StarMapResponse = {
+  domains: [
+    {
+      domain_id: 'math',
+      name: '数学',
+      level: '本科',
+      tracks: [
+        {
+          track: '分析学',
+          kind: 'main',
+          summary: '',
+          courses: [
+            { course_id: 'ma', name: '数学分析', track: '分析学', stage: '', sort_order: 1, kp_confirmed: 2, kp_candidates: 1 },
+            { course_id: 'ra', name: '实变函数', track: '分析学', stage: '', sort_order: 2, kp_confirmed: 0, kp_candidates: 0 },
+          ],
+        },
+        {
+          track: '代数学',
+          kind: 'main',
+          summary: '',
+          courses: [{ course_id: 'la', name: '线性代数', track: '代数学', stage: '', sort_order: 1, kp_confirmed: 0, kp_candidates: 3 }],
+        },
+      ],
+    },
+    {
+      domain_id: 'cs',
+      name: '计算机科学',
+      level: '本科',
+      tracks: [
+        {
+          track: 'AI',
+          kind: 'other',
+          summary: '',
+          courses: [{ course_id: 'ml', name: '机器学习', track: 'AI', stage: '', sort_order: 1, kp_confirmed: 0, kp_candidates: 0 }],
+        },
+      ],
+    },
+  ],
+  edges: [
+    { from: 'ma', to: 'ra', domain_id: 'math', cross_track: false },
+    { from: 'la', to: 'ra', domain_id: 'math', cross_track: true },
   ],
 };
 
-function renderKnowledge() {
+function renderPage() {
   return render(
     <MemoryRouter>
       <ConfigProvider theme={theme}>
         <Knowledge />
+        <LocationProbe />
       </ConfigProvider>
     </MemoryRouter>,
   );
 }
 
-describe('学习中心·知识结构浏览 Knowledge（原型）', () => {
+describe('学习中心·知识梳理星图 Knowledge（M5 demo）', { timeout: 15000 }, () => {
   beforeEach(() => {
-    useKnowledgeStore.setState({
-      catalogTargets: [], loading: false, error: null,
-      domain: '数学', selectedCourseId: null,
-    });
+    useStarMapStore.setState({ domains: [], edges: [], domainId: '', loading: false, error: null });
+    mockFetch.mockReset();
   });
 
-  it('渲染领域面板 + 课程泡泡图（分层 + 连线）', async () => {
-    mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/catalogs')) {
-        return Promise.resolve(new Response(JSON.stringify(catalogFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      if (url.includes('/courses')) {
-        // 返回含 stage/prerequisites 的课程数据
-        return Promise.resolve(new Response(JSON.stringify([
-          {
-            domain_id: 'math', name: '高等数学', stages: ['本科基础', '研究生基础'],
-            courses: [
-              { course_id: '01_math_analysis', name: '数学分析', stage: '本科基础', prerequisites: [] },
-              { course_id: '02_linear_algebra', name: '线性代数', stage: '本科基础', prerequisites: [] },
-              { course_id: '03_topology', name: '点集拓扑', stage: '本科基础', prerequisites: ['01_math_analysis', '02_linear_algebra'] },
-            ],
-          },
-        ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      return Promise.reject(new TypeError(`no route: ${url}`));
-    });
-    renderKnowledge();
-    expect(await screen.findByText('学习中心 · 知识结构浏览')).toBeInTheDocument();
-    // 领域面板
-    expect(screen.getByText('领域')).toBeInTheDocument();
+  it('大标题 + 领域下拉（默认第一个领域）+ 轨迹列与课程卡；画面不出现统计与图例', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify(STAR_MAP), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    renderPage();
+    expect(await screen.findByText('学习中心 · 知识梳理星图')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '领域' })).toBeInTheDocument();
     expect(screen.getByText('数学')).toBeInTheDocument();
-    // 泡泡节点（3 门课）
-    const bubbles = await screen.findAllByRole('button', { name: /课程 / });
-    expect(bubbles.length).toBeGreaterThanOrEqual(3);
-    // 连线 SVG 存在（依赖边：03 点集拓扑 → 01/02）
-    const svg = document.querySelector('svg[aria-label="课程依赖图"]');
-    expect(svg).not.toBeNull();
-    expect(svg!.querySelectorAll('path').length).toBeGreaterThanOrEqual(2);
-    // 层标签
-    expect(screen.getByText('本科基础')).toBeInTheDocument();
-    expect(screen.getByText('研究生基础')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '课程卡 数学分析（分析学）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '课程卡 线性代数（代数学）' })).toBeInTheDocument();
+    expect(screen.queryByText(/机器学习/)).not.toBeInTheDocument();
+    // 图上可直读的信息不再写成文字（统计行 / 页面内图例）
+    expect(screen.queryByText(/条轨迹/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/已确认知识点/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/竖虚线框＝学习轨迹/)).not.toBeInTheDocument();
   });
 
-  it('点击泡泡 → 知识结构图态（空态 + 返回）', async () => {
-    mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/catalogs')) {
-        return Promise.resolve(new Response(JSON.stringify(catalogFixture), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-      }
-      return Promise.reject(new TypeError(`no route: ${url}`));
-    });
-    renderKnowledge();
-    const bubble = await screen.findByRole('button', { name: '课程 数学分析' });
-    fireEvent.click(bubble);
-    expect(useKnowledgeStore.getState().selectedCourseId).toBe('01_math_analysis');
-    expect(await screen.findByText('《数学分析》知识点梳理')).toBeInTheDocument();
-    expect(screen.getByText(/解析产物管线/)).toBeInTheDocument();
-    // 返回课程结构图
-    fireEvent.click(screen.getByRole('button', { name: /返回课程结构/ }));
-    expect(useKnowledgeStore.getState().selectedCourseId).toBeNull();
-    expect(await screen.findByRole('button', { name: '课程 线性代数' })).toBeInTheDocument();
+  it('右上角只有三枚按钮，「使用手册」打开手册并含星图读图口径', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify(STAR_MAP), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    renderPage();
+    await screen.findByText('学习中心 · 知识梳理星图');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /使用手册/ }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('知识梳理星图')).toBeInTheDocument();
+    expect(screen.getByText(/竖虚线框＝学习轨迹（track），框内课程卡自上而下按层级排/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /刷新/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /返回/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /返回主界面|刷新星图/ })).not.toBeInTheDocument();
   });
 
-  it('catalog 不可达 → 降级横幅 + 课程图空态', async () => {
-    mockFetch.mockRejectedValue(new TypeError('fetch failed'));
-    renderKnowledge();
-    expect(await screen.findByText('课程目录数据不可达')).toBeInTheDocument();
-    expect(screen.getByText('暂无课程目录')).toBeInTheDocument();
+  it('切换领域 → 课程卡换为该领域课程', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify(STAR_MAP), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    renderPage();
+    await screen.findByRole('button', { name: '课程卡 数学分析（分析学）' });
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '领域' }));
+    fireEvent.click(await screen.findByText('计算机科学'));
+    expect(await screen.findByRole('button', { name: '课程卡 机器学习（AI）' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '课程卡 数学分析（分析学）' })).not.toBeInTheDocument();
+  });
+
+  it('点击课程卡 → 下钻课程知识点页', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify(STAR_MAP), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: '课程卡 实变函数（分析学）' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent('/knowledge/c/ra');
+  });
+
+  it('星图数据不可达 → 降级提示 + 空态，不白屏', async () => {
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ detail: '课程目录不可达：8901 未启动' }), { status: 503, headers: { 'Content-Type': 'application/json' } }),
+    );
+    renderPage();
+    expect(await screen.findByText('星图数据不可达')).toBeInTheDocument();
+    expect(screen.getByText('课程目录暂不可达，星图无课程可展示')).toBeInTheDocument();
   });
 });

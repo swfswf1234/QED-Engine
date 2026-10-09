@@ -3,7 +3,7 @@
  * - 根据 exploration_stage 显示不同按钮；失败态 danger 重试
  * - explore_pending 提示条（名称确认/课程审阅/导入挂起/失败原因）
  * - 领域恒显：无论筛选如何始终渲染（由页面层保证）
- * - 布局：名称 + 按钮（右上） + 描述（下方）
+ * - 布局：名称 + 按钮（右上） + 描述（下方；空描述给探索引导，见 downloads-ui.md §3.1）
  */
 import { Alert, Button } from 'antd';
 import type { DomainSystem } from '../stores';
@@ -168,11 +168,9 @@ export default function DomainCard({
           {buttonState.label}
         </Button>
       </div>
-      {domain.description && (
-        <div className="dl-domain-card-info">
-          <p>{domain.description}</p>
-        </div>
-      )}
+      <div className="dl-domain-card-info">
+        <p>{domain.description || '（暂无描述，可点『探索领域知识』生成）'}</p>
+      </div>
       {alert && (
         <Alert
           className="dl-domain-card-alert"

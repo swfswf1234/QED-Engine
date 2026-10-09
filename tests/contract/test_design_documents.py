@@ -26,6 +26,8 @@ CURRENT_DOCUMENTS = {
     "downloads-flow.md",
     "parsing-flow.md",
     "parsing-ui.md",
+    "learning-star-map.md",
+    "learning-workbench-ui.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {

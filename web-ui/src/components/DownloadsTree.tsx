@@ -3,7 +3,8 @@
  * - 真实领域课程体系三层层级：领域 → 课程 → 教程叶子（math-qe 冻结目录退出 UI）
  * - 右键菜单（antd Dropdown contextMenu，口径见 PLAN-033 §2.3/§2.5 统一表）：
  *   领域 = 编辑领域知识｜探索领域知识（未开始/待确认重探/失败重试；探索中除删除外禁用）
- *          ｜导入领域知识｜添加课程｜删除领域(danger)
+ *          ｜导入领域知识｜添加课程｜论文探索（REQ-102 W4：不受探索态门禁，仅该领域有在跑
+ *            论文任务时禁用）｜删除领域(danger)
  *   课程 = 编辑课程｜探索课程（探索中/已完成禁用）｜导入课程知识｜删除课程(danger)
  * - 树底「＋添加领域」为纯手工表单（POST /domains），与探索流解耦（用户裁决 2026-08-24）
  * - hover 🔍 取消（课程探索走右键菜单）；色点三态保留
@@ -26,7 +27,12 @@ import {
 import type { CourseNode, DomainNode, TutorialNode } from '../stores/downloads';
 import { buildTreeNodes, useDownloadsStore, TREE_WIDTH_MIN, TREE_WIDTH_MAX } from '../stores/downloads';
 import { exploreStatusOf } from '../stores/explore';
+import { usePaperExploreStore } from '../stores/paperExplore';
 import type { CourseRecord, DomainSystem } from '../stores';
+import {
+  DOMAIN_DESCRIPTION_PLACEHOLDER, DOMAIN_LABELS, DOMAIN_LEVEL_DEFAULT, DOMAIN_SCOPE_DEFAULT,
+  DOMAIN_STAGES_DEFAULT, domainDescriptionDefault,
+} from './domainFormDefaults';
 
 /** 右键菜单触发的表单动作 */
 type TreeFormAction =
@@ -347,20 +353,20 @@ export function TreeFormModal({ action, onClose }: { action: TreeFormAction | nu
         )}
         {(action?.kind === 'edit-domain') && (
           <>
-            <Form.Item label="领域名">
+            <Form.Item label={DOMAIN_LABELS.name}>
               <Input value={action.domain.name} disabled />
             </Form.Item>
-            <Form.Item name="description" label="描述">
-              <Input.TextArea rows={3} placeholder="领域定位说明" />
+            <Form.Item name="description" label={DOMAIN_LABELS.description}>
+              <Input.TextArea rows={3} placeholder={DOMAIN_DESCRIPTION_PLACEHOLDER} />
             </Form.Item>
-            <Form.Item name="level" label="探索范围">
-              <Input placeholder="如：本科" />
+            <Form.Item name="scope" label={DOMAIN_LABELS.scope}>
+              <Input.TextArea rows={2} placeholder={DOMAIN_SCOPE_DEFAULT} />
             </Form.Item>
-            <Form.Item name="stages" label="学习阶段">
-              <Input placeholder="如：基础,主干,分支,前沿" />
+            <Form.Item name="level" label={DOMAIN_LABELS.level}>
+              <Input placeholder={DOMAIN_LEVEL_DEFAULT} />
             </Form.Item>
-            <Form.Item name="scope" label="学科知识">
-              <Input.TextArea rows={2} placeholder="学科知识（当前可置空）" />
+            <Form.Item name="stages" label={DOMAIN_LABELS.stages}>
+              <Input placeholder={DOMAIN_STAGES_DEFAULT} />
             </Form.Item>
             <Form.Item label="课程方向（classic tracks）">
               <Form.List name="classic_tracks">
@@ -462,11 +468,17 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
   const knowledgeError = useDownloadsStore((s) => s.knowledgeError);
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
   const { message, modal } = App.useApp();
+  // 论文探索入口（REQ-102 W4）：领域右键菜单打开管理弹窗，禁用只看是否在跑论文任务
+  const paperBadges = usePaperExploreStore((s) => s.badges);
+  const openPaperExplore = useCallback((domainId: string, domainName: string) => {
+    void usePaperExploreStore.getState().openModal(domainId, domainName);
+  }, []);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [formAction, setFormAction] = useState<TreeFormAction | null>(null);
   const [addDomainOpen, setAddDomainOpen] = useState(false);
   const [addForm] = Form.useForm();
+  const addDescTouchedRef = useRef(false);
   const dragging = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importTargetRef = useRef<string | null>(null);
@@ -590,6 +602,8 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
     const stage = d.exploration_stage || '未开始';
     const running = stage === '探索中';
     const exploreEnabled = ['未开始', '已生成', '待确认', '失败'].includes(stage);
+    // 论文探索不受 exploration_stage 门禁（§3/§4.4）：仅在该领域有在跑论文任务时禁用
+    const paperRunning = paperBadges[d.domain_id]?.key === 'running';
     return {
       items: [
         { key: 'edit', label: '编辑领域知识', disabled: running },
@@ -599,6 +613,7 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
           disabled: running || stage === '已完成' },
         { key: 'add-course', label: '添加课程',
           disabled: running || stage === '未开始' || stage === '已生成' },
+        { key: 'papers', label: '论文探索', disabled: paperRunning },
         { type: 'divider' },
         { key: 'delete', label: '删除领域', danger: true },
       ],
@@ -608,6 +623,8 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
           if (exploreEnabled) {
             void startDomainExplore(d.domain_id);
           }
+        } else if (key === 'papers') {
+          void openPaperExplore(d.domain_id, d.name);
         } else if (key === 'import') {
           // 导入领域知识：选择 JSON 文件
           importTargetRef.current = d.domain_id;
@@ -726,6 +743,7 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
           aria-label="添加领域"
           onClick={() => {
             addForm.resetFields();
+            addDescTouchedRef.current = false;
             setAddDomainOpen(true);
           }}
         >
@@ -748,30 +766,37 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
           form={addForm}
           layout="vertical"
           initialValues={{
-            description: '这是一个新的学科领域，等待探索完善。',
-            level: '本科',
-            stages: '基础,主干,分支,前沿',
-            scope: '',
+            description: '',
+            scope: DOMAIN_SCOPE_DEFAULT,
+            level: DOMAIN_LEVEL_DEFAULT,
+            stages: DOMAIN_STAGES_DEFAULT,
+          }}
+          onValuesChange={(changed) => {
+            if ('description' in changed) addDescTouchedRef.current = true;
+            if ('name' in changed && !addDescTouchedRef.current) {
+              const name = String(changed.name ?? '').trim();
+              addForm.setFieldsValue({ description: name ? domainDescriptionDefault(name) : '' });
+            }
           }}
         >
           <Form.Item name="name" label="领域名（必填；创建后不可改）" rules={[{ required: true, message: '请填写领域名' }]}>
             <Input placeholder="如：高等数学" />
           </Form.Item>
-          <Form.Item name="description" label="描述（可选）">
-            <Input.TextArea rows={3} />
+          <Form.Item name="description" label={`${DOMAIN_LABELS.description}（可选）`}>
+            <Input.TextArea rows={3} placeholder={DOMAIN_DESCRIPTION_PLACEHOLDER} />
           </Form.Item>
-          <Form.Item name="level" label="探索范围（可选）">
-            <Input />
-          </Form.Item>
-          <Form.Item name="stages" label="学习阶段（可选，逗号分隔）">
-            <Input />
-          </Form.Item>
-          <Form.Item name="scope" label="学科知识（可选）">
+          <Form.Item name="scope" label={`${DOMAIN_LABELS.scope}（可选）`}>
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="level" label={`${DOMAIN_LABELS.level}（可选）`}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="stages" label={`${DOMAIN_LABELS.stages}（可选，逗号分隔）`}>
+            <Input />
           </Form.Item>
         </Form>
         <div style={{ color: '#999', fontSize: 12 }}>
-          创建后可在右侧面板点「探索课程体系」由 LLM 提议课程结构（阶段随探索产生）。
+          创建后可在右侧面板点「探索课程体系」由 LLM 提议课程结构；描述/学科知识/探索范围/学习阶段是探索的输入与范围边界。
         </div>
       </Modal>
 

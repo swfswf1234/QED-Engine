@@ -48,7 +48,7 @@ task model 继承兜底。
 | A-3 | JSON 容错三件套 + 一次 repair（`utils/json_parser.py`）；不支持 JSON 模式剥 response_format + 运行时拉黑（`capabilities.py:489-535`） | **落地 2026-09-28**：`parse_json_reply`（直解→围栏→最外层切片+宽松修复，`repair` 回调一次，失败抛 `JsonParseError.raw`）+ gateway 注入/剥参数单次重试/进程态拉黑；模型修复调用本体归 A-5 接线 |
 | A-4 | thinking/scratchpad 清洗（`llm/utils.py:180-202`） | **落地 2026-09-28**：`scrub_thinking`（成对/未闭合到文末/残缺标签残留）+ `is_reasoning_starved` 饥饿判定预留 A-5 |
 | A-4b | （新）工具导出（scratchpad）清洗：工具召回段落割除 | **后置**（2026-09-29 裁决：随 A-2 整块） |
-| A-5 | reasoning 预算饥饿降 effort 单次重试（`llm/structured_retry.py`） | 待开始（**M3 剩余两流之一**） |
+| A-5 | reasoning 预算饥饿降 effort 单次重试（`llm/structured_retry.py`）+ **网关空正文穿透修正**（2026-10-07 论文链取证承接，用户裁决并入本项、不占 DEFECT 编号：local 思考模型正文被截空时不得记 success，须携带 `finish_reason`/思考段供饥饿判定） | 待开始（**M3 剩余两流之一**；范围按 2026-10-07 裁决扩展） |
 | A-6 | task model 继承兜底（`model_selection/tasks.py`）：任务未配模型时继承会话模型 | 待开始（**M3 剩余两流之一**） |
 
 ## 过程与证据（滚动）
@@ -79,6 +79,22 @@ task model 继承兜底。
   「过程与证据（滚动）」，主链壳内对它的引用同步改道。
 - **2026-09-30 现状**：A-5/A-6 待开始（M3 剩余两流），G3 真机冒烟未做；A-1b/A-2/A-4b 后置，
   按裁决不阻塞本模块关闭。
+- **2026-10-07 论文链取证驱动 A-5 范围扩展（用户裁决：并入 A-5，不占 DEFECT 编号）**——现象与正本：[REQ-102 壳](../history/plans/2026-10/2026-09-30-req102-paper-display-row-root-impl.md)「过程与证据」2026-10-07 条（8901 经 8900 网关调 local LM Studio `qwen/qwen3.5-9b`，`paper-plan/assess@v1`（prompt 6011/12444 字）两次 101~103s 后正文为空，`qed_llm_calls` 却记 `status=success`；`plan@v2` 同模板一次 23s 出合法 JSON、一次 101s 出空正文）。归因＝`clients._extract_content` 只取 `choices[0].message.content`，`finish_reason` 与 `reasoning_content` 全丢弃，思考段吃满 `max_tokens` 的截断响应在网关侧与正常响应不可分，`call_text` 于是把空正文记成 success 穿透（ARCH-016 的「空串不穿透」防线只覆盖 `success=false` 分支），调用方仅剩「JSON 解析失败」并把渠道误写为百炼。**待用户「开始执行」后按下列判据实施**：
+  - J-A5a 规则层红测试先行（假 transport）：`content=""` 且 `finish_reason="length"` → 网关返回 `success=false`、`error` 含 `finish_reason` 与思考截断字样，`qed_llm_calls` 记 `status=error`；`content` 非空但 `finish_reason="length"` 同样按失败返回（截断正文不得作为结构化输入）。
+  - J-A5b local 响应保留 `reasoning_content`（网关内部返回面/记录面携带，**不扩 `/llm/text` 对外字段**，遵守 2026-09-29 裁决①同族的端点最小面口径），使 `scrub_thinking`/`is_reasoning_starved` 在「正文空＋思考段在另一字段」形状上可判定（现 `is_reasoning_starved("")` 返回 False，须与新口径一致）。
+  - J-A5c 饥饿降 effort 单次重试（`llm/structured_retry.py`）：判定饥饿后按降档参数重试一次，仍失败即报错，不得盲发二次长调用（本次 2×101s 空耗为反面证据）。
+  - J-A5d `QED_LLM_LOCAL_ADAPT=false` 时其余适配按现行为回退，但**空正文仍不得记 success**（正确性修复不受适配开关旁路）。
+  真机面：G3 冒烟须覆盖论文评分载荷（`paper-plan/assess`）或明确记录本地档不可用。
+  **2026-10-07 用户裁决（两项）**：① 本项缺陷**并入 A-5 承接、不占 DEFECT 编号**；② 渠道＝**local 优先**（api 可切但 `qwen-plus` 无额度），本轮按裁决启动 local 重试 W5 端到端，A-5 代码改动待用户「开始执行」后再动。
+- **2026-10-07 A-5 落地（用户裁决「先执行 A-5」，TDD 先红后绿）**：J-A5a~d 全部实现。
+  - **落位偏差**（判据原文写 `llm/structured_retry.py`）：降档重试内联在 `gateway.call_text`，判定与饥饿口径落在 `local_adapt.classify_reply` / `is_starved_reply`，不新建模块——理由＝重试仅一次且与判定共用同一返回面，独立模块只会做透传不承载规则；判据的「单次、不得盲发二次长调用」语义完整保留。
+  - `clients.py`：新增 `ChatReply(str)`（正文仍是 str 本体，附带 `finish_reason` / `reasoning_content`），`qwen_chat` 与 `provider_text_chat` 统一经 `_extract_reply` 返回（vision 仍用 `_extract_content`）；`qwen_chat` 增 `reasoning_effort` 参数，None 时不进请求体。
+  - `local_adapt.py`：`is_reasoning_starved(reply, reasoning="")` 改形（空正文＋思考段在独立字段 → True，修掉旧 `is_reasoning_starved("")` 恒 False）；新增 `classify_reply()`（截断/空正文/全思考三段判据）与 `is_starved_reply()`。
+  - `gateway.py`：local 与 api 两渠道都在记 success **之前**过判定，命中即抛 `模型响应不可用：<判据>` → 走既有异常分支落 `qed_llm_calls`（`status=error`、`provider=gateway`、`error` 带截断字样）；正文饥饿且开关开启时按 `reasoning_effort` **单次降档重试**（截断正文非空不追发）；判定不受 `QED_LLM_LOCAL_ADAPT` 旁路（J-A5d），`/llm/text` 对外字段不扩、`finish_reason`/`reasoning` 只在网关内部返回面（J-A5b）。
+  - **降档档位实测取 `none`（非 `low`）**——真机 A/B（`tmp/w5_probe_effort_ab.py`，`qwen/qwen3.5-9b`，同一短问题、`max_tokens=1024`）：不带头 → `finish=length`、正文 0、思考 3687 字；`low` → `finish=length`、正文 0、思考 3431 字（**该档不降思考段**）；`none` → `finish=stop`、正文 68 字、思考 0。J-A5c 只约束「按降档参数重试一次」不锁值，故实现取 `none`，设计与映射同步（`llm-gateway.md` A-5 条、`code-map.md` gateway 行）。
+  - **真机单点达成 J-A5a**（`tmp/w5_probe_a5_tiny.py`，经 8900 `/llm/text`、`max_tokens=8` 逼迫截断）：HTTP 200 + `{"success": false, "error": "模型响应不可用：思考截断致正文为空（finish_reason=length）"}`，`qed_llm_calls` 行 85 记 `status=error`＝空正文不再穿透。同时纠正一条旧的错误归因：10-07 重启后「网关无调用记录」不是写库降级，而是那四条 `/llm/text 200 OK` 属重启前的行 81–84，重启窗口内 8901 的请求根本没到 8900（当日即据此追出 2026-10-09 的系统代理劫持结论，见 [REQ-102 壳](../history/plans/2026-10/2026-09-30-req102-paper-display-row-root-impl.md)）。
+  - **门禁**：`pytest tests/contract tests/test_llm_local_adapt.py tests/test_llm_clients.py tests/test_llm_gateway.py tests/test_llm_endpoints.py tests/test_llm_call_log.py -q` → **201 passed**；`ruff check backend tests` → All checks passed。文档晋升＝`llm-gateway.md`「本地模型适配层」节标题改 A-1/A-3/A-4/A-5 + 新增 A-5 条、`code-map.md` 四行（gateway / clients / local_adapt + `test_llm_local_adapt.py` / `test_llm_clients.py` 概述）。
+  - **仍开**：G3 真机冒烟的论文评分载荷面（`paper-plan/assess`）——10-09 复跑受阻于对方侧系统代理劫持 loopback（同上壳），A-5 自身判据已达成；A-6 未动。
 
 ## 验证与验收
 
