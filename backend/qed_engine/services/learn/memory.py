@@ -1,7 +1,7 @@
 """学习域存储的内存实现：契约测试与联调降级用（接口与 MySQL 实现同形）。
 
 模块职责：InMemoryLearnStore——三表语义（课程 carry 编译作业、单元树两级、进度派生基）
-的进程内实现；线程锁保护编译后台线程读写。生产默认走 MySQL（qed_learn_*），
+的进程内实现；线程锁保护编译后台线程读写。生产默认走 MySQL（qe_learn_*），
 测试注入本类（隔离铁律：默认测试不写运行数据库）。
 设计关联（DesignRef）：docs/architecture/database-design.md
 实现状态：Current
@@ -15,7 +15,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from qed_engine.services.learn.base import LearnConflict, LearnNotFound, has_page_window
+from qed_engine.services.learn.base import (
+    LearnConflict,
+    LearnNotFound,
+    _progress_view,
+    has_page_window,
+)
 
 
 def _now() -> str:
@@ -195,14 +200,52 @@ class InMemoryLearnStore:
 
     # ---------- 进度派生基 ----------
 
+    def ensure_point_unit(
+        self,
+        course_id: str,
+        *,
+        unit_id: str,
+        kp_id: str,
+        parent_id: str | None,
+        title: str,
+        sort_order: int,
+        source_ref: dict[str, Any] | None,
+        covered: bool,
+    ) -> dict[str, Any]:
+        """知识点派生键首次落笔才物化（与 MySQL 实现同语义，§V2.3 读时投影）。"""
+        with self._lock:
+            self.get_course(course_id)
+            row = {
+                "unit_id": unit_id,
+                "learn_course_id": course_id,
+                "parent_id": parent_id,
+                "level": "point",
+                "title": title,
+                "sort_order": sort_order,
+                "sort_index": sort_order,
+                "confirmed": True,
+                "covered": bool(covered),
+                "type": None,
+                "payload": {},
+                "source_ref": {**(source_ref or {}), "kp_id": kp_id},
+                "gen_status": "generated",
+                "active": True,
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            existing = self.units.get(unit_id)
+            self.units[unit_id] = {**existing, **row} if existing else row
+            return dict(self.units[unit_id])
+
     def set_progress(self, course_id: str, unit_id: str, status: str) -> dict[str, Any]:
         with self._lock:
             row = self.get_unit(unit_id)
             if row["learn_course_id"] != course_id:
                 raise LearnNotFound(unit_id)
-            if row["level"] != "unit":
-                raise LearnConflict("进度只可打在 unit（块）行上")
+            if row["level"] != "point":
+                raise LearnConflict("进度只可打在知识点行上（旧节/块行保留只读，§V2.3）")
             self.progress[unit_id] = {
+                **self.progress.get(unit_id, {}),  # 勾选只写终态位，不抹质性门四列
                 "unit_id": unit_id,
                 "learn_course_id": course_id,
                 "status": status,
@@ -210,9 +253,47 @@ class InMemoryLearnStore:
             }
             return dict(self.progress[unit_id])
 
-    def derived_progress(self, course_id: str) -> dict[str, Any]:
+    def progress_rows(self, course_id: str) -> dict[str, dict[str, Any]]:
         with self._lock:
-            rows = self.active_units(course_id)
+            return {
+                str(row["unit_id"]): _progress_view(row)
+                for row in self.progress.values()
+                if row["learn_course_id"] == course_id
+            }
+
+    def assess_qualitative(
+        self,
+        course_id: str,
+        unit_id: str,
+        *,
+        passed: bool,
+        note: str = "",
+        assessed_by: str = "learner",
+    ) -> dict[str, Any]:
+        """与 MySQL 实现同语义：判定四列独立成写，终态位缺省为 pending。"""
+        with self._lock:
+            row = self.get_unit(unit_id)
+            if row["learn_course_id"] != course_id:
+                raise LearnNotFound(unit_id)
+            if row["level"] != "point":
+                raise LearnConflict("质性判定只可打在知识点行上（旧节/块行保留只读，§V2.3）")
+            stamp = _now()
+            self.progress[unit_id] = {
+                **self.progress.get(unit_id, {}),
+                "unit_id": unit_id,
+                "learn_course_id": course_id,
+                "status": self.progress.get(unit_id, {}).get("status") or "pending",
+                "qualitative_passed": bool(passed),
+                "qualitative_note": note,
+                "assessed_by": assessed_by,
+                "assessed_at": stamp,
+                "updated_at": stamp,
+            }
+            return _progress_view(self.progress[unit_id])
+
+    def derived_progress(self, course_id: str, units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        with self._lock:
+            rows = self.active_units(course_id) if units is None else units
             total = len(rows)
             done = sum(1 for r in rows if self.progress.get(r["unit_id"], {}).get("status") == "done")
             skipped = sum(1 for r in rows if self.progress.get(r["unit_id"], {}).get("status") == "skipped")
@@ -229,3 +310,26 @@ class InMemoryLearnStore:
                 "current_unit_id": current,
                 "completed": total > 0 and done + skipped == total,
             }
+
+    def books_progress(self, course_id: str, units: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        """教材级进度（与 MySQL 实现同语义）：计数单位行按 source_ref.ref_id 归集。"""
+        with self._lock:
+            rows = self.active_units(course_id) if units is None else units
+            grouped: dict[str, dict[str, int]] = {}
+            for row in rows:
+                ref_id = str((row.get("source_ref") or {}).get("ref_id") or "")
+                if not ref_id:
+                    continue
+                bucket = grouped.setdefault(ref_id, {"total": 0, "done": 0})
+                bucket["total"] += 1
+                if self.progress.get(row["unit_id"], {}).get("status") == "done":
+                    bucket["done"] += 1
+            return [
+                {
+                    "ref_id": ref_id,
+                    "total": bucket["total"],
+                    "done": bucket["done"],
+                    "percent": round(100.0 * bucket["done"] / bucket["total"], 1),
+                }
+                for ref_id, bucket in grouped.items()
+            ]

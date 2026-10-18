@@ -304,6 +304,40 @@ class InMemoryPracticeStore:
 
     # ---------- 复习队列（纯函数调度 + 持久态） ----------
 
+    def attempts_by_kp(self, course_id: str) -> dict[str, list[bool]]:
+        """与 MySQL 存储同语义的门输入面：全序事实，`kp_id` 空的未归档题不进门。"""
+        with self._lock:
+            rows = sorted(
+                (
+                    attempt
+                    for attempt in self._attempts
+                    if attempt["course_id"] == course_id and attempt["kp_id"]
+                ),
+                key=lambda attempt: (str(attempt["kp_id"]), attempt["answered_at"], attempt["attempt_id"]),
+            )
+        sequences: dict[str, list[bool]] = {}
+        for attempt in rows:
+            sequences.setdefault(str(attempt["kp_id"]), []).append(bool(attempt["is_correct"]))
+        return sequences
+
+    def due_counts_by_kp(self, course_id: str, now: datetime | None = None) -> dict[str, int]:
+        """与 MySQL 存储同语义的复习腿：到期行按知识点归集（题行＋kp 粒度行），未归档题不计。"""
+        when = now or _now()
+        with self._lock:
+            counts: dict[str, int] = {}
+            for task in self._review_tasks.values():
+                if task["status"] != "active" or task["due_at"] > when or task["course_id"] != course_id:
+                    continue
+                if task["target_kind"] == "kp":
+                    kp_id = str(task["target_id"])
+                else:
+                    question = self._questions.get(task["target_id"])
+                    kp_id = str(question["kp_id"]) if question and question["kp_id"] else ""
+                if not kp_id:
+                    continue
+                counts[kp_id] = counts.get(kp_id, 0) + 1
+            return counts
+
     def review_due(
         self,
         course_id: str | None = None,

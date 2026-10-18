@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-09-30
+最后更新：2026-10-14
 确认状态：已确认
 关联代码：`backend/qed_engine/api/main.py`、`backend/qed_engine/api/schemas.py`、`backend/qed_engine/api/control.py`、`backend/qed_engine/api/tracker.py`、`backend/qed_engine/api/axiom.py`、`backend/qed_engine/clients/axiom_client.py`、`backend/qed_engine/services/log_viewer.py`、`backend/qed_engine/services/monitor.py`（探索会话与 LLM 网关模块的契约事实源见设计文档，归属见 [code-map.md](code-map.md)）
 关联测试：`tests/test_api.py`、`tests/test_tracker_client.py`、`tests/test_web.py`、`tests/test_log_viewer.py`、`tests/test_monitor.py`、`tests/test_self_restart.py`、`tests/test_explore_sessions.py`、`tests/test_llm_gateway.py`、`tests/test_llm_endpoints.py`、`tests/contract/test_api_endpoint_inventory.py`
@@ -170,6 +170,7 @@
 | POST | /api/v1/database/test | ⑤ | 在用 |
 | GET | /api/v1/learn/courses | ⑥ | 在用 |
 | POST | /api/v1/learn/courses | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/sync | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
 | PATCH | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
 | DELETE | /api/v1/learn/courses/{learn_course_id} | ⑥ | 在用 |
@@ -182,6 +183,8 @@
 | GET | /api/v1/learn/courses/{learn_course_id}/compile | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{learn_course_id}/progress | ⑥ | 在用 |
 | POST | /api/v1/learn/courses/{learn_course_id}/progress | ⑥ | 在用 |
+| GET | /api/v1/learn/courses/{learn_course_id}/mastery | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/{learn_course_id}/mastery/assess | ⑥ | 在用 |
 | GET | /api/v1/learn/star-map | ⑥ | 在用 |
 | GET | /api/v1/learn/knowledge-points | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{course_ref}/knowledge-points | ⑥ | 在用 |
@@ -189,6 +192,8 @@
 | POST | /api/v1/learn/kp-details | ⑥ | 在用 |
 | POST | /api/v1/learn/kp-details/{detail_id}/confirm | ⑥ | 在用 |
 | POST | /api/v1/learn/kp-details/{detail_id}/reject | ⑥ | 在用 |
+| POST | /api/v1/learn/annotations/generate | ⑥ | 在用 |
+| POST | /api/v1/learn/kp-details/{detail_id}/like | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{course_ref}/outline | ⑥ | 在用 |
 | PUT | /api/v1/learn/courses/{course_ref}/outline | ⑥ | 在用 |
 | PATCH | /api/v1/learn/knowledge-points/{kp_id} | ⑥ | 在用 |
@@ -218,6 +223,13 @@
 服务注册表状态快照（config/tracker/axiom/web 四单元），含每单元运行态与离线原因。
 契约事实源：[服务控制设计](../design/service-hosting.md)（服务注册表/过渡窗口/错误语义），
 实现于 `services/service_manager.py`（能力层）与 `api/control.py`（路由层）。
+
+**库名一致性字段（DEFECT-015 S2）**：响应顶层带 `db_name`（8900 自身生效库名），每单元另带三字段——
+`db_name`（该单元最近一次经 8900 派发时注入的库名）、`db_source`（`injected`=本进程派发并注入 /
+`unknown`=在线但非本进程派发或本进程无记录 / `self`=config 单元自身）、`db_mismatch`（派发库名≠当前
+根库名，即旧库名进程仍在读写）。不一致时同步落一条 `db_mismatch` 告警到 `logs/config.log`（同一
+「单元+派发库名+根库名」只记一次，轮询不刷屏）。口令与 `QED_DB_*` 键名不出现在任何字段、
+日志或错误文本（S4；回归用例 `tests/test_api.py`）。
 
 ### POST /api/v1/services/{name}/start|stop|restart
 
@@ -553,11 +565,11 @@ exercise_ref/parallel_ref`）：建 **draft** 教程行 + `status=decided` 书�
 **论文没有默认桶**——`domain_id` 必填且须为 `qed_domain` 已登记领域；8900 对论文面一律
 **不补默认值、不做二次校验**，上游 422/404/409 原样透传给 8903 提示。链路分段责任与
 展示态派生见 [downloads-flow §7](../design/downloads-flow.md)，UI 消费面见
-[downloads-ui §4.4](../design/downloads-ui.md)。
+[downloads-ui §4.4](../design/frontend/downloads-ui.md)。
 
 #### `GET /api/v1/papers/books`
 
-发现论文书行枚举（8903 领域/课程展示行数据源）。固定以 `kind=paper` 透传 8901 `GET /books`
+发现论文书行枚举（8903 领域论文栏数据源，见 downloads-ui §4.4.6）。固定以 `kind=paper` 透传 8901 `GET /books`
 （调用方传入的 `kind` 被忽略）；**区别于 `GET /api/v1/books`**（Axiom af_books 代理，占用中不可复用）。
 
 **查询参数：** `domain_id`（可选）、`course_id`（可选，AND 过滤；空=领域级）。
@@ -650,7 +662,7 @@ recommendation_count}]}`。
 （`domain_explore`/`domain_explore_courses` 异步任务 + confirm/apply-results 端点，
 六步流程含手动导入同链），8900 负责 task_id 内存登记、courses.json→课程行桥接
 （apply-results 只删不建）与离线降级直写；课程探索保留 explore-sessions 会话通道，
-课程确认经 `/courses/{course_id}/confirm` 离线直写收口。
+课程确认经 `/courses/{course_id}/confirm` 收口（`exploration_stage` 走 8901 在线写，8901 不可达时降级直写）。
 终态写点矩阵与降级规则见
 [domain-explore 设计](../design/downloads-flow.md) §5.2/§5.4。
 
@@ -694,7 +706,7 @@ recommendation_count}]}`。
 #### `POST /api/v1/courses/{course_id}/confirm`
 
 课程探索确认：课程 `exploration_stage` 从「待确认」写为「已完成」
-（`shared_tables.set_course_stage` 离线直写）。**返回 200：**
+（`shared_tables.set_course_stage` 经 8901 `PATCH /courses` 在线写，8901 不可达时降级直写）。**返回 200：**
 `{"course_id","ok":true,"exploration_stage":"已完成","message"}`。
 **错误：** 404（课程不存在）、409（当前状态非「待确认」）、500（状态写入失败）。
 
@@ -754,7 +766,7 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `POST /parse-jobs` | 提交解析任务（202；pages 缺省全书；`engine` 缺省 mineru） | AxiomClient.create_parse_job |
 | `GET /parse-jobs` | 任务列表（透传 8902 列表端点：`book_id`/重复 `status` 过滤 + `active` 标记；前端打开工作台恢复在飞任务防重复建任务） | AxiomClient.list_parse_jobs |
 | `GET /parse-jobs/{job_id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
-| `GET /parsing/tree` | 左侧树聚合：8900 共享表（领域→课程）+ 8902 af_books；8902 离线降级为领域→课程 | 见 `api/axiom.py` `_build_parsing_tree` |
+| `GET /parsing/tree` | 左侧树聚合信封 `{nodes, sources}`：`nodes`＝8900 共享表（领域→课程）+ 8902 af_books；`sources`＝`{shared_tables: ok\|empty, axiom_flow: ok\|offline}` 标两种降级来源（DEFECT-015 S3），8902 离线时 `nodes` 仍含领域→课程且返 200 | 见 `api/axiom.py` `_build_parsing_tree` |
 
 ### 规划契约（8902 已实现、8900 透传待实施）
 
@@ -986,13 +998,27 @@ GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型
 
 学习链路（课程引用式注册→单元树→编译作业→派生进度）的 8900 自有域，非透传；表语义与
 裁决（D1~D4）事实源＝[学习设计轮主链壳](../plans/2026-09-22-learning-design-mainline.md)
-「M-1/M-2 契约设计稿」节。当前为 M-1 骨架形态：编译=静态兜底出块（不含 LLM 生成，M-2
+「M-1/M-2 契约设计稿」节。当前为 M-1 骨架形态：编译=静态兜底出块（编译链不含 LLM 生成，M-2
 接线），存储未接入时（生产 MySQL 存储随 M-2 落地）整域 503。错误包络=8900 自有中文纯文本。
+**2026-10-17 用户裁决 C18 改判注记**（REQ-117 W9）：学习面的**注解按需生成**属本域业务端点
+（`POST /learn/annotations/generate`，服务端经网关文字槽编排），不改变「静态出块不含 LLM」与
+「知识点自动抽取/确认入库归文档分析处理面」两条口径；前端不拼 prompt、不直调 `/llm/*`。
 
 M5 知识点两表（`qed_knowledge_point` 第四张共享表 + `qed_learn_kp_detail` 根私有候选池）由**首个
 知识点端点**懒建表挂载（判例 `qed_llm_calls`，启动路径不触碰 MySQL），数据库不可达时该族端点 503；
 星图端点只读课程目录（8901 透传，离线降级共享表直读），不依赖新表。语义事实源＝
 [M5 知识点体系与星图壳](../history/plans/2026-10/2026-09-30-knowledge-point-star-map.md)。
+
+**知识点主表行序列化形状（REQ-118 逐列定档，2026-10-16）**：本域所有返回主表行的端点
+（`GET /learn/knowledge-points`、`GET /learn/courses/{course_ref}/knowledge-points`、
+`.../outline`、`POST /learn/kp-details/{detail_id}/confirm`、`PATCH /learn/knowledge-points/{kp_id}`）
+的行形状＝`{kp_id, domain_id, domain_label, course_id, course_label, node_kind, parent_kp_id, depth,
+book_ref, name, norm_key, type, order_hint, summary, source_ref, anchors, from_detail_id, meta,
+created_by, updated_by, created_at, updated_at}`——**无 `confirmed` 键**（人工确认位只在候选池行）；
+`book_ref` 对 point 行为 `null`（空串哨兵已随定档撤销，来源书只在 outline 行与候选池）；
+`meta`＝扩展槽（只读不筛，读方按可缺省处理，守则见
+[database-design.md](database-design.md)「meta 扩展槽守则」节）；`created_by`/`updated_by`＝写入方
+服务标识（根侧恒 `qed_engine`）。
 
 M2 练习与复习（`qed_learn_question` / `qed_learn_attempt` / `qed_learn_review_task` 三表 + 8 端点）
 由**首个练习端点请求**懒建表挂载（同判例，短窗重试 `PRACTICE_MOUNT_RETRY_SECONDS`）。v1 题源＝**抽取式**
@@ -1003,30 +1029,35 @@ M2 练习与复习（`qed_learn_question` / `qed_learn_attempt` / `qed_learn_rev
 
 | 端点 | 语义 |
 | --- | --- |
-| `GET /learn/courses` | 课程列表（含派生态 `derived`） |
+| `GET /learn/courses` | 课程列表（含派生态 `derived`；`derived.books`＝按单元行 `source_ref.ref_id` 归集的**教材级进度** `[{ref_id,label,total,done,percent}]`，无单元行的教材 `total=0`／`percent=0`——REQ-117 W8/C9） |
 | `POST /learn/courses` | 注册课程：`{name, resources:[{kind,ref_id,label}]≥1, domain_ref?, course_ref?, direction?, instructions?, agent_notes?}`；kind 闭集 `book/af_version/knowledge`；双通道限长 4000；422 |
+| `POST /learn/courses/sync` | **解析好即同步**：读 `af_books`（`active_job_id` 非空且 `course_id` 非空）按课程分组，回查 `qed_course` 取领域与**正式名称**；`course_ref.ref_id` 命中既有学习课程（多门取 `created_at` 最早）只并集补入新书（不覆盖 `dismissed`、不改 `name`），未命中则建行（`name`＝正式名称）；坐标查不到者 PASS 不猜归属 → `{synced,created,updated,courses,books}`；`books`＝教材卡展示元数据 `[{ref_id,label,course_id,knowledge_id,intro,position,position_label,page_count}]`，其中「简介/面向对象」由 `af_books.knowledge_id` 联接 `qt_knowledge` 套级 `intro`/`position`（五档→入门/进阶/深入/综合/选修）——书级两列现网尚不存在，已按跨项目请求登记 QED-Tracker （REQ-117 W8/C10），落地后本联接改读列；8901 教程套不可达时两字段留空、不阻断同步；解析侧不可达 503（学面降级为列既有课程）——REQ-117 W8/C9 |
 | `GET /learn/courses/{learn_course_id}` | 详情聚合（课程行 + derived + unit_count）；404 |
-| `PATCH /learn/courses/{learn_course_id}` | 改元数据与双通道（限长 422、不存在 404） |
+| `PATCH /learn/courses/{learn_course_id}` | 改元数据与双通道（限长 422、不存在 404）；白名单含 `resources`（整列提交，元素 `{kind,ref_id,label,dismissed?}`——`dismissed`＝书架面教材级忽略位，JSON 列内键、零 DDL，REQ-117 W8/C11） |
 | `DELETE /learn/courses/{learn_course_id}` | 删除（级联清单元树与进度）；编译在跑 409 |
-| `GET /learn/courses/{learn_course_id}/units` | 单元树消费：`?level=section\|unit` 视图过滤；行含 `gen_status/active/confirmed/covered/drift`；422（level 非法）、404 |
+| `GET /learn/courses/{learn_course_id}/units` | 单元树消费：`?level=section\|unit\|point` 视图过滤（`point`＝已确认知识点的**读时投影**：派生键 `unit_id=kp:{kp_id}`、零写入，首次勾选/跳过才物化——REQ-117 §V2.3）；`level=point` 时同响应带 `chapters`＝章行 `{unit_id,kp_id,name,point_count,book_ref,source_ref,summary,key_points}`，其 `summary` 与 `key_points`（＝章行 `meta.chapter_key_points`）＝学习面注解段的章级成品位，进场一次直读；行含 `gen_status/active/confirmed/covered/drift` ＋投影行 `kp_id/window_source/summary`（`window_source ∈ point|anchor|chapter|''`＝取材页窗三级回落来源）；422（level 非法）、404 |
 | `PUT /learn/courses/{learn_course_id}/syllabus` | 整树草稿覆写 `{tree:[{title,order?,children?}]}`；最深三级（section→unit→block），空标题/空树 422 |
 | `PATCH /learn/units/{unit_id}` | 字段白名单 `{title,order,confirmed,covered}`（extra 422）；covered 前提=已 confirmed（否则 409，勾选权归学习者） |
 | `GET /learn/units/{unit_id}` | 单元回显；404 |
 | `POST /learn/courses/{learn_course_id}/compile/propose` | 提案入参登记 `{page_windows:[{start,end}]≥1}`（范围非法 422），置 `proposed` 并记源指纹 |
 | `POST /learn/courses/{learn_course_id}/compile/start` | 发起编译 **202**：要求树非空且全节点 confirmed（两级确认齐备，否则 409）；作业态挂课程行（D3 裁决） |
 | `GET /learn/courses/{learn_course_id}/compile` | 作业轮询：`{compile_status, done, total, failure_count}`；无作业=空态（status null） |
-| `GET /learn/courses/{learn_course_id}/progress` | 派生进度（读时重算非累加）：`{total,done,skipped,percent,current_unit_id,completed}` |
+| `GET /learn/courses/{learn_course_id}/progress` | 派生进度（读时重算非累加）：`{total,done,skipped,percent,current_unit_id,completed,mastered,next_unit_id,provenance}`——**原五字段口径不动**（计数源仍是学习者勾选位），主链 M-3 增三字段：`mastered`＝过门知识点行数（任一 provenance）、`provenance`＝`{system,learner}` 分布、`next_unit_id`＝`next_step` 指向的行；`current_unit_id` 由「第一个未勾选行」改判为**第一个未掌握知识点行**（门就是游标，裁决 D-M3-1；`skipped`＝学习者显式让位，不停靠）；`POST` 响应的 `derived` 与本行同形状、`GET /learn/courses` 的`derived` 同源（主链壳 M-3 W3） |
 | `POST /learn/courses/{learn_course_id}/progress` | 记学习事件 `{unit_id, status:done\|skipped\|pending}`（pending=撤销该行）；跨课程 unit 404、非 unit 行 409 |
-| `GET /learn/star-map` | 星图一次取全：`?domain=` 过滤（未知领域 404）→ `{domains:[{domain_id,name,level,tracks:[{track,kind:main\|branch\|other,summary,courses:[{course_id,name,track,stage,sort_order,kp_confirmed,kp_candidates}]}]}], edges:[{from,to,domain_id,cross_track}]}`；簇内按 `sort_order`→`course_id` 稳定排序、簇间按成员数降序；目录不可达 503 |
+| `GET /learn/courses/{learn_course_id}/mastery` | 逐知识点门态（主链 M-3）：只出投影的知识点行 → `{items:[{unit_id,kp_id,kp_type,gate,mastery,threshold,attempt_count,provenance,status,qualitative_passed,due_reviews}],next_step:{unit_id,kp_id,action,reason},summary:{total,mastered,learning,new}}`；门型按 `qed_knowledge_point.type` **现值**分流（`memory`/`procedure`＝量化门 0.9、`concept`/`design`＝质性门显示 1.0、空或未知型回落 0.9 不猜——D-M3-3）；分数＝近因加权正确率（最近 5 次、权重 `0.5/0.7/0.85/0.95/1.0`、置信上限 1 次 0.5／2 次 0.8）由 `services/learn/mastery.py` 读时派生、**不落列**，门态清单不物化单元行；`due_reviews`＝该知识点到期复习数（题行＋知识点粒度行两路归集，未归档题不进门）；练习腿不可达＝按零作答派生、不 503（D-M3-4）；404（课程不存在）、503（学习域存储未接入） |
+| `POST /learn/courses/{learn_course_id}/mastery/assess` | 质性门记录（v1＝学习者自评位，D-M3-2；`model` 判读腿属 M-3b）`{unit_id,passed:bool,note?≤1000,by:learner=learner}`（extra 422）→ 只写进度行判定四列（首次落笔才物化知识点行，已勾位不被抹）＋回显 `{item:<门态行>, next_step:{...}}`；量化型（`memory`/`procedure`/空型）拒绝 **409**（参照同款 refusal：量化型按答题序列过门）；404（课程或投影行不存在）、422（`passed` 缺失或非布尔、`by` 越界、`note` 超长）、503 |
+| `GET /learn/star-map` | 星图一次取全：`?domain=` 过滤（未知领域 404）→ `{domains:[{domain_id,name,level,tracks:[{track,kind:main\|branch\|other,summary,courses:[{course_id,name,track,stage,sort_order,description,kp_confirmed,kp_candidates}]}]}], edges:[{from,to,domain_id,cross_track}]}`；簇内按 `sort_order`→`course_id` 稳定排序、簇间按成员数降序；`description`＝`qed_course.description` 透传（星图课程卡悬停叙述，REQ-110 W2），无介绍时空串；目录不可达 503 |
 | `GET /learn/knowledge-points` | 已确认知识点跨课程检索：`?domain=&course=&type=&q=&limit=50&offset=0`（type 闭集非法 422，limit 1..500）→ `{points,total}`；**只出 `node_kind=point` 行**（M6 目录节点不进检索面） |
-| `GET /learn/courses/{course_ref}/knowledge-points` | 课程知识点总览 → `{course:{course_id,name,track,domain_id}, points:[主表行+`candidates`（同 `norm_key` 待选叙述，多版本并存）], total, candidate_total}`；默认只出 point 行，`?include_outline=true` 时带目录节点行；课程不存在 404、存储未接入 503 |
-| `GET /learn/kp-details` | 候选明细池浏览：`?course=&gen_status=&batch=&parent=&limit=100&offset=0`（gen_status 闭集非法 422；`parent=<kp_id>` 取该章候选、`parent=none` 取未归档池）→ `{details,total}` |
-| `POST /learn/kp-details` | 登记候选（生成管线与人工共用写面）`{course_id,name,domain_id?,course_label?,domain_label?,narrative?,type?,payload?,anchors?,gen_batch?,map_seed?,model_ref?,dedup_of?,gen_status:draft\|candidate,parent_kp_id?,intent:summary\|explanation=explanation,book_ref?}`；空 course_id/name、type 或 intent 非法 422；坐标标签缺省从课程目录补齐；**永不写 confirmed** |
-| `POST /learn/kp-details/{detail_id}/confirm` | **人工确认并提升**到共享主表（confirmed 只能由本端点置位）→ `{point,detail}`；同课程重复 `norm_key` 409（合并走 `dedup_of`）、已驳回 409、不存在 404；重复确认幂等返回既有主表行 |
+| `GET /learn/courses/{course_ref}/knowledge-points` | 课程知识点总览 → `{course:{course_id,name,track,domain_id,description}（`description`＝`qed_course.description` 直读透传，无介绍时空串，REQ-104 W7）, points:[主表行+`candidates`（同 `norm_key` 待选叙述，多版本并存）], total, candidate_total}`；默认只出 point 行，`?include_outline=true` 时带目录节点行；课程不存在 404、存储未接入 503 |
+| `GET /learn/kp-details` | 候选明细池浏览：`?course=&gen_status=&batch=&parent=&limit=100&offset=0`（gen_status 闭集非法 422；`parent=<kp_id>` 取该章候选、`parent=none` 取未归档池；`gen_status` 过滤**可选**——缺省连 `draft` 一起返回，学习面「备注」据此读回自己写的行）→ `{details,total}` |
+| `POST /learn/kp-details` | 登记候选（生成管线与人工共用写面）`{course_id,name,domain_id?,course_label?,domain_label?,narrative?,type?,payload?,anchors?,gen_batch?,map_seed?,model_ref?,dedup_of?,gen_status:draft\|candidate,parent_kp_id?,intent:summary\|explanation=explanation,book_ref?}`；空 course_id/name、type 或 intent 非法 422；坐标标签缺省从课程目录补齐；**永不写 confirmed**。锚点形状 `anchors=[{kind:book,ref_id,page,block_index?,snippet}]`——`block_index`＝书页内块序（REQ-117 C27：学习面「详解」按页＋块序精确命中排「这一块」，缺位的老行退化按页并入）。学习面「备注」＝本写面打标一行 `gen_batch=learn-note`、`gen_status=draft`、`payload.kind=note`、`name`＝正文首行截 40 字（REQ-117 C26：复用候选池零 DDL、8900 零改动）；`note` 行**不作知识点提升来源**，确认面归 REQ-116 后台管理 |
+| `POST /learn/kp-details/{detail_id}/confirm` | **人工确认并提升**到共享主表（人工确认位只在候选池行、且只能由本端点置位；主表无确认列——REQ-118 定档）→ `{point,detail}`；同课程重复 `norm_key` 409（合并走 `dedup_of`）、已驳回 409、不存在 404；重复确认幂等返回既有主表行 |
 | `POST /learn/kp-details/{detail_id}/reject` | 候选驳回（不落主表，可重新登记新候选）→ `{detail}`；不存在 404 |
-| `GET /learn/courses/{course_ref}/outline` | 章节树一次取全（M6）：`?book=` 按来源书过滤 → `{course_id,book_ref,outline:[{kp_id,name,depth,parent_kp_id,book_ref,source_ref,point_count,node_kind,type,...}]}`（前序平铺，左栏按 `depth` 缩进）；课程不存在 404、目录不可达 503 |
-| `PUT /learn/courses/{course_ref}/outline` | 目录确认后**整树幂等替换**同 `book_ref` 的 outline 子树 `{book_ref,tree:[{name,page_start,page_end,children?}]}`（页范围＝**PDF 页序**；叶节点常显式带 `children:[]`，空列表不下探层级）；**同父级下**同名节点复用 `kp_id`（跨章同名节各自成行——主表该组合只有普通索引，DEFECT-011 裁决）、未复用旧节点删除，其下 point 行不删而归未归档池（`parent_kp_id=NULL`）；写入即 `confirmed=1` → `{reused,created,dropped,orphaned_points,book_ref,outline}`；404；422（`book_ref` 空、树空、name 空、页范围非法、层级 >2、同一父级下重名） |
-| `PATCH /learn/knowledge-points/{kp_id}` | 人工面移动与改名：白名单 `{parent_kp_id,name,order_hint}`（extra 422；`parent_kp_id=null`=移入未归档池）→ 主表行；404；422（自挂、父非 outline 行、目录成环） |
+| `POST /learn/annotations/generate` | **按需生成注解**（REQ-117 W9／C18）：`{course_id,target_kind:point|chapter,kp_id,part:summary|key_points|annotation}`，用途与目标层配对闭集（章＝`summary`/`key_points`，条＝`annotation`），不匹配 422。服务端编排＝按知识点自带 `source_ref` → 来源锚点 → 所属章三级回落取页窗，经书页读面取块文本（限页＝章 12 页／条 6 页，限字与 `max_tokens` 随 `part` 定档）→ 拼 prompt → `services/llm/gateway.call_text(service=learn_annotation)`；**前端不拼 prompt、不直调 `/llm/*`**。落库两式：章＝**覆写**章行 `summary` 或 `meta.chapter_key_points`（成品位单一，零 DDL）；条＝候选池新增一行 `gen_status=candidate`、`intent=summary`、`gen_batch=learn-annotation`、`model_ref=调用标识`、`anchors=[{kind:book,ref_id,page,snippet}]`、`parent_kp_id=本条 kp_id`（多版本并存不覆写、永不写 `confirmed`——入库腿仍归 `…/confirm`）。响应 `{ok,target:{kind,kp_id,name},chapter?:{kp_id,summary,key_points},detail?:<候选整行>}`。章级同一 `(course_id,target_kind,kp_id,part)` 60s 内重复＝直接回上次成品（不重烧模型），条级不去重。错误口径（中文纯文本、过学习面话术净化）：取材零可用页 503、上游失败或空成品 502、目标不在投影序列 404、课程不存在 404、知识点两表不可达 503 |
+| `POST /learn/kp-details/{detail_id}/like` | **点赞＝保留**（REQ-117 C19）：`{liked:boolean}` → 只写候选行 `payload.liked`，`gen_status`／`confirmed`／主表一律不动 → `{detail:<候选整行>}`；与 `…/confirm`、`…/reject` 同形状；不存在 404、`liked` 缺失或非法 422 |
+| `GET /learn/courses/{course_ref}/outline` | 章节树一次取全（M6）：`?book=` 按来源书过滤 → `{course_id,book_ref,outline:[{kp_id,name,depth,parent_kp_id,book_ref,source_ref,point_count,node_kind,type,summary,...}]}`（前序平铺，左栏按 `depth` 缩进；`summary`＝该知识点／目录节点的一句话介绍，与 point 行同一列同一序列化通道）；课程不存在 404、目录不可达 503 |
+| `PUT /learn/courses/{course_ref}/outline` | 目录确认后**整树幂等替换**同 `book_ref` 的 outline 子树 `{book_ref,tree:[{name,page_start,page_end,summary?,children?}]}`（页范围＝**PDF 页序**；叶节点常显式带 `children:[]`，空列表不下探层级；`summary` 可选＝该节点介绍，≤1000 字符，**整树重写时未提交该键的节点保持库内原值**、显式提交空串才清空——REQ-114）；**同父级下**同名节点复用 `kp_id`（跨章同名节各自成行——主表该组合只有普通索引，DEFECT-011 裁决）、未复用旧节点删除，其下 point 行不删而归未归档池（`parent_kp_id=NULL`）；写入即视为已确认（主表无人工确认列，进表这一动作承载确认——REQ-118） → `{reused,created,dropped,orphaned_points,book_ref,outline}`；404；422（`book_ref` 空、树空、name 空、页范围非法、层级 >2、同一父级下重名、`summary` 超 1000 字符） |
+| `PATCH /learn/knowledge-points/{kp_id}` | 人工面移动、改名与介绍：白名单 `{parent_kp_id,name,order_hint,summary}`（extra 422；`parent_kp_id=null`=移入未归档池；`summary` ≤1000 字符，超限由 pydantic 422；outline 行同样可编辑自身介绍）→ 主表行；404；422（自挂、父非 outline 行、目录成环） |
 | `GET /learn/question-books` | 题源书目（R-10 根侧透传 8901 书库＋8900 应用层过滤）：`?course=&role=` → `{course_id,books:[{book_id,title,roles,course_id,parse_status,page_count,parsed_pages}]}`（`roles` 含 `textbook/exercises/solutions` 其一即认＝R-11 宽容读；**课程归属先取书库行 `course_id`，空则回退解析表 `af_books` 同列**——现网书库行该列全空，故过滤在 8900 侧做、不把 `course_id` 传给 8901；`parsed_pages`＝已解析出产物的页数（取 `pages_done`），`parse_status` 由解析侧维护、现网恒 `pending` 只作展示；解析侧离线按空值降级）；422（role 非闭集）、404（课程无坐标行）、503（目录不可达） |
 | `POST /learn/questions` | 人工确认后**批量入库** `{course_id,gen_batch?,model_ref?,learn_course_id?,questions:[{stem,kind,question_type,options,expected_answer,keywords,explanation,answer_back,difficulty,kp_type,kp_id?,source_kind,book_ref,source_ref,answer_source}]≥1}` → `{created,skipped_duplicates,gen_batch,model_ref,questions}`；`(course_id,stem_hash)` 命中即跳＝幂等，整批同事务（缝 6）；422（stem 空、闭集越界、quiz 缺 expected_answer、choice 选项非 A/B/C/D 四项、open 缺 keywords、`answer_source=none` 配 quiz＝裁决 ⑨）；503 |
 | `GET /learn/questions` | 题库浏览 `?course=&kp=&kind=&question_type=&source_kind=&book=&retired=active\|all\|only&limit=50&offset=0` → `{questions,total}`；**题面投影剔除 `expected_answer`/`keywords`/`explanation`（缝 2）**；422（闭集非法、limit 越界）；503 |

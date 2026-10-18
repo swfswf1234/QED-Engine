@@ -1,7 +1,7 @@
 """学习域路由（/api/v1/learn/*，32 端点）：主链 M-1 契约的 8900 自有域（非透传）。
 
 模块职责：课程引用式注册（kind 闭集+双通道限长）、单元树两级草稿与人工位
-（confirmed 两级确认 / covered 学习者独占）、编译作业（202+轮询，课程行自 carry）、
+（主表无确认位 / covered 学习者独占）、编译作业（202+轮询，课程行自 carry）、
 派生进度只读；M5 知识点体系（星图聚合、候选明细池、人工确认提升到共享主表）；
 M6 章节目录层级（outline 行整树幂等替换、point 行归属移动、候选按章过滤）；M2 练习与复习（题源书目透传、批量入库幂等跳重、题面敏感列投影、作答同事务判分、间隔复习到期队列、错题本派生查询与人工位）。
 错误包络：8900 自有校验=中文纯文本 detail（api-contracts 通用约定）。
@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from qed_engine.services.learn import annotations as learn_annotations
+from qed_engine.services.learn import mastery
 from qed_engine.services.learn.base import LearnConflict, LearnNotFound, fingerprint
 from qed_engine.services.learn.knowledge import KP_TYPES, norm_key
 from qed_engine.services.learn.practice import (
@@ -41,6 +43,14 @@ logger = logging.getLogger("qed_engine.learn")
 router = APIRouter(prefix="/api/v1/learn", tags=["learn"])
 
 KINDS = ("book", "af_version", "knowledge")
+# 教程套面向对象（qt_knowledge.position 五档）中文口径（书架清单卡片徽章）
+POSITION_LABELS = {
+    "beginner": "入门",
+    "intermediate": "进阶",
+    "advanced": "深入",
+    "comprehensive": "综合",
+    "elective": "选修",
+}
 UNIT_TYPES = ("text", "formula", "figure", "quiz", "flashcard")
 CHANNEL_LIMIT = 4000
 # 知识点两表懒挂载的重试窗口（DEFECT-009）
@@ -53,6 +63,7 @@ class ResourceRef(BaseModel):
     kind: str
     ref_id: str
     label: str
+    dismissed: bool = False
 
     @field_validator("kind")
     @classmethod
@@ -95,6 +106,7 @@ class CoursePatchBody(BaseModel):
     name: str | None = None
     domain_ref: CoordinateRef | None = None
     course_ref: CoordinateRef | None = None
+    resources: list[ResourceRef] | None = None
     direction: str | None = None
     instructions: str | None = None
     agent_notes: str | None = None
@@ -180,8 +192,189 @@ def _guard(func, *args, **kwargs):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _derived(store, course_id: str, course: dict[str, Any]) -> dict[str, Any]:
-    prog = store.derived_progress(course_id)
+def _optional_knowledge(request: Request) -> Any | None:
+    """知识点两表可得性探测（W5 读时投影用）：不可得返回 None，让学习面出空态而不是 503。"""
+    store = getattr(request.app.state, "knowledge_store", None)
+    if store is not None:
+        return store
+    try:
+        return _mount_knowledge_store(request.app)
+    except Exception:  # noqa: BLE001 - 投影只是读侧便利，知识点腿不可达时课程面照常工作
+        return None
+
+
+def _order_key(row: dict[str, Any]) -> tuple[int, str, str]:
+    """章序/知识点序统一口径：有 `order_hint` 者在前，其余按创建序（现网 point 的 hint 恒空）。"""
+    hint = row.get("order_hint")
+    return (hint if isinstance(hint, int) else 9999, str(row.get("created_at") or ""), str(row.get("kp_id") or ""))
+
+
+def _resolve_window(
+    point: dict[str, Any], chain: list[dict[str, Any]], default_ref_id: str
+) -> tuple[dict[str, Any] | None, str]:
+    """取材页窗三级回落：知识点自身 → 来源锚点页 → 所属章页窗（整章呈现由 window_source 标注）。"""
+    ref = point.get("source_ref") or {}
+    if ref.get("page_start") or ref.get("page_end"):
+        return {**ref, "ref_id": ref.get("ref_id") or default_ref_id}, "point"
+    anchors = [a for a in (point.get("anchors") or []) if isinstance(a, dict) and a.get("page")]
+    if anchors:
+        pages = [int(a["page"]) for a in anchors]
+        return (
+            {
+                "kind": "book",
+                "ref_id": anchors[0].get("ref_id") or default_ref_id,
+                "page_start": min(pages),
+                "page_end": max(pages),
+            },
+            "anchor",
+        )
+    for node in reversed(chain):
+        src = node.get("source_ref") or {}
+        if src.get("page_start") or src.get("page_end"):
+            return {**src, "ref_id": src.get("ref_id") or default_ref_id}, "chapter"
+    return None, ""
+
+
+def _point_projection(
+    request: Request, store: Any, course: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """已确认知识点 → point 单元行的**读时投影**（§V2.3）：派生键 `kp:{kp_id}`、零写入、勾选才物化。
+
+    两级形态（C15）：节层的页窗降为取材信息，知识点归属折叠到所属章；`parent_kp_id` 为空的
+    未归档池知识点不进推进序列（整理归文档分析处理面，C14）。
+    """
+    knowledge = _optional_knowledge(request)
+    catalog_id = str((course.get("course_ref") or {}).get("ref_id") or "")
+    course_id = str(course["learn_course_id"])
+    if knowledge is None or not catalog_id:
+        return [], []
+    outline_rows = knowledge.list_outline(catalog_id)
+    by_kp = {str(row["kp_id"]): row for row in outline_rows}
+    points, _total = knowledge.list_points(course_id=catalog_id, kind="point", limit=1000)
+    book_refs = [
+        str(r.get("ref_id") or "")
+        for r in (course.get("resources") or [])
+        if str(r.get("kind") or "") == "book"
+    ]
+    course_ref = book_refs[0] if book_refs else ""
+    chapters = sorted((row for row in outline_rows if row.get("depth") == 1), key=_order_key)
+    materialized = {str(row["unit_id"]): row for row in _guard(store.list_units, course_id, "point")}
+    nested = [
+        (
+            chapter,
+            sorted(
+                [
+                    (point, chain)
+                    for point, chain in (_point_and_chain(p, by_kp) for p in points)
+                    if chain and chain[-1]["kp_id"] == chapter["kp_id"]
+                ],
+                key=lambda pair: _order_key(pair[0]),
+            ),
+        )
+        for chapter in chapters
+    ]
+    rows: list[dict[str, Any]] = []
+    chapter_out: list[dict[str, Any]] = []
+    seq = 0
+    for chapter, members in nested:
+        chapter_key = f"kp:{chapter['kp_id']}"
+        chapter_out.append(
+            {
+                "unit_id": chapter_key,
+                "kp_id": chapter["kp_id"],
+                "name": chapter["name"],
+                "point_count": len(members),
+                "book_ref": chapter.get("book_ref") or "",
+                "source_ref": chapter.get("source_ref"),
+                # 章级注解成品位（§V2.5／C20）：进场一次随目录直读，缺失由前端出「生成」入口
+                "summary": chapter.get("summary") or "",
+                "key_points": list((chapter.get("meta") or {}).get("chapter_key_points") or []),
+            }
+        )
+        for point, chain in members:
+            default_ref = str(chapter.get("book_ref") or "") or course_ref
+            source_ref, window_source = _resolve_window(point, chain, default_ref)
+            unit_id = f"kp:{point['kp_id']}"
+            rows.append(
+                {
+                    "unit_id": unit_id,
+                    "learn_course_id": course_id,
+                    "parent_id": chapter_key,
+                    "level": "point",
+                    "kp_id": point["kp_id"],
+                    "title": point["name"],
+                    "sort_order": seq,
+                    "confirmed": True,
+                    "covered": bool(materialized.get(unit_id, {}).get("covered")),
+                    "type": point.get("type"),
+                    "payload": {},
+                    "source_ref": source_ref,
+                    "window_source": window_source,
+                    "gen_status": "generated",
+                    "active": True,
+                    "summary": point.get("summary") or "",
+                    "drift": False,
+                }
+            )
+            seq += 1
+    return rows, chapter_out
+
+
+def _point_and_chain(
+    point: dict[str, Any], by_kp: dict[str, dict[str, Any]]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    chain: list[dict[str, Any]] = []
+    parent = point.get("parent_kp_id")
+    while parent:
+        node = by_kp.get(str(parent))
+        if node is None:
+            break
+        chain.append(node)
+        if node.get("depth") == 1:
+            break
+        parent = node.get("parent_kp_id")
+    return point, chain
+
+
+def _books_out(
+    store: Any, course_id: str, course: dict[str, Any], units: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """教材级进度（书架清单卡片用）：book 素材逐个给出，无计数单位者 total=0。
+
+    归集口径与 `derived.total/done` 同源（知识点投影行的 `source_ref.ref_id`，§V2.3），
+    故素材外但知识点行引用了的 ref 也补入，标签回落 ref_id。
+    """
+    progress = {
+        str(row["ref_id"]): row for row in _guard(store.books_progress, course_id, units=units)
+    }
+    labels: dict[str, str] = {}
+    ordered: list[str] = []
+    for res in course.get("resources") or []:
+        ref_id = str(res.get("ref_id") or "")
+        if not ref_id:
+            continue
+        labels.setdefault(ref_id, str(res.get("label") or ""))
+        if str(res.get("kind") or "") == "book" and ref_id not in ordered:
+            ordered.append(ref_id)
+    for ref_id in progress:
+        if ref_id not in ordered:
+            ordered.append(ref_id)
+    return [
+        {
+            "ref_id": ref_id,
+            "label": labels.get(ref_id) or ref_id,
+            "total": int(progress.get(ref_id, {}).get("total") or 0),
+            "done": int(progress.get(ref_id, {}).get("done") or 0),
+            "percent": float(progress.get(ref_id, {}).get("percent") or 0.0),
+        }
+        for ref_id in ordered
+    ]
+
+
+def _derived(request: Request, store, course_id: str, course: dict[str, Any]) -> dict[str, Any]:
+    """课程态与进度一律按知识点行计数（§V2.3）；旧节/块行保留只读，不进计数。"""
+    units, _chapters = _point_projection(request, store, course)
+    prog = _progress_out(request, store, course, units)
     if course["compile_status"] == "running":
         status = "compiling"
     elif prog["completed"]:
@@ -190,18 +383,18 @@ def _derived(store, course_id: str, course: dict[str, Any]) -> dict[str, Any]:
         status = "learning"
     else:
         status = "draft"
-    return {"status": status, **prog}
+    return {"status": status, **prog, "books": _books_out(store, course_id, course, units)}
 
 
-def _course_out(store, course_id: str, course: dict[str, Any]) -> dict[str, Any]:
+def _course_out(request: Request, store, course_id: str, course: dict[str, Any]) -> dict[str, Any]:
     units = store.list_units(course_id)
-    return {**course, "derived": _derived(store, course_id, course), "unit_count": len(units)}
+    return {**course, "derived": _derived(request, store, course_id, course), "unit_count": len(units)}
 
 
 @router.get("/courses")
 def list_courses(request: Request) -> dict[str, Any]:
     store = _store(request)
-    return {"courses": [_course_out(store, c["learn_course_id"], c) for c in store.list_courses()]}
+    return {"courses": [_course_out(request, store, c["learn_course_id"], c) for c in store.list_courses()]}
 
 
 @router.post("/courses")
@@ -210,14 +403,144 @@ def create_course(request: Request, body: CourseCreateBody) -> dict[str, Any]:
     course = _guard(store.create_course, name=body.name, resources=[r.model_dump() for r in body.resources], **{
         k: v for k, v in body.model_dump(exclude={"name", "resources"}).items()
     })
-    return _course_out(store, course["learn_course_id"], course)
+    return _course_out(request, store, course["learn_course_id"], course)
+
+
+def _book_label(row: dict[str, Any]) -> str:
+    """教材显示名：解析侧 `display_title`（含分册）优先，回落 `title`，再回落 book_id。"""
+    return str(row.get("display_title") or row.get("title") or row.get("book_id") or "")
+
+
+def _knowledge_meta(request: Request) -> dict[str, dict[str, Any]]:
+    """knowledge_id → 教程套行（取 `intro` 简介 + `position` 面向对象）。
+
+    书级两列现网尚不存在（跨项目请求已登记 QED-Tracker），故书架展示元数据暂由
+    `af_books.knowledge_id` 联接套级字段；8901 读不到按空值降级，不阻断同步。
+    """
+    try:
+        rows = request.app.state.tracker_client.list_knowledge() or []
+    except Exception as exc:  # noqa: BLE001 - 展示元数据缺失不影响课程物化
+        logger.warning("教程套不可达，书架展示元数据留空：%s", type(exc).__name__)
+        return {}
+    return {
+        str(row.get("knowledge_id") or ""): row
+        for row in rows
+        if str(row.get("knowledge_id") or "")
+    }
+
+
+@router.post("/courses/sync")
+def sync_courses(request: Request) -> dict[str, Any]:
+    """解析好即同步（REQ-117 W8/C9）：`af_books` 生效版本 → 学习课程行 + 教材素材。
+
+    判据＝`active_job_id` 非空且 `course_id` 能在课程目录（8901）回查；查不到归属者 PASS、不猜。
+    `course_ref.ref_id` 命中既有课程（`list_courses` 按 created_at 升序，多门取最早者）只并集补入
+    新书——不改 `name`、不动已有素材的 `dismissed` 位；未命中则建行，`name` 取共享表正式名称。
+    8902 不可达 503（书架降级为只读既有课程），8901 不可达由 `_catalog` 抛 503。
+    """
+    store = _store(request)
+    index = _course_index(_catalog(request))
+    try:
+        books = request.app.state.axiom_client.list_books() or []
+    except Exception as exc:  # noqa: BLE001 - 解析侧不可达：同步是写操作，明确报错不静默
+        raise HTTPException(
+            status_code=503, detail=f"解析侧书目不可达，同步未执行：{type(exc).__name__}"
+        ) from exc
+
+    parsed_by_course: dict[str, list[dict[str, Any]]] = {}
+    for row in books:
+        book_id = str(row.get("book_id") or "")
+        course_id = str(row.get("course_id") or "")
+        if not book_id or not str(row.get("active_job_id") or "") or course_id not in index:
+            continue
+        parsed_by_course.setdefault(course_id, []).append(row)
+
+    by_course_ref: dict[str, dict[str, Any]] = {}
+    for course in store.list_courses():
+        ref_id = str((course.get("course_ref") or {}).get("ref_id") or "")
+        if ref_id and ref_id not in by_course_ref:
+            by_course_ref[ref_id] = course
+
+    created: list[str] = []
+    updated: list[str] = []
+    ordered = sorted(parsed_by_course.items())
+    for course_id, rows in ordered:
+        catalogue = index[course_id]
+        official_name = str(catalogue.get("name") or course_id)
+        target = by_course_ref.get(course_id)
+        if target is None:
+            course = _guard(
+                store.create_course,
+                name=official_name,
+                domain_ref={
+                    "ref_id": str(catalogue.get("domain_id") or ""),
+                    "label": str(catalogue.get("domain_label") or ""),
+                },
+                course_ref={"ref_id": course_id, "label": official_name},
+                resources=[
+                    {
+                        "kind": "book",
+                        "ref_id": str(row.get("book_id")),
+                        "label": _book_label(row),
+                        "dismissed": False,
+                    }
+                    for row in rows
+                ],
+            )
+            by_course_ref[course_id] = course
+            created.append(course_id)
+            continue
+        have = list(target.get("resources") or [])
+        known = {str(res.get("ref_id") or "") for res in have}
+        added = [
+            {
+                "kind": "book",
+                "ref_id": str(row.get("book_id")),
+                "label": _book_label(row),
+                "dismissed": False,
+            }
+            for row in rows
+            if str(row.get("book_id") or "") not in known
+        ]
+        if added:
+            by_course_ref[course_id] = _guard(
+                store.update_course, target["learn_course_id"], resources=have + added
+            )
+            updated.append(course_id)
+
+    courses = [_course_out(request, store, c["learn_course_id"], c) for c in store.list_courses()]
+    knowledge = _knowledge_meta(request)
+    book_meta: list[dict[str, Any]] = []
+    for course_id, rows in sorted(parsed_by_course.items()):
+        for row in rows:
+            meta_row = knowledge.get(str(row.get("knowledge_id") or "")) or {}
+            position = str(meta_row.get("position") or "")
+            book_meta.append(
+                {
+                    "ref_id": str(row.get("book_id")),
+                    "label": _book_label(row),
+                    "course_id": course_id,
+                    "knowledge_id": str(row.get("knowledge_id") or ""),
+                    "intro": str(meta_row.get("intro") or ""),
+                    "position": position,
+                    "position_label": POSITION_LABELS.get(position, position),
+                    "page_count": int(row.get("page_count") or 0),
+                }
+            )
+    return {
+        "synced": sum(len(rows) for rows in parsed_by_course.values()),
+        "created": created,
+        "updated": updated,
+        "courses": courses,
+        "books": book_meta,
+    }
 
 
 @router.get("/courses/{course_id}")
 def get_course(request: Request, course_id: str) -> dict[str, Any]:
     store = _store(request)
     course = _guard(store.get_course, course_id)
-    return _course_out(store, course_id, course)
+    return _course_out(request, store, course_id, course)
 
 
 @router.patch("/courses/{course_id}")
@@ -225,7 +548,7 @@ def patch_course(request: Request, course_id: str, body: CoursePatchBody) -> dic
     store = _store(request)
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     course = _guard(store.update_course, course_id, **fields)
-    return _course_out(store, course_id, course)
+    return _course_out(request, store, course_id, course)
 
 
 @router.delete("/courses/{course_id}")
@@ -240,10 +563,15 @@ def delete_course(request: Request, course_id: str) -> dict[str, Any]:
 
 @router.get("/courses/{course_id}/units")
 def list_units(
-    request: Request, course_id: str, level: Literal["section", "unit"] | None = Query(default=None)
+    request: Request,
+    course_id: str,
+    level: Literal["section", "unit", "point"] | None = Query(default=None),
 ) -> dict[str, Any]:
     store = _store(request)
     course = _guard(store.get_course, course_id)
+    if level == "point":
+        units, chapters = _point_projection(request, store, course)
+        return {"units": units, "chapters": chapters}
     rows = _guard(store.list_units, course_id, level)
     drift = bool(
         course["page_windows"]
@@ -347,18 +675,202 @@ def compile_status(request: Request, course_id: str) -> dict[str, Any]:
 @router.get("/courses/{course_id}/progress")
 def get_progress(request: Request, course_id: str) -> dict[str, Any]:
     store = _store(request)
-    _guard(store.get_course, course_id)
-    return store.derived_progress(course_id)
+    course = _guard(store.get_course, course_id)
+    units, _chapters = _point_projection(request, store, course)
+    return _progress_out(request, store, course, units)
 
 
 @router.post("/courses/{course_id}/progress")
 def set_progress(request: Request, course_id: str, body: ProgressBody) -> dict[str, Any]:
+    """勾选落笔：`kp:` 前缀＝知识点投影行的派生键，首次落笔才物化单元行（§V2.3）。"""
     store = _store(request)
+    course = _guard(store.get_course, course_id)
+    if body.unit_id.startswith("kp:"):
+        units, _chapters = _point_projection(request, store, course)
+        row = next((u for u in units if u["unit_id"] == body.unit_id), None)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"学习域实体不存在：{body.unit_id}")
+        _guard(
+            store.ensure_point_unit,
+            course_id,
+            unit_id=row["unit_id"],
+            kp_id=row["kp_id"],
+            parent_id=row["parent_id"],
+            title=row["title"],
+            sort_order=row["sort_order"],
+            source_ref=row["source_ref"],
+            covered=body.status == "done",
+        )
     row = _guard(store.set_progress, course_id, body.unit_id, body.status)
-    return {**row, "derived": store.derived_progress(course_id)}
+    units, _chapters = _point_projection(request, store, course)
+    return {**row, "derived": _progress_out(request, store, course, units)}
 
 
-# ---------- M5：知识点体系与知识梳理星图（qed_knowledge_point / qed_learn_kp_detail） ----------
+
+# ---------- 主链 M-3：门与判分（门态清单 · 质性判定 · 游标） ----------
+
+MASTERY_ITEM_FIELDS = (
+    "unit_id",
+    "kp_id",
+    "kp_type",
+    "gate",
+    "mastery",
+    "threshold",
+    "attempt_count",
+    "provenance",
+    "status",
+    "qualitative_passed",
+    "due_reviews",
+)
+
+
+class MasteryAssessBody(BaseModel):
+    """质性门判定（D-M3-2：v1 只有学习者自评位，`model` 判读腿属 M-3b）。"""
+
+    model_config = {"extra": "forbid"}
+
+    unit_id: str = Field(min_length=1)
+    passed: bool
+    note: str = Field(default="", max_length=1000)
+    by: Literal["learner"] = "learner"
+
+
+def _optional_practice(request: Request) -> Any | None:
+    """练习域事实可得性探测（门的输入面）：不可得返回 None，门按零作答派生而不是 503（D-M3-4）。"""
+    store = getattr(request.app.state, "practice_store", None)
+    if store is not None:
+        return store
+    try:
+        return _mount_practice_store(request.app)
+    except Exception:  # noqa: BLE001 - 门只是读侧派生，练习腿不可达时学习面照常推进
+        return None
+
+
+def _mastery_item_out(state: dict[str, Any]) -> dict[str, Any]:
+    """门态行的响应投影：只出冻结字段（`assessed_mastered`/`assessed_by` 留内部判定用）。"""
+    return {key: state[key] for key in MASTERY_ITEM_FIELDS}
+
+
+def _mastery_view(
+    request: Request, store: Any, course: dict[str, Any], units: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """投影行 × 进度行 × 练习域事实 → 门态序列（顺序即推进序列；分数与结论读时派生，不落列）。
+
+    练习腿的课程键＝目录课程 ID（`qe_learn_attempt.course_id` 现网口径），与学习课程的
+    `learn_course_id` 不同源，故两键各走各的：进度行按学习课程取，作答与到期按目录课程取。
+    """
+    course_id = str(course["learn_course_id"])
+    catalog_id = str((course.get("course_ref") or {}).get("ref_id") or "")
+    progress = _guard(store.progress_rows, course_id)
+    practice = _optional_practice(request)
+    attempts: dict[str, list[bool]] = {}
+    due: dict[str, int] = {}
+    if practice is not None and catalog_id:
+        attempts = practice.attempts_by_kp(catalog_id)
+        due = practice.due_counts_by_kp(catalog_id)
+    states = []
+    for row in units:
+        unit_id = str(row["unit_id"])
+        kp_id = str(row.get("kp_id") or "")
+        gate_row = progress.get(unit_id, {})
+        states.append(
+            mastery.build_state(
+                unit_id=unit_id,
+                kp_id=kp_id,
+                kp_type=row.get("type"),
+                correctness=attempts.get(kp_id, []),
+                qualitative_passed=gate_row.get("qualitative_passed"),
+                assessed_by=gate_row.get("assessed_by") or "",
+                learner_claimed=gate_row.get("status") == "done",
+                due_reviews=int(due.get(kp_id, 0)),
+            )
+        )
+    return {"states": states, "progress": progress}
+
+
+def _gate_cursor(view: dict[str, Any]) -> str | None:
+    """门就是游标（D-M3-1）：第一个未掌握知识点行；`skipped`＝学习者显式让位，不停靠。"""
+    for state in view["states"]:
+        if state["mastered"]:
+            continue
+        if view["progress"].get(state["unit_id"], {}).get("status") == "skipped":
+            continue
+        return str(state["unit_id"])
+    return None
+
+
+def _progress_out(
+    request: Request, store: Any, course: dict[str, Any], units: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """进度响应＝原五字段口径不动（勾选仍是计数源）＋门态三字段，游标改判为门游标。"""
+    view = _mastery_view(request, store, course, units)
+    provenance = {mastery.PROVENANCE_SYSTEM: 0, mastery.PROVENANCE_LEARNER: 0}
+    for state in view["states"]:
+        if state["provenance"] in provenance:
+            provenance[state["provenance"]] += 1
+    base = store.derived_progress(str(course["learn_course_id"]), units=units)
+    step = mastery.next_step(view["states"])
+    return {
+        **base,
+        "current_unit_id": _gate_cursor(view),
+        "mastered": sum(1 for state in view["states"] if state["mastered"]),
+        "next_unit_id": step["unit_id"] or None,
+        "provenance": provenance,
+    }
+
+
+@router.get("/courses/{course_id}/mastery")
+def course_mastery(request: Request, course_id: str) -> dict[str, Any]:
+    """逐知识点门态（主链 M-3）：只出投影的知识点行，过门结论与三态一律读时重算。"""
+    store = _store(request)
+    course = _guard(store.get_course, course_id)
+    units, _chapters = _point_projection(request, store, course)
+    view = _mastery_view(request, store, course, units)
+    return {
+        "items": [_mastery_item_out(state) for state in view["states"]],
+        "next_step": mastery.next_step(view["states"]),
+        "summary": mastery.mastery_summary(view["states"]),
+    }
+
+
+@router.post("/courses/{course_id}/mastery/assess")
+def assess_mastery(request: Request, course_id: str, body: MasteryAssessBody) -> dict[str, Any]:
+    """质性门记录：只写判定四列、不取代勾选通路（D-M3-1）；量化型按参照口径拒绝（409）。"""
+    store = _store(request)
+    course = _guard(store.get_course, course_id)
+    units, _chapters = _point_projection(request, store, course)
+    row = next((unit for unit in units if str(unit["unit_id"]) == body.unit_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"学习域实体不存在：{body.unit_id}")
+    refusal = mastery.assess_refusal(row.get("type"))
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    # 判定同样是落笔：首次才物化投影行（§V2.3）；covered 回读，不抹勾选位
+    _guard(
+        store.ensure_point_unit,
+        course_id,
+        unit_id=row["unit_id"],
+        kp_id=row["kp_id"],
+        parent_id=row["parent_id"],
+        title=row["title"],
+        sort_order=row["sort_order"],
+        source_ref=row["source_ref"],
+        covered=bool(row["covered"]),
+    )
+    _guard(
+        store.assess_qualitative,
+        course_id,
+        body.unit_id,
+        passed=body.passed,
+        note=body.note,
+        assessed_by=body.by,
+    )
+    view = _mastery_view(request, store, course, units)
+    state = next(item for item in view["states"] if item["unit_id"] == body.unit_id)
+    return {"item": _mastery_item_out(state), "next_step": mastery.next_step(view["states"])}
+
+
+# ---------- M5：知识点体系与知识梳理星图（qed_knowledge_point / qe_learn_kp_detail） ----------
 
 DETAIL_STATUSES = ("draft", "candidate", "adopted", "rejected")
 OPEN_STATUSES = ("draft", "candidate")
@@ -402,13 +914,15 @@ class OutlineTreeBody(BaseModel):
 
 
 class PointPatchBody(BaseModel):
-    """知识点改列白名单（extra=forbid）：归属、展示名与顺序提示，不开放 confirmed/type。"""
+    """知识点改列白名单（extra=forbid）：归属、展示名、顺序提示与介绍，不开放 node_kind/type 分类列。"""
 
     model_config = {"extra": "forbid"}
 
     parent_kp_id: str | None = None
     name: str | None = Field(default=None, min_length=1)
     order_hint: int | None = None
+    # 摘要＝知识点一句话介绍（学习者可见）；上限对齐列宽 VARCHAR(1000)
+    summary: str | None = Field(default=None, max_length=1000)
 
 
 def _validate_outline_tree(nodes: list[Any], depth: int = 1) -> None:
@@ -428,6 +942,11 @@ def _validate_outline_tree(nodes: list[Any], depth: int = 1) -> None:
             raise HTTPException(status_code=422, detail="目录节点必须含整数 page_start/page_end")
         if start < 1 or end < start:
             raise HTTPException(status_code=422, detail="页范围非法（page_start≥1 且 page_end≥page_start）")
+        summary = node.get("summary")
+        if summary is not None and (
+            not isinstance(summary, str) or len(summary) > 1000
+        ):
+            raise HTTPException(status_code=422, detail="summary 必须为不超过 1000 字符的字符串")
         children = node.get("children")
         if children is not None:
             if not isinstance(children, list):
@@ -505,7 +1024,6 @@ def _course_index(domains: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def _point_out(point: dict[str, Any]) -> dict[str, Any]:
     out = dict(point)
     out["anchors"] = out.get("anchors") or []
-    out["confirmed"] = bool(out.get("confirmed"))
     return out
 
 
@@ -569,6 +1087,7 @@ def star_map(request: Request, domain: str | None = Query(default=None)) -> dict
                     "track": track_name,
                     "stage": course.get("stage") or "",
                     "sort_order": course.get("sort_order"),
+                    "description": str(course.get("description") or ""),
                     "kp_confirmed": int(count.get("confirmed") or 0),
                     "kp_candidates": int(count.get("candidates") or 0),
                 }
@@ -652,6 +1171,7 @@ def course_knowledge_points(
             "name": course.get("name") or course_id,
             "track": str(course.get("track") or "").strip() or UNSORTED_TRACK,
             "domain_id": course.get("domain_id") or "",
+            "description": str(course.get("description") or ""),
         },
         "points": [
             {**_point_out(point), "candidates": by_norm.get(point["norm_key"], [])} for point in points
@@ -716,6 +1236,169 @@ def reject_kp_detail(request: Request, detail_id: str) -> dict[str, Any]:
     return {"detail": _guard(store.reject_detail, detail_id)}
 
 
+# ---------- REQ-117 W9：注解按需生成腿（§V2.11；生成经网关，前端不拼 prompt、不直调 /llm/*） ----------
+
+
+class AnnotationGenerateBody(BaseModel):
+    course_id: str = Field(min_length=1)
+    target_kind: Literal["point", "chapter"]
+    kp_id: str = Field(min_length=1)
+    part: Literal["summary", "key_points", "annotation"]
+
+
+class DetailLikeBody(BaseModel):
+    liked: bool
+
+
+def _page_block_text(data: Any) -> str:
+    """书页 → 取材文本（与前端 `blockText` 同口径：公式取 latex、表取 html、列表取 items）。"""
+    if not isinstance(data, dict):
+        return ""
+    blocks = data.get("blocks")
+    if isinstance(blocks, dict):
+        blocks = blocks.get("blocks")
+    out: list[str] = []
+    for block in blocks or []:
+        if not isinstance(block, dict):
+            continue
+        kind = str(block.get("type") or "")
+        if kind == "formula":
+            text = str(block.get("latex") or "")
+        elif kind == "table":
+            text = str(block.get("html") or "")
+        elif kind == "list":
+            text = "\n".join(str(item) for item in (block.get("items") or []))
+        else:
+            text = str(block.get("text") or "")
+        if text.strip():
+            out.append(text.strip())
+    return "\n".join(out)
+
+
+def _annotation_source(request: Request, window: Any, part: str) -> tuple[str, int, str]:
+    """按页窗取取材正文（经既有 8900 书页读面）；返回 (文本, 首个可用页, ref_id)。"""
+    window = window if isinstance(window, dict) else {}
+    ref_id = str(window.get("ref_id") or "")
+    try:
+        start = int(window.get("page_start") or 0)
+        end = int(window.get("page_end") or start)
+    except (TypeError, ValueError):
+        return "", 0, ref_id
+    client = getattr(request.app.state, "axiom_client", None)
+    if not ref_id or start <= 0 or end < start or client is None:
+        return "", 0, ref_id
+    limit = learn_annotations.source_page_limit(part)
+    chunks: list[str] = []
+    first_page = 0
+    for page in range(start, min(end, start + limit - 1) + 1):
+        try:
+            text = _page_block_text(client.get_book_page(ref_id, page))
+        except Exception:  # noqa: BLE001 - 单页取不到即跳过，全窗零文本由调用方降 503
+            continue
+        if not text:
+            continue
+        first_page = first_page or page
+        chunks.append(text)
+    return "\n".join(chunks), first_page, ref_id
+
+
+def _annotation_target(
+    request: Request, store: Any, course: dict[str, Any], body: AnnotationGenerateBody
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """目标定位：投影行给取材页窗（章＝章行／条＝point 行），主表行给名称与坐标。
+
+    知识点两表不可达＝503，投影序列里没有这一条＝404（未归档池与别课知识点都不给生成）。
+    """
+    knowledge = _optional_knowledge(request)
+    if knowledge is None:
+        raise HTTPException(status_code=503, detail="知识点数据还没准备好，暂时生成不了")
+    units, chapters = _point_projection(request, store, course)
+    rows = chapters if body.target_kind == "chapter" else units
+    projected = next((row for row in rows if str(row.get("kp_id") or "") == body.kp_id), None)
+    if projected is None:
+        raise HTTPException(status_code=404, detail=f"学习域实体不存在：{body.kp_id}")
+    return _guard(knowledge.get_point, body.kp_id), projected
+
+
+@router.post("/annotations/generate")
+def generate_annotation(request: Request, body: AnnotationGenerateBody) -> dict[str, Any]:
+    """按需生成注解（C18）：章级成品写章行并持久，条级写候选池一行 candidate（点赞不入库，C19）。"""
+    if learn_annotations.PART_TARGETS[body.part] != body.target_kind:
+        raise HTTPException(
+            status_code=422, detail="生成用途与目标层不匹配：章＝章节总结／学习要点，条＝总结与注解"
+        )
+    store = _store(request)
+    course = _guard(store.get_course, body.course_id)
+    row, projected = _annotation_target(request, store, course, body)
+    text, first_page, ref_id = _annotation_source(request, projected.get("source_ref"), body.part)
+    if not text:
+        label = "章" if body.target_kind == "chapter" else "条"
+        raise HTTPException(status_code=503, detail=f"这一{label}的正文还没准备好，暂时生成不了")
+    key = learn_annotations.throttle_key(body.course_id, body.target_kind, body.kp_id, body.part)
+    if body.target_kind == "chapter":
+        hit = learn_annotations.cached(key)
+        if hit is not None:
+            return hit
+    outcome = learn_annotations.generate(
+        request.app.state.settings, body.part, str(row["name"]), text
+    )
+    if not outcome["ok"]:
+        raise HTTPException(status_code=502, detail=f"生成没能完成：{outcome['reason']}，可以再点一次")
+    target = {"kind": body.target_kind, "kp_id": body.kp_id, "name": str(row["name"])}
+    knowledge = _knowledge(request)
+    if body.target_kind == "chapter":
+        fields: dict[str, Any] = (
+            {"summary": outcome["text"]}
+            if body.part == "summary"
+            else {"meta": {"chapter_key_points": outcome["items"]}}
+        )
+        saved = _guard(knowledge.patch_point, body.kp_id, **fields)
+        chapter = {
+            "kp_id": body.kp_id,
+            "summary": saved.get("summary") or "",
+            "key_points": list((saved.get("meta") or {}).get("chapter_key_points") or []),
+        }
+        response = {"ok": True, "target": target, "chapter": chapter}
+    else:
+        detail = knowledge.add_detail(
+            course_id=str(row["course_id"]),
+            name=str(row["name"]),
+            domain_id=str(row.get("domain_id") or ""),
+            domain_label=str(row.get("domain_label") or ""),
+            course_label=str(row.get("course_label") or ""),
+            narrative=outcome["text"],
+            type=row.get("type"),
+            intent="summary",
+            gen_status="candidate",
+            gen_batch=learn_annotations.GEN_BATCH,
+            model_ref=outcome["model_ref"],
+            parent_kp_id=body.kp_id,
+            book_ref=ref_id,
+            anchors=[
+                {
+                    "kind": "book",
+                    "ref_id": ref_id,
+                    "page": first_page,
+                    "snippet": learn_annotations.source_snippet(text),
+                }
+            ],
+        )
+        response = {"ok": True, "target": target, "detail": detail}
+    if body.target_kind == "chapter":
+        learn_annotations.remember(key, response)
+    return response
+
+
+@router.post("/kp-details/{detail_id}/like")
+def like_kp_detail(request: Request, detail_id: str, body: DetailLikeBody) -> dict[str, Any]:
+    """点赞＝保留（C19）：只写 `payload.liked`，`gen_status`／`confirmed`／主表一律不动。
+
+    返回整行候选（与 `GET /kp-details` 与 `…/reject` 同形状），学习面按 `payload.liked` 排序直读。
+    """
+    store = _knowledge(request)
+    return {"detail": _guard(store.set_detail_liked, detail_id, body.liked)}
+
+
 # ---------- M6：章节目录树（outline 行）与知识点归属 ----------
 
 
@@ -742,20 +1425,29 @@ def get_outline(
 
 @router.put("/courses/{course_id}/outline")
 def put_outline(request: Request, course_id: str, body: OutlineTreeBody) -> dict[str, Any]:
-    """目录确认后的整树写入：幂等替换同 book_ref 的 outline 子树，写入即 confirmed=1。
+    """目录确认后的整树写入：幂等替换同 book_ref 的 outline 子树，写入即视为已确认。
 
     point 行一律不删；其父 outline 被替换掉时归未归档池（parent_kp_id=NULL）。
+    坐标列按课程目录补全（REQ-118 D1）。
     """
     store = _knowledge(request)
-    _require_catalog_course(request, course_id)
+    course = _require_catalog_course(request, course_id)
     _validate_outline_tree(body.tree)
-    result = _guard(store.replace_outline, course_id, body.book_ref, body.tree)
+    result = _guard(
+        store.replace_outline,
+        course_id,
+        body.book_ref,
+        body.tree,
+        domain_id=str(course.get("domain_id") or ""),
+        domain_label=str(course.get("domain_label") or ""),
+        course_label=str(course.get("name") or ""),
+    )
     return {**result, "book_ref": body.book_ref, "outline": store.list_outline(course_id, body.book_ref)}
 
 
 @router.patch("/knowledge-points/{kp_id}")
 def patch_knowledge_point(request: Request, kp_id: str, body: PointPatchBody) -> dict[str, Any]:
-    """人工面移动与改名：只开放归属、展示名与顺序提示（确认位与四分类不走本端点）。"""
+    """人工面移动与改名：开放归属、展示名、顺序提示与摘要（确认位与四分类不走本端点）。"""
     store = _knowledge(request)
     row = _guard(store.get_point, kp_id)
     fields = {k: getattr(body, k) for k in body.model_fields_set}
@@ -783,7 +1475,7 @@ def _validate_parent(store: Any, row: dict[str, Any], parent_kp_id: str | None) 
             cursor = _guard(store.get_point, cursor["parent_kp_id"])
 
 
-# ---------- M2：练习与复习（qed_learn_question / qed_learn_attempt / qed_learn_review_task） ----------
+# ---------- M2：练习与复习（qe_learn_question / qe_learn_attempt / qe_learn_review_task） ----------
 
 # 练习域三表懒挂载的重试窗口（同判例 DEFECT-009）
 PRACTICE_MOUNT_RETRY_SECONDS = 60.0

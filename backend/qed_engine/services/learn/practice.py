@@ -1,4 +1,4 @@
-"""学习域·练习与复习三表存储（M2）：qed_learn_question + qed_learn_attempt + qed_learn_review_task。
+"""学习域·练习与复习三表存储（M2）：qe_learn_question + qe_learn_attempt + qe_learn_review_task。
 
 模块职责：练习域三表的幂等建表、题干规范化去重（`stem_hash`）、批量入库（重复即跳过的幂等
 语义）、间隔复习调度纯函数（`schedule_next` / `INTERVAL_SEQUENCES` / `TYPE_PRIORITY`）、
@@ -57,12 +57,12 @@ DEFAULT_KP_TYPE = "memory"
 DEFAULT_MAX_TASKS = 5
 
 CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS qed_learn_question (
+CREATE TABLE IF NOT EXISTS qe_learn_question (
   question_id VARCHAR(64) PRIMARY KEY COMMENT '题目 ID（服务端生成 q-<hex12>）',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course，与知识点主表/星图/M6 工作台同源）',
   course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  learn_course_id VARCHAR(64) COMMENT '所属学习课程（逻辑引用 qed_learn_course；非编译链路出题=NULL）',
-  unit_id VARCHAR(64) COMMENT '关联块（逻辑引用 qed_learn_unit；M-2 编译接线后启用，v1 可空）',
+  learn_course_id VARCHAR(64) COMMENT '所属学习课程（逻辑引用 qe_learn_course；非编译链路出题=NULL）',
+  unit_id VARCHAR(64) COMMENT '关联块（逻辑引用 qe_learn_unit；M-2 编译接线后启用，v1 可空）',
   kp_id VARCHAR(64) COMMENT '归属细知识点（逻辑引用 qed_knowledge_point 的 point 行；NULL=未归档题）',
   kind VARCHAR(16) NOT NULL DEFAULT 'quiz' COMMENT '闭集 quiz=判分题 / flashcard=记忆卡（自评，不判分；裁决 ⑨：answer_source=none 时强制本值）',
   question_type VARCHAR(16) COMMENT 'quiz 行判分闭集 choice/short/open（与 M-3 三类一一对应）；flashcard 行 NULL',
@@ -90,12 +90,12 @@ CREATE TABLE IF NOT EXISTS qed_learn_question (
   KEY idx_question_kp (kp_id),
   KEY idx_question_book (book_ref),
   KEY idx_question_batch (gen_batch)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 COMMENT='练习题库（根自建；一行=一道题/一张卡，expected_answer 只存服务端，所有权 QED-Engine）';
 
-CREATE TABLE IF NOT EXISTS qed_learn_attempt (
+CREATE TABLE IF NOT EXISTS qe_learn_attempt (
   attempt_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键，时序即事实序）',
-  question_id VARCHAR(64) NOT NULL COMMENT '题目（逻辑引用 qed_learn_question）',
+  question_id VARCHAR(64) NOT NULL COMMENT '题目（逻辑引用 qe_learn_question）',
   course_id VARCHAR(64) NOT NULL COMMENT '冗余课程坐标（错题本与统计按课程聚合）',
   kp_id VARCHAR(64) COMMENT '冗余知识点（M-3 掌握门按 kp 取近因序列、复习错题优先级判定）',
   origin VARCHAR(16) NOT NULL DEFAULT 'new' COMMENT '闭集 new=首练 / review=复习队列 / manual=人工重做',
@@ -113,10 +113,10 @@ CREATE TABLE IF NOT EXISTS qed_learn_attempt (
   KEY idx_attempt_kp (kp_id, answered_at),
   KEY idx_attempt_course (course_id, answered_at),
   KEY idx_attempt_open (course_id, resolved, is_correct)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 COMMENT='答题事实明细（M-3 掌握门的唯一数据源；全量保留逐次行不做只留终态的合并，缝 4）';
 
-CREATE TABLE IF NOT EXISTS qed_learn_review_task (
+CREATE TABLE IF NOT EXISTS qe_learn_review_task (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   target_kind VARCHAR(16) NOT NULL COMMENT '闭集 question=具体题/卡（错题重练与闪卡节律）/ kp=知识点整体节律（v2 按知识点推题时用）',
   target_id VARCHAR(64) NOT NULL COMMENT 'question_id 或 kp_id',
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS qed_learn_review_task (
   updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
   UNIQUE KEY uq_review_target (target_kind, target_id),
   KEY idx_review_due (course_id, status, due_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化，双粒度，重启不丢；所有权 QED-Engine）';
 """
 
@@ -404,7 +404,7 @@ class MySQLPracticeStore:
                         now=stamp,
                     )
                     cursor.execute(
-                        "SELECT question_id FROM qed_learn_question WHERE course_id=%s AND stem_hash=%s",
+                        "SELECT question_id FROM qe_learn_question WHERE course_id=%s AND stem_hash=%s",
                         (course_id, row["stem_hash"]),
                     )
                     hit = cursor.fetchone()
@@ -417,7 +417,7 @@ class MySQLPracticeStore:
                     columns = ", ".join(values)
                     placeholders = ", ".join(f"%({key})s" for key in values)
                     cursor.execute(
-                        f"INSERT INTO qed_learn_question ({columns}) VALUES ({placeholders})", values
+                        f"INSERT INTO qe_learn_question ({columns}) VALUES ({placeholders})", values
                     )
                     self._ensure_task(
                         cursor, "question", row["question_id"], course_id,
@@ -441,7 +441,7 @@ class MySQLPracticeStore:
 
     def _question(self, cursor: Any, question_id: str) -> dict[str, Any]:
         cursor.execute(
-            f"SELECT {_QUESTION_COLUMNS} FROM qed_learn_question WHERE question_id=%s", (question_id,)
+            f"SELECT {_QUESTION_COLUMNS} FROM qe_learn_question WHERE question_id=%s", (question_id,)
         )
         row = cursor.fetchone()
         if row is None:
@@ -483,10 +483,10 @@ class MySQLPracticeStore:
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(f"SELECT COUNT(*) AS n FROM qed_learn_question {clause}", params)
+                cursor.execute(f"SELECT COUNT(*) AS n FROM qe_learn_question {clause}", params)
                 total = int(cursor.fetchone()["n"])
                 cursor.execute(
-                    f"SELECT {_QUESTION_COLUMNS} FROM qed_learn_question {clause} "
+                    f"SELECT {_QUESTION_COLUMNS} FROM qe_learn_question {clause} "
                     "ORDER BY created_at, question_id LIMIT %s OFFSET %s",
                     [*params, limit, offset],
                 )
@@ -517,12 +517,12 @@ class MySQLPracticeStore:
                         params.append(value)
                 params.append(question_id)
                 cursor.execute(
-                    f"UPDATE qed_learn_question SET {', '.join(sets)} WHERE question_id=%s", params
+                    f"UPDATE qe_learn_question SET {', '.join(sets)} WHERE question_id=%s", params
                 )
                 if "retired" in fields:
                     status = "archived" if bool(fields["retired"]) else "active"
                     cursor.execute(
-                        "UPDATE qed_learn_review_task SET status=%s, updated_at=%s "
+                        "UPDATE qe_learn_review_task SET status=%s, updated_at=%s "
                         "WHERE target_kind='question' AND target_id=%s",
                         (status, stamp, question_id),
                     )
@@ -553,7 +553,7 @@ class MySQLPracticeStore:
         try:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    f"SELECT {_QUESTION_COLUMNS} FROM qed_learn_question WHERE question_id=%s FOR UPDATE",
+                    f"SELECT {_QUESTION_COLUMNS} FROM qe_learn_question WHERE question_id=%s FOR UPDATE",
                     (question_id,),
                 )
                 question = cursor.fetchone()
@@ -561,7 +561,7 @@ class MySQLPracticeStore:
                     raise LearnNotFound(f"题目不存在：{question_id}")
                 question = dict(question)
                 cursor.execute(
-                    "SELECT COUNT(*) AS n FROM qed_learn_attempt WHERE question_id=%s "
+                    "SELECT COUNT(*) AS n FROM qe_learn_attempt WHERE question_id=%s "
                     "AND review_date=%s AND origin=%s",
                     (question_id, review_when, origin),
                 )
@@ -578,7 +578,7 @@ class MySQLPracticeStore:
                     correct = bool(verdict["is_correct"])
                 trend, resolved = resolve_trend(previous, correct)
                 cursor.execute(
-                    "INSERT INTO qed_learn_attempt "
+                    "INSERT INTO qe_learn_attempt "
                     "(question_id, course_id, kp_id, origin, review_date, user_answer, is_correct, "
                     " method, judge_note, score_trend, resolved, bookmarked, answered_at) "
                     "VALUES (%(question_id)s, %(course_id)s, %(kp_id)s, %(origin)s, %(review_date)s, "
@@ -603,7 +603,7 @@ class MySQLPracticeStore:
                 if verdict["note"] == ISSUE_MISSING_EXPECTED:
                     question = _record_issue(question, ISSUE_MISSING_EXPECTED)
                     cursor.execute(
-                        "UPDATE qed_learn_question SET meta=%s, updated_at=%s WHERE question_id=%s",
+                        "UPDATE qe_learn_question SET meta=%s, updated_at=%s WHERE question_id=%s",
                         (_to_json(question["meta"]), stamp, question_id),
                     )
                 review = self._write_back(
@@ -638,7 +638,7 @@ class MySQLPracticeStore:
     ) -> dict[str, Any]:
         """回写 question 粒度调度态并返回 `review` 响应块（缝 6 同事务）。"""
         cursor.execute(
-            f"SELECT {_TASK_COLUMNS} FROM qed_learn_review_task "
+            f"SELECT {_TASK_COLUMNS} FROM qe_learn_review_task "
             "WHERE target_kind='question' AND target_id=%s",
             (question["question_id"],),
         )
@@ -657,7 +657,7 @@ class MySQLPracticeStore:
         }
         state = schedule_next(task, correct, now)
         cursor.execute(
-            "INSERT INTO qed_learn_review_task "
+            "INSERT INTO qe_learn_review_task "
             "(target_kind, target_id, course_id, kp_type, interval_index, consecutive_correct, "
             " consecutive_wrong, due_at, status, created_at, updated_at) "
             "VALUES (%(target_kind)s, %(target_id)s, %(course_id)s, %(kp_type)s, "
@@ -689,7 +689,7 @@ class MySQLPracticeStore:
         now: datetime,
     ) -> None:
         cursor.execute(
-            "INSERT INTO qed_learn_review_task "
+            "INSERT INTO qe_learn_review_task "
             "(target_kind, target_id, course_id, kp_type, interval_index, consecutive_correct, "
             " consecutive_wrong, due_at, status, created_at, updated_at) "
             "VALUES (%s, %s, %s, %s, 0, 0, 0, %s, 'active', %s, %s) "
@@ -699,7 +699,7 @@ class MySQLPracticeStore:
 
     def _latest_attempt(self, cursor: Any, question_id: str) -> dict[str, Any] | None:
         cursor.execute(
-            f"SELECT {_ATTEMPT_COLUMNS} FROM qed_learn_attempt WHERE question_id=%s "
+            f"SELECT {_ATTEMPT_COLUMNS} FROM qe_learn_attempt WHERE question_id=%s "
             "ORDER BY answered_at DESC, attempt_id DESC LIMIT 1",
             (question_id,),
         )
@@ -710,7 +710,7 @@ class MySQLPracticeStore:
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    f"SELECT {_ATTEMPT_COLUMNS} FROM qed_learn_attempt WHERE attempt_id=%s",
+                    f"SELECT {_ATTEMPT_COLUMNS} FROM qe_learn_attempt WHERE attempt_id=%s",
                     (attempt_id,),
                 )
                 row = cursor.fetchone()
@@ -724,7 +724,7 @@ class MySQLPracticeStore:
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT attempt_id FROM qed_learn_attempt WHERE attempt_id=%s FOR UPDATE",
+                    "SELECT attempt_id FROM qe_learn_attempt WHERE attempt_id=%s FOR UPDATE",
                     (attempt_id,),
                 )
                 if cursor.fetchone() is None:
@@ -735,7 +735,7 @@ class MySQLPracticeStore:
                     sets.append(f"{key}=%s")
                     params.append(int(bool(value)))
                 params.append(attempt_id)
-                cursor.execute(f"UPDATE qed_learn_attempt SET {', '.join(sets)} WHERE attempt_id=%s", params)
+                cursor.execute(f"UPDATE qe_learn_attempt SET {', '.join(sets)} WHERE attempt_id=%s", params)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -743,6 +743,47 @@ class MySQLPracticeStore:
         finally:
             conn.close()
         return self.get_attempt(attempt_id)
+
+    def attempts_by_kp(self, course_id: str) -> dict[str, list[bool]]:
+        """主链 M-3 门的输入面：按知识点取近因作答序列（全序，时序＝`answered_at` 升序、同刻按行 ID）。
+
+        `kp_id` 为 NULL 的未归档题不进门；最近 5 次窗口与置信上限钳制归规则层
+        `services/learn/mastery.py`，本方法只给事实序，不做任何折算。
+        """
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT kp_id, is_correct FROM qe_learn_attempt "
+                    "WHERE course_id=%s AND kp_id IS NOT NULL "
+                    "ORDER BY kp_id, answered_at, attempt_id",
+                    (course_id,),
+                )
+                rows = cursor.fetchall()
+        sequences: dict[str, list[bool]] = {}
+        for row in rows:
+            sequences.setdefault(str(row["kp_id"]), []).append(bool(row["is_correct"]))
+        return sequences
+
+    def due_counts_by_kp(self, course_id: str, now: datetime | None = None) -> dict[str, int]:
+        """门游标的复习腿：到期复习任务按知识点归集（题行归到所属知识点＋裁决 ⑧ 的 kp 粒度行）。
+
+        到期口径与 `review_due` 一致（`status='active'` 且 `due_at<=now`），本方法只给计数，
+        排序与题面下发仍归复习队列；未归档题（`kp_id` IS NULL）不进任何门（裁决 D-M3-4）。
+        """
+        when = _as_naive(now) or _now()
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT IF(t.target_kind='kp', t.target_id, q.kp_id) AS kp_id, COUNT(*) AS n "
+                    "FROM qe_learn_review_task t "
+                    "LEFT JOIN qe_learn_question q ON q.question_id=t.target_id "
+                    "WHERE t.status='active' AND t.due_at<=%s AND t.course_id=%s "
+                    "AND (t.target_kind='kp' OR (t.target_kind='question' AND q.kp_id IS NOT NULL)) "
+                    "GROUP BY kp_id",
+                    (when, course_id),
+                )
+                rows = cursor.fetchall()
+        return {str(row["kp_id"]): int(row["n"]) for row in rows}
 
     # ---------- 复习队列（纯函数调度 + 持久态） ----------
 
@@ -759,7 +800,7 @@ class MySQLPracticeStore:
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    f"SELECT {_TASK_COLUMNS} FROM qed_learn_review_task "
+                    f"SELECT {_TASK_COLUMNS} FROM qe_learn_review_task "
                     f"WHERE {' AND '.join(where)} ORDER BY due_at, target_id",
                     params,
                 )
@@ -785,7 +826,7 @@ class MySQLPracticeStore:
             where.append("course_id=%s")
             params.append(course_id)
         cursor.execute(
-            f"SELECT q.question_id, q.kp_id FROM qed_learn_question q "
+            f"SELECT q.question_id, q.kp_id FROM qe_learn_question q "
             f"WHERE {' AND '.join(where)}",
             params,
         )
@@ -804,7 +845,7 @@ class MySQLPracticeStore:
             return {}
         marks = ", ".join(["%s"] * len(question_ids))
         cursor.execute(
-            f"SELECT {_QUESTION_COLUMNS} FROM qed_learn_question WHERE question_id IN ({marks})",
+            f"SELECT {_QUESTION_COLUMNS} FROM qe_learn_question WHERE question_id IN ({marks})",
             question_ids,
         )
         return {row["question_id"]: dict(row) for row in cursor.fetchall()}
@@ -819,7 +860,7 @@ class MySQLPracticeStore:
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"SELECT COUNT(*) FROM qed_learn_review_task WHERE {' AND '.join(where)}", params
+                    f"SELECT COUNT(*) FROM qe_learn_review_task WHERE {' AND '.join(where)}", params
                 )
                 return int(cursor.fetchone()[0])
 
@@ -837,7 +878,7 @@ class MySQLPracticeStore:
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    f"SELECT {_QUESTION_COLUMNS} FROM qed_learn_question "
+                    f"SELECT {_QUESTION_COLUMNS} FROM qe_learn_question "
                     f"WHERE {' AND '.join(where)} ORDER BY created_at, question_id",
                     params,
                 )
@@ -845,7 +886,7 @@ class MySQLPracticeStore:
                 items: list[dict[str, Any]] = []
                 for question in questions:
                     cursor.execute(
-                        f"SELECT {_ATTEMPT_COLUMNS} FROM qed_learn_attempt WHERE question_id=%s "
+                        f"SELECT {_ATTEMPT_COLUMNS} FROM qe_learn_attempt WHERE question_id=%s "
                         "ORDER BY answered_at DESC, attempt_id DESC",
                         (question["question_id"],),
                     )
@@ -856,7 +897,7 @@ class MySQLPracticeStore:
                     if all(bool(a["is_correct"]) for a in attempts):
                         continue
                     cursor.execute(
-                        "SELECT COUNT(*) AS n FROM qed_learn_review_task "
+                        "SELECT COUNT(*) AS n FROM qe_learn_review_task "
                         "WHERE status='active' AND due_at<=%s AND target_kind='question' AND target_id=%s",
                         (now, question["question_id"]),
                     )
@@ -915,7 +956,7 @@ class MySQLPracticeStore:
                         where.append(f"{column}=%s")
                         params.append(value)
                 cursor.execute(
-                    f"SELECT COUNT(*) AS n FROM qed_learn_question WHERE {' AND '.join(where)}", params
+                    f"SELECT COUNT(*) AS n FROM qe_learn_question WHERE {' AND '.join(where)}", params
                 )
                 total = int(cursor.fetchone()["n"])
         rows = self._mistake_rows(course_id=course_id, kp_id=kp_id, book_ref=book_ref, now=when)
@@ -928,8 +969,8 @@ class MySQLPracticeStore:
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT COUNT(*) AS n FROM qed_learn_review_task t "
-                    "JOIN qed_learn_question q ON q.question_id=t.target_id "
+                    "SELECT COUNT(*) AS n FROM qe_learn_review_task t "
+                    "JOIN qe_learn_question q ON q.question_id=t.target_id "
                     f"WHERE {' AND '.join(where)}",
                     params,
                 )
@@ -943,7 +984,7 @@ class MySQLPracticeStore:
         }
 
 def ensure_tables(settings: Settings) -> None:
-    """幂等建三表（判例 qed_learn_*）；数据库不可达抛异常由调用方降级。"""
+    """幂等建三表（判例 qe_learn_*）；数据库不可达抛异常由调用方降级。"""
     conn = _connect(settings)
     try:
         with conn.cursor() as cursor:

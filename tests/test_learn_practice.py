@@ -4,6 +4,7 @@
 `answer_source=none` 强制 flashcard 即裁决 ⑨）、题面下发响应的敏感列投影（缝 2）、
 人工面白名单与 ⑨ 的升级路径、作答同事务判分与 `score_trend/resolved`（缝 6）、
 间隔复习双粒度调度（`schedule_next` 升降档/钳位、错题 priority=1、到期队列投影）、
+主链 M-3 门的两张读入面（`attempts_by_kp` 全序作答序列、`due_counts_by_kp` 按知识点到期计数）、
 错题本派生查询与统计、题源书目 `roles` 过滤；内存 store 承载，不写运行数据库。
 设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
@@ -758,3 +759,60 @@ def test_attempt_leaves_no_trace_when_rejected(client, store):
     assert after["interval_index"] == before["interval_index"] == 0
     assert after["due_at"] == before["due_at"]
     assert store._attempts == []
+
+
+# ---------- 主链 M-3 W2：掌握门的输入面（近因序列按知识点取，两实现同形） ----------
+
+
+def test_attempts_by_kp_returns_chronological_sequences(store):
+    """门的输入＝该知识点的近因序列：按作答时序而非入库序，跨课程不串，未归档题不进门。"""
+    stamp = datetime(2026, 10, 18, 8, 0, 0)
+    batch = store.add_questions(course_id="math_analysis", items=[
+        _item(stem="kpA 第一题。", kp_id="kp-limit", kp_type="memory", expected_answer="存在"),
+        _item(stem="kpA 第二题。", kp_id="kp-limit", kp_type="memory", expected_answer="存在"),
+        _item(stem="kpB 题。", kp_id="kp-continuity", kp_type="procedure", expected_answer="连续"),
+        _item(stem="未归档题。", expected_answer="存在"),
+    ])
+    a1, a2, b1, loose = (row["question_id"] for row in batch["questions"])
+    store.add_attempt(question_id=a2, user_answer="存在", now=stamp + timedelta(minutes=1))
+    store.add_attempt(question_id=a1, user_answer="不存在", now=stamp + timedelta(minutes=2))
+    store.add_attempt(question_id=a1, user_answer="存在", now=stamp + timedelta(minutes=4))
+    store.add_attempt(question_id=b1, user_answer="连续", now=stamp + timedelta(minutes=3))
+    store.add_attempt(question_id=loose, user_answer="存在", now=stamp)
+
+    sequences = store.attempts_by_kp("math_analysis")
+    assert sequences["kp-limit"] == [True, False, True]  # 时序：分钟 1→2→4
+    assert sequences["kp-continuity"] == [True]
+    assert set(sequences) == {"kp-limit", "kp-continuity"}
+    assert store.attempts_by_kp("other_course") == {}
+
+
+def test_attempts_by_kp_returns_the_whole_history(store):
+    """缝 4 全量保留在读侧的体现：本方法给全序，最近 5 次窗口与置信上限钳制归规则层。"""
+    stamp = datetime(2026, 10, 18, 8, 0, 0)
+    question_id = store.add_questions(course_id="math_analysis", items=[
+        _item(stem="kpA 八次作答。", kp_id="kp-limit", expected_answer="存在"),
+    ])["questions"][0]["question_id"]
+    for index in range(8):
+        store.add_attempt(
+            question_id=question_id,
+            user_answer="存在" if index == 7 else "不存在",
+            now=stamp + timedelta(minutes=index),
+        )
+    sequence = store.attempts_by_kp("math_analysis")["kp-limit"]
+    assert len(sequence) == 8 and sequence[-1] is True and sequence[0] is False
+
+
+# ---------- 主链 M-3 W3：门输入面（按知识点到期计数） ----------
+
+def test_due_counts_by_kp_groups_question_and_kp_granularity_tasks(client, store):
+    """门游标的复习腿：到期任务按知识点归集（题行＋裁决 ⑧ 的 kp 粒度行两路都算，未归档题不进门）。"""
+    _post(client, [_choice(kp_id="kp-m3", kp_type="procedure")])
+    quiz_id = _first_id(client, kp="kp-m3")
+    assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}  # 题行当日到期
+    _answer(client, quiz_id, "B")
+    # 答对后题行退到 7 天后，kp 粒度行由首次作答建、当日到期：计数仍归到该知识点
+    assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}
+    assert store.due_counts_by_kp("other_course") == {}
+    _post(client, [_choice(stem="未归档题面：求导数。")])  # kp_id 空＝不进任何门（裁决 D-M3-4）
+    assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}
