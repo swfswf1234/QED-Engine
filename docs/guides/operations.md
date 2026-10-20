@@ -184,8 +184,13 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8900/api/v1/services/tracker/sto
 conda run -n QED_env python scripts/qed_engine_service.py stop
 ```
 
-- `stop` 幂等：未运行（无 PID 文件/ stale PID）也返回成功；优雅停止（CTRL_BREAK）5s 宽限后
+- `stop` 幂等只覆盖**真未运行**（无 PID 文件且端口不通 / stale PID），返回 0；优雅停止（CTRL_BREAK）5s 宽限后
   `taskkill /T /F` 强杀兜底。
+- **未纳管实例形（DEFECT-020，2026-10-20）**：无 PID 文件而端口仍在监听＝该实例非本脚本启动，脚本按端口
+  `netstat -ano` 反查并打印监听 PID、以退出码 **3** 回报，**不终止非本脚本启动的进程**；确需停止请按打印的
+  PID 人工处置。`restart` 见 `stop` 非 0 即中止（回显 `restart aborted`），停止失败时不再拉起第二实例。
+  8900 控制中心对该码也不终止进程，端口复核后如实报 409（语义与退出码 1 → 500 的区分见
+  [service-hosting](../design/service-hosting.md)）。
 - **停止可靠性语义**（2026-09-04）：判活用内核句柄探测（探测失败不再误判为「已死」）；
   优雅信号未生效由强杀兜底成功时回显 `stopped (forced)`；优雅+强杀后仍存活则退出码 1
   显式报 `stop failed`（绝不假 stopped，按提示手动 taskkill 后重试）。

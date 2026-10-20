@@ -42,9 +42,11 @@ def test_web_service_script_subcommands():
 
 
 def test_web_service_script_exit_codes_documented():
-    """退出码语义与 8900 接入契约一致（0 成功/幂等，1 运行失败，2 参数错误）。"""
+    """退出码语义与 8900 接入契约一致（0 成功/幂等，1 运行失败，2 参数错误，
+    3 端口由非本脚本启动的进程监听·只检测不杀）。"""
     src = SCRIPT.read_text(encoding="utf-8")
     assert "退出码：0" in src and "1 运行失败" in src and "2 参数错误" in src
+    assert "3 端口由非本脚本启动的进程监听" in src, "DEFECT-020 只检测形须有成文退出码"
 
 
 def test_pid_is_alive_tolerates_non_utf8_stdout(monkeypatch):
@@ -216,7 +218,7 @@ def test_cmd_restart_never_builds(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "_find_npm", _no_npm)
     monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-web.pid")
     stopped: list = []
-    monkeypatch.setattr(mod, "cmd_stop", lambda a: stopped.append(1))
+    monkeypatch.setattr(mod, "cmd_stop", lambda a: [stopped.append(1), 0][1])
     captured: dict = {}
 
     def fake_cmd_start(ns):
@@ -320,6 +322,66 @@ def test_proc_alive_real_process_liveness():
     victim.wait()
     assert mod._proc_alive(victim.pid) is False, "已退出进程应判定死亡"
     assert mod._proc_alive(0) is False and mod._proc_alive(-1) is False
+
+
+def test_cmd_stop_reports_unmanaged_listener(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S1：无 PID 文件而端口在听（外部实例）→ 按端口反查并打印监听 PID，
+    退出码 3 与「真未运行」形（0）可区分；只检测不杀，不终止任何非托管进程。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-web.pid")  # 不存在＝无 PID 文件
+    monkeypatch.setattr(mod, "_port_open", lambda port: True)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+    touched: list = []
+    monkeypatch.setattr(mod, "_kill_tree", lambda pid: touched.append(("taskkill", pid)))
+    monkeypatch.setattr(mod.os, "kill", lambda pid, sig: touched.append(("kill", pid)))
+
+    assert mod.cmd_stop(type("A", (), {"port": 8903})()) == 3
+    out = capsys.readouterr().out
+    assert "4321" in out, "必须打印端口反查到的监听 PID"
+    assert "not running" not in out, "外部实例形不得再说成未运行"
+    assert touched == [], "只检测不杀：不得终止非本脚本启动的进程"
+
+
+def test_cmd_stop_without_pid_file_and_port_free_is_idempotent(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S1 守护形：真未运行（无 PID 文件且端口不通）仍幂等退出 0，
+    与「端口被非托管进程监听」的 3 可区分。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-web.pid")
+    monkeypatch.setattr(mod, "_port_open", lambda port: False)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+
+    assert mod.cmd_stop(type("A", (), {"port": 8903})()) == 0
+    out = capsys.readouterr().out
+    assert "not running (no pid file)" in out
+    assert "4321" not in out
+
+
+def test_parse_netstat_pid_reads_listen_line():
+    """DEFECT-020 S1：脚本自带端口→监听 PID 反查解析（形态同 service_manager）——
+    只认 TCP LISTENING、本地地址以 :端口 结尾，UDP 与 89030 之类前缀行不算命中。"""
+    mod = _load_script_module()
+    text = (
+        "  协议  本地地址          外部地址        状态           PID\n"
+        "  TCP    127.0.0.1:8903           0.0.0.0:0              LISTENING       4321\n"
+        "  TCP    127.0.0.1:89030          0.0.0.0:0              LISTENING       9999\n"
+        "  UDP    0.0.0.0:8903             *:*                                    7777\n"
+    )
+    assert mod._parse_netstat_pid(text, 8903) == 4321
+    assert mod._parse_netstat_pid(text, 8999) is None
+
+
+def test_cmd_restart_aborts_when_stop_unconfirmed(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S2：cmd_stop 非 0 即中止，不拉起新实例（停止失败仍重启＝双实例）。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-web.pid")
+    monkeypatch.setattr(mod, "_port_open", lambda port: True)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+    started: list = []
+    monkeypatch.setattr(mod, "cmd_start", lambda args: started.append(args) or 0)
+
+    assert mod.cmd_restart(type("A", (), {"port": 8903})()) == 3
+    assert started == [], "stop 未确认成功时不得启动新实例"
+    assert "restart aborted" in capsys.readouterr().out
 
 
 def test_cmd_stop_never_fakes_success(monkeypatch, tmp_path, capsys):

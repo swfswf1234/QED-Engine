@@ -48,7 +48,7 @@
 
 | 代码路径 | 层级/职责 | 状态 | 设计关联 | 关联测试 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `backend/qed_engine/services/explore_sessions.py` | 探索会话管理 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | 内存会话 + 后台线程调 8901 dry-run；状态机 + TTL 2h。 |
+| `backend/qed_engine/services/explore_sessions.py` | 探索会话管理 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | 内存会话 + 后台线程调 8901 dry-run；状态机 + TTL 2h；失败态落库两侧不对称（领域直写 `explore_pending`，课程只经 8901 在线写、不可达不落库）。 |
 | `backend/qed_engine/services/shared_tables.py` | 共享表 exploration_stage 直读写层 | Current | `docs/design/downloads-flow.md` | `tests/test_explore_sessions.py` | 领域/课程 stage 状态流转（8901 在线优先、不可达时降级直写）；`_require_stage` 按表分档校验取值（领域 6 态／课程 5 态，越界抛 `ValueError`）；QED_DB_PASSWORD 未配置时静默跳过。 |
 | `backend/qed_engine/services/learn/base.py` | 学习域存储基座（三表 DDL+异常+源指纹+MySQL 存储） | Current | `docs/architecture/database-design.md` | `tests/test_learn.py` | qed_learn_* 三表幂等建表 SQL（D3 编译态挂课程行）与 NotFound/Conflict 异常映射；`MySQLLearnStore`＝三表 MySQL 实现，接口与内存实现同形（公开方法签名由 parity 测试守护），由首个 /learn 课程请求懒挂载（`LEARN_MOUNT_RETRY_SECONDS` 短窗重试，判例 DEFECT-009）。主链 M-3：进度表判定四列 `PROGRESS_GATE_COLUMNS` 随 `ensure_tables` 按 information_schema 幂等补列；`progress_rows`（门读入面）与 `assess_qualitative`（判定落笔，行缺时以 `status='pending'` 起行）与 `set_progress` 各写各列，互不覆盖。 |
 | `backend/qed_engine/services/learn/memory.py` | 学习域存储内存实现 | Current | `docs/architecture/database-design.md` | `tests/test_learn.py` | InMemoryLearnStore：三表接口的进程内实现（契约测试注入 + 生产存储未接入期降级），线程锁保护编译后台读写。同形承载 M-3 判定面（`progress_rows`/`assess_qualitative`）：勾选只并写终态位，不抹判定四列。 |
@@ -94,8 +94,8 @@
 | `tests/test_self_restart.py` | 自身重启契约测试 | Current | `docs/architecture/api-contracts.md` | — | 延迟 spawn/失败语义。 |
 | `tests/test_explore_sessions.py` | 探索会话契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点/状态机/apply 双链路/TTL。 |
 | `tests/test_domain_explore.py` | 领域探索五态门面契约测试 | Current | `docs/design/downloads-flow.md` | — | 五端点：原生任务提交/透传/桥接/降级/状态合成。 |
-| `tests/test_qed_web_service.py` | 8903 前端生命周期脚本契约测试 | Current | `docs/design/service-hosting.md` | — | PID 文件/serve 命令/health 端口。 |
-| `tests/test_qed_engine_service.py` | 8900 后端生命周期脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | PID/serve/health/--mode/子命令。 |
+| `tests/test_qed_web_service.py` | 8903 前端生命周期脚本契约测试 | Current | `docs/design/service-hosting.md` | — | PID 文件/serve 命令/health 端口/停止三形（真停·未纳管端口在听退出码 3·停不住 1）与 restart 见非 0 中止。 |
+| `tests/test_qed_engine_service.py` | 8900 后端生命周期脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | PID/serve/health/--mode/子命令/停止三形（同 8903 脚本口径，DEFECT-020）。 |
 | `tests/test_qed_qwen_service.py` | 本地文字模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | lms CLI 启停/健康探测/子命令。 |
 | `tests/test_qed_mineru_service.py` | 本地图像模型脚本契约测试 | Current | `docs/design/llm-gateway.md` | — | infra-*.ps1 编排/健康探测/子命令。 |
 | `tests/test_llm_gateway.py` | LLM 网关契约测试 | Current | `docs/design/llm-gateway.md` | — | api/local 路由、调用记录字段。 |

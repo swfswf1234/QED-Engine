@@ -47,9 +47,16 @@
   停止 8900 即断掉整个控制中心），仅提供**重启**（经 `/self-restart`，见
   [../architecture/api-contracts.md](../architecture/api-contracts.md)）。8903 前端**不提供停止**（停止即断掉界面），
   在线→重启、离线→启动。
-- **停止语义（2026-08-17 修复）**：生命周期脚本单元（tracker/web）不再以「8900 托管记录」
+- **停止语义（2026-08-17 修复）**：生命周期脚本单元（tracker/axiom/web）不再以「8900 托管记录」
   为停止放行前提——凡端口探测在线即视为在管，直接 `_stop_via_script`（解决手动经脚本启动的
   服务在 8900 重启后「无法停止」问题）；探测离线且无托管记录 → 409。
+- **停止后端口复核**：脚本单元以退出码判定不足——脚本对「无 PID 文件」的实例（非经该脚本启动的
+  外部进程）只打印提示并退出：子项目脚本幂等退出 0，根侧脚本（8903 web / 8900 engine）自 DEFECT-020
+  起退出 3 并打印端口反查到的监听 PID（只检测不杀）。两者都不足以判定实例已停。故 `_stop_via_script`
+  回传 stdout 并把 0/3 一并交复核，`_stop` 在派发后按端口判定：端口已释放 → `stopping`；端口仍监听 →
+  409，原因给出端口反查到的监听 PID
+  （`netstat -ano` 只读反查）与脚本回报文本，且不置停止过渡标记。根侧**不终止非本控制中心启动
+  的进程**，外部实例的真停由该服务自身的生命周期脚本（按端口反查 PID）或人工完成。
 
 ## API 契约（8900 新增，前缀 /api/v1）
 
@@ -59,21 +66,25 @@
 
 ```json
 {
+  "db_name": "qed_test",
   "services": [
     {
       "name": "tracker", "label": "QED-Tracker 文档下载服务", "port": 8901,
       "status": "online", "pid": 6772, "started_at": "2026-08-09T10:00:00+08:00",
-      "log_path": "D:/coding/QED-Engine/QED-Tracker/logs/qed-tracker-serve.log", "reason": ""
+      "log_path": "D:/coding/QED-Engine/QED-Tracker/logs/qed-tracker-serve.log", "reason": "",
+      "db_name": "qed_test", "db_source": "injected", "db_mismatch": false
     },
     {
       "name": "axiom", "label": "Axiom-Flow 文档解析服务", "port": 8902,
       "status": "offline", "pid": null, "started_at": null,
-      "log_path": "D:/coding/QED-Engine/Axiom-Flow/logs/qed-axiom-serve.log", "reason": "未启动"
+      "log_path": "D:/coding/QED-Engine/Axiom-Flow/logs/qed-axiom-serve.log", "reason": "未启动",
+      "db_name": "", "db_source": "unknown", "db_mismatch": false
     },
     {
       "name": "web", "label": "QED 前端服务", "port": 8903,
       "status": "online", "pid": 2341, "started_at": "2026-08-17T10:00:00+08:00",
-      "log_path": "D:/coding/QED-Engine/logs/qed-web-serve.log", "reason": ""
+      "log_path": "D:/coding/QED-Engine/logs/qed-web-serve.log", "reason": "",
+      "db_name": "", "db_source": "unknown", "db_mismatch": false
     }
   ]
 }
@@ -84,7 +95,14 @@
 - `pid`：8900 托管记录的主 PID（`axiom` 为 API 进程 PID；8900 重启后 PID 记录丢失，以端口
   探测为准，pid 可为 null）。
 - `reason`：offline 的补充原因（未启动 / 连接失败 / 停止超时强杀 / 进程已退出（启动失败，见
-  <log_path>））。
+  <log_path>）。
+- **库名一致性（DEFECT-015 S1/S2/S4）**：8900 托管启动 8901/8902/8903 时，把根 `.env` 解析出的
+  `QED_DB_HOST`/`PORT`/`NAME`/`USER`/`PASSWORD` 显式注入子进程环境（`_child_env()`，只及子进程、
+  不写脏根进程 `os.environ`），子服务「真实环境变量最高优先级」因此被钉在根配置上；口令只进子进程
+  环境，不进任何响应字段、事件账或错误文本。`db_name`/`db_source`/`db_mismatch` 三字段与顶层
+  `db_name` 透出派发口径：`injected`＝本进程派发并记录、`unknown`＝在线但非本进程派发（外部脚本
+  启动或 8900 先重启，不谎报一致）、`self`＝config 单元自身。`db_mismatch=true` 表示旧库名进程仍在
+  读写（重启该单元即重新派发），同时向 `logs/config.log` 记一次 `db_mismatch` 告警、轮询不刷屏。
 - **启动失败提前收敛**（OPS-002）：`starting` 窗口内每轮状态判定先查托管进程存活（Popen 单元看
   poll，生命周期脚本单元看 PID 句柄）——进程已退出即结束过渡态并按 offline 报「进程已退出」+
   实际日志路径，不等 15s 耗尽后降级成中性的「连接失败」。判据只认「进程确定已退出」：查询失败与
@@ -111,6 +129,9 @@
 {"name": "tracker", "status": "stopping"}
 ```
 
+脚本单元派发后端口仍监听（该实例不在脚本的 PID 文件里）→ 409，原因含端口反查到的监听 PID，
+响应不出现 `stopping`（见「停止后端口复核」）。
+
 ### POST /api/v1/services/{name}/restart
 
 先停后启（复用 stop → start 语义）。`config` 返回 409。
@@ -127,7 +148,8 @@
 ### 错误语义
 
 - 未知服务名 → 404；`config` 启停 → 409（重启经 `/self-restart`，不走 /services）；
-  重复启动（已 online/starting）→ 409；停止未运行服务 → 409。
+  重复启动（已 online/starting）→ 409；停止未运行服务 → 409；脚本单元停止后端口仍监听
+  （未纳管实例）→ 409，restart 随之中止、不再启动（不静默跳过停止）。
 - 启停为**同步轻量操作**：启动返回前完成 `Popen` 创建（不等待健康），停止返回前完成信号
   发送；状态收敛由前端轮询 `/services` 观察。
 
@@ -145,7 +167,8 @@
    PID 取脚本 stdout 首行 `pid: <n>`（兜底读 `logs/qed-{name}.pid`，tracker/axiom/web 同名
    规则），仅用于前端展示；优雅停止/强杀兜底由脚本自含，8900 不再持有 Popen 句柄；脚本非 0
    退出 → 500。tracker 契约见 QED-Tracker `docs/design/service-lifecycle.md`，axiom 契约见
-   Axiom-Flow `docs/design/service-lifecycle.md`。
+   Axiom-Flow `docs/design/service-lifecycle.md`。停止以 `_probe_http(port)` 复核（脚本 stdout
+   一并回传，供 409 原因引用），端口仍监听即未纳管 → 409，见「停止后端口复核」。
 3. **优雅停止（Popen 单元）**：`os.kill(pid, signal.CTRL_BREAK_EVENT)` 发送到进程组；
    uvicorn 捕获 KeyboardInterrupt 触发优雅关闭；5s 宽限后 `taskkill /PID <pid> /T /F`
    强杀兜底。
@@ -159,7 +182,7 @@
 ## 前端呈现（指向）
 
 服务控制区在管理后台的 UI 呈现（四服务卡、依赖组件卡、操作按钮与确认交互）由
-[admin-console.md](admin-console.md)「管理后台·控制台」承载，本文件只定义后端托管契约，不再重复
+[admin-console.md](frontend/admin-console.md)「管理后台·控制台」承载，本文件只定义后端托管契约，不再重复
 前端设计。要点对照：`config`（8900）仅重启（`/self-restart`）；`tracker`/`axiom`
 在线→停止+重启、离线→启动；`web`（8903）不提供停止（避免自掘断界面）。
 
@@ -206,7 +229,8 @@
 - `pytest tests -q` 全绿；`ruff check backend tests` 无错误。
 - 定向测试：服务注册表完整性（四单元含 web）、状态探测（注入假 transport）、启停端点
   （mock Popen/信号）、`config` 409、未知服务 404、并发 409、脚本单元外部运行停止/重启
-  （`tests/test_api.py`）、web 生命周期脚本契约（`tests/test_qed_web_service.py`）、
+  与停止后端口复核（未纳管 → 409 含监听 PID；正常停止 → stopping）、端口→PID 反查解析、
+  `tests/test_api.py`、web 生命周期脚本契约（`tests/test_qed_web_service.py`）、
   serve_web health 端点（`tests/test_web.py`）。
 - 前端：`npx tsc -b` + vitest 全绿。
 - 人工验收：8900 在线时启动/停止/重启 8901（观察 8903 控制台状态流转与日志

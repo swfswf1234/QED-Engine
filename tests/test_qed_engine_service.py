@@ -155,6 +155,64 @@ def test_kill_tree_visible_failure_and_success(monkeypatch):
     assert mod._kill_tree(123) is False, "taskkill 异常不得抛出、必须返回 False"
 
 
+def test_cmd_stop_reports_unmanaged_listener(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S1（engine 脚本同批形）：无 PID 文件而端口在听 → 反查并打印监听 PID、
+    退出码 3，与「真未运行」形可区分；只检测不杀。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-engine.pid")  # 不存在＝无 PID 文件
+    monkeypatch.setattr(mod, "_port_open", lambda port: True)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+    touched: list = []
+    monkeypatch.setattr(mod, "_kill_tree", lambda pid: touched.append(("taskkill", pid)))
+    monkeypatch.setattr(mod.os, "kill", lambda pid, sig: touched.append(("kill", pid)))
+
+    assert mod.cmd_stop(type("A", (), {"port": 8900})()) == 3
+    out = capsys.readouterr().out
+    assert "4321" in out, "必须打印端口反查到的监听 PID"
+    assert "not running" not in out, "外部实例形不得再说成未运行"
+    assert touched == [], "只检测不杀：不得终止非本脚本启动的进程"
+
+
+def test_cmd_stop_without_pid_file_and_port_free_is_idempotent(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S1 守护形：真未运行（无 PID 文件且端口不通）仍幂等退出 0。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-engine.pid")
+    monkeypatch.setattr(mod, "_port_open", lambda port: False)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+
+    assert mod.cmd_stop(type("A", (), {"port": 8900})()) == 0
+    out = capsys.readouterr().out
+    assert "not running (no pid file)" in out
+    assert "4321" not in out
+
+
+def test_parse_netstat_pid_reads_listen_line():
+    """DEFECT-020 S1：脚本自带端口→监听 PID 反查解析（形态同 service_manager）。"""
+    mod = _load_script_module()
+    text = (
+        "  协议  本地地址          外部地址        状态           PID\n"
+        "  TCP    127.0.0.1:8900           0.0.0.0:0              LISTENING       4321\n"
+        "  TCP    127.0.0.1:89000          0.0.0.0:0              LISTENING       9999\n"
+        "  UDP    0.0.0.0:8900             *:*                                    7777\n"
+    )
+    assert mod._parse_netstat_pid(text, 8900) == 4321
+    assert mod._parse_netstat_pid(text, 8999) is None
+
+
+def test_cmd_restart_aborts_when_stop_unconfirmed(monkeypatch, tmp_path, capsys):
+    """DEFECT-020 S2：cmd_stop 非 0 即中止，不拉起新实例。"""
+    mod = _load_script_module()
+    monkeypatch.setattr(mod, "PID_FILE", tmp_path / "qed-engine.pid")
+    monkeypatch.setattr(mod, "_port_open", lambda port: True)
+    monkeypatch.setattr(mod, "_listening_pid", lambda port: 4321)
+    started: list = []
+    monkeypatch.setattr(mod, "cmd_start", lambda args: started.append(args) or 0)
+
+    assert mod.cmd_restart(type("A", (), {"port": 8900})()) == 3
+    assert started == [], "stop 未确认成功时不得启动新实例"
+    assert "restart aborted" in capsys.readouterr().out
+
+
 def test_cmd_stop_never_fakes_success(monkeypatch, tmp_path, capsys):
     """缺陷①回归：优雅+强杀两腿都失效时，stop 必须退出码 1 报错，绝不打印假 stopped
     （2026-09-04 实机故障：stop 回显 stopped 而 uvicorn 7364 仍服务 8900）。"""

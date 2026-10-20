@@ -7,7 +7,8 @@ api 模式走 API key 调用，local 模式启用本地模型（Qwen / MinerU）
 健康探测端点：http://127.0.0.1:8900/api/v1/health。
 契约见 docs/design/llm-gateway.md（2026-08-20）。
 
-退出码：0 成功/幂等；1 运行失败（spawn 失败、health 超时、stop 无法终止）；2 参数错误（argparse）。
+退出码：0 成功/幂等；1 运行失败（spawn 失败、health 超时、stop 无法终止）；2 参数错误（argparse）；
+3 端口由非本脚本启动的进程监听（只检测不杀，见 `_unmanaged_listener`；DEFECT-020 与「真未运行」的 0 区分）。
 Windows 注意：os.kill(pid, 0) 会直接 TerminateProcess，进程存在性检测用 tasklist。
 
 停止可靠性（2026-09-04 修复）：判活用 _proc_alive（ctypes OpenProcess，毫秒级）——tasklist
@@ -41,6 +42,8 @@ STOP_GRACE_SECONDS = 5.0
 STOP_POLL_INTERVAL = 0.2
 HEALTH_TIMEOUT_SECONDS = 30.0
 HEALTH_INTERVAL_SECONDS = 0.5
+
+UNMANAGED_LISTENER_EXIT = 3
 
 
 def default_port() -> int:
@@ -125,6 +128,36 @@ def _port_open(port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def _parse_netstat_pid(text: str, port: int) -> int | None:
+    """从 `netstat -ano` 文本取该端口 LISTENING 行的 PID；无匹配返回 None。"""
+    suffix = f":{port}"
+    for line in text.splitlines():
+        cols = line.split()
+        if len(cols) < 5 or cols[0] != "TCP" or cols[3] != "LISTENING":
+            continue
+        if cols[1].endswith(suffix):
+            try:
+                return int(cols[4])
+            except ValueError:
+                return None
+    return None
+
+
+def _listening_pid(port: int) -> int | None:
+    """端口反查监听进程 PID（只读，本脚本不据此终止任何进程）。
+
+    字节捕获 + 容错解码（本机 netstat 走 GBK 管道，形态同 service_manager 同名函数）；
+    命令不可用或无法解析时返回 None，由调用方降级为「未取得监听 PID」。
+    """
+    try:
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    blob = result.stdout
+    text = blob.decode("utf-8", errors="replace") if isinstance(blob, bytes) else (blob or "")
+    return _parse_netstat_pid(text, port)
 
 
 def _health_ok(port: int) -> bool:
@@ -217,11 +250,25 @@ def _kill_tree(pid: int) -> bool:
     return False
 
 
+def _unmanaged_listener(args: argparse.Namespace) -> int:
+    """无 PID 文件时的分诊：端口不通＝真未运行（幂等 0）；端口在听＝外部实例（只检测不杀，3）。"""
+    port = getattr(args, "port", None) or default_port()
+    if not _port_open(port):
+        print("not running (no pid file)")
+        return 0
+    listener = _listening_pid(port)
+    who = f"pid {listener}" if listener is not None else "pid 未取得（netstat 不可用）"
+    print(
+        f"port {port} 由非本脚本启动的进程监听（{who}），本脚本不终止非托管进程；"
+        "确需停止请人工处置该 PID"
+    )
+    return UNMANAGED_LISTENER_EXIT
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     pid = read_pid()
     if pid is None:
-        print("not running (no pid file)")
-        return 0
+        return _unmanaged_listener(args)
     if not _proc_alive(pid):
         PID_FILE.unlink(missing_ok=True)
         print("not running (stale pid file)")
@@ -255,7 +302,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_restart(args: argparse.Namespace) -> int:
-    cmd_stop(args)
+    stopped = cmd_stop(args)
+    if stopped != 0:
+        print(f"restart aborted: stop 未确认成功（退出码 {stopped}），不拉起新实例")
+        return stopped
     return cmd_start(args)
 
 
