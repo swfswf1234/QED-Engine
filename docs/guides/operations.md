@@ -28,7 +28,8 @@
 
 ### 生命周期脚本命令矩阵
 
-两个本仓库生命周期脚本（start/stop/restart/status，退出码 0 成功/幂等、1 运行失败、2 参数错误）：
+两个本仓库生命周期脚本（start/stop/restart/status，退出码 `0` 成功/幂等、`1` 运行失败、`2` 参数错误、
+`3` 端口由非本脚本启动的进程监听（只检测不杀，见下））：
 
 | 操作 | 后端 8900（`scripts/qed_engine_service.py`） | 前端 8903（`scripts/qed_web_service.py`） |
 | --- | --- | --- |
@@ -44,6 +45,12 @@
   `dist/index.html` 缺失时任何启动方式都会自动兜底构建。前端测试（vitest）属开发门禁
   （见 [development.md](development.md)），启动流程不执行测试。
 - 两个脚本均有幂等保护：已运行（PID 存活或端口占用）时 `start` 返回 `already running`。
+- **停止分诊（DEFECT-020）**：`stop` 在 PID 文件缺失时先探端口——端口不通＝真未运行，回显
+  `not running (no pid file)` 并幂等退出 `0`；端口在听＝非本脚本启动的外部实例，回显该端口反查到的
+  监听 PID 并退出 `3`，**不终止任何进程**（控制中心对非托管进程无处置权，确需停止请人工处置该 PID）。
+  `restart` 取回 `stop` 的退出码，非 `0` 打印 `restart aborted` 并中止，不拉起第二实例。子项目脚本
+  （8901/8902）同形处置**有意不同**：它们各自是自己端口的生命周期属主，按端口反查 PID 后真停，
+  口径见[服务托管设计](../design/service-hosting.md)「停止后端口复核」。
 
 ### 启动与停止顺序
 
