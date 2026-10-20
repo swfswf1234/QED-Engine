@@ -7,7 +7,7 @@ description: Use when implementing code in the QED repos — locates the module 
 
 ## 步骤
 
-1. **定位模块**：在标准映射「模块映射」（`docs/architecture/code-map.md`）找到模块职责、状态、设计关联（DesignRef）与关联测试；契约变化先完成 ADR/设计，再改实现、code-map 与语义测试。
+1. **定位模块**：在标准映射「模块映射」（`docs/architecture/code-map.md`）找到模块职责、状态、设计关联（DesignRef）与关联测试；契约变化先完成 ADR/设计，再改实现、code-map 与语义测试。实现前对照 `design/` 文档与已批计划壳范围——文档未提及的功能不加（缺失先回文档面补设计再裁决，ADR 0024 范围锁死）；大任务到 demo 门即暂停待人工验收，不径直冲进扩展批次。
 2. **先写测试**：涉及契约/状态机/迁移/行为变化，先写会失败的测试（调用 `test-driven-development`），再写实现使其通过。
 3. **遵循分层**：按标准映射「测试门禁」的测试分层与治理契约测试规范。
 4. **同步映射**：模块新增/移动/删除时，同一变更内同步 code-map 与关联设计文档；先用 `rg "旧路径"` 全库确认无残余引用。

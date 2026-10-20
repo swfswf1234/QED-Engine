@@ -26,6 +26,8 @@ ADR 0016/0020/0021 + 六枚契约守护 + `qed-*` 技能 + `guides/development.m
   需要用户裁决，本次靠会话裁决补齐，规则缺位。
 - **技能副本无正本**：`AGENTS.md` 同时声明全局 `~/.config/opencode/skills/` 与项目 `.qoder/skills/`
   两套同源技能，本仓库 agent 只能读后者；口径更新（ADR 0020/0021）实际只落到 `.qoder` 侧。
+  （修订：2026-10-20 用户授权取消 opencode 工具层、单端只服务 Qoder，本条背景所述的双套同源状态已不存在；
+  判据不变，现行落点见决定 6 的修订注记与根 `AGENTS.md`「协作流程」。取消不另立 ADR。）
 - **证据要求与现实脱节**：「Achieved 须提交 hash」是标准口径，但项目常在未提交态收口（用户逐次批准提交），
   按字面执行等于每轮收口都在违规。
 
@@ -55,6 +57,11 @@ ADR 0016/0020/0021 + 六枚契约守护 + `qed-*` 技能 + `guides/development.m
 6. **技能正本为项目 `.qoder/skills/`**：本仓库治理技能（`qed-intake` / `qed-plan` / `qed-implement` /
    `qed-closeout` / `qed-frontend-check`）以 `.qoder/skills/` 为唯一正本，随 ADR 同批更新；其他 agent
    侧的副本（如 `~/.config/opencode/skills/`）不由本仓库 agent 维护或校验，`AGENTS.md` 按此声明。
+   （修订：2026-10-20 用户授权取消 opencode 工具层、不另立 ADR——三仓 `.opencode/skills` 联接与根
+   `opencode.json` 已删除，机器级配置目录改名停用为 `~/.config/opencode.disabled-2026-10-20`（可逆备份）。
+   本条**判据不变**（L2/L3 正本是各仓库 `.qoder/skills/`，agent 端直读正本、不持有副本，副本差异不计为缺陷），
+   变的是事实层：已无「其他 agent 侧副本」需要声明，故三分句自本日起只作历史口径；三层模型与端无关防线
+   正文见根 `AGENTS.md`「协作流程」，本 ADR 状态与其余六条决定均不变。）
 7. **关闭证据允许「待提交」占位**：收口时改动尚未提交，可写 `待提交（用户发令提交后由收尾会话补登 hash）`
    并在 completed.md 留同一注记；**无 hash 不构成拒绝关闭的理由**。用户发令提交后，收尾会话在下一次
    触达该台账时补登提交 hash。
@@ -70,6 +77,8 @@ ADR 0016/0020/0021 + 六枚契约守护 + `qed-*` 技能 + `guides/development.m
 - 决定 4 与决定 5 暂无契约守护（守护增量属另批裁决，本 ADR 不夹带实现）；执行面由 `qed-plan` /
   `qed-closeout` 的自查步骤承接，收口时按「壳的目标节是否被改过」「他轮行归属是否被挪过」两处对照。
 - 技能口径不再假设双侧同步：以 `.qoder/skills/` 为准，其他副本的差异不作为本仓库缺陷计数。
+  （2026-10-20 起该副本层已随 opencode 工具层取消而不复存在；本条后果继续有效，用于兜住任何未来出现的
+  端侧副本——正本定义仍是单点，副本差异不计缺陷。）
 - 证据占位让「台账收口」与「git 提交」解耦，符合本项目提交逐次人工批准的权限现实；副作用是 completed.md
   可能短时期存在「待提交」行，由后续收尾会话补登收敛。
 - 不取代任何现行 ADR：本决定是对 [ADR 0016](0016-todo-registration-one-task-one-plan.md)（登记形态）、

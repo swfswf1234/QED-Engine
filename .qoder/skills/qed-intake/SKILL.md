@@ -1,11 +1,11 @@
 ---
 name: qed-intake
-description: Use when starting any task in the QED-Engine / QED-Tracker / Axiom-Flow repos — reads required docs, classifies the change level (变更分级), and sets up todo/plans before implementation. Trigger on 接任务, 任务开始, 定级, 立项.
+description: Use when starting any task in QED-Engine / QED-Tracker / Axiom-Flow — reads required docs, classifies the change level (变更分级), sets up todo/plans before coding. Trigger on 接任务, 任务开始, 定级, 立项.
 ---
 
 # QED 任务进场（读必读 → 定级 → 立项）
 
-任务动手前的统一入口。**未定级不实施**；无法判定时用 question 工具询问用户。
+任务动手前的统一入口。**未定级不实施**；无法判定时询问用户。
 登记与收口细则的唯一正文是 `docs/standards/task-lifecycle.md`，本技能只给步骤与指针。
 
 ## 1. 读必读文档
@@ -17,13 +17,14 @@ description: Use when starting any task in the QED-Engine / QED-Tracker / Axiom-
 
 按 `AGENTS.md`「变更分级与边界」表判定变更对象属于大修改 / 阻止项 / 小修改 / 先立 ADR / 豁免；
 判据只在该表，本技能不复述。无法判定或涉及新增轮次、改判他轮归属时问用户。
+- **形态不清先做 prior-art**：用户说不清要做成怎样时，用联网检索、网页读取与浏览器能力在 GitHub 挖掘成熟项目作借鉴；产出＝**设计提案交用户裁决**，不直接落码（遵 ADR 0024 范围锁死——探索结论先入 `design/` 或 ADR，经用户拍板后才成为实施范围）。
 
 ## 3. 立项
 
 1. **先找承载再新建**：能在既有行/壳加条目就不加行，能挂支线就不开轮次；默认落点是
    `普通任务轮` 壳的登记表条目（判据：task-lifecycle「收口节拍、薄登记上限与承载归属」节）。
 2. **一任务一行一壳**（ADR 0016）：在 `docs/trackers/todo.md` 建一个任务行并在 `docs/plans/`
-   建其唯一计划壳（见 `qed-plan`）；不设独立 PLAN 镜像行、不为一个任务发两个 ID。
+   建其唯一计划壳（见 `qed-plan`）；不设独立 PLAN 镜像行、不为一个任务发两个 ID。大任务（多工作项 B 类壳）立项即预判 demo 门适用性——其壳首工作项须为核心场景端到端最小可跑 demo（ADR 0024 决定 2，判据见 task-lifecycle「计划准入与分拆」节，落地见 `qed-plan`）。
 3. 行的写法：`任务描述` 列＝壳链接 + 一句话「做什么 + 目标/效果」且含仓库内文档锚（G5）；
    `成功标准` 列＝条目化固定判据 `S1 …`（正本在行、写定不改，G2）；`状态` 列只用进行中态（G1）。
    执行进展与证据不写进行——落壳的 `## 过程与证据` 节（G7）。

@@ -13,7 +13,7 @@ description: Use when a QED task needs an implementation plan in docs/plans/ —
 1. 确认任务已按 `qed-intake` 定级并登记 todo。
 2. 在 `docs/plans/` 建计划文件，命名 `YYYY-MM-DD-<类型>-<slug>.md`（全小写连字符）。
 3. 声明必需元数据、写入必需章节（含 `## 过程与证据`），清单与格式以 task-lifecycle
-   「计划契约」节为准；状态枚举与 `Blocked` 三要素同见该节。
+   「计划契约」节为准；状态枚举与 `Blocked` 三要素同见该节。大任务（多工作项 B 类壳）的「工作项」首条须为 demo 门——核心场景端到端最小可跑、到门暂停待人工验收（ADR 0024 决定 2，判据见 task-lifecycle「计划准入与分拆」节）。
 4. 在 `docs/trackers/todo.md` 由**该任务的唯一任务行**登记：`任务描述` 列写计划壳链接 +
    一句话「做什么 + 目标/效果」（锚内嵌，ADR 0021），`成功标准` 列写条目化固定判据
    `S1 …；S2 …`（正本在行，写定不改，ADR 0023）；`状态` 与壳一致，壳是状态事实源。

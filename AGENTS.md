@@ -110,17 +110,37 @@ QED-Engine/            # 本仓库（git：QED-Engine）
 
 每项目独立走六步：**进场读必读 → 定级 → 立项 → 实现（TDD）→ 验证 → 收尾**；流程正文见[开发指南·开发流程（六步）](docs/guides/development.md)。
 
-- 技能清单（正本在项目 `.qoder/skills/`，见下方「技能正本」条目）：
-  - 项目本地：`qed-intake`（进场/定级/立项）、`qed-plan`（计划契约）、`qed-implement`（code-map + TDD）、`qed-closeout`（收尾/台账/文档同步）、`qed-frontend-check`（前端浏览器实测）。
-  - 通用保留：`test-driven-development`、`systematic-debugging`、`verification-before-completion`、`dispatching-parallel-agents`、`requesting-code-review`、`receiving-code-review`。
-  - 已停用：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`using-superpowers`、`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（在 `~/.config/opencode/skills-disabled/` 备查）。
-- **工具链**：默认开发 agent 提示与技能在全局 `~/.config/opencode/`（见其 `README.md`）；技能只做薄触发与指路，正文以本仓库 docs 为准。
-- **技能正本（ADR 0022 决定 6）**：本仓库治理技能（`qed-intake` / `qed-plan` / `qed-implement` /
-  `qed-closeout` / `qed-frontend-check`）以项目 `.qoder/skills/` 为**唯一正本**，随 ADR 同批更新；
-  其他 agent 侧的副本（如全局 `~/.config/opencode/skills/`）不由本仓库 agent 维护或校验，其差异不计为
-  缺陷。技能只做薄触发与指路，口径正文以本仓库 `docs/` 为准。
-- **Qoder 侧工具层**：权限边界在 `.qoder/settings.json`（复刻只读放行 / git 写与 rm·mv 询问 / `dataset/**` 写入拦截）；GitHub MCP 配在 user 全局 `~/.qoder/settings.json`（OAuth，密钥不落盘）。
-- 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向。
+- 技能清单（三层模型，每层唯一正本落点；2026-10-20 起只服务 Qoder 单端，opencode 工具层已取消）：
+  - **L1 通用行为层**（正本在全局 `~/.qoder/skills/`，机器级、随用户走、项目零拷贝）：
+    `test-driven-development`、`systematic-debugging`、`verification-before-completion`、
+    `requesting-code-review`、`receiving-code-review`、`cjk-safe-edit-and-verify`、
+    `dispatching-parallel-agents`（2026-10-20 自原工具层遗留目录提升入正本）。该目录由 Qoder
+    自动发现，无需任何技能清单配置。
+  - **L2 治理模板层**（正本在各仓库 `.qoder/skills/`）：`qed-intake`（进场/定级/立项）、
+    `qed-plan`（计划契约）、`qed-implement`（code-map + TDD）、`qed-closeout`（收尾/台账/文档同步）。
+    四件套只引用「概念」（标准映射表、变更分级表、承载壳、门禁指南），判据正文在各仓库 docs；
+    移植到新项目 = 复制四个目录 + 新项目补齐「最小文档契约」：① AGENTS.md 有「标准映射」表与
+    「变更分级与边界」表；② `docs/standards/` 有任务生命周期与文档治理两份判据正文；
+    ③ 一份门禁指南（命令矩阵）；④ 一份模块映射（code-map）。
+  - **L3 项目事实层**（正本在所属仓库 `.qoder/skills/`，薄触发+指路，事实指向该仓库 docs）：
+    根仓库 `qed-frontend-check`（8903 前端浏览器实测）；QED-Tracker `qed-db-alter-redline-window`
+    （私有表加列 ALTER 窗口，2026-10-14 自根仓库迁正）。
+  - 已停用：`brainstorming`、`writing-plans`、`executing-plans`、`subagent-driven-development`、`using-superpowers`、`using-git-worktrees`、`writing-skills`、`finishing-a-development-branch`（不再挂载；备查位＝机器级备份目录 `~/.config/opencode.disabled-2026-10-20/skills-disabled/`）。
+- **`.qoder/` 版本控制与工具层（2026-10-20 三仓统一）**：三仓 `.gitignore` 一律写
+  `.qoder/*` ＋ `!.qoder/skills/` ＋ `!.qoder/settings.json`——**技能正本与权限边界入库**，
+  `scratch/`、`tmp/`、缓存等本机面继续忽略（目录模式必须改成内容模式，否则被排除目录的子项
+  无法重新纳入）。`.qoder/settings.json` 是本仓权限边界（只读放行 / git 写与 rm·mv 询问 /
+  `dataset/**` 拦截）。原 opencode 接线层已取消（用户 2026-10-20 授权，不立 ADR）：删除三仓
+  `.opencode/skills` 联接与根 `opencode.json`，机器级配置目录改名停用为
+  `~/.config/opencode.disabled-2026-10-20`（可逆备份，非硬删）。技能只做薄触发与指路，
+  正文以各仓库 docs 为准。
+- **技能正本（ADR 0022 决定 6，2026-10-14 起按三层模型执行；2026-10-20 修订为单端）**：各仓库
+  `.qoder/skills/` 是该仓库 L2/L3 技能的**唯一正本**，agent 端直读正本、不持有副本，副本差异不计
+  为缺陷。子仓库（QED-Tracker / Axiom-Flow）治理四件套各自持正、口径独立演化；口径正文以各仓库
+  `docs/` 为准。**端无关防线**（每次技能改动均适用）：技能正文与 `description` 不得直接引用单一
+  agent 端的专有工具名，应使用概念名。
+- **GitHub 探索**：不依赖专用 MCP/CLI，以联网检索、网页读取与浏览器能力为可用品。
+- 决策机制：关键决策由用户拍板（多选问答），agent 不擅自决定方向；方向取舍以核心价值为准绳（第一性原理，非强制）。
 - **跨项目协作**：规则见[跨项目协作规范](docs/standards/cross-project-collaboration.md)。
   核心要点：① 根仓库 agent 在子项目工作区只读+写文档，不得产生代码改动；② 子项目 git
   提交/推送不归根仓库 agent 执行；③ 误产生的代码改动须登记移交。

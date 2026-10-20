@@ -9,7 +9,7 @@
       "Bash(rg:*)",
       "Bash(python -m pytest:*)",
       "Bash(python -m ruff:*)",
-      "Bash(conda run -n qed_env:*)"
+      "Bash(conda run -n QED_env:*)"
     ],
     "ask": [
       "Bash(git commit:*)",
