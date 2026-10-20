@@ -158,7 +158,7 @@ todo.md `REQ-124` 行「成功标准」列，本壳不复制判据。
    即可」逐枚点名 stage 并提交＝其 `067d5b9`（9 枚文件＝`.gitignore` ＋ `.qoder/settings.json` ＋ `.qoder/skills`
    下五枚 `SKILL.md` ＋ `docs/guides/development.md` ＋ `docs/plans/2026-09-24-v1-task-chain.md`）。提交后其
    `git ls-files .qoder/skills` 实测 **5**（原 0）＝S3 首句达成；其门禁复跑＝`pytest tests -q` 668 passed／
-   1 skipped ＋ ruff All checks passed。**未随批**＝其 `docs/trackers/todo.md`：该文件含并行窗口 QED-079 登记行，
+   1 skipped ＋ ruff All checks passed（回执两处随之更正的随步提交＝其 `c8523d8`）。**未随批**＝其 `docs/trackers/todo.md`：该文件含并行窗口 QED-079 登记行，
    其计划正文尚未入树，整文件提交会在 HEAD 里留下断链，故 QED-081 承接行的提交归该轮会话（工作树内该行的
    请求稿链接已随本壳归档改指 `docs/history/plans/2026-10/`，否则其 `test_all_documentation_links_resolve` 即红）。
 2. **已裁决（原「待用户裁决：R1 三形态」）**：取**形态②**白名单（`.qoder/*` ＋ `!.qoder/skills/` ＋
