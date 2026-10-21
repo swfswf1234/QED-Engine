@@ -756,7 +756,7 @@ def _mastery_view(
 ) -> dict[str, Any]:
     """投影行 × 进度行 × 练习域事实 → 门态序列（顺序即推进序列；分数与结论读时派生，不落列）。
 
-    练习腿的课程键＝目录课程 ID（`qe_learn_attempt.course_id` 现网口径），与学习课程的
+    练习腿的课程键＝目录课程 ID（`qe_attempt.course_id` 现网口径），与学习课程的
     `learn_course_id` 不同源，故两键各走各的：进度行按学习课程取，作答与到期按目录课程取。
     """
     course_id = str(course["learn_course_id"])
@@ -1475,7 +1475,7 @@ def _validate_parent(store: Any, row: dict[str, Any], parent_kp_id: str | None) 
             cursor = _guard(store.get_point, cursor["parent_kp_id"])
 
 
-# ---------- M2：练习与复习（qe_learn_question / qe_learn_attempt / qe_learn_review_task） ----------
+# ---------- M2：练习与复习（qe_question / qe_attempt / qe_review_task） ----------
 
 # 练习域三表懒挂载的重试窗口（同判例 DEFECT-009）
 PRACTICE_MOUNT_RETRY_SECONDS = 60.0

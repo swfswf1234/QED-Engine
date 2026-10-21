@@ -1,7 +1,7 @@
 # ADR 索引
 
 状态：Current
-最后更新：2026-09-30
+最后更新：2026-10-14
 确认状态：暂定
 
 本目录登记影响长期约束的架构决策：决定、理由、后果和取代关系。编号与生命周期规则见
@@ -26,5 +26,7 @@
 | [`0021`](0021-round-proliferation-cap-and-per-row-doc-anchor.md) | 轮次不增设与 todo 行文档锚（关闭轮不留节，一行一锚） | 工程治理 | v0.1 | Accepted | — |
 | [`0022`](0022-task-chain-clarifications.md) | 任务治理链路口径澄清（缺陷登记·关闭结果·成功标准冻结·归并裁决） | 工程治理 | v0.1 | Accepted | — |
 | [`0023`](0023-todo-row-carries-scope-and-criteria.md) | 台账行承载任务描述与固定成功标准，过程证据落壳 | 工程治理 | v0.1 | Accepted | — |
+| [`0024`](0024-preschema-rebuild-tiers-and-demo-gate.md) | 1.0 前 schema 重建档位与 demo 门（范围锁死） | 工程治理 | v0.1 | Accepted | — |
+| [`0025`](0025-database-design-master-doc-and-ddl-ownership.md) | 数据库设计总纲升为三项目总正本并承载建表语句 | 架构与边界 | v0.1 | Accepted | — |
 
-下一个可用编号：0024
+下一个可用编号：0026

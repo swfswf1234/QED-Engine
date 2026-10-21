@@ -727,6 +727,18 @@ def test_mysql_practice_store_interface_matches_memory_store():
     assert _api(InMemoryPracticeStore) - _api(MySQLPracticeStore) == set()
 
 
+def test_due_counts_by_kp_groups_by_expression_not_alias():
+    """DEFECT-021 回归：`GROUP BY kp_id` 指向计算列别名在 only_full_group_by 下报 1055，
+    归集语句必须重复表达式本体。"""
+    import inspect
+
+    from qed_engine.services.learn.practice import MySQLPracticeStore
+
+    sql = inspect.getsource(MySQLPracticeStore.due_counts_by_kp)
+    assert "GROUP BY IF(t.target_kind='kp', t.target_id, q.kp_id)" in sql
+    assert "GROUP BY kp_id" not in sql
+
+
 def test_add_questions_is_atomic_on_validation_failure(store):
     """缝 6 同事务的内存等价断言：一批里有一项非法则整批不落。"""
     with pytest.raises(ValueError):
