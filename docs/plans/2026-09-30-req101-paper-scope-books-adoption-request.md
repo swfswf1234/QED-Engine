@@ -2,11 +2,11 @@
 
 状态：Accepted
 任务类型：A
-最后更新：2026-10-01
+最后更新：2026-10-14
 关联 ADR：[ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md)（一任务一行一壳）、
 [ADR 0022](../adr/0022-task-chain-clarifications.md)（移交型关闭取值与回执口径）
 关联设计：[downloads-flow.md](../design/downloads-flow.md)（探索状态机与课程收集五阶段）、
-[downloads-ui.md](../design/downloads-ui.md)（四层展示规范——论文展示行的挂载面）、
+[downloads-ui.md](../design/frontend/downloads-ui.md)（四层展示规范——领域论文栏的挂载面）、
 [dataset-conventions.md](../design/dataset-conventions.md)（论文落盘与内容身份口径）、
 [cross-project-contracts.md](../design/cross-project-contracts.md)（8901 能力面与「写操作=后台任务」）
 关联 Tracker：docs/trackers/todo.md REQ-101；登记与跟踪由

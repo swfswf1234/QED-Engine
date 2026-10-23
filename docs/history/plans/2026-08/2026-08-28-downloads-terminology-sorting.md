@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-08-31
 关联 ADR：[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计随计划承载，确定后迁入 design/ 固定文档）
-关联设计：[downloads-manage-redesign.md](../../../design/downloads-ui.md)、[web-frontend.md](../../../architecture/frontend-architecture.md)
+关联设计：[downloads-manage-redesign.md](../../../design/frontend/downloads-ui.md)、[web-frontend.md](../../../architecture/frontend-architecture.md)
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-024；REQ-068；ARCH-019）
 归档判定：Delete 归档（纯前端一次性实现，完成后成果并入 design/web-frontend.md 与 downloads-manage-redesign.md，计划归档 history/plans/）
 

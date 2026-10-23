@@ -79,6 +79,17 @@
   审核时可判 Not Applicable）
 - 状态：待评审
 
+### [2026-10-18] REQ-117 W6／W10 晋升批：code-map 受管面只扫 `backend/qed_engine` 与 `tests`，前端 DesignRef 无处可挂
+- 场景：REQ-117 W6 设计稿晋升要求补 `code-map.md` 的 DesignRef，同批 W10 防复发落点④也提「code-map 补前端行」。
+- 反复探索点：按元数据给前端补行时，`tests/contract/test_code_document_mapping.py:15` 的 `MANAGED_DIRECTORIES = ("backend/qed_engine", "tests")`
+  只从这两处收 `.py` 且断言映射**集合等值**——`.tsx` 页面根本不在受管面内，加行即打红；两次独立取证（W10 落点④、W6 DesignRef）
+  指向同一结论，易误判为门禁坏了或自己放错位置。
+- 解法：前端的设计关联不走 code-map，改由 `tests/test_web.py` 两枚互指守护承接（`LEARN_UI_DESIGN` 常量指向详设档 ＋ 源码「设计关联」注释指针）；
+  凡计划条目写「code-map 补前端行」的，应在取证后直接判**不适用**并给出替代落点，不留待办行。
+- 建议归类：治理（可考虑在 code-map.md「受管面」节或 code-document-traceability.md 补一句「前端不适用，替代＝`tests/test_web.py` 互指」；
+  `architecture/`、`standards/` 属实质规则面，本轮未改正文，待评审）
+- 状态：待评审
+
 ## 已晋升记录
 
 | 日期 | 来源任务 | 内容摘要 | 晋升去向 |

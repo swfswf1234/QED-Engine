@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-09-11
 关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
-关联设计：[api-contracts.md](../../../architecture/api-contracts.md) §③/§③.9、[cross-project-contracts.md](../../../design/cross-project-contracts.md)、[downloads-flow.md](../../../design/downloads-flow.md)、[downloads-ui.md](../../../design/downloads-ui.md)
+关联设计：[api-contracts.md](../../../architecture/api-contracts.md) §③/§③.9、[cross-project-contracts.md](../../../design/cross-project-contracts.md)、[downloads-flow.md](../../../design/downloads-flow.md)、[downloads-ui.md](../../../design/frontend/downloads-ui.md)
 关联 Tracker：docs/trackers/todo.md（PLAN-040、REQ-068、REQ-079、ARCH-019）
 归档判定：Merge（契约事实并入 api-contracts.md；计划壳 Retain 归档 `../history/plans/2026-09/`）
 

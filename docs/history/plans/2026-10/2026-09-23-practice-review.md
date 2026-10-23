@@ -600,6 +600,15 @@ R3（取消 gen_job，通用 job 表面向 v2）、R5（双粒度调度）、以
   `ArrowDown/ArrowUp + Enter` 在有残留 popup 时会点到错位的选项（残留下拉不随 Escape 收，须 blur），
   故每次操作前用选项文本确认目标下拉。
 
+  **归档执行与契约复绿（2026-10-09，收口批后同日）**：用户批准并执行 `mv`，本壳落
+  `docs/history/plans/2026-10/`；同批改动＝壳内 5 枚出链按三级深度（`../../../`，与同目录 M6 壳一致）、
+  七处入站 markdown 引用（api-contracts / database-design / learning-star-map / learning-workbench-ui /
+  completed / project-status / 主链壳兄弟链接）与两枚代码 docstring（`exerciseParse.ts`、
+  `ExerciseConfirmPanel.tsx`）重指向归档路径，`docs/plans/index.md`「已归档计划（2026-10）」补 M2 行。
+  门禁复跑＝契约 **2 failed / 80 passed → 82 passed**（两红即归档依赖项，已消）、根全量
+  `pytest backend tests` **737 passed**、`ruff check .` All checks passed、`web-ui/` 内 `tsc -b` 零错；
+  全仓 grep 已无指向 `docs/plans/2026-09-23-practice-review.md` 的残余引用。
+
 ## 验证与验收
 
 - 抽取切题与调度器、段 1/段 2 的 normalize/校验/repair 均为**纯函数单测**

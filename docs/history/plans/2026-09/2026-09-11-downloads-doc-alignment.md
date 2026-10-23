@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-09-11
 关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0010](../../adr/v0.1/0010-documentation-versioning.md)（文档版本机制）、[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计位置）
-关联设计：[downloads-flow.md](../../../design/downloads-flow.md)、[downloads-ui.md](../../../design/downloads-ui.md)、[admin-dashboard.md](../../../design/admin-dashboard.md)、[cross-project-contracts.md](../../../design/cross-project-contracts.md)、[api-contracts.md](../../../architecture/api-contracts.md)
+关联设计：[downloads-flow.md](../../../design/downloads-flow.md)、[downloads-ui.md](../../../design/frontend/downloads-ui.md)、[admin-dashboard.md](../../../design/frontend/admin-dashboard.md)、[cross-project-contracts.md](../../../design/cross-project-contracts.md)、[api-contracts.md](../../../architecture/api-contracts.md)
 关联 Tracker：docs/trackers/todo.md（PLAN-038、ARCH-019、REQ-068、REQ-076、REQ-077、REQ-078）
 归档判定：Merge（设计事实并入 design/ 与 architecture/ 固定文档，计划壳 Retain 归档 `../history/plans/2026-09/`）
 

@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-30
+最后更新：2026-10-21
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -55,7 +55,7 @@
 | QED-Engine 统一 CLI → 子项目 | 已落地：`qed tracker` 直连 8901（运维工具，保持直连） | HTTP 调用 8901/8902；地址默认 localhost 端口，可配置 |
 | 8903 前端 → 子项目 | **已重构（ADR 0007）**：前端只连 8900，数据域/服务域由 8900 适配 8901/8902 | 冻结（前端唯一入口 8900） |
 | QED-Engine 配置中心 → 子项目 | 子项目直读根 `.env`（`load-env.ps1` 映射层已于 2026-08-17 退役） | 冻结（子项目直读 `QED_*` 变量） |
-| 三个项目 → MySQL | QED-Tracker 与 Axiom-Flow 均用 `qed` 库 | 冻结：统一 MySQL 8 `qed` 库，QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源；测试库 `qed_test` 隔离真实数据（遗留库已收敛清零） |
+| 三个项目 → MySQL | 三服务同钉测试库 `qed_test`（用户裁决 2026-10-17：并库后单一工作库；业务库 `qed` 同期完成结构对齐与关键数据回灌，随时可承接，窗口证据见 [REQ-118 壳](../history/plans/2026-10/2026-10-15-shared-tables-field-freeze.md)） | 冻结：统一 MySQL 8 `qed` 库，QED-Tracker `qt_*`、Axiom-Flow `af_*`、共享元数据 `qed_*`（只读），`QED_DB_*` 唯一事实源；测试库 `qed_test` 隔离真实数据（遗留库已收敛清零） |
 | QED-Tracker → 资源登记 | 单资源 JSON `meta/resources/` + MySQL 知识层次五表登记（`qed_domain`/`qed_course` 共享 + `qt_knowledge`/`qt_books`/`qt_sources` 私有，QED-031；表结构见 QED-Tracker `docs/architecture/database-private-tables.md` 与 `database-shared-tables.md`） | **元数据默认存数据库**（meta/ JSON 退役，DB 为唯一事实源）；dataset/ 只管理数据资料文件 |
 
 ## 4. 统一数据库（MySQL 8，qed 库）
@@ -71,6 +71,55 @@ QED-Tracker（建表维护），其他项目**只读不写**；共享表不复�
 `qed_*` 共享表 **schema 变更顺序**：所有权方（QED-Tracker）迁移先行发布，同时按 §10 破坏性
 变更流程经请求流通知消费方（Axiom-Flow / 8900 只读侧），消费方代码回归在同窗收口前完成；
 消费方不得先于所有权方依赖未发布的列。
+
+**根所属共享表的加列口径（2026-10-21 v1.0 定档；三列已于 2026-10-22 在工作库 `qed_test` 落地，生产 `qed` 属人工窗口）**：`qed_knowledge_point` 的所有权方是
+根侧（结构由根定义、8900 是唯一写者），故加 `aliases`／`narrative_ref`／`angles` 三列按 R3 走
+「先改根总纲与接口契约 → **通知**两项目消费方」即可，**不发跨项目请求函**——三列对 8901/8902 是
+追加式变更且两者对本表只读、不消费这三列，零破坏。仅当对方 ORM 做全列映射而需随步时，才在通知里
+附一个转告窗口。逐列形状与「为什么是列不是 `meta`」的论证正本在
+[database-design.md](../architecture/database-design.md) 五章该表小节，规则级判据在
+`docs/adr/0026-v1-root-table-family-freeze.md`。**与 §6 提升腿的衔接**：`narrative_ref` 存的是
+数据根相对路径全串（非单段文件名），正是为了 8902 离线时 8900 仍能自行解析——若改存单段名，
+根侧就得向对方问路径前缀，即破独立性铁律。
+
+**跨项目请求登记**（本节只登记编号与去处，判据正本在台账行与其承载壳）：`REQ-119` →
+QED-Tracker，`qed_domain`／`qed_course` 两表形状定档承接（R1~R6）于 **2026-10-23 以 `Partial` 收口**，
+承载壳见
+[2026-10-16-shared-tables-tracker-request.md](../history/plans/2026-10/2026-10-16-shared-tables-tracker-request.md)（**契约面仍有效的两件事实**：
+① R1 `meta` 扩展槽／R2 主键与外键宽度收 `varchar(64)`／R3「主键值不可改」条文／R4 `level`／`scope` 注释语义／R6 对方文档快照改指根总纲五条
+已在对方树内成型（2026-10-23 实读其 `models.py`／`schema.py`／`database-design.md` 取证）；② **R5 未执行**——`qed_domain.path_results` 与
+`qed_course.related_targets` 两列**在册且仍可写**，故本节消费语义照旧、两列的摘除**必须双仓同批**（根侧
+[shared_tables.py](../../backend/qed_engine/services/shared_tables.py) 的 `qed_domain` INSERT 列清单同样点名 `path_results`，先删一侧即断 8900
+离线降级写），逐列改面清单见归档壳「遗留与移交」节；**对方逐条回执（本请求 S2）与其 `QED-080` 行的收敛仍归对方会话**，根侧不代出回执）；
+`REQ-122` → QED-Tracker 与 Axiom-Flow，根文档升为三项目数据库总正本后的**正本声明改镜像**请求
+（R1 对方 `database-shared-tables.md` 的「设计唯一事实源」改为镜像并指回根总纲、R2 `qt_*` 列变更先经根侧登记
+且 `qt_sources.book_id` 宽度不匹配交其裁决、R3 `related_targets`／`path_results` 两列删否（**2026-10-18 用户复裁＝都删**，执行随 REQ-119 R5）、R4 `af_*` 列级晋升为后续批次、
+R5 其文档自陈 Alembic 位置与生产库实存不符请更正），承载壳与请求稿见
+[2026-10-16-database-design-core-registry.md](../history/plans/2026-10/2026-10-16-database-design-core-registry.md)；
+`REQ-123`／`REQ-129`／`REQ-133`／`REQ-135` → Axiom-Flow 四枚在册请求已于 **2026-10-21 经用户裁决合并为单枚综合请求 `REQ-136`**
+（挂 ARCH-025 轮线 2，一次谈定 `af_*` 专用表族重构）：R1 两库现状读数与迁移链自陈更正、R2 档 B 整族重建采否与四件必答、
+R3 逐列形状与净新增两枚知识点表准入（并入原 `REQ-133` R2／R3／R5／R6、`REQ-135` R3／R4）、R4 书级三列自洽与两库分叉归一
+（原 `REQ-123` R1／R2）、R5 `af_parse_jobs` 保留窗与生效指针不可裁剪不变量（原 `REQ-129`）；承载壳见
+[2026-10-21-af-family-rebuild-consolidated-request.md](../plans/2026-10-21-af-family-rebuild-consolidated-request.md)
+（**登记口径 2026-10-21 复核**：对方台账已自成承接——其 `docs/trackers/todo.md` 的 PLAN-024 行自陈「**请求接收（QED-Engine 根仓库 REQ-136，并入 REQ-123／REQ-129）**」，其 `todo.md:33` 的 `REQ-123` 与 `todo.md:45` 的 `REQ-129` 两枚入站行已改指 `REQ-136`，故本段原「待发函、对方台账尚无承接行」与下句「待发函窗改指」两处口径**已被对方台账现状超越**；本会话只登记这一观察，`REQ-136` 的关闭判据仍以其逐条回执为准，其 R1~R5 状态列一字未改，改判归该行会话），**逐列形状正本已移交对方** [AF PLAN-024](../../Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md)（`af_*` 四张：`af_books` 零改列／`af_operations` 事件明细／`af_pages` 结果索引／`af_kp` 知识点单表 21 列），其上游设计稿 [REQ-134](../plans/2026-10-21-af-table-architecture-design.md) 于 **2026-10-21 退为指针**（R-1~R-7 七枚裁决点全部有答案，根侧承接面＝只读导出端点 + 共享主表提升腿）；
+`REQ-123`／`REQ-133`／`REQ-135` 三枚原请求稿壳按 ADR 0021 第 5 条**归并不删壳**移
+[`history/plans/2026-10/`](../history/plans/2026-10/2026-10-17-af-books-parse-status-request.md) 并置 `状态：Superseded`
+（`REQ-129` 原无独立壳，承载在 [普通任务轮壳 W5](../plans/2026-09-29-ordinary-tasks-round.md)），逐条映射写在
+[completed.md](../trackers/completed.md) 四行；对方台账的两枚入站承接行（其 `todo.md:33` 的 `REQ-123`、其 `todo.md:45` 的
+`REQ-129`）**已改指 `REQ-136`**（2026-10-21 实读其行文，见上条登记口径）；`REQ-121` → QED-Tracker，`qt_books` 书级两列（`intro`／`audience`）＋ 8901 `GET /books` 透传＋存量 17 行回填口径（R1~R5），承载壳见 [2026-10-16-book-intro-audience-tracker-request.md](../plans/2026-10-16-book-intro-audience-tracker-request.md)（**待用户转达**，对方台账尚无承接行）；`REQ-128` → QED-Tracker 的两张作业表**保留期口径自定**请求于 **2026-10-21 取消**（**Not Applicable**，需求失效依据两条：
+① 根侧总纲 §7.9 的裁剪边界与「四类行不可裁剪」已成文，根侧既不代设数值也不代执行，向对方发函无新增约束；② 代码查证推翻
+原 S2 的立论前提——`qt_selections` 不是流水表而是**数据源表**，`QED-Tracker/src/qed_tracker/db/selection_repository.py:183-190`
+以全表 `payload.downloads` 派生论文去重集，按行裁剪即误删去重记忆）；同批的 `REQ-129`（`af_parse_jobs` 保留期）**不随取消**，
+已并入上条 `REQ-136` R5；落点见 [普通任务轮壳 W5](../plans/2026-09-29-ordinary-tasks-round.md)；
+`REQ-139` → Axiom-Flow 的**知识点梳理模块三面承接请求**（甲・条文面 A1~A6／乙・写者与通路面 B1~B4＝其 PLAN-024 的 W10
+实现批／丙・端点面 C1~C8 含批量取页）于 **2026-10-23 发函**，承载壳见
+[2026-10-23-kp-review-af-request.md](../plans/2026-10-23-kp-review-af-request.md)，判据正本＝其上游核查轮
+[REQ-138 壳](../plans/2026-10-23-admin-render-and-kp-review-workspace.md) 的梳理稿三段与本函工作项表；三面**全部零 ALTER、
+零新迁移**——发函时曾按条件项 X1 登记「章→页区间加列」，根侧 Q4 已裁为**甲案**（由该节全部 point 行
+`anchors[].page` 取 min/max 读时派生，派生不出时人工补起止页落根侧 `meta` 作兜底）⇒ X1 作废，本函对 `af_*` 列面
+零请求；对方列面已为四步备齐位置，缺的全是写者与条文。
+对方文档面已按根侧合法动作代登承接（其 `docs/trackers/todo.md` 的 `REQ-139` 行＋其 PLAN-024 壳「承载 REQ-139」节，
+未新建其任何 md 文件）；代码面、排期与逐条回执归对方会话，根侧本函零代码零 DDL。
 
 ## 5. QED-Tracker 服务接口契约（8901）
 
@@ -119,6 +168,7 @@ QED-Tracker（建表维护），其他项目**只读不写**；共享表不复�
   | 入库与解析 | ingest＝渲染页图（元数据落 af_books，不调模型），**分钟级同步长请求**（超时分层见 §11）；解析任务 202 提交 + 轮询（`queued/running/completed/failed`，progress `{parsed,total,error}`）——解析本身已是后台任务范式 | Axiom-Flow `api.md`；`api-contracts.md` §④；parsing-flow.md §4 |
   | 产物与对照 | 页级 blocks/markdown/原页图读取；manifest 产物清单（路径/大小/哈希）；源 PDF 由 8900 本地端点从数据根取（不经 8902） | `api-contracts.md` §④；parsing-flow.md §5/§7 |
   | 人工编辑落库 | 块级编辑记录（EditRecord）与判定写入；8900 `/review` 门面为过渡兼容，新消费面一律走 edit 契约 | `api-contracts.md` §④ |
+  | 知识点梳理工作区（**2026-10-21 定档，尚未落地**） | 梳理段正本整体归 8902：工作区与候选池＝单表 `af_kp`（层级 `parent_id`、关系 `links` JSON、机器位 `gen_status`／人工位 `confirmed` 分列、批次 `gen_batch`、长文只留 `narrative_ref` 指针）。根侧消费面**只有两件事**＝经 8900 透传读其**只读导出端点**（命名与形状归对方）＋把 `confirmed=1` 的行单向提升进共享 `qed_knowledge_point`（幂等锚＝主表标量列 `from_detail_id` 存 `node_id`）；**提升时的列映射（2026-10-21 v1.0 定档）**＝对方别名列表 → 主表 `aliases`、对方多角度叙述 → 主表 `angles`（`angle` 闭集复用根侧既有六词 `summary`／`explanation`／`definition`／`theorem`／`proof`／`example`，对方若给闭集外词即拒收并记偏差，不静默改写）、对方长文指针 → 主表 `narrative_ref`；**两侧指针形态刻意不同**＝对方存 `<book_dir>/kp/<node_id>.md` 的**单段文件名**（其 KA-20），根侧存**数据根相对路径全串**，提升腿负责补前缀，理由是 8900 须在 8902 离线时自行解析该指针（独立性铁律）；8902 **不直写共享表**、**不回写提升结果**，根侧**不直写 `af_*`**；AF 离线时学习与练习三链照常（独立性铁律，只梳理屏不可用） | Axiom-Flow [PLAN-024](../../Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md)（逐列与提升通路正本）；根侧承接面 [REQ-134](../plans/2026-10-21-af-table-architecture-design.md)（已退指针）与 [REQ-132 壳 W5](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) |
   | 预留面 | 版本列表/回滚、chunks（RAG 切片预留）、书目 PATCH/DELETE——8902 侧已实现，8900 透传与前端消费未排期 | `api-contracts.md` §④「规划契约」 |
 
 - **上下游**：上游 8901 `axiom push` 交接（§3 对接点）；解析经引擎适配器**直连本地模型服务**，

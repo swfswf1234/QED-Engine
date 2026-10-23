@@ -2,11 +2,11 @@
 
 状态：In Progress
 任务类型：A
-最后更新：2026-09-30
+最后更新：2026-10-21
 关联 ADR：无新增（治理沿用 [ADR 0011](../history/adr/v0.1/0011-pending-design-location.md) 不确定文档暂居 plans/；跨项目执行边界见 standards/cross-project-collaboration.md）
 关联设计：[dataset-conventions.md](../design/dataset-conventions.md)（产物布局）、
 [parsing-flow.md](../design/parsing-flow.md)（8902 契约 + af_* 四表根侧契约事实源）
-关联 Tracker：docs/trackers/todo.md（ARCH-025 任务行，一任务一行一壳，ADR 0016）
+关联 Tracker：docs/trackers/todo.md（ARCH-025 任务行，一任务一行一壳，ADR 0016）；REQ-136 综合请求行落本轮分节、本壳线 2 登记表放指针（轮次不增设，ADR 0021 第 1 条）
 归档判定：Retain（滚动记录，关闭时按当时里程碑归档 history/plans/）
 
 ## 目标与成功标准
@@ -62,7 +62,7 @@ QED-Tracker 下载面（归 [ARCH-024 滚动壳](2026-09-22-tracker-v1-continuou
 
 | 条目 | 现象/动机 | 方案要点 | 责任侧 | 状态 |
 | --- | --- | --- | --- | --- |
-| （待登记） | — | — | — | — |
+| REQ-136 `af_` 表族重构综合请求（原 REQ-123／129／133／135 四枚并入） | 对 Axiom-Flow 的 `af_*` 修改请求若分四枚发函会互相推翻——档 B 整族重建一旦采纳，书级三列语义、双列权威归属与保留期都要在同一个新形状里重定；用户 2026-10-21 裁决整合为一枚综合请求、只开一个回执窗口 | 承载壳＝[综合请求汇](2026-10-21-af-family-rebuild-consolidated-request.md)，逐列形状正本＝[AF PLAN-024](../../Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md)（2026-10-21 起；[REQ-134 设计稿](2026-10-21-af-table-architecture-design.md)同日退为指针）；R1 两库读数与文档自陈更正、R2 档 B 采否四件必答、R3 逐列形状与净新增两表准入、R4 书级三列自洽与分叉归一随重建同窗、R5 `af_parse_jobs` 保留窗与被生效指针引用行不裁剪的不变量 | 根发函／AF 执行 | 待发函 |
 
 ## REQ-089 第一批调研承接：优化项目划分与未来规划（2026-09-22）
 
@@ -139,10 +139,11 @@ PDF → 解析管线（MinerU 引擎，已有）
   转**后续观察项**，挂 ARCH-028 稳定性轮首次真机演练顺带做（渲染侧核销归 ARCH-027-M1 UI-1，不变）。
 - **2026-09-26 / 09-29 线 1 承接**：REQ-098（框图工作台 + 版式重排）首批落地并把 R1~R6 移交为
   跨项目请求 REQ-099（见 [REQ-099 请求壳](2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)）；
-  REQ-098 随后按 [parsing-ui.md](../design/parsing-ui.md) §4.5 降级稳态收口，残余结构操作由本壳
+  REQ-098 随后按 [parsing-ui.md](../design/frontend/parsing-ui.md) §4.5 降级稳态收口，残余结构操作由本壳
   线 1 在对方 R1~R3 回执后承接（8900 门面透传与落库链路）。
 - **2026-09-30 台账结构改判（[ADR 0023](../adr/0023-todo-row-carries-scope-and-criteria.md)）**：
   验收判据正本移入 todo 行「成功标准」列，原行内立项/裁决/回填叙述迁入本节。
+- **2026-10-21 线 2 收拢为一枚综合请求（用户裁决）**：对 Axiom-Flow 的四枚在册 `af_*` 数据库修改请求（REQ-123 书级三列复位、REQ-129 `af_parse_jobs` 保留期、REQ-133 结构梳理与迁移指针、REQ-135 档 B 整族重建 + 知识点两表）整合为单枚 [REQ-136 综合请求](2026-10-21-af-family-rebuild-consolidated-request.md)，本轮线 2 只留本行指针；四行原存标准原子移出 todo 写入 completed.md（关闭结果 Not Applicable，取代关系逐行说明），三枚原请求稿壳置 `Superseded` 移 [history/plans/2026-10](../history/plans/2026-10/)（归并不删壳，ADR 0021 第 5 条）；REQ-134 设计稿保留在册作逐列形状正本。同日携带取消 REQ-128（对 QED-Tracker 的保留期请求，判据见其 completed 行）。
 
 ## 验证与验收
 

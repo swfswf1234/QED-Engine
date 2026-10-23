@@ -6,7 +6,7 @@
 dataset 物理清理属 D 类，另归 ARCH-020-F 承载不在本计划执行）
 最后更新：2026-09-20
 关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow，版本化落盘实施方为其）
-关联设计：[design/dataset-conventions.md](../../../design/dataset-conventions.md)（解析版本划分约定，本计划登记）、[design/parsing-ui.md](../../../design/parsing-ui.md)（对照视图设计，本轮按「原始文件优先」方向增量）、[architecture/api-contracts.md](../../../architecture/api-contracts.md) §④
+关联设计：[design/dataset-conventions.md](../../../design/dataset-conventions.md)（解析版本划分约定，本计划登记）、[design/parsing-ui.md](../../../design/frontend/parsing-ui.md)（对照视图设计，本轮按「原始文件优先」方向增量）、[architecture/api-contracts.md](../../../architecture/api-contracts.md) §④
 关联 Tracker：ARCH-020-UI（本计划镜像行）、REQ-080（请求：Axiom-Flow）、ARCH-020-F（dataset 清理承接），镜像见 [docs/trackers/todo.md](../../../trackers/todo.md)
 归档判定：Retain（有效裁决并入 design/parsing-ui.md 与 dataset-conventions.md 后计划壳归档）
 

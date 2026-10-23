@@ -5,7 +5,7 @@
 （任务类型注记：C 探索实验——切分/召回链路与参数需实验验证，方向已由用户 2026-08-18 裁决）
 最后更新：2026-09-21
 关联 ADR：[ADR 0008](../../adr/v0.1/0008-frontend-react-refactor.md)（九大界面：知识探索/知识点检索调试）、[ADR 0011](../../adr/v0.1/0011-pending-design-location.md)（待评审设计留 plans/——本壳承载依据）
-关联设计：[学习功能现状](../../../plans/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
+关联设计：[学习功能现状](../2026-10/2026-09-10-learning-center-current-state.md)（知识问答多 Agent 方向）、
 chunking-notes / rag-notes 笔记（切分策略与召回链路；learning/ 类目已于 2026-09-22 退役
 [ADR 0015](../../../adr/0015-learning-category-retirement.md)，旧笔记靠 Git 历史找回）、
 [Axiom-Flow 交互全链路](../2026-09/2026-09-14-parsing-management-axiom-flow-chain.md)（解析产物与书目基座）
@@ -28,7 +28,7 @@ chunking-notes / rag-notes 笔记（切分策略与召回链路；learning/ 类�
 - 目的：整理知识——切分与召回的产出（块级知识单元）是后续学习中心课程学习与知识问答
   的知识底座。
 
-与[学习中心](../../../plans/2026-09-10-learning-center-current-state.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
+与[学习中心](../2026-10/2026-09-10-learning-center-current-state.md)知识问答的关系：探索是**管理侧的技术校验与知识整理**
 （对单书逐块核对、调参、人工确认）；学习中心问答是**用户侧的最终形态**（多 Agent 编排、
 课程级知识链路）。探索先行，问答后置。
 

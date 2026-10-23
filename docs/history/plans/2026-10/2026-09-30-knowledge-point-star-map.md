@@ -9,7 +9,7 @@
 关联设计：[database-design.md](../../../architecture/database-design.md)（qed_* 共享表族与学习表族节，
 第四张共享表登记去处）、[api-contracts.md](../../../architecture/api-contracts.md) §⑥（学习域端点契约）、
 [frontend-architecture.md](../../../architecture/frontend-architecture.md)（8903 视觉与服务架构）、
-[learning-star-map.md](../../../design/learning-star-map.md)（星图 UI 面已于 2026-09-30 晋升的事实源）
+[learning-star-map.md](learning-star-map.md)（星图 UI 面已于 2026-09-30 晋升的事实源）
 关联 Tracker：docs/trackers/todo.md（ARCH-027-M5 任务行；主链与 M1~M4 见
 [学习设计轮主链壳](../../../plans/2026-09-22-learning-design-mainline.md)）
 归档判定：Retain（设计稿 + 裁决过程 + DeepTutor 借鉴判定表为长期证据，收口时归档 history/plans/）
@@ -159,7 +159,7 @@ S5 待裁清单 D1~D6 逐项有用户裁决记录），本壳不复制判据条�
 
 ## 星图 UI 设计（学习中心 · 知识梳理星图）
 
-> **本节已于 2026-09-30 晋升为 [design/learning-star-map.md](../../../design/learning-star-map.md)**，设计态正文以该档为准；本节保留为裁决与演进过程的原始记录（W10）。
+> **本节已于 2026-09-30 晋升为 [design/learning-star-map.md](learning-star-map.md)**，设计态正文以该档为准；本节保留为裁决与演进过程的原始记录（W10）。
 
 **形态**：**星空图像底 + 银河辉光与 CSS 星点动效层**之上的四级下钻——**领域（下拉）→ 轨迹列（星云
 虚框）→ 课程森林（层级行 × 轨迹列，先修框间连线）→ 知识点详情**。

@@ -1,7 +1,7 @@
 # 设计类小修与 bug 修复台账（design-bugfix-log）
 
 状态：Current（长期滚动台账）
-最后更新：2026-10-09
+最后更新：2026-10-18
 关联任务：REQ-069（见 [todo.md](../trackers/todo.md)）
 
 > **定位声明**：本文档是**长期滚动台账**，不是一次性计划——**不随任务完成归档**
@@ -498,3 +498,151 @@
   `mathadvanced-b19` 由「待验证」经书目详情按钮转 `verified`、行徽同步为「已完成」；根侧全量 pytest
   735 passed、文档契约守护无新增红。
 - **状态**：已修复（2026-10-09，随 REQ-102 收口）
+
+### BUGFIX-028：归档壳元数据里的反引号内联相对路径不随 mv 改深度，链接门禁查不到（全仓存量）
+
+- **发现日期**：2026-10-15（REQ-104／110／113／114 收口批复audit：四壳 mv 进 `docs/history/plans/2026-10/`
+  后自写审计脚本全仓扫反引号内联路径，命中 51 处不可解析；修完本轮链上 1 处后为 50 处，同日并行窗口
+  迁 `docs/design/frontend/` 又新增同类，复跑为 64 处）
+- **设计文档**：涉及 `docs/history/plans/2026-08/`（4 件）、`docs/history/plans/2026-09/`（7 件）、
+  `docs/history/plans/2026-10/`（多件）各壳元数据行「关联 ADR／关联设计／关联架构」，以及已确认标准
+  `docs/standards/code-document-traceability.md`:9（仍指 `docs/plans/2026-08-30-traceability-refactor.md`，
+  实际该壳已在 `docs/history/plans/2026-08/`）
+- **问题与根因**：历次壳归档 mv 只重写 **Markdown 链接**（`]` 加括号形式），未重写**反引号内联代码路径**
+  （以 `../` 开头指向 docs/ 上层的那两层相对写法），文件下沉两级后这些路径整体少两级；守护
+  `tests/contract/test_markdown_links.py` 只解析链接语法，对内联路径是盲区，故门禁全绿也带着死指针。
+  根因是「归档即重写引用」的动作定义只覆盖了一半，不是某次手误。
+- **修复与验证**：本轮只修知识点探索链上 1 处（`docs/history/plans/2026-10/2026-10-14-learn-ui-course-star-graph.md`:8
+  的设计稿 A 指针改同目录直引），验证＝审计脚本该文件命中 0、契约 82 passed。余量批量修法（待另立轮次）＝
+  遍历 `docs/**/*.md`，取反引号包裹且以 `../` 开头的 md 路径，逐条按 `os.path.normpath` 断言存在，
+  不存在则按该文件当前所在目录重算深度后原地替换；复跑审计至 0 后，再评估把该断言并入
+  `test_markdown_links.py`（属守护变更，按 AGENTS「standards/ 实质规则变更先立 ADR」路径评估）。
+- **状态**：待修复（本轮链上 1 处已修，其余存量待批量轮）
+
+### BUGFIX-029：手册改四页册后两处设计正文成死口径——「五阶段说明入手册」与「知识点探索节为第二节」
+
+- **发现日期**：2026-10-15（REQ-031 改判裁决轮：用户裁决手册只写学习中心四页，后台六节与「常见问题」删除）
+- **设计文档**：`docs/design/frontend/downloads-ui.md` §7 末条、`docs/design/frontend/knowledge-point-exploration-ui.md` 页头表「页头右」行与「图例与读图口径归使用手册」条
+- **问题与根因**：两处正文都写死了旧手册形态——downloads-ui.md 要求「使用手册需包含课程收集五阶段说明」，exploration-ui.md 声明「手册弹窗（知识点探索节为第二节）」并按旧节文本罗列读图口径（含大知识点／小知识点字样）。手册形态在 `web-ui/src/help/sections.ts` 单点变更，两份 `design/` 文档无联动守护，实现一改文档即成死指针。
+- **修复与验证**：downloads-ui.md 该条改「后台管理面不出使用手册（裁决），五阶段业务流程事实源仍在 downloads-flow.md §6」；exploration-ui.md 页头右行改「四页册，本页直落知识点探索册」、读图口径条改章节／知识点术语并注明裁决来源。验证＝web-ui vitest 63 files / 762 passed（串行）+ `tsc -b` 零错 + `npm run build` 成功 + 契约与全量 pytest 见本轮收口输出；8903 真机四页与工作台各直落本面册、控制台零报错、请求全指 8900。
+- **守护补位（2026-10-16 二批改判轮）**：根因「手册形态单点变更、文档无联动守护」已补——节名收归 `web-ui/src/help/sections.ts` 的 `HELP_BLOCK_TITLES` 常量（弹层不再自带措辞），`web-ui/src/help/helpPages.test.ts` 断言四册节序恒为 功能概览／使用说明／状态与限制、usage 节只出步骤、正文禁现服务与运维词；形态再变更时实现与文档口径不同批即红。
+- **状态**：已修复（2026-10-16，守护同批落地）
+
+
+### BUGFIX-030：REQ-105 收口后总设计 §5 课程学习指针指向已归档壳，且「按已编排链路推进」措辞与 R7 冲突
+
+- **发现日期**：2026-10-16（REQ-105 收口批：用户 2026-10-15 裁决 v1 设计本体留改不晋升，壳随收口 Retain 归档）
+- **设计文档**：`docs/design/frontend/frontend-overview.md` §5 模块一览「课程学习」行（详设指针列＋边界列）
+- **问题与根因**：指针列写死 `plans/2026-10-11-learn-ui-course-study.md`，该壳收口后移入 `history/plans/2026-10/`，
+  指针成死链；同格边界列写「按已编排链路推进章节单元；**与课后练习联动**」，与 REQ-105 R7「链路退为后台准备、
+  界面不出现『链路』字样」和 REQ-106 已落地裁决「面间零跳转、入口唯一＝首页卡」相互冲突（属口径冲突，非措辞笔误）。
+- **修复与验证**：本条只改**指针**（壳移出 `plans/` 后全部入站链接随动改道，共四处）——总设计 §5 课程学习详设指针改指
+  [REQ-117 重设计轮壳](../history/plans/2026-10/2026-10-15-learn-course-study-redesign.md) 并加 v1 归档落点；[frontend-architecture.md](../architecture/frontend-architecture.md) 信息架构行、[learning-practice-ui.md](../design/frontend/learning-practice-ui.md) 归属表行、REQ-117 壳「关联设计」行的指向由 `plans/2026-10-11-*` 改指 `history/plans/2026-10/2026-10-11-*`；`test_markdown_links` 死链扫描通过。
+  **边界列措辞冲突不改**：改他轮设计正文属范围改判，已由用户 2026-10-15 裁决归 REQ-117 W2「三方边界对表与逐条裁决」
+  承接（REQ-104 稿／REQ-106 稿／REQ-116 稿／总设计 §5 四组冲突一次对表）。
+- **另发现（不改，移交 REQ-117 W7 ④）**：`frontend-architecture.md` 的 `#/learn/c/:courseId` 行仍描述「阅读／链路双模式（Segmented 受控切换）」与 `POST …/compile/propose`＋`compile/start` 链路通路，与工作树实态（单屏、自动目录 `PUT …/outline`＋`PATCH …/units/{id}`）不符；属架构文档描述陈旧，回写时机归 REQ-117 W6 晋升批。
+- **状态**：已修复（四处指针全部改道，门禁绿；边界措辞与架构行描述陈旧分别待 REQ-117 W2、W7 ④）
+
+### BUGFIX-031：跨项目契约「三个项目 → MySQL」现状列仍写「均用 `qed` 库」——本机三服务实已同钉 `qed_test`
+
+- **发现日期**：2026-10-17（并库与 `qed` 库 ALTER 窗口收尾时核文档）
+- **设计文档**：`docs/design/cross-project-contracts.md` §3 表「三个项目 → MySQL」行现状列
+- **问题与根因**：现状列写「QED-Tracker 与 Axiom-Flow 均用 `qed` 库」，自 2026-09-11 双 `.env`
+  分库起即失真（8900 一直连 `qed_test`），2026-10-17 并库后三服务统一钉 `qed_test`
+  （根 `.env:30`、`QED-Tracker/.env:19`、`Axiom-Flow/.env:12`）。该失真会把「写入落 `qed`」
+  的预期传给并行会话，而两库分裂正是本轮 8903 两页空数据的根因面。
+- **修复与验证**：只改现状列为同库事实并指回承载壳证据；`冻结` 列（统一 MySQL 8 `qed` 库、
+  `QED_DB_*` 唯一事实源、测试库隔离真实数据）不动——契约未变，变的是本机联调落点。
+  `tests/contract/test_markdown_links.py` + `test_plan_governance.py` 8 passed。
+  **2026-10-17 收尾随步扩两处同因失真**：[project-configuration.md](../design/project-configuration.md) 变量表现状段补「本机联调落点」一条（三库同钉 `qed_test` + 托管不注入 `QED_DB_*` 的缺口指向 DEFECT-015）；[database-design.md](../architecture/database-design.md) 共享表行与「REQ-118 定档结论」两处的「库内落地待放行／生产 `qed` 随发布批次」改为两库已落地零差。
+- **状态**：已修复（2026-10-17）
+
+### BUGFIX-032：parsing-flow §9「8902 离线 → 数据域端点返回 503」对 `GET /parsing/tree` 不成立，且掩盖两种同形空态
+
+- **发现日期**：2026-10-17（并库取证：排查 8903 文档解析管理页空数据时逐行核降级口径）
+- **设计文档**：`docs/design/parsing-flow.md` §9 状态与降级矩阵
+- **问题与根因**：矩阵只写「8902 离线 → 8900 数据域端点返回 503，前端降级显示」一行，但
+  `GET /parsing/tree` 捕获上游错误后把书目置空、领域→课程照常聚合并返 **200**；另一侧共享表为空即返
+  `[]`，与「共享表为空 ∧ 8902 离线」同形。该行因此掩盖两点：树端点的响应不能证明 8902 在位，前端也
+  无法区分「数据未登记」与「服务离线」。本轮空数据归因正是先被该行带偏，最后靠读码 + 真机读数才定位到
+  库名分叉（证据见 `docs/plans/2026-10-15-shared-tables-field-freeze.md` 过程与证据 2026-10-17 段）。
+- **修复与验证**：只改文档——§9 该行补「唯一例外」子句，并新增「`GET /parsing/tree` 空态」一行，
+  同形空态的可区分性改进指向台账 DEFECT-015 S3；`tests/contract/test_markdown_links.py` 与
+  `test_plan_governance.py` 定向绿（全量门禁输出见本轮收尾汇报）。
+- **状态**：已修复（2026-10-17 文档面；同轮 DEFECT-015 S3 已把可区分性落到响应与界面——`GET /parsing/tree` 改信封 `{nodes, sources}`，8903 左树按 `sources` 分话术，本条掩盖的同形空态自此消解）
+
+### BUGFIX-033：project-configuration.md「Axiom-Flow `AXIOM_MYSQL_*` 存量别名」在活源码零命中
+
+- **发现日期**：2026-10-17（DEFECT-015 S1 取证：判定「注入 `QED_DB_*` 能否钉住子服务库名」需实读对方解析链）
+- **设计文档**：`docs/design/project-configuration.md` §四 元数据库配置 的「映射」条
+- **问题与根因**：该条写「映射：Axiom-Flow `AXIOM_MYSQL_*`（存量别名，默认库名随之改为 `qed`，改造后别名退役）」，
+  实读 `Axiom-Flow/src/axiom_flow/config.py:128-132,167-169,202` 与 `Axiom-Flow/.env.example`，`AXIOM_MYSQL`
+  在其**活源码与模板零命中**，只余 `Axiom-Flow/docs/history/v1-20260814/**` 冻结叙述与一枚过期 `.pyc`；
+  QED-Tracker 同样直读 `QED_DB_*`（`src/qed_tracker/config.py:85-89,117-140`）。该失真把子服务配置链写成
+  「经别名映射」，会让人误判注入 `QED_DB_*` 未必生效（正是 S1 的判据前提）。
+- **修复与验证**：映射条改为「子项目直接读取本组 `QED_DB_*`，无 `AXIOM_MYSQL_*` 别名」并注明实核范围；
+  与同文件「环境变量优先级」强制规则一致。验证＝`tests/test_api.py::test_start_via_script_injects_root_db_env[tracker|axiom]`
+  （注入即钉库名的行为守护）+ `tests/contract/test_markdown_links.py`。
+- **状态**：已修复（2026-10-17）
+
+### BUGFIX-034：admin-console.md §3 三区结构行仍写「文字/图像/向量三槽位卡」，与同文 §3.3「向量不出卡」自相矛盾
+
+- **发现日期**：2026-10-17（普通任务轮 ARCH-035 清理第③组：核 ARCH-039 S4「§3.3 槽位卡表随步」达成情况时实读全文）
+- **设计文档**：`docs/design/frontend/admin-console.md` §3 三区结构 首行
+- **问题与根因**：ARCH-039 落地时 §3.3 已写明「向量槽位（`embedding`）不出卡：界面只渲染文字/图像两卡」，
+  但 §3 的三区顺序行仍保留迁移前叙述「资源监控（GPU 状态 + 文字/图像/向量三槽位卡）」，同一文档两处对
+  控制台版面给出相反结论；按[文档治理规范](../standards/doc-governance.md)事实源唯一铁律，第二处正文即漂移。
+  根因＝该轮改动只覆盖了槽位卡表，未同清扫 §3 概览行（判据锚点单一节名的后果）。
+- **修复与验证**：§3 顺序行改为「资源监控（GPU 状态 + 文字/图像两槽位卡；向量槽位不出卡，口径见 §3.3）」，
+  与 §3.3 单一口径一致；版面事实由 `web-ui/src/pages/Console.test.tsx`「向量卡不出」用例守护，
+  链接与结构由 `tests/contract/test_markdown_links.py` 守护。
+- **状态**：已修复（2026-10-17）
+### BUGFIX-035：tech-stack.md 选型记录仍写「原生前端无构建／框架化评估延后」，与同文总览行「React 19 + Vite 已用」自相矛盾
+
+- **发现日期**：2026-10-18（REQ-070-LEARN 收口批「遗留①」点名该两行；本轮按用户令把确定性内容写进稳定文档时实读全文复核）
+- **设计文档**：`docs/design/tech-stack.md` 选型记录「原生前端无构建」条（与「技术栈总览」表前端行相对）
+- **问题与根因**：总览行已写「React 19 + AntD 5 + zustand + Vite｜`web-ui/` 学习中心 + 管理后台（8903），构建产物 dist/ 由 serve_web.py 托管｜已用」，
+  选型记录条却仍写「静态 SPA 零构建零依赖……框架化（Vue/React）评估延后到学习中心正式建设时」，同一文档对前端形态给出相反结论；实态由
+  `web-ui/package.json`、`scripts/qed_web_service.py` 托管 `web-ui/dist/` 与 ADR 0008 坐实。根因＝该轮只改总览行未清选型记录，与 BUGFIX-034 同形
+  （改动覆盖面止于一节，违反[文档治理规范](../standards/doc-governance.md)事实源唯一铁律）。
+- **修复与验证**：选型记录条改写为设计态正文（React 19 + AntD 5 + zustand + Vite 构建、`web-ui/dist/` 由 `serve_web.py` 静态托管、页面只连 8900），
+  并显式声明早期「零构建／评估延后」结论作废，指针指向 [前端总设计](../design/frontend/frontend-overview.md)；元数据「最后更新」随步。
+  验证＝`tests/contract/test_design_documents.py`（design 元数据与清单）＋ `tests/contract/test_markdown_links.py`（新增指针可解析）。
+- **状态**：已修复（2026-10-18）
+
+### BUGFIX-036：前端总则缺载跨面页头动作组与 flex 左缘对齐规范，四面共同口径只写在单面详设
+
+- **发现日期**：2026-10-18（REQ-117／DEFECT-016 收口后按用户令把裁决出的规范沉淀进稳定文档）
+- **设计文档**：`docs/design/frontend/frontend-overview.md` §2 视觉总则
+- **问题与根因**：① 页头三枚（使用手册／刷新／返回，返回末位）经用户 C22→C29 两轮改判后已是四面共同口径，但只落在
+  [learning-course-ui.md](../design/frontend/learning-course-ui.md) 的页头表与 [frontend-architecture.md](../architecture/frontend-architecture.md)
+  的 `#/learn` 行，跨面规则无正本，其余三面靠抄该表维持一致；② DEFECT-016 的通用根因（antd v5 `Button` 内容容器
+  `display:inline-flex; justify-content:center` ⇒ 单写 `textAlign:'left'` 对 flex 主轴无效、左缘随文本长度漂移）与「左缘由常量函数单源给出」
+  的防复发判据只写在单面详设 §V2.4，其它面的列表行同样会踩而无条文可依。
+- **修复与验证**：§2 增两条总则＝跨面页头动作组（四面同位同顺序、返回末位、刷新不触发生产；面内出口留详设以免双写）与
+  对齐实现规范（形态常量化 ＋ 对齐断言落 `justify-content` ＋ 版式类改动按 `qed-frontend-check` 三档 `innerWidth` 实测记左缘读数）。
+  守护不动代码：`web-ui/src/pages/LearnWorkbench.test.tsx`（`justify-content: flex-start` 与同档左缘相等）、
+  `web-ui/src/pages/learnPlaneCopy.test.tsx`（目录处理进度话术禁现）、`tests/test_web.py`（设计档互指）。
+- **状态**：已修复（2026-10-18）
+
+### BUGFIX-037：跨项目契约 §4 在途请求登记仍把 `af_*` 面四枚请求与 REQ-128 各自记为在册，与 2026-10-21 合并／取消裁决不符
+
+- **发现日期**：2026-10-21（REQ-136 合并落地轮的文档面清扫中实读 §4 发现）
+- **设计文档**：`docs/design/cross-project-contracts.md` §4 在途跨项目请求登记
+- **问题与根因**：§4 仍逐条在册 `REQ-123`／`REQ-129`／`REQ-133`／`REQ-135` 四枚出站请求（其中 `REQ-133` 标「待用户评审放行移交」、
+  `REQ-135` 标「待用户放行代登」）与 `REQ-128`（作业表保留期出站请求），而用户 2026-10-21 裁决已把前四枚合并为单枚综合请求
+  `REQ-136`（挂 ARCH-025 轮线 2，一次谈定 `af_*` 专用表族重构）并**取消** `REQ-128`。根因＝该轮口径随步落在台账（todo／completed／
+  `plans/index.md`）、两枚滚动壳与总纲 §7.9，出站请求登记这处 `design/` 正本未随步，与 BUGFIX-034／035 同形（改动止于一节，
+  违反[文档治理规范](../standards/doc-governance.md)事实源唯一铁律）。
+- **修复与验证**：§4 四枚合并为 `REQ-136` 单条，写清 R1~R5 与原逐条映射、承载壳与逐列形状正本（`REQ-134` 设计稿）指针、三枚原请求稿壳
+  `Superseded` 归档去处（`REQ-129` 无独立壳，原承载普通任务轮壳 W5）、对方两枚入站承接行（其 `todo.md:33`／`:44`）待发函窗改指口径；
+  `REQ-128` 改写为取消并写明**需求失效依据**两条＝根侧总纲 §7.9 裁剪边界与「四类行不可裁剪」已成文（出站发函无新增约束）、
+  代码查证推翻原 S2 立论前提（`QED-Tracker/src/qed_tracker/db/selection_repository.py:183-190` 以全表 `payload.downloads` 派生论文
+  去重集，按行裁剪即误删去重记忆）；同批的 `REQ-129` 显式声明不随取消、随 `REQ-136` R5 走。
+  验证＝`tests/contract/test_markdown_links.py`（新增与改写指针可解析）＋ `tests/contract/test_design_documents.py`（design 元数据与骨架）。
+- **同日第二批随步（2026-10-21，同节再改，归本条不另立 BUGFIX）**：本条修复后的 §4 在途登记仍含两处被同日事实超越的口径＝
+  ① 「**待发函**、对方台账尚无承接行」——对方已自登 `REQ-136` 承接行（其 `todo.md:33`／`:45` 两枚入站行已改指），故改写为「登记口径复核」；
+  ② 「逐列形状正本＝`REQ-134` 设计稿」——对方同日自立 PLAN-024 承载同一形状并定档，正本移交该稿、`REQ-134` 退为指针
+  （根侧 `REQ-136` 壳关联设计行／目标段／过程与证据条，与 [项目状态快照](../trackers/project-status.md) 当前主线同批随步）。
+  `REQ-136` 行 `成功标准` 列与 R1~R5 状态列一字未改（ADR 0023；改判归该行会话）。
+- **状态**：已修复（2026-10-21）

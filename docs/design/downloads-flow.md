@@ -2,22 +2,22 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-10-09
+最后更新：2026-10-14
 确认状态：已确认
 关联代码：backend/qed_engine/api/domain_explore.py、backend/qed_engine/api/explore.py、backend/qed_engine/services/explore_sessions.py、backend/qed_engine/services/shared_tables.py、backend/qed_engine/clients/tracker_client.py、web-ui/src/pages/Downloads.tsx、web-ui/src/components/{DownloadsTree,DomainCard,DomainConfirmModal,CourseConfirmModal,ExploreFlowModal}.tsx、web-ui/src/api/{tracker,explore-helpers}.ts、web-ui/src/stores/downloads.ts（端点请求/返回细节见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：tests/test_domain_explore.py、tests/test_explore_sessions.py、web-ui/src/pages/Downloads.test.tsx、web-ui/src/components/DownloadsTree.state.test.tsx
 关联 ADR：[ADR 0011](../history/adr/v0.1/0011-pending-design-location.md)（设计晋升位置）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（8900 网关唯一入口）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（设计文档结构契约）
-关联文档：[downloads-ui.md](downloads-ui.md)（UI 展示规范与异常降级的用户可见表现唯一事实源）、[api-contracts](../architecture/api-contracts.md)（8900 端点请求/返回细节唯一事实源）；8901 原生契约以 QED-Tracker `docs/architecture/api.md` 为事实源（不复制）
+关联文档：[downloads-ui.md](frontend/downloads-ui.md)（UI 展示规范与异常降级的用户可见表现唯一事实源）、[api-contracts](../architecture/api-contracts.md)（8900 端点请求/返回细节唯一事实源）；8901 原生契约以 QED-Tracker `docs/architecture/api.md` 为事实源（不复制）
 关联计划：[arch019-explore-ui-logic](../history/plans/2026-09/2026-09-08-arch019-explore-ui-logic.md)、
 [arch019-explore-backend-chain](../history/plans/2026-09/2026-09-08-arch019-explore-backend-chain.md)（PLAN-033/034 晋升来源）；
-论文链路（§7）设计态承载＝任务台账 REQ-101（8901 侧请求）/REQ-102（根侧消费面）两行及其计划壳；
-链路演进经 git 历史与 `history/plans/` 各计划壳追溯
+论文链路（§7）界面形态唯一事实源＝[downloads-ui.md](frontend/downloads-ui.md) §4.4；
+链路演进经 git 历史与 `history/plans/2026-10/` 论文线各计划壳（链路轮＋界面两轮）追溯
 
 ## 1. 定位与目标
 
 本文档是文档下载管理页（`#/admin/downloads`）领域探索的**设计事实源**：统一状态机口径、
 8900 后端链路与终态写点、降级规则本身与课程收集业务规则（展示规范与异常降级的用户可见
-表现归 [downloads-ui.md](downloads-ui.md)）。
+表现归 [downloads-ui.md](frontend/downloads-ui.md)）。
 
 单管理员在下载管理页发起领域探索/导入，8900 负责会话编排、状态落库与 8901 透传。
 设计取向：等待可观测（5s 轮询）、中断可恢复（刷新直读共享表）、失败可重试
@@ -67,7 +67,7 @@ explore-status 口径、降级链路规则、课程收集业务流程规则（�
 
 | 事实主题 | 唯一事实源 |
 | --- | --- |
-| UI 展示层级、筛选、弹窗与异常降级的用户可见表现 | [downloads-ui.md](downloads-ui.md) |
+| UI 展示层级、筛选、弹窗与异常降级的用户可见表现 | [downloads-ui.md](frontend/downloads-ui.md) |
 | 8900 端点请求/返回细节 | [api-contracts](../architecture/api-contracts.md) |
 | 8901 原生契约 | QED-Tracker `docs/architecture/api.md`（不复制） |
 | 书籍状态机字段口径（选用 + 生命周期） | QED-Tracker `architecture/database-private-tables.md`（本文档仅使用术语分组，见 §6） |
@@ -88,7 +88,7 @@ explore-status 口径、降级链路规则、课程收集业务流程规则（�
 | 探索中 | `探索中` | 第一轮已确认，第二轮 courses@v8 后台生成中 |
 | 待确认 | `待确认` | 课程知识生成完成，等待人工确认 |
 | 已完成 | `已完成` | 领域探索全流程完成（终态） |
-| 失败 | `失败` | 管线异常（可重试），`explore_pending={kind:'error', error}` |
+| 失败 | `失败` | 管线异常（可重试），`explore_pending={kind:'failed', error}`（8900 会话写点；8901 原生任务的 `PipelineError` 写「待确认」+ `error`，见 §5.4） |
 
 ```mermaid
 flowchart LR
@@ -143,8 +143,8 @@ flowchart LR
 | 确认课程名单 | 领域 | 待确认 | 已完成 | `POST /domains/{id}/confirm-knowledge` | apply 成功写 COMPLETED |
 | 课程探索 | 课程 | 未开始 / 失败 | 探索中 | `POST /courses/{id}/explore-knowledge` | 会话启动写 RUNNING |
 | 课程后台完成 | 课程 | 探索中 | 待确认 | 5s 轮询感知 | 会话 ready 写 PENDING |
-| 确认课程 | 课程 | 待确认 | 已完成 | `POST /courses/{id}/confirm` | `set_course_stage` 写 COMPLETED |
-| 管线异常 | 领域/课程 | 探索中 / 待确认 | 失败 | 轮询感知 | `_write_failure` 写 FAILED + `explore_pending={kind:'error', error}` |
+| 确认课程 | 课程 | 待确认 | 已完成 | `POST /courses/{id}/confirm` | `set_course_stage` 写 COMPLETED（在线写，降级见 §5.4） |
+| 管线异常 | 领域/课程 | 探索中 / 待确认 | 失败 | 轮询感知 | `_write_failure` 写 FAILED + `explore_pending={kind:'failed', error}`（领域直写共享表；课程只经 8901 在线腿，不可达即不落库） |
 
 ### 3.4 前端禁写原则
 
@@ -155,7 +155,7 @@ flowchart LR
 ## 4. 展示与降级表现（指向）
 
 右侧四层展示规范（领域 DomainCard / 课程操作条 / 教程行 / 书目卡，教程与书目详情弹窗、
-筛选规则）由 [downloads-ui.md](downloads-ui.md)（UI 设计文档）§4 承载；异常与降级的
+筛选规则）由 [downloads-ui.md](frontend/downloads-ui.md)（UI 设计文档）§4 承载；异常与降级的
 **用户可见表现**（横幅、提示条、toast、会话失效提示）由其 §6 承载。
 本文件只定义状态机、后端链路、写点与降级规则本身（§3、§5）。
 
@@ -213,7 +213,7 @@ sequenceDiagram
 | 探索中 | `explore-knowledge` 提交任务；`confirm_domain_info` 写 RUNNING |
 | 待确认 | courses.json 落盘后置 PENDING；`_apply_domain` 写 PENDING |
 | 已完成 | `confirm_course_knowledge` → apply；`commit_import_courses` 写 COMPLETED |
-| 失败 | `_write_failure` 异常分支写 FAILED + `explore_pending={kind:'error', error}` |
+| 失败 | `_write_failure` 异常分支写 FAILED + `explore_pending={kind:'failed', error}`（直写共享表，8901 不可达亦落库） |
 
 **课程（5 态）**
 
@@ -223,7 +223,17 @@ sequenceDiagram
 | 探索中 | 课程探索会话启动写 RUNNING |
 | 待确认 | `_finish_ready`（课程会话 ready）写 PENDING；`import_course_knowledge` 后写 PENDING |
 | 已完成 | `POST /courses/{id}/confirm` → `set_course_stage` 写 COMPLETED |
-| 失败 | `_write_failure` 写 FAILED |
+| 失败 | `_write_failure` 写 FAILED + `explore_pending={kind:'failed', error}`（只经 8901 在线写，见 §5.4；8901 不可达不落库） |
+
+**写路径与值域分档**（`set_domain_stage` / `set_course_stage` 单点门面）
+
+- **在线优先**：领域经 8901 `PATCH /domains/{domain_id}`、课程经 8901 `PATCH /courses/{course_id}`
+  写入本列（两端点均透传 `exploration_stage`，对方仓储层各自校验值域、非法值 422）。
+- **降级例外**：仅当调用方标记 8901 不可用（`online=False`）或其写请求失败时，才落 `direct_write_stage`
+  直写共享表（例外登记与恢复条件见 §5.4）。
+- **值域按表分档**：领域 6 态含领域专用的「已生成」，课程 5 态没有它。`direct_write_stage` 落笔前
+  必过 `shared_tables._require_stage`，课程门面在分流前先校验（领域在线路径由 8901 仓储层校验）；
+  越界取值抛 `ValueError`——课程列没有写「已生成」的通道。
 
 confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domain[domain_id]` → 404；
 `selected` 缺省取 report 全量课程清单（一键全收）。8901 离线时 409 降级：仅写本地 COMPLETED
@@ -233,7 +243,7 @@ confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domai
 
 `active_session = (exploration_stage == 探索中)`（与 [api-contracts](../architecture/api-contracts.md) 一致）；
 8900 重启后内存会话丢失 → `task_id=null`，库态直读永远可用，前端据 `active_session=false` 提示
-「探索会话已失效，请重试」（用户可见表现见 [downloads-ui.md](downloads-ui.md) §6），不做自动回写。
+「探索会话已失效，请重试」（用户可见表现见 [downloads-ui.md](frontend/downloads-ui.md) §6），不做自动回写。
 8901 离线兜底：跳过 task 查询仅返回库态。
 
 ### 5.4 降级链路规则
@@ -243,18 +253,35 @@ confirm-knowledge 会话定位顺序：显式 `session_id` → `_active_by_domai
 | 8901 离线 + 导入领域 | `import_domain_manual` 本地已生成（手动导入只写 domains.json + 状态，不写 pending；六步流程由 confirm-domain→confirm-knowledge 收口） |
 | 8901 离线 + 确认课程 | 409 降级本地 COMPLETED + 待同步 |
 | 8901 离线 + explore-status | 库态直读兜底 |
-| 探索管线失败 | 失败 + `explore_pending={kind:'error', error}` |
+| 探索管线失败 | 失败 + `explore_pending={kind:'failed', error}`（领域直写；课程该列无直写腿，8901 不可达即不落库） |
 | 8900 重启（会话丢失） | 不自动回写；active_session=false 承接 |
 
-`explore_pending.kind` 值域（后端写点契约，前端据其渲染提示条，见 [downloads-ui.md](downloads-ui.md) §6）：
-`review_results` / `name_confirmation` / `error`。
+**课程 `exploration_stage` 的降级直写例外**：8901 `PATCH /courses` 已透传本列（REQ-077 D3=B），
+正常路径不经直写；只在 `online=False` 或该请求失败时降级 `direct_write_stage`，降级写同样受课程 5 态
+值域校验。恢复条件＝8901 常驻可达时降级路径自然不再发生（无常驻开关、无一次性标记）。
+
+**课程 `explore_pending` 只在线写**（DEFECT-017，2026-10-18 用户裁决「只在线写，离线不落库」）：该列在总纲读写矩阵里属 8900 禁写列，故课程侧失败原因只经 8901 `PATCH /courses` 写入
+（`clients/tracker_client.py:update_course` 透传本字段，且 8901 不可达时**不降级**、直接抛错）；写前先读现值、合并同列既有键后整列写回，不覆盖其它 pending 键。
+8901 离线时失败原因只留在会话内存态（`GET /api/v1/explore-sessions/{id}` 的 `error`），不落库——课程侧不留直写腿，与领域分支的直写腿不对称，属裁决而非缺陷。
+
+**越界历史行检出**（只读，`qed` 与 `qed_test` 各跑一次，结果应为 0 行）：
+
+```sql
+SELECT course_id, exploration_stage FROM qed_course
+ WHERE exploration_stage NOT IN ('未开始','探索中','待确认','已完成','失败');
+```
+
+`explore_pending.kind` 值域（后端写点契约，前端据其渲染提示条，见 [downloads-ui.md](frontend/downloads-ui.md) §6）：
+`failed`（8900 会话管线失败，领域/课程两侧）／`review_results`（8900 采纳后待审）／
+`import_courses`（8900 导入降级暂存）／`name_confirmation`（8901 写、8900 只读）／
+`error`（8901 原生任务 `PipelineError` 写点，含课程任务把状态写回「待确认」）。
 
 ## 6. 业务流程规则（课程收集五阶段）
 
 > 书籍状态术语：选用态 `candidate/decided/parallel/retired` + 生命周期
 > `downloading/downloaded/verified/failed`（`failed` 可重试，`retired` 留痕退出）；
 > 字段口径事实源见 §2 指针表。
-> UI 筛选 5 档（待下载/下载中/待验证/已完成/失败）见 [downloads-ui.md](downloads-ui.md) §4.2。
+> UI 筛选 5 档（待下载/下载中/待验证/已完成/失败）见 [downloads-ui.md](frontend/downloads-ui.md) §4.2。
 > 当前聚焦数学课程体系（13 门），后续轮次扩展计算机科学（AI 方向），五阶段规则通用。
 
 五阶段总览（阶段 0 定体系 → 逐课程走 1→4；未达完成判定可回下载补充，上限四套不可突破）：
@@ -290,7 +317,7 @@ flowchart LR
 **一套 = 教材 + 配套习题集**（同作者/同系列配套；英文原版对照单独计为英文套）。
 
 评估动作：候选人工三态（确定 / 备选 / 否定，可带评审建议）——在探索会话与教程/书目
-操作中执行（确认下载/否决等操作见 [downloads-ui.md](downloads-ui.md) §4.1 教程详情弹窗，
+操作中执行（确认下载/否决等操作见 [downloads-ui.md](frontend/downloads-ui.md) §4.1 教程详情弹窗，
 端点见 api-contracts.md）。
 
 ### 6.3 阶段 2：下载
@@ -322,10 +349,12 @@ flowchart LR
 
 ## 7. 论文链路（领域级探索与领域/课程沉淀）
 
-论文链路为领域与课程持续沉淀**前沿/核心论文**，与课程收集五阶段（§6）并行：探索
+论文链路为领域与课程持续沉淀**领域相关论文**（界面按四个检索方向发起，落到请求体仍只用
+`frontier`／`core` 两个服务端配方 + 年窗/抓取量/目标追加语覆盖；方向与参数的映射正本在
+[downloads-ui.md](frontend/downloads-ui.md) §4.4.3），与课程收集五阶段（§6）并行：探索
 **仅由领域语境发起**（goal 取领域描述），确认后的论文可落位到**领域或该领域下课程**
 （逻辑分组）。本节定义链路、展示状态派生与写点归属；界面形态见
-[downloads-ui.md](downloads-ui.md) §4.4，端点形状见
+[downloads-ui.md](frontend/downloads-ui.md) §4.4，端点形状见
 [api-contracts](../architecture/api-contracts.md) §③「规划契约」。本节为设计态，
 实施承载＝任务台账 REQ-101（8901 侧）/REQ-102（根侧）。
 
@@ -333,22 +362,24 @@ flowchart LR
 
 | 段 | 执行方 | 要点 |
 | --- | --- | --- |
-| 探索发起 | 8903→8900 透传→8901 | `papers/recommend`（domain_id + recipe `frontier\|core`），202 返回 task_id；8901 执行 LLM 计划→arXiv 检索→相关性评估 |
+| 探索发起 | 8903→8900 透传→8901 | `papers/recommend`（domain_id 必填 + recipe `frontier\|core`，可选 `top`/`limit`/`years_limit`/`goal`/`categories`），202 返回 task_id；8901 执行 LLM 计划→arXiv 检索→相关性评估 |
 | 报告 | 8901 | `qt_selections` 携带领域 scope，状态 `planning→ranked`；候选评分（goal_fit/foundational_value/readability） |
 | 评审与 pick | 8903 | 候选清单 + **逐条落位选择（领域\|该领域下课程）**；显式采纳（adopt）由人确认，模型不写任何资源事实 |
 | 书本化 | 8901 | adopt 生成 `qt_books` kind=paper 行（标识=arXiv ID、refs=落位 domain_id/course_id），下载/验收复用 §6 书本五层态链；查重=书库命中（arXiv ID/标题） |
 | 透传 | 8900 | papers 面纯透传+信任，对 DB 与数据根零写点 |
 
-- 课程**不独立发起论文探索**；课程级论文仅来自 pick 落位（展示行两级都挂，见 downloads-ui §4.4）；
+- 课程**不独立发起论文探索**；课程级论文仅来自 pick 落位，且统一在该领域的「论文」栏一处看全
+  （卡片带课程归属标签，见 downloads-ui §4.4.6）；
 - 论文**没有默认落盘桶**（2026-10-01 用户裁定，正本=对方 QED-068 壳「F9 裁定」）：`domain_id`
   必填且须为 `qed_domain` 已登记领域，领域不存在即拒绝落盘/建书行；8900/8903 透传**不补默认值**，
   论文只会落在真实领域的 `raw/<domain>/_general/papers/`，与书行 `domain_id` 天然一致；
 - 报告状态只是审计快照，落位完成后消费侧长期状态一律以**书行五层态**为事实源。
-- 采纳（adopt）**不自动取书**：取书须显式 `POST /books/{book_id}/fetch`（8900 透传），自动下载链止于 `downloaded`（展示行「待验证」）；`verified`（展示行「已验收」）是**人工验收档**，只由书目详情「验证通过」置位，展示行、透传面与探索弹窗均不代做验收。
+- 采纳（adopt）**不自动取书**：取书须显式 `POST /books/{book_id}/fetch`（8900 透传），自动下载链止于 `downloaded`（论文栏「待验证」）；`verified`（论文栏「已验收」）是**人工验收档**，只由书目详情「验证通过」置位，论文栏、透传面与探索弹窗均不代做验收。
 
 ### 7.2 论文行展示态派生（不引入第四套状态机）
 
-领域/课程论文展示行为**派生视图**，来源字段与显示一一对应：
+论文线的三个界面形态——左树「论文」节点计数、领域论文栏卡片徽标、汇总行活动态徽标——
+都是**派生视图**，来源字段与显示一一对应：
 
 | 展示态 | 派生条件（任务态 × 报告态 × 书行态） |
 | --- | --- |
@@ -360,6 +391,8 @@ flowchart LR
 
 论文行**不进入**领域 6 态/课程 5 态 `exploration_stage` 状态机（§3），不写 `explore_pending`；
 教程附属论文（kind=paper 挂 knowledge）与本链路发现论文（refs=domain/course）以 refs 区分，互不混列。
+派生视图只读不写：三个形态一律由任务态×报告态×书行态现算，不新增状态字段、不落任何课程记录，
+界面侧对论文视图零写点（写点全在 §7.1 责任分界与 §7.3）。
 
 同一领域同时命中多态时按**探索中 > 待评审 > 失败 > 已沉淀 > 隐藏**取一（任务发起即就地转
 「探索中」，不等任务列表回读）；「待评审」「失败」两态徽标可点击直达管理弹窗——待评审续看候选
@@ -370,7 +403,7 @@ flowchart LR
 - 论文链路落库写点（报告生成、书本化、文件登记）全部在 8901；8900/8903 **零写点**，
   本链路不新增也不改动任何 `set_*_stage`；
 - 8901 离线：书行清单经 DB 直读仍显示，探索发起入口禁用（口径与 §5.4 降级规则一致）；
-- 8900 重启：论文任务事实源在 8901 `qt_tasks`，弹窗按 task_id 续轮询，展示行派生不受影响。
+- 8900 重启：论文任务事实源在 8901 `qt_tasks`，弹窗按 task_id 续轮询，论文栏与徽标派生不受影响。
 
 ## 8. 已知约束与维护规则
 
@@ -380,5 +413,5 @@ flowchart LR
 3. **领域/课程状态不混用**：6 态与 5 态值域独立流转（§3.1/§3.2），UI 与写点均不互相推断。
 
 维护规则：状态机/写点矩阵变更须先改本文档再改代码，展示规范与异常降级的用户可见表现
-变更先改 [downloads-ui.md](downloads-ui.md)；端点请求/返回细节以
+变更先改 [downloads-ui.md](frontend/downloads-ui.md)；端点请求/返回细节以
 [api-contracts.md](../architecture/api-contracts.md) 为唯一事实源。

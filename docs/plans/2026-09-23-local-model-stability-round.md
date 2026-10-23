@@ -8,7 +8,7 @@
 [llm-gateway.md](../design/llm-gateway.md)（网关与调用记录分工；W11 请求侧熔断承接位）、
 [api-contracts.md](../architecture/api-contracts.md)（W1/W2 端点扩展承接位）、
 [frontend-architecture.md](../architecture/frontend-architecture.md)（W4 仪表盘界面）
-关联 Tracker：docs/trackers/todo.md（ARCH-028 任务行，一任务一行一壳，支线 ARCH-033 启动参数配置壳 2026-09-24 裁定挂入本轮、不另立轮））
+关联 Tracker：docs/trackers/todo.md（ARCH-028 任务行，一任务一行一壳，支线 ARCH-033 启动参数配置壳 2026-09-24 裁定挂入本轮、不另立轮；2026-10-20 用户裁决把支线 ARCH-027-M3 行归并入本轮承载，本轮即本地模型优化轮的唯一正本轮））
 归档判定：Retain（滚动记录，轮次收口时按当时里程碑归档 history/plans/<year-month>/）
 
 > 本壳是本地模型稳定性轮唯一滚动记录。排期范围＝根仓库（8900/8903）+ 根 `.env` 配置；
@@ -102,6 +102,7 @@ embedding 本地化、Docker 层兜底（容器 healthcheck + `--restart` 自动
 | W10 | 诊断包取证补强：down 翻转时增采 docker inspect（State.OOMKilled/ExitCode/RestartCount） | 根 8900 `supervisor.py` | 未开始（S3「外部杀/OOM」两假设现场直接定谳项）。**顺带必修已直修（2026-09-24，用户裁决不另立任务）**：W12 真机实录 docker events 采集失效——`{{.Status}}` 字段不存在（rc=64）且 `--until now` 不能解析为时间（rc=1），events 段实际采空；修正为 epoch 整数 since/until + `{{.Action}} {{.Type}} {{.Actor.Attributes.name}}`（真机实测 rc=0），单测断言命令构造（test_default_diagnostics_events_cmd…，定向 98 passed）。本行剩余范围＝增采 docker inspect：**已实施 2026-09-26（增强批）**——诊断包 captures 增 `docker inspect mineru-api --format {{.State.OOMKilled}} {{.State.ExitCode}} {{.RestartCount}}`，单测断言命令构造与三字段齐备；W10 至此全量收口（S3 现场定谳采集能力就绪，定谳本身仍待真崩/注入杀容器＝W6） |
 | W11 | 网关请求侧熔断：槽位级连续失败开闸（3 次/开 60s/half-open 单试探/快挂稳定 reason），open 事件供监督器消费为观测源（细则见监督器设计 §7） | 根 8900 `gateway.py`+`supervisor.py` | 未开始（用户裁决 2026-09-24：实施在本项目，归属 M3 之说先记录） |
 | W12 | 期望状态（desired）语义：人工停止永不自动复活（仅告警一次）+ api 来源观测暂停清位 + 状况卡就绪性说明文案 | 根 8900 `supervisor.py`+`model_manager.py` + 8903 状况卡 | **已实施 2026-09-24**（用户两案实报直修：停模型后仪表盘仍「就绪」＝api 暂停冻结快照＋监督器把人工停止当故障复活；api→local 切换自动起模型＝意图残留。裁决：人工停止＝合法终态、未加载仅说明文案不标降级；细则见监督器设计 §8 与 BUGFIX-018。TDD 新增 supervisor 6 例＋model_manager 挂点 2 例＋状况卡 vitest 2 例，定向 97 passed；真机生效需 8900 重启加载。**真机验证 2026-09-24（用户重启 8900，浏览器实测）**：① 人工停止链路四行落账——期望状态 desired=stopped → ready→down 定态 → 每 Episode 仅一条「不自动恢复，仅告警」，跨恢复节拍 0 次恢复尝试、WSL 容器保持未起；② 来源切 api：`down->∅ 观察暂停（api 来源）` 清位、状况卡图像行消失（旧 down/就绪快照不残留）；③ 切回 local：∅→down 首观测定态、恢复尝试 0、仅一条「期望=未声明」告警，不自动拉起；④ 正向对照：手动启动上报 desired=running 后撞上已知约束 7 实录（容器内 NVML GPU blocked）→ 卡片实时「降级」黄标 → 恢复第 1 次 restart → degraded→ready 收敛（desired=running 才恢复的活体证明）；⑤ 文字槽位「服务存活未加载」渲染「模型未就绪（服务存活）」次要文案（health_state 保持就绪不标降级，用户裁决形态）；页面请求 24 条全指 8900 全 200、console 零报错；环境已复位双就绪 |
+| W13 | **归并承接（2026-10-20 用户裁决）＝本地模型调用面适配线**：ARCH-027-M3 行的剩余判据随本轮真机演练场同场执行——其 S4 冒烟＝本地模型下出题与判分链路各跑通一次 + 一键回退可验证；判据仍由该行「成功标准」列与 [M3 壳](2026-09-23-local-model-adaptation.md) 持有，**本壳 S1~S7 判据不扩**（ADR 0024 范围锁死） | 根 8900 `services/llm/` | 未开始（前置＝W9 显存水位门 + W11 熔断到位；与 S2/S5~S7 演练同一次机器窗口，双轮取证；M3 行 S2 的文本工具协议段按 2026-09-29 裁决继续后置） |
 
 ## W0 调研判定（2026-09-23，DeepTutor 只读调研收口）
 
@@ -135,6 +136,8 @@ DeepTutor **不管理本地模型进程**（Ollama/LM Studio/vLLM 视为用户�
   「剩余＝W9/W11 + 真机演练场」叙述迁入本节。
 - **2026-09-30 现状与下一条件**：剩余＝W9 显存水位门 + W11 网关请求侧熔断（代码）+
   真机演练场 S1/S2/S4/S5/S6/S7；关闭条件见「关闭与归档」节，由用户裁决收口。
+
+- **2026-10-20 归并裁定（用户原话「这块和本地模型稳定性轮（ARCH-028）结合，单独做一块本地模型优化轮看看是不是更加合适一些，如果是的话就合过去」）**：评估结论＝**合，但不新立轮**，把 ARCH-027-M3 行的承载关系改到本轮（todo 行自「学习设计轮」节移入本节，判据列零改动；M3 壳不删，按 ADR 0021 归并不删壳）。三条依据＝① M3 剩余只剩行 S4 真机冒烟与后置的文本工具协议段，其前置正是本轮 W9 水位门与 W11 熔断——同一场演练可同时验本轮 S5~S7 与 M3 S4，分两轮各等一次机器窗口是浪费；② 本轮 W11 自 2026-09-24 起就登记「归属 M3 之说先记录」，两线本就交叉；③ ADR 0021「轮次非必要不增设」＋任务生命周期「新的小任务原则上并入已有轮次」。三方边界随之写清：本轮＝服务侧稳定性能力 + 调用面适配，REQ-100（长期）＝现场取证与参数标定，ARCH-027 主链＝业务语义（编译与判分规则）。正文见[集群总纲](2026-10-20-doc-knowledge-cluster-master-outline.md)「附」节。
 
 ## 验证与验收
 

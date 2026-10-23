@@ -11,7 +11,7 @@
 > **挂靠说明（2026-09-11 修订）**：本文档为技术架构参考；PLAN-023 已 Superseded 并归档
 > （[history/plans/2026-08](../../plans/2026-08/2026-08-27-download-ux-flow.md)），
 > 状态机与交互事实源以 [design/downloads-flow.md](../../../design/downloads-flow.md) /
-> [downloads-ui.md](../../../design/downloads-ui.md) 为准；本文档保留三端架构图、数据访问双链路、降级策略等技术事实。
+> [downloads-ui.md](../../../design/frontend/downloads-ui.md) 为准；本文档保留三端架构图、数据访问双链路、降级策略等技术事实。
 >
 > **口径说明**：本文档 exploration_stage 4 态模型、域探索弹窗流、8900 包装异步会话等内容已过时，
 > 现行口径为：领域 6 态 / 课程 5 态、无弹窗直触（REQ-067 §B2）、8900 写点驱动 + 8901 原生任务链。
@@ -35,7 +35,7 @@
 
 > 2026-08-27 重写：对齐 REQ-064 共享表新架构，旧 explore-runs 轮询架构已废弃。
 > 用户操作级流程规范曾由 PLAN-023 承载，该计划已 Superseded 归档；现行规范见
-> [design/downloads-flow.md](../../../design/downloads-flow.md) / [downloads-ui.md](../../../design/downloads-ui.md)。
+> [design/downloads-flow.md](../../../design/downloads-flow.md) / [downloads-ui.md](../../../design/frontend/downloads-ui.md)。
 
 ## 目标与成功标准
 

@@ -85,5 +85,5 @@
   壳保留）、REQ-006（关闭移交 ARCH-027-M1）、REQ-091 / REQ-092 / REQ-096 / OPS-001 / REQ-031 /
   REQ-050 / DEFECT-007（补锚）
 - 壳：[普通任务轮滚动记录](../plans/2026-09-29-ordinary-tasks-round.md)、
-  [运行时产物与备份面规范化](../plans/2026-09-29-runtime-artifact-placement-round.md)、
+  [运行时产物与备份面规范化](../history/plans/2026-09/2026-09-29-runtime-artifact-placement-round.md)、
   归档壳 [存储链路规范化轮](../history/plans/2026-09/2026-09-24-storage-chain-governance-round.md)

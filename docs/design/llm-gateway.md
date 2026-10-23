@@ -14,7 +14,7 @@
 本设计定义三项目统一的**模型调用网关**：8900 提供 LLM 网关端点（文字/图像/向量），负责
 槽位路由、资源互斥与调用记录。分工：本地模型生命周期与 runtime 适配归
 [local-model-management.md](local-model-management.md)；配置变量唯一事实源归
-[project-configuration.md](project-configuration.md)；控制台 UI 展示归 [admin-console.md](admin-console.md)；
+[project-configuration.md](project-configuration.md)；控制台 UI 展示归 [admin-console.md](frontend/admin-console.md)；
 文档解析不归本网关（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)）——解析管线
 归 Axiom-Flow 并经引擎适配器直连本地模型服务，`/llm/vision` 只服务控制台测试与通用视觉用途。
 
@@ -29,7 +29,7 @@
 - 调用记录（prompt 模板/提问/回答/耗时/调用时间/成败）落 qed 库单表 `qed_llm_calls`，三项目均可
   写入（local 直连也记录，用于 prompt 与工具调用调优），8900 提供检索端点。
 - 前端控制台布局：服务管理四卡 + 基础设施（MySQL）+ 资源监控（GPU 总览 + 文字/图像/向量
-  三槽位卡）+ 调用记录检索页（见下文与 [admin-console.md](admin-console.md)）。
+  三槽位卡）+ 调用记录检索页（见下文与 [admin-console.md](frontend/admin-console.md)）。
 
 ## 来源、渠道与调用拓扑
 
@@ -192,8 +192,10 @@ QED_EMBEDDING_MODEL=text-embedding-v4   # 向量槽位身份
 2. `api` 来源：身份的 api 引用；无 api 引用 → 回退 `.env` 身份变量对应的已注册 api 身份 >
    槽位厂商默认模型（告警一次，不阻断）。
 3. `local` 来源：身份的本地引用（按生效 runtime 匹配）；身份无该 runtime 引用 → 回退槽位默认
-   本地身份（告警一次，不阻断）；**槽位无本地候选（embedding）→ 来源固定 `api`**，不随全局
-   `QED_API_SELECT=local` 切换（解析恒成功，避免必失败槽位）。
+   本地身份（告警一次，不阻断）；连回退身份也无该 runtime 引用时按槽位分岔——**文字槽位**
+   走 A-6 继承兜底（`model` 留空，由网关发现式继承单活 runtime 已加载模型，见「本地模型
+   适配层」节）、**图像槽位**仍写 `error` 判失败；**槽位无本地候选（embedding）→ 来源固定
+   `api`**，不随全局 `QED_API_SELECT=local` 切换（解析恒成功，避免必失败槽位）。
 4. `description` 供控制台「备注」行展示；`ready`（探针/配置）供「可用」行展示，不阻断解析。
 
 - **插拔约定**：新增本地模型 = 注册表加身份条目（+ 对应 runtime 引用），不改 gateway/clients
@@ -295,14 +297,20 @@ backend/qed_engine/services/llm/
 | `step` | VARCHAR(32) | 步骤标识（如 plan、assess、propose），可空 |
 | `review_status` | VARCHAR(16) | 审核状态：`unreviewed` / `passed` / `rejected` |
 | `review_note` | VARCHAR(1000) | 审核备注，可空 |
+| `meta` | JSON | 扩展槽：未定档字段先入本列（只读不筛，不进 WHERE/索引）；定档后升实体列并清空对应键（REQ-118） |
 
-- 表结构以根仓库 Alembic 迁移落地（qed 库）；三项目各自持有 `QED_DB_*` 写权限。
+- 二级索引三枚（REQ-118 定档，`ensure_indexes()` 幂等补齐）：`idx_llm_created(created_at)`／
+  `idx_llm_service_created(service, created_at)`／`idx_llm_task_step(task, step)`。
+- 表结构由根仓库 `services/llm/call_log.py` **幂等建表 + 追加式补列/补索引/补注释**落地（根不引入
+  Alembic）；三项目各自持有 `QED_DB_*` 写权限。
+- **本表有外部写方（8901/8902 local 直写），绝不 DROP 重建**——是 [database-design.md](../architecture/database-design.md)
+  「1.0 前 schema 重建档位」自由重建档的明确例外；schema 变更只做加列/加索引/改注释。
 - 写入方约定：网关统一写（QED-Engine 模式天然覆盖三项目）；子项目 local 直连时由各自
   `llm_client.py` 自写（`service` 标识自身）。
 - **prompt/response 调优用途**：记录完整提问与回答（响应体过大的可截断，策略实现时定），
   支撑后续 prompt 模板与工具调用调优。
 
-## 本地模型适配层（`services/llm/local_adapt.py`，ARCH-027-M3 A-1/A-3/A-4/A-5）
+## 本地模型适配层（`services/llm/local_adapt.py` + `registry._resolve_local`，ARCH-027-M3 A-1/A-3/A-4/A-5/A-6）
 
 本地后端（LM Studio / llama.cpp / Ollama 级）对工具调用、结构化输出与长推理的支持
 不一，网关在 local 渠道上按下述约定降级；**全局开关** `QED_LLM_LOCAL_ADAPT`（默认 true）
@@ -345,12 +353,24 @@ backend/qed_engine/services/llm/
   `finish_reason` 只在网关内部返回面携带，`/llm/text` 对外响应字段不扩（与 `response_format`
   同族的最小面口径）。
 
+- **A-6 文字槽位继承兜底**（`registry._resolve_local`）：文字槽位在生效 runtime 取不到任何本地
+  身份引用时**不判解析失败**——`Resolved.model` 留空、`provider` 记该 runtime、`notes` 带继承
+  标注，网关沿上文「模型名发现式取已加载模型」通路继承**单活 runtime 当前已加载的模型**
+  （registry 纯解析不发网络请求，探测归 `clients.qwen_chat` 的空 model 分支）。覆盖面只限文字
+  槽位：图像槽位＝MinerU 一脚本一模型的固定部署，没有「已加载模型」可继承，绑定缺失仍写
+  `error`；向量槽位无本地候选不变。`QED_LLM_LOCAL_ADAPT=false` 时本兜底旁路，回到「无本地绑定
+  即解析失败」口径（网关抛「文字槽位解析失败」并记 `status=error`）。继承态调用记录的 `model`
+  为空串＝未指名身份，控制台槽位卡按「未就绪」展示（绑定探针无对象），成功调用仍走本地渠道
+  并正常记账。
+
 隔离与回归：适配层首批规则层纯单测（`tests/test_llm_local_adapt.py`，假 client / 无网络）；
-拉黑清单为进程态，`clear_blacklist()` 供测试与运维复位。
+拉黑清单为进程态，`clear_blacklist()` 供测试与运维复位。A-6 兜底的解析面归
+`tests/test_llm_registry.py`、继承交接与开关关闭回退归 `tests/test_llm_gateway.py`（同假 client，
+不触网不触真实模型）。
 
 ## 前端控制台（8903，根仓库实现）
 
-布局（自上而下，UI 细节归 [admin-console.md](admin-console.md)）：
+布局（自上而下，UI 细节归 [admin-console.md](frontend/admin-console.md)）：
 
 1. **服务管理（四服务卡）**：8900 仅重启。
 2. **基础设施（MySQL）**：测试按钮 → `POST /database/test` 即时连接探测，反馈成功/失败+原因。
@@ -363,4 +383,10 @@ backend/qed_engine/services/llm/
    - 选择（来源/渠道/模型）经 `POST /models/{slot}/select` 写运行态 manifest；local 卡另有启停
      按钮（`POST /models/{slot}/{start|stop|restart}`，单活仲裁）；向量卡无本地候选（来源固定 api）。
 4. **模型调用记录检索页**（`#/admin/llm-calls`）：读 `GET /llm/calls` 检索展示与审核标注；
-   页面 UI 设计见 [admin-console.md](admin-console.md)「模型调用记录页」节。
+   页面 UI 设计见 [admin-console.md](frontend/admin-console.md)「模型调用记录页」节。
+
+**前端能力边界（2026-10-17 用户裁决 C18，REQ-117 W9）**：前端的**生成类请求一律经业务域端点**
+由服务端编排——如学习面注解「点生成」走 `POST /learn/annotations/generate`，该端点在 8900 内调
+`services/llm/gateway.call_text(service="learn_annotation")`（与 M-2 编译、M2 出题同一条网关通道，
+调用账同样落 `qed_llm_calls`）。`POST /llm/text|vision|embedding` 与 `POST /llm/test/*` 属控制中心
+的诊断面，不开放给业务界面直调；前端不拼装 prompt、不持有模型身份与密钥。

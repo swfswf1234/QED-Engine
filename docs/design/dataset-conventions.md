@@ -138,6 +138,7 @@
 | 书籍 ingest 元数据（含内容身份 sha256/ingested_at） | `af_books`（DB） | 唯一正本；根视图不写 book.json/manifest.json，版本内 `book.json` 从 `af_books` 生成 |
 | parse 产物（blocks/Markdown/图像/chunks） | `parsed/<domain>/<course>/<book_id>/versions/<active_job_id>/`（QED_DATA_ROOT） | 唯一正本；版本指针：`af_books.active_job_id`（DB）；激活即删除旧版本目录，磁盘只存当前生效版本 |
 | 解析任务与页状态 | `af_*` 四表（DB） | 唯一事实源；`active_job_id` 设置 = 版本激活确认语义 |
+| 知识点长文正文（详解／多角度叙述） | `parsed/<domain>/<course>/<book_id>/kp/<node_id>.md`（QED_DATA_ROOT） | **2026-10-21 v1.0 定档；根侧读腿 2026-10-22 已在 `qed_test` 落地**（主表 `narrative_ref` 列 ＋ `GET /learn/knowledge-points/{kp_id}/narrative`，越根双闸），**盘上正文文件尚未产出**＝写入方 Axiom-Flow（其 PLAN-024 KA-20）未交付，故现网读回 `available=false` 与悬空降级话术；读取方 8900 经主表 `qed_knowledge_point.narrative_ref` 指针取文；**正文不入列**（不落 `MEDIUMTEXT`）、**不入 `meta`**，DB 只存指针；落点在顶层白名单既有区 `parsed/` 内，**白名单不新增条目**（ADR 0018 不动）；根侧存相对路径全串、对方存单段文件名，补前缀由提升腿负责（理由是 8902 离线时 8900 仍须能自行解析，独立性铁律）；指针悬空＝可见降级，不静默改写 |
 
 > **野生区警示（ADR 0018）**：`<QED_DATA_ROOT>/qed-tracker/`（含 `meta/resources/<sha256>.json`）不在顶层
 > 白名单，属野生区；该 JSON 岛当前仍在写（书侧内容身份临时载体），随 QED-071 B 轮迁入 DB 后消失——

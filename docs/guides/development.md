@@ -56,7 +56,7 @@
 | 1 进场读必读 | 读状态快照、台账与相关标准 | 交付任务、定优先级 | [project-status](../trackers/project-status.md)、[todo](../trackers/todo.md)、[standards](../standards/index.md) | `qed-intake` |
 | 2 定级 | 判变更对象与 A/B/C/D 分类，给出方案 | **拍板定级**（未定级不实施） | [AGENTS.md](../../AGENTS.md)、[task-lifecycle](../standards/task-lifecycle.md) | `qed-intake` |
 | 3 立项 | 写 `plans/` 计划 + todo 登记（元数据/章节/关联 Tracker） | **评审计划** | [task-lifecycle](../standards/task-lifecycle.md)、[doc-governance](../standards/doc-governance.md) | `qed-plan` |
-| 4 实现 | 用 code-map 定位模块，先测试后实现（TDD） | 抽查/评审 | [code-map](../architecture/code-map.md)、`design/`、[testing](../standards/testing.md) | `qed-implement` |
+| 4 实现 | 用 code-map 定位模块，先测试后实现（TDD） | 抽查/评审；大任务到 demo 门暂停待人工验收（ADR 0024） | [code-map](../architecture/code-map.md)、`design/`、[testing](../standards/testing.md) | `qed-implement` |
 | 5 验证 | 跑完整门禁，整理证据（测试数字/提交 hash） | **验收** | [testing](../standards/testing.md)、[local-dev](../standards/local-dev.md) | `verification-before-completion`、`qed-frontend-check`（前端条目） |
 | 6 收尾 | 计划两态判定、todo 移 `completed.md`、同步设计/架构/索引 | **确认关闭** | [task-lifecycle](../standards/task-lifecycle.md)、[doc-governance](../standards/doc-governance.md) | `qed-closeout` |
 

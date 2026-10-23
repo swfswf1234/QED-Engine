@@ -13,15 +13,15 @@
 `web-ui/src/components/EChart.test.tsx`、`web-ui/src/pages/Knowledge.test.tsx`、
 `web-ui/src/pages/CourseKnowledge.test.tsx`、`web-ui/src/stores/starMap.test.ts`、
 `tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
-关联 ADR：[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）、
-[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
-关联设计：[frontend-architecture.md](../architecture/frontend-architecture.md)（8903 信息架构与视觉规范）、
-[api-contracts.md](../architecture/api-contracts.md)（学习域端点契约事实源）、
-[database-design.md](../architecture/database-design.md)（知识点两表结构事实源）
+关联 ADR：[ADR 0017](../../../adr/0017-design-doc-structure-contract.md（本文档结构契约与事实源唯一铁律）、
+[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md（前端唯一入口 8900）
+关联设计：[frontend-architecture.md](../../../architecture/frontend-architecture.md（8903 信息架构与视觉规范）、
+[api-contracts.md](../../../architecture/api-contracts.md（学习域端点契约事实源）、
+[database-design.md](../../../architecture/database-design.md（知识点两表结构事实源）
 关联计划：形态演进（首版扇区环布局 → 森林版式）与实施取证由
-[M5 知识点体系与知识梳理星图壳](../history/plans/2026-10/2026-09-30-knowledge-point-star-map.md)承载，关闭后归档
+[M5 知识点体系与知识梳理星图壳](2026-09-30-knowledge-point-star-map.md承载，关闭后归档
 `history/plans/`；本档只写设计态。复习入口（课程节点悬停行的「今日复习 N 条」与课程知识点页
-页头按钮）由 [M2 练习与复习壳](../history/plans/2026-10/2026-09-23-practice-review.md)承载。
+页头按钮）由 [M2 练习与复习壳](2026-09-23-practice-review.md承载。
 
 ## 1. 定位与目标
 
@@ -41,13 +41,13 @@
 - **本档管**：星图页与课程知识点页的信息面、背景层、布局纯函数的几何契约、ECharts graph
   渲染口径、悬停/点击/缩放交互、空态与降级表现。
 - **本档不管**（事实源改指）：
-  - 学习域端点形状、错误码与响应字段 → [api-contracts.md](../architecture/api-contracts.md) 学习域节；
+  - 学习域端点形状、错误码与响应字段 → [api-contracts.md](../../../architecture/api-contracts.md 学习域节；
   - `qed_knowledge_point` / `qed_learn_kp_detail` 两表结构与共享约定 →
-    [database-design.md](../architecture/database-design.md)、
-    [cross-project-contracts.md](cross-project-contracts.md)；
-  - 8903 全局信息架构、路由与视觉 token → [frontend-architecture.md](../architecture/frontend-architecture.md)；
+    [database-design.md](../../../architecture/database-design.md、
+    [cross-project-contracts.md](../../design/cross-project-contracts.md；
+  - 8903 全局信息架构、路由与视觉 token → [frontend-architecture.md](../../../architecture/frontend-architecture.md；
   - 知识点候选池的挖掘/生成链路（GraphRAG 等）→ 未立项，暂不落设计；
-  - 管理后台各页 → [admin-console.md](admin-console.md)、[admin-dashboard.md](admin-dashboard.md)。
+  - 管理后台各页 → [admin-console.md](../../design/admin-console.md、[admin-dashboard.md](../../design/admin-dashboard.md。
 - **非目标**：不做力导向布局（`force`）与自动美化迭代；不引入新的图表/图形依赖（ECharts 按需
   `GraphChart` 已足）；不在图上承载知识点计数以外的业务操作（一切写操作归课程知识点页）。
 

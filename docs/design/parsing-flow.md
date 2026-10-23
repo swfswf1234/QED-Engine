@@ -7,7 +7,7 @@
 关联代码：8902 侧 `Axiom-Flow/src/axiom_flow/orchestrator/pipeline.py`、`Axiom-Flow/src/axiom_flow/engines/mineru.py`、`Axiom-Flow/src/axiom_flow/normalize/blocks.py`、`Axiom-Flow/src/axiom_flow/ingest/artifacts.py`；8900 侧适配层（api/axiom.py、clients/axiom_client.py）的模块映射与 DesignRef 登记在 [code-map.md](../architecture/code-map.md)，面向前端的端点契约事实源为 [api-contracts.md](../architecture/api-contracts.md) §④
 关联测试：`tests/test_api.py`、`tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
 关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）、[ADR 0018](../adr/0018-data-root-whitelist-and-meta-json-ban.md)（数据根顶层白名单与元数据 JSON 岛禁止）
-关联设计：[parsing-ui.md](parsing-ui.md)（界面消费）、[dataset-conventions.md](dataset-conventions.md)（数据根三区与产物版本划分约定正文）、
+关联设计：[parsing-ui.md](frontend/parsing-ui.md)（界面消费）、[dataset-conventions.md](dataset-conventions.md)（数据根三区与产物版本划分约定正文）、
 [local-model-management.md](local-model-management.md)（模型生命周期与槽位）、[llm-gateway.md](llm-gateway.md)（网关与调用记录）、
 [cross-project-contracts.md](cross-project-contracts.md)（三项目对接点总表）
 关联架构：[api-contracts.md](../architecture/api-contracts.md) §④（8900 端点表事实源）、[database-design.md](../architecture/database-design.md)（af_* 登记清单）
@@ -22,7 +22,7 @@
 
 - **目标**：解析能力归属与模型边界（ADR 0014）确立后，全链路职责、版本与状态口径、
   产物格式与降级行为可查、可测、可独立降级；前端界面设计归
-  [parsing-ui.md](parsing-ui.md)。
+  [parsing-ui.md](frontend/parsing-ui.md)。
 - **成功标准**：读者能依据本文档回答——任一解析环节（同步/入库/提交/引擎调用/归一化/
   落盘/读取/编辑）由哪个服务负责；一个 job 从受控到终态经历哪些状态与规则；哪个版本
   生效、如何续跑、空白页算什么；模型服务或任一依赖离线时各环节的行为。
@@ -38,7 +38,7 @@
 | 8902 原生 API 契约（全量端点与形状） | Axiom-Flow `docs/architecture/api.md` 与其契约测试 |
 | `parsed/` 目录布局与产物版本划分约定正文 | [dataset-conventions.md](dataset-conventions.md) |
 | 模型启停/探针/槽位/水位与运维约束 | [local-model-management.md](local-model-management.md) |
-| 前端交互、组件与状态模型 | [parsing-ui.md](parsing-ui.md) |
+| 前端交互、组件与状态模型 | [parsing-ui.md](frontend/parsing-ui.md) |
 
 ## 3. 职责边界
 
@@ -175,7 +175,7 @@ sequenceDiagram
   [api-contracts.md](../architecture/api-contracts.md) §④ 为事实源，本文档不重复维护；
   消费面语义要点：页未解析读取返回 404（非错误）、任务受理后异步推进靠轮询；
 - 超时分层：ingest/源 PDF 流等分钟级透传调用按
-  [parsing-ui.md](parsing-ui.md) §6 登记的超时口径；普通透传走网关默认；
+  [parsing-ui.md](frontend/parsing-ui.md) §6 登记的超时口径；普通透传走网关默认；
 - 模型生命周期：`/models/{name}` 启停/重启、`/monitor/mineru` 等探针、模型槽位与资源互斥归
   [local-model-management.md](local-model-management.md)；解析在飞不重启 vision 槽位的运维
   约束见该文档已知约束节。
@@ -196,7 +196,8 @@ sequenceDiagram
 
 | 场景 | 行为 |
 | --- | --- |
-| 8902 离线 | 8900 数据域端点返回 503，前端降级显示；配置域不受影响 |
+| 8902 离线 | 8900 数据域端点返回 503，前端降级显示；配置域不受影响。**唯一例外＝`GET /parsing/tree`**：该端点吞掉上游错误后仍返 200，书目置空、领域→课程照常出，但信封 `sources.axiom_flow` 显式标 `offline`（DEFECT-015 S3）——故其非空响应本身仍不能证明 8902 在位，判据是 `sources` 而非 HTTP 状态 |
+| `GET /parsing/tree` 空态 | 响应为信封 `{nodes, sources}`：`sources.shared_tables` ∈ `ok`/`empty`、`sources.axiom_flow` ∈ `ok`/`offline`，「共享表为空」与「8902 离线」两种同形空态自此可区分；8903 左树据 `sources` 走 `treeEmptyHint` 分话术显示（DEFECT-015 S3） |
 | 8901 离线 | `POST /books/sync` 返回 503（取数失败），其余端点不受影响 |
 | 模型服务离线 | 提交期 8902 探活失败返回 503 **不创建任务**；受理后故障才逐页失败、job 记 `failed`（`error` 记原因）；只读端点正常；全本分块推进时块间探活失败即止 |
 | 8900 离线 | 前端错误横幅；Axiom-Flow 可经脚本手动启停模型并独立解析（[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md) 决定 5） |

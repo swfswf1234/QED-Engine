@@ -38,7 +38,7 @@
 | `QED_API_SELECT` | 默认模型来源 | `api` | `api`（默认，API key 调用）/ `local`（本地模型）/ `qed-engine`（仅子项目，经 8900 网关）；**槽位未选择时的默认来源**（槽位级运行态 `manifest.source` 优先） |
 | `QED_LLM_GATEWAY_URL` | 网关地址 | `http://127.0.0.1:8900` | 子项目 `qed-engine` 模式读取；api/local 模式忽略 |
 | `QED_LLM_TIMEOUT` | LLM 上游调用超时秒数 | `300` | 网关向文字/视觉/向量上游透传；按需调大 |
-| `QED_LLM_LOCAL_ADAPT` | 本地模型适配层开关 | `true` | ARCH-027-M3：true 时 local 渠道按能力表注入 `response_format`、上游拒绝剥参数单次重试并运行时拉黑；false 全部旁路（回退现行为）。正文见 [llm-gateway.md](llm-gateway.md)「本地模型适配层」节 |
+| `QED_LLM_LOCAL_ADAPT` | 本地模型适配层开关 | `true` | ARCH-027-M3：true 时 local 渠道按能力表注入 `response_format`、上游拒绝剥参数单次重试并运行时拉黑，文字槽位无本地引用时走 A-6 继承兜底（model 留空取单活 runtime 已加载模型）；false 全部旁路（回退现行为）。正文见 [llm-gateway.md](llm-gateway.md)「本地模型适配层」节 |
 | `QED_DATA_ROOT` | 三项目统一数据根目录 | `<进程工作目录>/dataset/` | 解析优先级：**真实环境变量 > 自身 `.env` > 向上走查父目录 `.env` > 内置默认**；顶层布局 `raw\|tmp\|parsed/<领域>/<课程>/`（派生路径表见 [dataset-conventions.md](dataset-conventions.md)）；推荐 `D:\coding\QED-Engine\dataset` |
 | `QED_PROXY` | 本地代理 | 空 | 污染/限流的 archive.org、openlibrary.org 走代理（Clash 默认混合端口 `http://127.0.0.1:7890`） |
 
@@ -97,10 +97,16 @@ api 来源回退槽位厂商默认模型（告警一次，不阻断）。
 | `QED_DB_USER` | 数据库用户 | `root` | — |
 | `QED_DB_PASSWORD` | 数据库密码 | 空 | 密钥类变量，绝不下发、不打印 |
 
-- 映射：Axiom-Flow `AXIOM_MYSQL_*`（存量别名，默认库名随之改为 `qed`，改造后别名退役）；QED-Tracker 服务化轮直接读取本组变量。
+- 映射：子项目**直接读取本组 `QED_DB_*`**，无 `AXIOM_MYSQL_*` 别名（2026-10-17 实核：该前缀在 Axiom-Flow 活源码与 `.env.example` 零命中，只余 `docs/history/` 冻结叙述；原「存量别名」措辞随 BUGFIX-033 更正）。
 - `qed` 库由各项目 Alembic 独立初始化自己的表，互不影响；库面统一现状：MySQL 上仅业务库
   `qed` 与测试库 `qed_test`（隔离真实数据，保留），遗留库已收敛清零（执行与备份记录见
   trackers/completed.md 数据操作行）。
+- 本机联调落点（2026-10-17）：三份 `.env`（根 / QED-Tracker / Axiom-Flow）同钉 `qed_test`，`qed` 已完成同形状结构对齐与关键数据回灌作生产候补。
+- **托管派发即钉库名（DEFECT-015 S1，2026-10-17 已修）**：8900 经控制台/控制中心启动子服务时，把根解析的
+  `QED_DB_*` 五个键显式注入子进程环境；因「真实环境变量」是子项目配置链的最高优先级，经 8900 启动的 8901/8902
+  必然落在根 `.env` 的库上，不再依赖三份 `.env` 写死同一库名。根进程 `os.environ` 不被写脏、不新增环境变量，
+  根 `.env` 仍是唯一配置事实源。绕过 8900 自行用脚本启动的子服务仍走自身 `.env` 链，其库名一致性由
+  `/api/v1/services` 的 `db_name`/`db_source`/`db_mismatch` 透出（见[服务控制设计](service-hosting.md)）。
 - 数据库配置状态由配置中心 `/config/database` 接口暴露（configured/reachable/reason，
   密码不下发），见[配置中心 API 契约](../architecture/api-contracts.md)。
 

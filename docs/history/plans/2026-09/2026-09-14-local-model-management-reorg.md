@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-09-14
 关联 ADR：ADR 0007（前端唯一入口 8900）、ADR 0011（待评审设计先入 plans/）
-关联设计：[local-model-management.md](../../../design/local-model-management.md)、[llm-gateway.md](../../../design/llm-gateway.md)、[api-contracts.md](../../../architecture/api-contracts.md)、[project-configuration.md](../../../design/project-configuration.md)、[admin-console.md](../../../design/admin-console.md)、[code-map.md](../../../architecture/code-map.md)
+关联设计：[local-model-management.md](../../../design/local-model-management.md)、[llm-gateway.md](../../../design/llm-gateway.md)、[api-contracts.md](../../../architecture/api-contracts.md)、[project-configuration.md](../../../design/project-configuration.md)、[admin-console.md](../../../design/frontend/admin-console.md)、[code-map.md](../../../architecture/code-map.md)
 关联 Tracker：docs/trackers/todo.md（PLAN-042、DEFECT-003、ARCH-020）
 归档判定：Merge（设计事实并入 local-model-management.md 等；计划壳 Retain 归档 `history/plans/2026-09/`）
 

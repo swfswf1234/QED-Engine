@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-10
+最后更新：2026-10-18
 确认状态：已确认
 关联代码：`web-ui/`（React 重构版，已接管 8903；后端三服务代码见各自契约文档）
 关联测试：`tests/contract/test_design_documents.py`
@@ -22,15 +22,17 @@
 | LLM 模型（单线路） | 默认档 qwen（主对话/OCR/Embedding 三用途） | 一次只用一条线路，暂不用备用线路（策略与模型名见 [project-configuration.md](project-configuration.md) 模型选择表） | 已用 |
 | 文档解析 | MinerU | 布局识别、公式还原（Axiom-Flow 主选；容器编排迁入根仓库 `scripts/image-model/`） | 已用（local 模式） |
 | 向量数据库 | 未选定 | 学习中心知识问答 RAG 检索（候选评估中） | 规划 |
-| 多 Agent 编排 | 未选定（LangChain 学习中） | 知识问答多 Agent（工具链方向与细化项见 [学习功能现状](../plans/2026-09-10-learning-center-current-state.md)） | 规划 |
+| 多 Agent 编排 | 未选定（LangChain 学习中） | 知识问答多 Agent（工具链方向与细化项见 [学习功能现状](../history/plans/2026-10/2026-09-10-learning-center-current-state.md)） | 规划 |
 | 容器化 | 只进规划不展示 | 依赖托管（[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)） | 规划 |
 
 ## 选型记录
 
 - **FastAPI 三服务统一**：8900/8901/8902 均 FastAPI `/api/v1`，形态一致、契约测试模式统一；
   轻量原生，避免引入重型框架（对比 Flask/Django 的旧评估笔记已随 learning/ 退役，靠 Git 历史找回）。
-- **原生前端无构建**：学习中心与管理后台目前规模可控，静态 SPA 零构建零依赖，浏览器直连后端
-  无代理；框架化（Vue/React）评估延后到学习中心正式建设时（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
+- **前端＝React + Vite 构建链**：8903 为 React 19 + AntD 5 + zustand 单页应用，经 Vite 构建出 `web-ui/dist/`，
+  由 `serve_web.py` 静态托管（ADR 0008）；页面只连 8900，不直连 8901／8902（ADR 0007）。早期「原生 SPA 零构建、
+  框架化评估延后」的结论已作废——框架化评估的落地结论即采用 React + 组件库并引入构建链；前端形态与设计口径见
+  [前端总设计](frontend/frontend-overview.md)。
 - **MySQL 8 共享 qed 库**：三项目数据集中登记与查询，表命名空间隔离保证独立性；见
   [ADR 0003](../history/adr/v0.1/0003-shared-qed-database-independence.md) 与
   [../architecture/database-design.md](../architecture/database-design.md)。

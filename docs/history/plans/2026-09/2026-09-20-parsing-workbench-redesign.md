@@ -6,7 +6,7 @@
 列表数据源=数据库表（af_books）、单页改造、设计先行并入 ARCH-020-D 实现；无实验决策内容）
 最后更新：2026-09-20
 关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow）
-关联设计：[design/parsing-ui.md](../../../design/parsing-ui.md)（本轮设计裁决已并入其正文）、[architecture/api-contracts.md](../../../architecture/api-contracts.md) §④
+关联设计：[design/parsing-ui.md](../../../design/frontend/parsing-ui.md)（本轮设计裁决已并入其正文）、[architecture/api-contracts.md](../../../architecture/api-contracts.md) §④
 关联 Tracker：ARCH-020-WB（本计划镜像行）、ARCH-020-D（实现承接）、ARCH-020-B（`POST /books/{id}/ingest` 透传升为高优先）、PLAN-044（parse-jobs `pages` 契约），镜像见 [docs/trackers/todo.md](../../../trackers/todo.md)
 归档判定：Retain（设计裁决已并入 design/parsing-ui.md；D 轮实现完成后计划壳归档）
 

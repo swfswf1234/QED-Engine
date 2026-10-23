@@ -3,7 +3,9 @@
 状态：In Progress
 任务类型：B
 最后更新：2026-10-18
-关联 ADR：无新增（重划分为台账裁决；登记方式沿用 [ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md) 一任务一行一壳）
+关联 ADR：[ADR 0026](../adr/0026-v1-root-table-family-freeze.md)（2026-10-21 改判：本链第二环「链路编译」
+整链退役，见「目标」节注记）、[ADR 0016](../adr/0016-todo-registration-one-task-one-plan.md)
+（一任务一行一壳；重划分本身为台账裁决，无新增决策）
 关联设计：[api-contracts.md](../architecture/api-contracts.md)（学习域契约承接位）、
 [frontend-architecture.md](../architecture/frontend-architecture.md)（消费面指针，界面实施归 M1 壳）
 关联 Tracker：docs/trackers/todo.md（ARCH-027 任务行＝主链路主任务；模块支线行 ARCH-027-M1~M4 各配固定壳；本壳承接原 ARCH-022 第五轮、原 ARCH-026/PLAN-051 渲染线与 REQ-089 第二批调研收口）
@@ -22,6 +24,16 @@
 课程素材的检索/下载归 QED-Tracker（ARCH-024 线）、知识整理归 Axiom-Flow（ARCH-025 线）。
 主链路＝一门课从进到完的闭环驱动：**课程注册（引用式）→ 链路编译（两级确认→块序列）→
 块学习推进 → 判分与掌握门 → 派生进度与结课**。本壳承载该状态机与 8900 学习域数据契约本身。
+
+> **2026-10-21 主链第二环改判（[ADR 0026](../adr/0026-v1-root-table-family-freeze.md) D2／[REQ-137](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md)）**：
+> 「链路编译（两级确认→块序列）」**整环退役**，其承载表 `qe_unit` 与编译／单元两端点族一并退出；
+> 「块学习推进」随之改称「**知识点推进**」。学习序列的正本＝共享主表知识点树（`node_kind`／
+> `parent_kp_id`／`depth`）＋课程行 `qe_learning.config.kp_path` 的 `kp_id` 有序数组。
+> 判据＝`qe_unit.payload` 现网只装 M-1 骨架占位串、8903 零渲染点，且知识生产已归 Axiom-Flow。
+> **M-1 的「课程注册（引用式）」与 M-3 的「判分与掌握门→派生进度与结课」两环保留**，只换读源
+> （进度表改 `qe_learning` 的 kp 行、到期计数改作答流水重放）；M-2 的编译承接面随第二环退役失效，
+> 出题与复习面不受影响。**本轮只落判定，代码与 DDL 未动**——M-1/M-2/M-3 三子壳在 REQ-137
+> W1 之前不为退役表新增写入。
 
 **成功标准正本在台账行**（ADR 0023）：验收判据逐条见[任务台账](../trackers/todo.md)
 `ARCH-027` 行的「成功标准」列（行内 S1~S5，S5＝M-1/M-2/M-3 三子壳各自收口），本壳不复制

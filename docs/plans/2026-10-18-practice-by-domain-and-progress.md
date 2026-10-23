@@ -25,7 +25,7 @@
 
 **目标**：把课后练习面（`#/practice`）的组织轴从「选一门课 → 该课全量题卡」改为
 **「按领域组织 ＋ 跟随学习者实际学习进度」**：练习的选题范围、题卡列表与到期队列由学习者在
-课程学习面真正读过的知识点（`qe_learn_unit` 的 point 行勾选态）与其所属领域算出，而不是把整门课的
+课程学习面真正读过的知识点（`qe_unit` 的 point 行勾选态）与其所属领域算出，而不是把整门课的
 题库一次性铺出来；同时把该面**对齐站点整体风格**（REQ-117 定档的页头三件套、无进度徽章、
 左栏两档左缘、文案净化与降级话术口径），并按参照项目的实践重审「到期复习队列＋错题本」的形态。
 
@@ -43,9 +43,18 @@
 | 到期队列与错题本 | `GET /learn/review/due?course=&max_tasks=`（服务端 1..100），与错题本同屏两段，无 Tabs、不新开路由 | `api-contracts.md` 的 `GET /learn/review/due` 行、设计正本 §3/§6 |
 | 题源归属 | 课级：面内无章/节选择器，入库 `kp_id` 可选留空；课程归属由服务端定（现网 `qt_books.course_id` 全空，2026-10-07 真机核验） | 设计正本 §3 题源工作区行、§4「课程归属在服务端定」 |
 | 明确的既有非目标 | 「不做跨课程合并队列（按课选择）」与「不改服务端练习域契约（端点、三表、判分与调度语义冻结）」 | 设计正本 §2 非目标段 |
-| 练习域三表 | `qe_learn_question` / `qe_learn_attempt` / `qe_learn_review_task`（前缀 2026-10 起为 `qe_learn_*`，端点表 `api-contracts.md` §⑥ 为形状事实源） | `backend/qed_engine/services/learn/`、`database-design.md` 学习表族节 |
-| 学习进度事实源 | 课程学习面的 point 行推进＝`POST …/progress` 写 `qe_learn_unit_progress`（`status ∈ done/skipped/pending`），派生进度按 point 行计数；练习面目前**不读**该进度 | `docs/design/frontend/learning-course-ui.md` §V2.3 对应正文（REQ-117 归档壳 §V2.3 为裁决沿革） |
+| 练习域三表 | `qe_question` / `qe_attempt` / `qe_review_task`（2026-10-21 REQ-132 W1 定档改名，此前代码名为 `qe_learn_*`、更旧文档写 `qed_learn_*`；端点表 `api-contracts.md` §⑥ 为形状事实源） | `backend/qed_engine/services/learn/`、`database-design.md` 学习表族节 |
+| 学习进度事实源 | 课程学习面的 point 行推进＝`POST …/progress` 写 `qe_unit_progress`（`status ∈ done/skipped/pending`），派生进度按 point 行计数；练习面目前**不读**该进度 | `docs/design/frontend/learning-course-ui.md` §V2.3 对应正文（REQ-117 归档壳 §V2.3 为裁决沿革） |
 | 领域坐标 | 学习课程行带 `domain_ref`/`course_ref`/`direction` 三引用；知识点主表按「领域 → 课程 → 知识点」三层；知识探索面 `#/knowledge` 已按领域组织 | `docs/plans/2026-09-22-learning-design-mainline.md` 表契约段、`docs/design/frontend/knowledge-point-exploration-ui.md` |
+
+> **2026-10-21 改判注记（ADR 0026／[REQ-137](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md) 判定批，执行未落地）**：
+> 上表三行的形状已被更上层定档覆盖——`qe_review_task` 与 `qe_unit_progress` **整表退出**（练习域三表
+> 收为两表 `qe_question`／`qe_attempt`，调度态改由作答流水重放派生；学习进度事实源改
+> `qe_learning` 的 `target_kind='kp'` 行），`qe_question` 退 `unit_id`／`learn_course_id`／`course_label`
+> 三列、`qe_attempt` 加 `owner` 并退 `score_trend`、`resolved` 改判纯人工位。
+> **本轮「不改服务端练习域契约」的非目标据此收窄**＝端点与响应字段名仍冻结（`score_trend`／
+> `resolved` 读时派生后原样回传），但**表与列面不再冻结**。本轮若开工，凡触上述表的读写须按目标态
+> 排到 REQ-137 W1 之后，或先与用户确认是否照旧写退役表。
 
 **已探明的参照项目**＝`D:\coding\demo_program\DeepTutor`（第三方开源，只读参照、不引入依赖）。
 其在主链判定表已有初判三条（L2 确定性判分、L3 间隔复习＋错题双写题库、L6 出题三向位），

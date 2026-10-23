@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-09-11
 关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
-关联设计：[downloads-ui.md](../../../design/downloads-ui.md)、[downloads-flow.md](../../../design/downloads-flow.md)、[api-contracts.md](../../../architecture/api-contracts.md)
+关联设计：[downloads-ui.md](../../../design/frontend/downloads-ui.md)、[downloads-flow.md](../../../design/downloads-flow.md)、[api-contracts.md](../../../architecture/api-contracts.md)
 关联 Tracker：docs/trackers/todo.md（PLAN-039、ARCH-019、REQ-068）
 归档判定：Merge（设计事实并入 downloads-ui.md 与 api-contracts.md，计划壳 Retain 归档 `../history/plans/2026-09/`）
 

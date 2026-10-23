@@ -22,16 +22,16 @@
 `web-ui/src/exerciseParse.test.ts`、`web-ui/src/stores/practice.test.ts`、
 `web-ui/src/components/practice`（四组件用例）、`web-ui/src/components/StarMapGraph.test.ts`、
 `tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
-关联 ADR：[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）、
-[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）
+关联 ADR：[ADR 0017](../../../adr/0017-design-doc-structure-contract.md（本文档结构契约与事实源唯一铁律）、
+[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md（前端唯一入口 8900）
 关联设计：[learning-star-map.md](learning-star-map.md)（星图与课程知识点页＝本工作台的上游入口）、
-[parsing-ui.md](parsing-ui.md)（§9 双栏对照与 §9.1 版式重排版＝中栏渲染组件的复用源）、
-[api-contracts.md](../architecture/api-contracts.md)（学习域端点契约事实源）、
-[database-design.md](../architecture/database-design.md)（知识点两表与 `node_kind` 层级结构事实源）、
-[frontend-architecture.md](../architecture/frontend-architecture.md)（8903 信息架构与「只连 8900」）
+[parsing-ui.md](../../design/parsing-ui.md（§9 双栏对照与 §9.1 版式重排版＝中栏渲染组件的复用源）、
+[api-contracts.md](../../../architecture/api-contracts.md（学习域端点契约事实源）、
+[database-design.md](../../../architecture/database-design.md（知识点两表与 `node_kind` 层级结构事实源）、
+[frontend-architecture.md](../../../architecture/frontend-architecture.md（8903 信息架构与「只连 8900」）
 关联计划：立项与实施取证由
-[M6 书籍目录知识点树与三栏学习工作台壳（已归档）](../history/plans/2026-10/2026-10-01-toc-knowledge-tree-and-learn-workbench.md)（三栏与信息面、目录解析、批注闭环）与
-[M2 练习与复习壳](../history/plans/2026-10/2026-09-23-practice-review.md)（§8/§9 的题源、抽取、判分回显与复习入口口径）承载，
+[M6 书籍目录知识点树与三栏学习工作台壳（已归档）](2026-10-01-toc-knowledge-tree-and-learn-workbench.md（三栏与信息面、目录解析、批注闭环）与
+[M2 练习与复习壳](2026-09-23-practice-review.md（§8/§9 的题源、抽取、判分回显与复习入口口径）承载，
 关闭后归档 `history/plans/`；本档只写设计态。
 
 ## 1. 定位与目标
@@ -61,17 +61,17 @@
   目录页文本 → 章/节树的解析规格与确认写面、批注登记的字段与闭环、练习面的题源选择与
   抽取/确认/入库/作答口径、本章复习队列与错题本人工位的呈现、空态与降级矩阵。
 - **本档不管**（事实源改指）：
-  - 端点形状、错误码与响应字段 → [api-contracts.md](../architecture/api-contracts.md) 学习域节；
+  - 端点形状、错误码与响应字段 → [api-contracts.md](../../../architecture/api-contracts.md 学习域节；
   - `qed_knowledge_point` / `qed_learn_kp_detail` 两表结构与 `node_kind`/`parent_kp_id`/`source_ref` 列语义，
     以及练习三表（`qed_learn_question`/`attempt`/`review_task`）结构
-    → [database-design.md](../architecture/database-design.md)；
+    → [database-design.md](../../../architecture/database-design.md；
   - **判分阈值与复习间隔序列表的取值**（choice/short/open 三型阈值、`kp_type` 五档间隔）
     → 服务端事实源（`services/learn/grading.py`、`services/learn/practice.py`）与其契约行，
     UI 只消费 `is_correct/method/score_trend/review` 字段，**不在界面复制任何阈值**；
   - 版式重排规则本体（字号阶梯、标题级差、目录启发式、符号表三列）→
-    [parsing-ui.md](parsing-ui.md) §9.1 与 `web-ui/src/components/parsing/typography.ts`；
+    [parsing-ui.md](../../design/parsing-ui.md §9.1 与 `web-ui/src/components/parsing/typography.ts`；
   - 星图版式与图元 → [learning-star-map.md](learning-star-map.md)；
-  - 解析产物的生成与版本激活 → [parsing-flow.md](parsing-flow.md)。
+  - 解析产物的生成与版本激活 → [parsing-flow.md](../../design/parsing-flow.md。
 - **非目标**：
   - **不做模型生成**：批注与候选的叙述一律人工书写，界面不提供「生成」按钮；
     模型生成候选属学习域后续设计面，其落点是候选池同一张表，不改变本界面的字段口径。
@@ -351,7 +351,7 @@
   界面原样透传该提示，不做前端预检。
 - **块内容口径**：链路模式的单元按其 `source_ref` 页窗懒取该书当前生效版本的解析产物，复用
   `BlockList renderMode="layout"`（与阅读模式同一渲染基线，规则见
-  [parsing-ui.md](parsing-ui.md) §9/§9.1）；image 块用整页页图 + `bbox` 内联裁切
+  [parsing-ui.md](../../design/parsing-ui.md §9/§9.1）；image 块用整页页图 + `bbox` 内联裁切
   （`pageImageUrl` 入参，parsing-ui §9），无地址或无 bbox 回退题注文字。
 - **推进语义（勾选式）**：「学完」由学习者勾选 → `POST …/progress`（`done`/`skipped`/`pending`）
   ＋ `PATCH /learn/units/{id}` 的 `covered`；服务端不自动推进，界面不复制掌握门与判分逻辑。

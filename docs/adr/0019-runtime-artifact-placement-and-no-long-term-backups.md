@@ -97,7 +97,7 @@
   [服务托管设计](../design/service-hosting.md)（单元日志路径口径）、
   [api-contracts.md](../architecture/api-contracts.md)（`/logs/{service}` 与 `/services` 的 `log_path`）。
 - 本决定执行载体：任务壳
-  [运行时产物与备份面规范化](../plans/2026-09-29-runtime-artifact-placement-round.md)
+  [运行时产物与备份面规范化](../history/plans/2026-09/2026-09-29-runtime-artifact-placement-round.md)
   （含 `/logs` 陈旧读路径 DEFECT 行与清理执行记录）。
 - 前序裁决：[ADR 0018](0018-data-root-whitelist-and-meta-json-ban.md)（数据根顶层白名单与
   `backups/` 例外区）、[ADR 0013](0013-dev-standards-system.md)（存储规范设立）、

@@ -2,15 +2,15 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-10-21
-需求方：QED-Engine（根私有 `qe_*` 七表 + `qed_knowledge_point` + `qed_llm_calls`）、QED-Tracker（受托建表的 `qed_domain`/`qed_course`、私有 `qt_*` 五表）、Axiom-Flow（私有 `af_*` 五表）
+最后更新：2026-10-22
+需求方：QED-Engine（根私有 `qe_*` 三表 + `qed_knowledge_point` + `qed_llm_calls`）、QED-Tracker（受托建表的 `qed_domain`/`qed_course`、私有 `qt_*` 五表）、Axiom-Flow（私有 `af_*` 四表）
 确认状态：已确认
-关联代码：`backend/qed_engine/services/learn/base.py`、`backend/qed_engine/services/learn/knowledge.py`、`backend/qed_engine/services/learn/practice.py`（八张根侧表的可执行 DDL；第九张 `qed_llm_calls` 的 DDL 归属 LLM 网关模块，见五章该表小节）、`QED-Tracker/src/qed_tracker/db/models.py`（`qed_domain`/`qed_course` 形状事实源）、`QED-Tracker/src/qed_tracker/db/schema.py`（受托建表面 `ensure_schema`）、`.env.example`（`QED_DB_*` 变量模板）
+关联代码：`backend/qed_engine/services/learn/base.py`、`backend/qed_engine/services/learn/knowledge.py`、`backend/qed_engine/services/learn/practice.py`（本文正本 7 张表中四张的可执行 DDL；第五张 `qed_llm_calls` 的 DDL 归属 LLM 网关模块 `services/llm/call_log.py`，见五章该表小节）、`QED-Tracker/src/qed_tracker/db/models.py`（`qed_domain`/`qed_course` 形状事实源）、`QED-Tracker/src/qed_tracker/db/schema.py`（受托建表面 `ensure_schema`）、`.env.example`（`QED_DB_*` 变量模板）
 关联测试：`tests/contract/test_architecture_documents.py`、`tests/test_learn.py`、`tests/test_learn_knowledge.py`、`tests/test_learn_practice.py`、`tests/test_llm_call_log.py`
-关联 ADR：`docs/history/adr/v0.1/0003-shared-qed-database-independence.md`、`docs/history/adr/v0.1/0009-shared-qed-tables.md`、`docs/history/adr/v0.1/0010-documentation-versioning.md`、`docs/adr/0014-parsing-ownership-and-model-boundary.md`、`docs/adr/0017-design-doc-structure-contract.md`、`docs/adr/0024-preschema-rebuild-tiers-and-demo-gate.md`、`docs/adr/0025-database-design-master-doc-and-ddl-ownership.md`
+关联 ADR：`docs/history/adr/v0.1/0003-shared-qed-database-independence.md`、`docs/history/adr/v0.1/0009-shared-qed-tables.md`、`docs/history/adr/v0.1/0010-documentation-versioning.md`、`docs/adr/0014-parsing-ownership-and-model-boundary.md`、`docs/adr/0017-design-doc-structure-contract.md`、`docs/adr/0024-preschema-rebuild-tiers-and-demo-gate.md`、`docs/adr/0025-database-design-master-doc-and-ddl-ownership.md`、`docs/adr/0026-v1-root-table-family-freeze.md`
 
 > 本文件是三个项目共用的 MySQL 库（业务库 `qed`、工作库 `qed_test`）的**数据库总设计正本**：
-> 全库表清单与所有权、命名空间与访问拓扑、跨族数据主线、关系视图、读写矩阵、本文正本 11 张表的
+> 全库表清单与所有权、命名空间与访问拓扑、跨族数据主线、关系视图、读写矩阵、本文正本 7 张表的
 > 逐列定义与建表语句、他项目表族的同步契约，以及数据库变更与运维规范。`qt_*`／`af_*` 两族的列级
 > 内容仍在其各自仓库文档，本文只做总览登记与路由。
 > 本文是稳定文档：正文只写已确定的事实与规则，不写裁决过程与编号引用；一次性事实（库内现状、
@@ -27,20 +27,25 @@
 ——登记、状态、进度、评价、课程体系、任务与调用账一律入库，`meta/` JSON 文件不再是事实源。数据库
 因此不是某个服务的私事，而是三项目之间唯一持久的共享面。
 
-全库 **21 张表**按功能域分七组（表族归属、逐表功能与结构事实源见第三章）：
+全库 **16 张表**按功能域分五组（表族归属、逐表功能与结构事实源见第三章）：
 
 | 功能域 | 承载表 |
 | --- | --- |
 | 课程与知识体系 | `qed_domain`、`qed_course`、`qed_knowledge_point` |
-| 学习主链 | `qe_learn_course`、`qe_learn_unit`、`qe_learn_unit_progress` |
-| 知识点生产管线 | `qe_learn_kp_detail` |
-| 练习与复习 | `qe_question`、`qe_attempt`、`qe_review_task` |
+| 课程学习 | `qe_learning` |
+| 课后练习与复习 | `qe_question`、`qe_attempt` |
 | 书目与下载 | `qt_knowledge`、`qt_books`、`qt_sources`、`qt_tasks`、`qt_selections` |
-| 解析产物 | `af_books`、`af_parse_jobs`、`af_pages`、`af_block_edits`、`af_page_regions` |
+| 解析产物与知识点梳理 | `af_books`、`af_operations`、`af_pages`、`af_kp` |
 | 运行账目 | `qed_llm_calls` |
 
+功能域与用户可见功能一一对上：**知识探索**只由三张共享表承载（领域表、课程表、知识点表），
+**课程学习**由 `qe_learning` 一张承载（选课与学习路径、知识点终态与质性门），**课后练习**由
+`qe_question`（题库）与 `qe_attempt`（作答事实）两张承载；练习与复习的到期队列是 `qe_attempt`
+流水的读时重放，不另立调度表。知识点的生成与梳理工作区在 Axiom-Flow（`af_kp`），根侧只留
+「拉取已确认知识点 → 写共享主表」一条提升面。
+
 本文**负责**的粒度：表清单与表族归属、列名与列序、SQL 类型与宽度、可空性与默认值语义、列注释与
-表注释、索引与约束，以及本文正本 11 张表的建表语句——改动其中任一项即须同批改本文。本文**不负责**
+表注释、索引与约束，以及本文正本 7 张表的建表语句——改动其中任一项即须同批改本文。本文**不负责**
 迁移执行编排、运行时连接配置与凭据、数据搬迁与回填脚本、端点契约与错误码、业务状态机与终态写点
 矩阵、文件与目录布局：这些各有事实源，规范细则与指针统一落在第六章（同步契约）与第七章（变更与
 运维）。三条硬边界恒定：8903 前端不直连数据库、一律经 8900 API；`qt_*`／`af_*` 两族的列级内容不进
@@ -57,7 +62,7 @@
 | R3 | 共享表变更先经根登记 | `qed_*` schema 变更须先改本文与接口契约、通知消费方，再由所有权方执行迁移 |
 | R4 | 逻辑引用不建跨命名空间外键 | 跨表族引用由应用层维护；同命名空间内允许物理外键 |
 | R5 | 只引用不复制 | 领域／课程／书目／教程／解析版本一律存 `ref_id` + `label` 快照，素材 `kind` 闭集 `book`/`af_version`/`knowledge` |
-| R6 | 人工位机器不写 | `confirmed`（两级确认）、`covered`（学习者勾选）、`retired`（题目退役）、`bookmarked`（错题收藏）只由人工置位 |
+| R6 | 人工位机器不写 | `retired`（题目退役）、`bookmarked`（错题收藏）、`resolved`（错题人工处置）、`learner_note` 与 `qualitative_*`（学习者自评位）只由人工置位；知识点梳理的确认位在 Axiom-Flow `af_kp.confirmed`，根侧「写入主表」这一动作即承载确认 |
 | R7 | `meta` 扩展槽三红线 | 只读不筛（不进 `WHERE`／不建函数索引／不参与唯一键）、不放密钥与个人信息、不放跨项目契约字段；定档后升实体列并清空对应键 |
 | R8 | 主键不可变 | `domain_id`／`course_id`／`kp_id` 一经写入不得改值——下游四族按 ID 逻辑串接 |
 | R9 | 存储与字符集 | `ENGINE=InnoDB`、`CHARSET=utf8mb4`；根侧 DDL 一律显式声明库默认 `COLLATE=utf8mb4_0900_ai_ci`，不声明与共享族分裂的排序规则 |
@@ -68,26 +73,21 @@
 ## 三、全库总览
 
 表族顺序＝**共享 `qed_*` → 根私有 `qe_*` → `af_*` → `qt_*`**（本项目自视角，前缀即所有权＝R1，
-阅读顺序即变更权重）。共 **21 张表**：共享 4 + 根私有 7 + `af_*` 5 + `qt_*` 5。
+阅读顺序即变更权重）。共 **16 张表**：共享 4 + 根私有 3 + `af_*` 4 + `qt_*` 5。
 
 | 表名 | 表类型 | 表功能与负责范围 | 备注 | 结构事实源指针 |
 | --- | --- | --- | --- | --- |
 | `qed_domain` | 共享 | 一个学科领域（当前仅 math，预留扩展）；含学习阶段顺序与领域探索门面态 | 受托建表：所有权与可执行面在 QED-Tracker；生产库 `meta` 居物理末位、`domain_id` 现状 VARCHAR(32) | `QED-Tracker/src/qed_tracker/db/models.py::QedDomain`（本文＝设计正本） |
 | `qed_course` | 共享 | 一门课程：阶段、先修 DAG、别名、学习顺序；取代 `courses/math.json` | 受托建表；根侧 `exploration_stage` 在线优先经 8901 写、不可达时降级直写（见 7.8 T6） | `QED-Tracker/src/qed_tracker/db/models.py::QedCourse` |
-| `qed_knowledge_point` | 共享 | 一个**已确认**知识点或目录节点（outline/point 两级层级主数据） | 结构由根定义；本表**不存确认位**（能进即已确认）；`type` 四分类只描述 point 行 | 本文五章 + 可执行 DDL `backend/qed_engine/services/learn/knowledge.py` |
+| `qed_knowledge_point` | 共享 | 一个**已确认**知识点或目录节点（outline/point 两级层级主数据）；25 列 | 结构由根定义；本表**不存确认位**（能进即已确认）；`type` 四分类只描述 point 行；`aliases`（别名，权威名仍在 `name`）／`narrative_ref`（长文正文指针，存**数据根相对路径全串**）／`angles`（多角度叙述索引，`angle` 闭集六词）三列为 v1.0 定档追加 | 本文五章 + 可执行 DDL `backend/qed_engine/services/learn/knowledge.py` |
 | `qed_llm_calls` | 共享 | 一次 LLM 调用记录（完整输入输出、耗时、成败、审核态） | 三项目均可写；有外部写方，**绝不 DROP 重建**（ADR 0024 例外档） | 本文五章 + 可执行 DDL `backend/qed_engine/services/llm/call_log.py` |
-| `qe_learn_course` | 根私有 | 一门学习课程：引用式注册 + 坐标三引用 + 素材引用 + 编译作业态自 carry | 表名待定档 `qe_course_state`（REQ-132 W2）；生产 `qed` 库内尚未建表 | 本文五章 + `backend/qed_engine/services/learn/base.py` |
-| `qe_learn_unit` | 根私有 | 单元树一个节点：章节大纲与块序列合一（最深三级），带人工位与断点位 | 表名待定档 `qe_unit`（REQ-132 W2）；`qed_test` 内旧名 `qed_learn_unit` 仍并存 | 同上 |
-| `qe_learn_unit_progress` | 根私有 | 一个单元的终态学习事实行，进度读时派生重算的基座 | 表名待定档 `qe_unit_progress`（REQ-132 W2）；与单元分表是为重编译换代不丢学习记录 | 同上 |
-| `qe_learn_kp_detail` | 根私有 | 一条候选叙述/版本：知识点生成待选明细池，确认后才提升 | 表名待定档 `qe_kp_detail`（REQ-132 W2）；8901/8902 不读；确认位只活在本池 | `backend/qed_engine/services/learn/knowledge.py` |
-| `qe_question` | 根私有 | 一道题或一张卡：题面 + 服务端判分依据 + 题源溯源 + 产出事实 | 表名已定档（REQ-132 W1 落地）；`expected_answer` 不进题面下发响应；生产 `qed` 库内尚未建表（见 7.8 T3） | `backend/qed_engine/services/learn/practice.py` |
-| `qe_attempt` | 根私有 | 一次作答事实：作答原文 + 判分结果 + 趋势 + 错题本工位 | 表名已定档（同上）；幂等唯一键 `(question_id, review_date, origin)` | 同上 |
-| `qe_review_task` | 根私有 | 一个间隔复习调度态：题粒度与知识点粒度双行 | 表名已定档（同上）；优先级不落列（读时派生） | 同上 |
-| `af_books` | AF 私有 | 一册已验证书：`qt_books` 只读快照 + 哈希/ingest/解析进度 + 生效版本指针 | 列级内容由 Axiom-Flow 承载（后续批次晋升） | `Axiom-Flow/docs/architecture/database-design.md` |
-| `af_parse_jobs` | AF 私有 | 一次解析任务＝一个解析版本：逐页/全本的状态与进度 | 同上 | 同上 |
-| `af_pages` | AF 私有 | 一个解析版本一页的解析状态与质量信号 | `job_id='legacy'` 是根视图存量哨兵，非真实版本行 | 同上 |
-| `af_block_edits` | AF 私有 | 一次块级人工编辑：判定/备注/文字/范围，绑定其解析版本 | 同上 | 同上 |
-| `af_page_regions` | AF 私有 | 一页上人工声明的一条**结构意图**（新框/删块/并块），跨版本存活 | 刻意无 `job_id`：页级区域是解析输入而非解析产物 | 同上 |
+| `qe_learning` | 根私有 | 学习记录单表（13 列）：`target_kind='course'` 行＝选课与学习路径顺序，`target_kind='kp'` 行＝知识点终态与质性门 | **课程无独立 ID**——course 行的 `target_id` 直引共享 `qed_course.course_id`；学习路径是 course 行 `config.kp_path` 的 `kp_id` 有序数组；进度百分比、结课态与掌握分一律读时重算不落列；`owner` 为多学习者扩展位（v1.0 恒 `admin`） | 本文五章 + `backend/qed_engine/services/learn/base.py` |
+| `qe_question` | 根私有 | 一道题或一张卡（24 列）：题面 + 服务端判分依据 + 题源溯源 + 产出事实 | 表名已定档（REQ-132 W1 落地）；`expected_answer` 不进题面下发响应；题源只留 `book_ref` + `source_ref`，课程名读时从共享表取；**不加 `owner`**——题库是内容、跨学习者共享，分账由作答表承担；生产 `qed` 库内尚未建表（见 7.8 T3） | `backend/qed_engine/services/learn/practice.py` |
+| `qe_attempt` | 根私有 | 一次作答事实（14 列）：作答原文 + 判分结果 + 错题本工位 | 幂等唯一键 `(owner, question_id, review_date, origin)`；趋势与到期档位都是本表全量流水的确定性重放，读时派生不落列；`resolved` 与 `bookmarked` 为纯人工位（R6） | 同上 |
+| `af_books` | AF 私有 | 一册已验证书：`qt_books` 只读快照 + 哈希/ingest/解析进度 + 生效版本指针 | 列级内容由 Axiom-Flow 承载；`af_*` 四表形状由对方 PLAN-024 定档，其库内重建窗口未执行（见 7.8 T11） | `Axiom-Flow/docs/architecture/database-design.md` |
+| `af_operations` | AF 私有 | 一条事件明细：解析、人工编辑、结构意图与审阅判定全量入本表（单表事件流） | 同上 | 同上 |
+| `af_pages` | AF 私有 | 一个解析版本一页的解析状态、质量信号与产物指针 | 同上；`job_id='legacy'` 是根视图存量哨兵，非真实版本行 | 同上 |
+| `af_kp` | AF 私有 | 一个知识点节点：梳理工作区、去重谱系与长文正文文件指针 | 同上；根侧经 HTTP 单向拉取已确认行提升进共享主表 | 同上 |
 | `qt_knowledge` | Tracker 私有 | 一套教程（tutorial）或课程延展资料归类（other_material），两态 draft→confirmed | 与共享 `qed_knowledge_point` **语义不同且无引用关系**（命名避让见五章） | `QED-Tracker/docs/architecture/database-private-tables.md` |
 | `qt_books` | 私有书目 | 一册/一本书：选用态 + 持有态 + 下载生命周期（QED-060） | 根侧经 8901 API 透传消费，不直连 | 同上 |
 | `qt_sources` | Tracker 私有 | 一次下载渠道尝试（挂 `book_id`），ok 标达成败 | `book_id` 宽度与 `qt_books.book_id` 主键宽度不匹配（见 7.8） | 同上 |
@@ -108,9 +108,9 @@ flowchart LR
     TRK["8901 QED-Tracker"]
     AF["8902 Axiom-Flow"]
     QED[("qed_* 共享四表")]
-    QE[("qe_* 根私有七表")]
+    QE[("qe_* 根私有三表")]
     QT[("qt_* Tracker 私有五表")]
-    AFT[("af_* AF 私有五表")]
+    AFT[("af_* AF 私有四表")]
 
     UI -->|"HTTP：唯一数据入口"| ROOT
     ROOT -->|"直连：所有权＋幂等建表"| QE
@@ -141,35 +141,37 @@ flowchart LR
 | 阶段 | 写入表 | 交给下游的引用键 | 只引用不复制的表现 |
 | --- | --- | --- | --- |
 | 发现与下载（8901） | `qt_knowledge`、`qt_books`、`qt_sources` | `qt_books.book_id`（`verified` 态才算可解析书目） | 渠道尝试与任务各自留痕，不改书目主行语义 |
-| 解析与版本（8902） | `af_books`、`af_parse_jobs`、`af_pages`、`af_block_edits`、`af_page_regions` | `af_books.book_id` 同源快照 ＋ `job_id` 版本作用域 | `af_books` 只存 `qt_books` 的只读快照，不回写对方 |
-| 知识体系（8900） | `qed_knowledge_point`（outline/point）、`qe_learn_kp_detail`（候选池） | `kp_id`、`book_ref`（取书目级稳定 ID） | 候选确认后才提升主表；解析版本换代不碎知识点树 |
-| 学习课程（8900） | `qe_learn_course`、`qe_learn_unit`、`qe_learn_unit_progress` | `learn_course_id`、`unit_id` | `domain_ref`/`course_ref` 存 `{ref_id,label}` 快照，对方改值不回溯 |
-| 练习与复习（8900） | `qe_question`、`qe_attempt`、`qe_review_task` | `question_id`、`kp_id` | 题面只存 `book_ref` ＋ `source_ref{page,block_indexes}`，不存书目列 |
+| 解析与梳理（8902） | `af_books`、`af_operations`、`af_pages`、`af_kp` | `af_books.book_id` 同源快照 ＋ `job_id` 版本作用域 ＋ `af_kp.node_id` | `af_books` 只存 `qt_books` 的只读快照，不回写对方；长文正文落文件、表内只存指针 |
+| 知识体系（8900） | `qed_knowledge_point`（outline/point 单表两级） | `kp_id`、`book_ref`（取书目级稳定 ID） | 8900 单向拉取对方已确认知识点写入本表；解析版本换代不碎知识点树 |
+| 课程学习与课后练习（8900） | `qe_learning`、`qe_question`、`qe_attempt` | `target_id`（course 行＝`qed_course.course_id`、kp 行＝`kp_id`）与 `question_id` | 题面只存 `book_ref` ＋ `source_ref{page,block_indexes}`，不存书目列；学习记录只存 `target_id`，不存课程名与知识点名快照 |
 | 全程账目（三项目） | `qed_llm_calls` | 无入向引用（`service`/`task`/`step` 自描述） | 独立审计账，只追加不改写 |
+
+血缘仍是单向，且**跨界引用键只有两个**（`course_id`、`kp_id`）：知识点梳理与长文正文的正本在
+Axiom-Flow（`af_kp` + 数据根 `parsed/**` 文件），根侧只经 HTTP 单向拉取已确认行写入共享主表，
+`narrative_ref` 是指针而非正文（不入列内容、不入 `meta`）；间隔复习不是独立一跳，而是
+`qe_attempt` 流水的读时重放。
 
 ### 4.3 关系视图
 
 连线＝**逻辑引用**（应用层维护，跨命名空间不建外键；同命名空间内允许物理外键，如
-`qt_sources`→`qt_books`）。按正本域与他项目域分两图，避免 21 节点单图不可读。
+`qt_sources`→`qt_books`）。按正本域与他项目域分两图，避免 16 节点单图不可读。
 
-**图 A：本文正本域（共享四表 ＋ 根私有七表）**
+**图 A：本文正本域（共享四表 ＋ 根私有三表）**
 
 ```mermaid
 erDiagram
     qed_domain ||--o{ qed_course : "domain_id"
     qed_domain ||--o{ qed_knowledge_point : "domain_id 坐标"
     qed_course ||--o{ qed_knowledge_point : "course_id 坐标"
-    qed_knowledge_point }o--o| qe_learn_kp_detail : "from_detail_id 提升来源"
-    qe_learn_kp_detail }o--o| qed_knowledge_point : "parent_kp_id 所属 outline"
-    qed_domain ||--o{ qe_learn_course : "domain_ref 快照引用"
-    qed_course ||--o{ qe_learn_course : "course_ref 快照引用"
-    qe_learn_course ||--o{ qe_learn_unit : "learn_course_id"
-    qe_learn_unit ||--o| qe_learn_unit_progress : "unit_id"
-    qe_learn_unit }o--o| qed_knowledge_point : "point 行 source_ref.kp_id"
-    qe_learn_unit ||--o{ qe_question : "unit_id 编译链路出题"
+    qed_course ||--o{ qe_learning : "course 行 target_id 直引"
+    qed_knowledge_point ||--o{ qe_learning : "kp 行 target_id 直引"
+    qe_learning |o--o{ qe_learning : "course 行 config.kp_path 指向同表 kp 行"
+    qed_knowledge_point ||--o{ qe_question : "kp_id 归档"
     qe_question ||--o{ qe_attempt : "question_id"
-    qe_question ||--o{ qe_review_task : "调度 target_kind=question"
-    qed_knowledge_point ||--o{ qe_review_task : "调度 target_kind=kp"
+    qe_learning {
+        varchar target_kind "闭集 course 与 kp：单表继承"
+        varchar target_id "直引共享表主键，不存名称快照"
+    }
     qed_knowledge_point {
         varchar kp_id PK "outline 与 point 两类行"
     }
@@ -178,7 +180,14 @@ erDiagram
     }
 ```
 
-**图 B：他项目两族（十表）与跨界引用**
+- **一条自引用边**：course 行的 `config.kp_path` 指向同表 kp 行的 `target_id`——学习路径顺序是
+  JSON 数组而非树表，故不建独立节点表。
+- `qe_attempt` 与 `qed_knowledge_point` 之间**不画边**：到期队列按 `qe_question.kp_id` 二跳投影，
+  作答事实只认 `question_id`（同一关系不在两处承载）。
+- 知识点候选与梳理工作区不入本图：其正本在 Axiom-Flow `af_kp`（图 B），根侧只有一条单向拉取腿
+  写入 `qed_knowledge_point`，跨族边不画进正本域图。
+
+**图 B：他项目两族（九表）与跨界引用**
 
 ```mermaid
 erDiagram
@@ -188,11 +197,11 @@ erDiagram
     qt_books ||--o{ qt_sources : "book_id 物理外键"
     qt_books ||--o| af_books : "verified 书目同源只读快照"
     qe_question }o--o| qt_books : "book_ref 来源书"
-    af_books |o--o| af_parse_jobs : "active_job_id 生效版本指针"
-    af_books ||--o{ af_parse_jobs : "book_id"
-    af_parse_jobs ||--o{ af_pages : "job_id 版本作用域"
-    af_pages ||--o{ af_block_edits : "book+job+page × block_index"
-    af_pages ||--o{ af_page_regions : "book+page 结构意图，跨版本存活"
+    af_books ||--o{ af_operations : "book_id 全量事件流"
+    af_books ||--o{ af_pages : "book_id × job_id 版本作用域"
+    af_books ||--o{ af_kp : "book_id 梳理作用域"
+    af_kp }o--o| af_kp : "parent_id 层级"
+    af_operations }o--o| af_pages : "book × job × page_no"
     qt_tasks {
         varchar task_id PK "8901 后台任务，独立无入向引用"
     }
@@ -202,7 +211,8 @@ erDiagram
 ```
 
 - `qed_course → qed_domain` 的先修 DAG 存在 `prerequisites` JSON 里，图中不展开。
-- 根私有表对 `qed_*` 的引用是**快照引用**（`ref_id` + `label`），对方改值不回溯（R5、R8）。
+- `qe_learning` 对 `qed_*` 的引用是**直引主键**（`target_id`），不是快照——课程名与知识点名读时
+  从共享表取，对方改值即自然生效（R5「只引用不复制」在本族取最严的一档）。
 - 跨界边只有四条：课程坐标两条（`qt_knowledge`/`qt_books`）、书目同源一条（`af_books`）、
   题源书一条（`qe_question.book_ref`）——共享库的耦合面刻意压到最窄。
 - 全图只表达表间逻辑引用；列级关系明细与单行语义见第五章各表小节。
@@ -210,24 +220,28 @@ erDiagram
 ### 4.4 读写矩阵
 
 R＝可读，W＝可写，–＝不直连（经对应服务 HTTP API 消费）。`af_*` 与 `qt_*` 暂按表族合并行，
-其表数与总览一致（21 表全覆盖），列级拆分待两族逐列晋升后随步。降级直写的逐列白名单与终态
+其表数与总览一致（16 表全覆盖），列级拆分待两族逐列晋升后随步。降级直写的逐列白名单与终态
 写点事实源：[downloads-flow.md](../design/downloads-flow.md) §5.2/§5.4。
 
 | 段 | 表 | 8903 前端 | 8901 QED-Tracker | 8902 Axiom-Flow | 8900 QED-Engine |
 | --- | --- | --- | --- | --- | --- |
 | 共享 | `qed_domain` | –（经 8900） | R/W（受托建表方，形状事实源） | R | R + 离线降级直写（白名单：`description`/`stages`/`exploration_stage`/`explore_pending`；禁 `level`/`scope`/`classic_tracks`/`path_results`/`meta`） |
 | 共享 | `qed_course` | –（经 8900） | R/W（同上） | R | R + 离线降级直写（白名单：`stage`/`sort_order`/`description`/`aliases`/`exploration_stage`——本列在线优先经 8901 `PATCH /courses` 写、仅降级时直写；`explore_pending` 无直写腿（8900 只可经 8901 `PATCH /courses` 在线写本列，不可达即不落库，见 [downloads-flow.md](../design/downloads-flow.md) §5.4）；禁 `track`/`related_targets`/`meta`；值域按课程 5 态分档校验，见 [downloads-flow.md](../design/downloads-flow.md) §5.2） |
-| 共享 | `qed_knowledge_point` | –（经 8900） | R（结构上开三项目可写，写入待其立项） | R（同上） | R/W（结构定义方 + 确认提升与检索端点，**当前唯一写者**） |
+| 共享 | `qed_knowledge_point` | –（经 8900） | R（结构上开三项目可写，写入待其立项） | R（同上） | R/W（结构定义方 + 知识点登记与检索端点，**当前唯一写者**） |
 | 共享 | `qed_llm_calls` | –（经 8900） | W（local 直连自写） | W（local 直连自写） | R/W（网关统一写 + 建表维护 + 检索与审核端点） |
-| 根私有 | `qe_learn_course` / `qe_learn_unit` / `qe_learn_unit_progress` | –（经 8900 `/api/v1/learn/*`） | –（不读） | –（不读） | R/W（所有权，根侧幂等建表） |
-| 根私有 | `qe_learn_kp_detail` | –（经 8900） | –（不读） | –（不读） | R/W（同上） |
-| 根私有 | `qe_question` / `qe_attempt` / `qe_review_task` | –（经 8900） | –（不读） | –（不读） | R/W（同上） |
-| af_* | `af_books` / `af_parse_jobs` / `af_pages` / `af_block_edits` / `af_page_regions` | –（经 8900） | – | R/W（所有权，迁移链维护） | –（经 8902 API 透传；`GET /books/{book_id}/file` 只读 `file_path` 指向的 PDF 本体） |
+| 根私有 | `qe_learning` | –（经 8900 `/api/v1/learn/*`） | –（不读） | –（不读） | R/W（所有权，根侧幂等建表） |
+| 根私有 | `qe_question` / `qe_attempt` | –（经 8900 `/api/v1/learn/*`） | –（不读） | –（不读） | R/W（同上） |
+| af_* | `af_books` / `af_operations` / `af_pages` / `af_kp` | –（经 8900） | – | R/W（所有权，迁移链维护） | –（经 8902 API 透传，R2；`GET /books/{book_id}/file` 只读 `file_path` 指向的 PDF 本体） |
 | qt_* | `qt_knowledge` / `qt_books` / `qt_sources` / `qt_tasks` / `qt_selections` | –（经 8900） | R/W（所有权） | – | –（经 8901 API 透传，R2） |
 
 - **`meta` 扩展槽只由该表既有写方写**：`qed_domain`/`qed_course` 归 8901（8900 降级直写白名单
   不含本列），`qed_knowledge_point`/`qed_llm_calls` 归 8900；读方一律按「键可能不存在」处理。
-- 根私有族现居共享库但仅根一侧读写，是命名空间的**反向例外**；前缀改判 `qe_*` 即为其收口（R1）。
+- 根私有族现居共享库但仅根一侧读写，是命名空间的**反向例外**；前缀 `qe_*` 即为其收口（R1）。
+- **一条读文件腿**：8900 按主表 `narrative_ref` 读数据根 `parsed/**` 下的长文正文并经
+  `/api/v1/learn/knowledge-points/{kp_id}/narrative` 下发。路径双闸（拒绝绝对路径、拒绝越数据根、
+  只允许 `parsed/` 前缀）与 Axiom-Flow 侧同形；该腿**只读、不经 8902**，故独立性铁律不破
+  （8902 离线时指针悬空按可见降级处理，不静默改写）。
+- 表数增减不改「谁能碰哪张表」：读写矩阵按表族与所有权成文，与本族内合并几张无关。
 
 ### 4.5 表角色分类
 
@@ -235,17 +249,24 @@ R＝可读，W＝可写，–＝不直连（经对应服务 HTTP API 消费）�
 
 | 角色 | 判据 | 表 | 架构后果 |
 | --- | --- | --- | --- |
-| 主数据 | 一处登记、多处消费，改动即波及全链 | `qed_domain`、`qed_course`、`qed_knowledge_point`、`qe_learn_course`、`qt_knowledge`、`qt_books` | 主键不可变（R8）；共享主数据变更走 7.1 首行顺序，根私有主数据走次行（本文与代码 DDL 同批） |
-| 版本化产物 | 一行属一个解析版本或一次编译/出题批次，换代不抹旧行 | `af_books`、`af_parse_jobs`、`af_pages`、`af_block_edits`、`af_page_regions`、`qe_learn_unit`（`active` 位）、`qe_question`（`retired` 软删位） | 按 `job_id`／`active`／批次作用域读写；再生昂贵，属备份确认档 |
-| 候选与待选池 | 机器写、人工确认后才提升 | `qe_learn_kp_detail` | 确认位只活在本池（R6）；有可删除重建授权 |
-| 事务事实 | 一行＝一次已发生的事件，全量保留不合并 | `qe_attempt`、`qt_sources`、`qt_tasks`、`qt_selections` | 只追加不改写；判分与趋势由服务端写入，不信任客户端 |
-| 调度态 | 可重算的派生态被持久化，只为重启不丢 | `qe_learn_unit_progress`、`qe_review_task` | 读时派生重算非累加；进度与错题本不落列 |
+| 主数据 | 一处登记、多处消费，改动即波及全链 | `qed_domain`、`qed_course`、`qed_knowledge_point`、`qe_learning`、`qt_knowledge`、`qt_books` | 主键不可变（R8）；共享主数据变更走 7.1 首行顺序，根私有主数据走次行（本文与代码 DDL 同批） |
+| 版本化产物 | 一行属一个解析版本或一次出题批次，换代不抹旧行 | `af_books`、`af_pages`、`qe_question` | 按 `job_id`／批次作用域读写；`qe_question` 取 `retired` 软删位；再生昂贵，属备份确认档 |
+| 候选与待选池 | 机器写、人工确认后才提升 | `af_kp` | 确认位只活在本池（R6）；正本在他项目族，根侧只单向拉取已确认行 |
+| 事务事实 | 一行＝一次已发生的事件，全量保留不合并 | `qe_attempt`、`af_operations`、`qt_sources`、`qt_tasks`、`qt_selections` | 只追加不改写；判分由服务端写入，不信任客户端 |
 | 审计账目 | 有外部写方的历史账 | `qed_llm_calls` | **绝不 DROP 重建**，只做追加式 ALTER |
 
-## 五、详细设计（本文正本的 11 张表）
+- **`qe_learning` 是单表继承的跨角色例外**：course 行属主数据（`target_id` 即共享 `course_id`），
+  kp 行属学习者终态事实（含 `learner_note` 等人工位，R6）。角色按 `target_kind` 分档判定，但
+  **重建档位取两者中较严的一档**（备份确认档，见 7.3），不因 course 行可低成本再生而降档。
+- **调度态整类在本库退出**：可重算的派生态一律不再持久化，到期队列与掌握门读 `qe_attempt`
+  流水重放；进度与错题本不落列。
+- `af_operations` 是 AF 侧的单表事件流（解析、编辑、结构意图与审阅判定同表），按事务事实对待。
 
-每表四件套＝**用途 → 涉及模块 → 字段明细 → 建表语句**（必要时加注释段）。九张根侧代码持有
-DDL 的表，其建表语句与代码渲染结果**逐字对齐**（列名、列序、类型、注释、索引、表尾存储子句），
+## 五、详细设计（本文正本的 7 张表）
+
+每表四件套＝**用途 → 涉及模块 → 字段明细 → 建表语句**（必要时加注释段）。五张根侧代码持有
+DDL 的表（`qed_knowledge_point`、`qed_llm_calls`、`qe_learning`、`qe_question`、`qe_attempt`），
+其建表语句与代码渲染结果**逐字对齐**（列名、列序、类型、注释、索引、表尾存储子句），
 改动任一侧即契约红；`qed_domain`/`qed_course` 的可执行面在 QED-Tracker，其语句是 ORM 派生的
 **等价展示 DDL**（守护比对列名·列序·类型·可空性，不比对逐字），默认值全在应用层（无
 `server_default`），故语句里不出现 `DEFAULT` 子句。
@@ -323,7 +344,7 @@ CREATE TABLE IF NOT EXISTS qed_domain (
 
 | 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `course_id` | VARCHAR(64) | PK | NOT NULL | 课程标识（主键，创建后不可改值） | R8；被知识点主表、候选池、题目表与 `qe_learn_course.course_ref` 引用 |
+| `course_id` | VARCHAR(64) | PK | NOT NULL | 课程标识（主键，创建后不可改值） | R8；被知识点主表、题目表与 `qe_learning` 的 course 行 `target_id` 直引 |
 | `domain_id` | VARCHAR(64) | IDX | NOT NULL | 所属领域 | 定档宽度 64；生产库现状 VARCHAR(32) |
 | `sort_order` | INT | – | NOT NULL，默认 `0`（应用层） | 学习顺序 | 8900 降级直写白名单列 |
 | `name` | VARCHAR(200) | – | NOT NULL | 课程名称 | label 快照来源 |
@@ -369,15 +390,20 @@ CREATE TABLE IF NOT EXISTS qed_course (
 
 ### qed_knowledge_point（知识点主数据表）
 
-**用途**：一行＝一个**人工确认**的知识点或目录节点，承载「领域 → 课程 → 章节(outline) →
+**用途**：一行＝一个**已确认**的知识点或目录节点，承载「领域 → 课程 → 章节(outline) →
 知识点(point)」四层体系的第三、四层。`node_kind` 把两类行合在一表：outline＝大知识点（书籍目录
-节点，可带层级与正文位置），point＝细知识点（确认提升后的产物）。多版本叙述与分栏内容不在本表
-（留 `qe_learn_kp_detail`），掌握态也不在本表。**本表没有人工确认列——能进本表即已确认**。
+节点，可带层级与正文位置），point＝细知识点（梳理确认后进入本表的产物）。本表是知识点的**唯一整合
+结果**：一个知识点的别名（`aliases`）、长文详解指针（`narrative_ref`）与多角度叙述索引（`angles`）
+都归本表，不归学习记录表。**权威名仍只在 `name` 一列**——权威性由「哪一行进了本表」表达，不由列
+表达，故无 `is_canonical` 位、无别名谱系表。多版本叙述正文不落本表（落数据根的 Markdown），
+掌握态也不在本表（归 `qe_learning` 的 kp 行）。**本表没有人工确认列——能进本表即已确认**。
 
 **涉及模块**：`backend/qed_engine/services/learn/knowledge.py`（可执行 DDL + 幂等建表 + 读写）、
-`services/learn/annotations.py`（批注生成）、`api/learn.py`（`GET /learn/knowledge-points`、
-`GET|PUT /learn/courses/{course_id}/outline`、`PATCH /learn/knowledge-points/{kp_id}`、
-`GET /learn/star-map`、`GET /learn/search`）、`services/learn/practice.py`（按 `kp_id` 归档题）、
+`services/learn/annotations.py`（批注生成，落 `angles` 的角度条目）、
+`api/learn.py`（`GET|POST /learn/knowledge-points`、
+`GET /learn/knowledge-points/{kp_id}/narrative`、`GET|PUT /learn/courses/{course_id}/outline`、
+`PATCH /learn/knowledge-points/{kp_id}`、`GET /learn/star-map`、`GET /learn/search`）、
+`services/learn/practice.py`（按 `kp_id` 归档题）、
 8903 `web-ui/src/pages/Knowledge.tsx`、`CourseKnowledge.tsx`。端点契约见
 [api-contracts.md](api-contracts.md) §⑥。
 
@@ -385,7 +411,7 @@ CREATE TABLE IF NOT EXISTS qed_course (
 
 | 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| `kp_id` | VARCHAR(64) | PK | NOT NULL | 行 ID（服务端生成 `kp-<hex12>`，与候选 `detail_id` 不同族） | R8 不可变 |
+| `kp_id` | VARCHAR(64) | PK | NOT NULL | 行 ID（服务端生成 `kp-<hex12>`，与 AF 节点 `node_id` 不同族） | R8 不可变 |
 | `domain_id` | VARCHAR(64) | IDX | NOT NULL，默认 `''` | 领域坐标（逻辑引用 `qed_domain`） | 标量列是为可筛可建唯一键；按 label 快照回填 |
 | `domain_label` | VARCHAR(255) | – | 默认 `''` | 领域名快照 | 读展示用，不作筛选键 |
 | `course_id` | VARCHAR(64) | IDX | NOT NULL | 课程坐标（逻辑引用 `qed_course`） | 所有课程级查询的主键前缀 |
@@ -394,14 +420,17 @@ CREATE TABLE IF NOT EXISTS qed_course (
 | `parent_kp_id` | VARCHAR(64) | IDX | 可空 | outline：父 outline（章=NULL，节=章）；point：所属 outline | NULL 的 point 行＝未归档池 |
 | `depth` | TINYINT | – | 可空 | outline 层级：1=章 2=节 | point 行恒 NULL |
 | `book_ref` | VARCHAR(64) | – | 可空 | outline：来源书（`qt_books.book_id`，版本换代不碎树） | point 行 NULL（空串哨兵已随唯一键降级撤销）；取书目级稳定 ID，版本换代不碎树 |
-| `name` | VARCHAR(500) | – | NOT NULL | 展示名（章名 / 知识点 canonical 名） | |
+| `name` | VARCHAR(500) | – | NOT NULL | 展示名（章名 / 知识点权威名） | 恒为权威名，别名不进本列 |
+| `aliases` | JSON | – | 可空 | 同物异名列表 `["…"]`：多教程对同一章节／知识点的不同称谓 | 检索要命中别名⇒必须可 `WHERE`，故是列不是 `meta`（R7）；无权威位 |
 | `norm_key` | VARCHAR(200) | IDX | NOT NULL | 去重键（全角转半角 + 空白折叠 + 小写） | 索引是**普通索引**：同父级唯一由服务端校验保证，跨章同名合法 |
 | `type` | VARCHAR(16) | – | 可空 | point 行四分类 `memory`/`procedure`/`concept`/`design` | outline 行必须 NULL；四分类是**间隔序列依据**，题目行存快照不回溯 |
 | `order_hint` | INT | – | 可空 | 书内/课程内顺序 | outline＝目录前序序号；point＝学习顺序提示 |
 | `summary` | VARCHAR(1000) | – | 默认 `''` | 一句话摘要（限长 1000） | outline 与 point 行都可写；学习面悬停只读这一列 |
+| `narrative_ref` | VARCHAR(500) | – | NOT NULL，默认 `''` | 已确认长文正文的**数据根相对路径全串**（如 `parsed/<domain>/<course>/<book_id>/kp/<node_id>.md`），`''`＝无正文 | 正文只读不筛、正本由 8902 生成，故存指针不存正文（R5／R7）；8900 读端点按本列取文件，落点在数据根白名单既有区 `parsed/` |
+| `angles` | JSON | – | 可空 | 正文内已承载的角度索引 `[{angle,note?}]`，`angle` 闭集六词 `summary`/`explanation`/`definition`/`theorem`/`proof`/`example` | 星图与学习面按角度出徽标⇒要可筛；数组序即权威排序；正文本身不复制进库 |
 | `source_ref` | JSON | – | 可空 | outline 正文位置 `{kind,ref_id,page_start,page_end}` | 页序＝**PDF 页序**（印刷页码只存在于解析草稿）；point 行可空 |
 | `anchors` | JSON | – | 可空 | 来源锚点 `[{kind,ref_id,page?,snippet?}]` | DeepTutor K1 形状，降级不删 |
-| `from_detail_id` | VARCHAR(64) | – | 可空 | 提升来源明细（溯源 `qe_learn_kp_detail`） | 未确认路径无值 |
+| `from_detail_id` | VARCHAR(64) | – | 可空 | 提升幂等锚＝Axiom-Flow `af_kp.node_id`（梳理侧节点稳定身份） | 标量列可 `WHERE`、可建唯一约束，比 JSON 锚硬；手工登记行无值 |
 | `meta` | JSON | – | 可空 | 扩展槽（只读不筛） | R7；写方 8900 |
 | `created_by` | VARCHAR(16) | – | NOT NULL，默认 `''` | 创建写入方标识 | 根侧常量 `qed_engine`，与共享两表同口径、非人名 |
 | `updated_by` | VARCHAR(16) | – | NOT NULL，默认 `''` | 最近写入方标识 | 同上 |
@@ -412,13 +441,18 @@ CREATE TABLE IF NOT EXISTS qed_course (
 旧的 `idx_kp_course_book_norm` 随 `book_ref` 退出键位而作废；生产 `qed` 库的索引变更属人工窗口。
 命名避让：本表与 QED-Tracker 私有 `qt_knowledge` **语义不同且无引用关系**——后者是
 「一套教程或课程延展资料的归类」，本表是知识点主数据；两者分属 `qed_*` 与 `qt_*` 命名空间。
-本表与 `qe_learn_kp_detail` **可删除重建**（无数据搬迁授权，档位见 7.3）。
+三列追加的正交判据：`aliases` 参与检索、`narrative_ref` 是读路径的键、`angles` 要出徽标可筛，
+三条各触 R7 红线之一（只读不筛／不放跨项目契约字段），故一律升列不落脚本槽。
+长文正文指针的**失效口径**：指针悬空＝可见降级（正文区标「待复核」），不静默改写、不静默删、
+不回落空串假装无正文；存全串而非 AF 侧的单段文件名，是为了让 8900 在 8902 离线时仍能自行解析
+该指针（独立性铁律），路径前缀派生规则不外引也不复制。
+本表可删除重建（无数据搬迁授权，档位见 7.3）。
 
 **建表语句**：
 
 ```sql
 CREATE TABLE IF NOT EXISTS qed_knowledge_point (
-  kp_id VARCHAR(64) PRIMARY KEY COMMENT '行 ID（服务端生成 kp-<hex12>，与候选 detail_id 不同族）',
+  kp_id VARCHAR(64) PRIMARY KEY COMMENT '行 ID（服务端生成 kp-<hex12>，与梳理侧 af_kp.node_id 不同族）',
   domain_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '领域坐标（逻辑引用 qed_domain，标量列供检索与唯一键）',
   domain_label VARCHAR(255) DEFAULT '' COMMENT '领域名快照',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course）',
@@ -427,14 +461,17 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   parent_kp_id VARCHAR(64) COMMENT 'outline：父 outline（章=NULL，节=章）；point：所属 outline（NULL=未归档池）',
   depth TINYINT COMMENT 'outline 层级：1=章 2=节；point 行 NULL',
   book_ref VARCHAR(64) COMMENT 'outline：来源书（qt_books.book_id，版本换代不碎树）；point 行 NULL（空串哨兵随 DEFECT-011 唯一键降级后撤销）',
-  name VARCHAR(500) NOT NULL COMMENT '展示名（章名 / 知识点 canonical 名）',
+  name VARCHAR(500) NOT NULL COMMENT '展示名（章名 / 知识点权威名，别名进 aliases）',
+  aliases JSON COMMENT '同物异名列表 ["…"]（多教程对同一章节或知识点的不同称谓；name 恒为权威名，本列不表权威）',
   norm_key VARCHAR(200) NOT NULL COMMENT '去重键（全角转半角+空白折叠+小写）',
   type VARCHAR(16) COMMENT 'point 行四分类 memory/procedure/concept/design；outline 行必须 NULL',
   order_hint INT COMMENT '书内/课程内顺序（outline 行=目录前序序号，point 行=学习顺序提示，均可空）',
   summary VARCHAR(1000) DEFAULT '' COMMENT '一句话摘要（限长 1000）',
+  narrative_ref VARCHAR(500) NOT NULL DEFAULT '' COMMENT '已确认长文正文的数据根相对路径（空串=无正文；正文不落库，读端点按本列取文件）',
+  angles JSON COMMENT '多角度叙述索引 [{angle,note?}]（angle 闭集 summary/explanation/definition/theorem/proof/example；数组序=权威排序）',
   source_ref JSON COMMENT 'outline 正文位置 {kind,ref_id,page_start,page_end}（页序=PDF 页序）；point 行可空',
   anchors JSON COMMENT '来源锚点 [{kind,ref_id,page?,snippet?}]（DeepTutor K1 形状，降级不删）',
-  from_detail_id VARCHAR(64) COMMENT '提升来源明细（溯源 qe_learn_kp_detail）',
+  from_detail_id VARCHAR(64) COMMENT '提升幂等锚=Axiom-Flow af_kp.node_id（梳理侧节点稳定身份，一经发放不可变）',
   meta JSON COMMENT '扩展槽：未定档字段先入本列（只读不筛）；定档后升为实体列并清空对应键',
   created_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '创建写入方标识（qed_engine）',
   updated_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '最近写入方标识（qed_engine）',
@@ -445,7 +482,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   KEY idx_kp_course_kind (course_id, node_kind),
   KEY idx_kp_domain (domain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；一行=一个人工确认的行，结构由 QED-Engine 根定义）';
+COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；一行=一个人工确认的行，别名/长文指针/角度索引同表承载；结构由 QED-Engine 根定义）';
 ```
 
 ### qed_llm_calls（LLM 调用记录表）
@@ -517,248 +554,84 @@ CREATE TABLE IF NOT EXISTS qed_llm_calls (
   COMMENT='LLM 调用审计表：一行 = 一次 LLM 调用（成功或失败），记录完整 prompt 输入、模型响应、耗时与审核态（三项目共用，service 区分调用方）'
 ```
 
-**根私有 `qe_*` 七表**（表名定档进度见 7.8 T1；四张现名仍带 `learn_` 段，待 REQ-132 W2）
+**根私有 `qe_*` 三表**（课程学习一张、课后练习两张；列数合计 51，所有权与可执行面均在根侧）
 
-### qe_learn_course（学习课程表）
+### qe_learning（学习记录表）
 
-**用途**：一行＝一门**学习课程**（用户在 8900 上开的一门课），与共享表 `qed_course`（课程体系
-主数据）是两回事。承载引用式注册信息、三级坐标快照、素材引用列表、编译作业态（自 carry：一门课
-同时只跑一个编译）与双通道指令。**课程态与进度不落列**——读时由单元树与进度行派生重算。
+**用途**：一行＝**一个学习者对一个目标的状态**，用 `target_kind` 做单表继承：`course` 行＝选课
+与学习路径（素材引用、`kp_path` 顺序），`kp` 行＝一个知识点的**学习事实**（终态位 + 质性门判定）。
+承载「用户（v1.0 恒 `admin`）→ 可学习内容 → 进度 → 备注」这条学习中心主线，一张表覆盖。
+三条设计取向：**课程无独立 ID**（course 行的 `target_id` 直引共享 `qed_course.course_id`，
+少一层从不由用户选择的间接）；**名称不落库**（`target_id` 直引主键，课程名／知识点名读时按坐标
+从共享表取，R5）；**派生量不落列**（课程百分比、结课态与掌握分一律读时按本表 kp 行 ×
+`qe_attempt` 流水 × 到期重放重算，非累加；**未落笔＝无行**，不为「还没学」写占位行）。
 
-**涉及模块**：`backend/qed_engine/services/learn/base.py`（DDL + `ensure_tables()`）、
+**涉及模块**：`backend/qed_engine/services/learn/base.py`（DDL + `ensure_tables()` + 选课/进度/
+质性门读写 + 派生重算）、`services/learn/memory.py`（同形内存实现）、
 `api/learn.py`（`GET|POST /learn/courses`、`POST /learn/courses/sync`、
-`GET|PATCH|DELETE /learn/courses/{course_id}`、`POST /learn/courses/{id}/compile/propose|start`、
-`GET /learn/courses/{id}/compile`）、`services/learn/memory.py`（存储层）、
+`GET|PATCH|DELETE /learn/courses/{course_id}`、`GET|POST /learn/courses/{course_id}/progress`、
+`GET /learn/courses/{course_id}/mastery`、`POST …/mastery/assess`）、
+`services/learn/mastery.py`（门规则纯函数本体）、
 8903 `web-ui/src/pages/LearnShelf.tsx`、`LearnWorkbench.tsx`。契约见
-[api-contracts.md](api-contracts.md) §⑥。
-
-**字段明细**：
-
-| 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| `learn_course_id` | VARCHAR(64) | PK | NOT NULL | 学习课程 ID（服务端生成） | ≠ `qed_course.course_id` |
-| `name` | VARCHAR(255) | – | NOT NULL | 课程名 | |
-| `domain_ref` | JSON | – | 可空 | 领域坐标引用 `{ref_id,label}` | 逻辑引用 `qed_domain`；R5 只引用不复制 |
-| `course_ref` | JSON | – | 可空 | 课程坐标引用 `{ref_id,label}` | 逻辑引用 `qed_course` |
-| `direction` | VARCHAR(255) | – | 默认 `''` | 方向 label 快照 | 共享表无方向实体，仅存文本 |
-| `resources` | JSON | – | NOT NULL | 素材引用列表 `[{kind,ref_id,label}]` | `kind` 闭集三值 `book`/`af_version`/`knowledge` |
-| `compile_status` | VARCHAR(16) | – | 可空 | 编译作业态：NULL/proposed/running/completed/failed | 课程行自 carry：一门课同时只跑一个编译 |
-| `compile_done` | INT | – | NOT NULL，默认 0 | 已生成活动块数 | 与 `compile_total` 组进度 |
-| `compile_total` | INT | – | NOT NULL，默认 0 | 活动块总数 | |
-| `failure_count` | INT | – | NOT NULL，默认 0 | 本作业块级失败计数 | 熔断判据（掌握门接线后启用） |
-| `page_windows` | JSON | – | 可空 | 人工页窗 `[{start,end}]` | propose 输入，不依赖检索；页序＝PDF 页序 |
-| `compile_fingerprint` | VARCHAR(64) | – | 可空 | 上次编译的源指纹 | drift 判定 |
-| `instructions` | VARCHAR(4000) | – | 默认 `''` | 学习者通道 | 限长 4000 |
-| `agent_notes` | VARCHAR(4000) | – | 默认 `''` | agent 通道 | 限长 4000；两通道互不覆盖 |
-| `created_at` | DATETIME | – | NOT NULL | UTC 创建时间 | |
-| `updated_at` | DATETIME | – | NOT NULL | UTC 更新时间 | |
-
-**建表语句**：
-
-```sql
-CREATE TABLE IF NOT EXISTS qe_learn_course (
-  learn_course_id VARCHAR(64) PRIMARY KEY COMMENT '学习课程 ID（服务端生成，≠共享表 qed_course）',
-  name VARCHAR(255) NOT NULL COMMENT '课程名',
-  domain_ref JSON COMMENT '领域坐标引用 {ref_id,label}（逻辑引用 qed_domain）',
-  course_ref JSON COMMENT '课程坐标引用 {ref_id,label}（逻辑引用 qed_course）',
-  direction VARCHAR(255) DEFAULT '' COMMENT '方向 label 快照（共享表无方向实体，仅存文本）',
-  resources JSON NOT NULL COMMENT '素材引用列表 [{kind,ref_id,label}]，kind 闭集 book/af_version/knowledge',
-  compile_status VARCHAR(16) COMMENT '编译作业态：NULL/proposed/running/completed/failed（D3：课程行自 carry）',
-  compile_done INT NOT NULL DEFAULT 0 COMMENT '已生成活动块数',
-  compile_total INT NOT NULL DEFAULT 0 COMMENT '活动块总数',
-  failure_count INT NOT NULL DEFAULT 0 COMMENT '本作业块级失败计数（熔断判据，M-2 接线）',
-  page_windows JSON COMMENT '人工页窗 [{start,end}]（propose 输入，不依赖检索）',
-  compile_fingerprint VARCHAR(64) COMMENT '上次编译的源指纹（drift 判定）',
-  instructions VARCHAR(4000) DEFAULT '' COMMENT '学习者通道（限长 4000）',
-  agent_notes VARCHAR(4000) DEFAULT '' COMMENT 'agent 通道（限长 4000）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习课程注册表（引用式，所有权 QED-Engine，主链壳 M-1 契约）';
-```
-
-### qe_learn_unit（学习单元树表）
-
-**用途**：一行＝单元树一个节点，把**章节大纲与块序列合一**存储（最深三级：section → unit，
-另有知识点推进行 `point`）。承载内容生成结果（块类型与 `payload`）、溯源（页块）、断点续编位与
-重编译版本位，以及两级人工确认位与学习者勾选位。
-
-**涉及模块**：`backend/qed_engine/services/learn/base.py`（DDL + 树读写 + 编译落库）、
-`api/learn.py`（`GET /learn/courses/{id}/units`、`GET /learn/units/{unit_id}`、
-`PUT /learn/courses/{id}/syllabus`、`PATCH /learn/units/{unit_id}`、进度端点）、
-`services/learn/practice.py`（编译链路出题回填 `unit_id`）、
-8903 `web-ui/src/pages/LearnWorkbench.tsx`。
-
-**字段明细**：
-
-| 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| `unit_id` | VARCHAR(64) | PK | NOT NULL | 单元 ID（服务端生成） | |
-| `learn_course_id` | VARCHAR(64) | IDX | NOT NULL | 所属学习课程 | 逻辑引用 `qe_learn_course` |
-| `parent_id` | VARCHAR(64) | – | 可空 | 父节点（unit→section；section 为 NULL） | 树形自引用，同命名空间内由应用层维护 |
-| `level` | VARCHAR(16) | IDX | NOT NULL | `section`=章节大纲节点 / `unit`=最小学习单元（块） / `point`=知识点推进行 | point 行的 kp 引用在 `source_ref.kp_id` |
-| `title` | VARCHAR(500) | – | NOT NULL | 标题 | |
-| `sort_order` | INT | IDX | NOT NULL，默认 0 | 同级顺序 | 与 `level` 同索引，读树时排序键 |
-| `confirmed` | TINYINT(1) | – | NOT NULL，默认 0 | 人工确认位（section 与 unit 各自两级） | R6 机器不写 1 |
-| `covered` | TINYINT(1) | – | NOT NULL，默认 0 | 学习者勾选位 | **agent/编译永不写**（R6） |
-| `type` | VARCHAR(16) | – | 可空 | unit 行块类型闭集 `text`/`formula`/`figure`/`quiz`/`flashcard` | |
-| `payload` | JSON | – | 可空 | unit 行内容定义 | quiz/flashcard 块**不含判分**，判分归判分层 `grading.py` |
-| `source_ref` | JSON | – | 可空 | 溯源 `{ref_id,page,block_index}` | 逻辑引用素材页块；页序＝PDF 页序 |
-| `gen_status` | VARCHAR(16) | – | NOT NULL，默认 `'pending'` | `pending`/`generated`/`failed` | 断点续编位 |
-| `active` | TINYINT(1) | – | NOT NULL，默认 1 | 当前编译版本位 | 重编不抹历史，旧行置 0 |
-| `created_at` | DATETIME | – | NOT NULL | UTC 创建时间 | |
-| `updated_at` | DATETIME | – | NOT NULL | UTC 更新时间 | |
-
-**建表语句**：
-
-```sql
-CREATE TABLE IF NOT EXISTS qe_learn_unit (
-  unit_id VARCHAR(64) PRIMARY KEY COMMENT '单元 ID（服务端生成）',
-  learn_course_id VARCHAR(64) NOT NULL COMMENT '所属学习课程（逻辑引用）',
-  parent_id VARCHAR(64) COMMENT '父节点（unit→section；section 为 NULL）',
-  level VARCHAR(16) NOT NULL COMMENT 'section=章节大纲节点 / unit=最小学习单元（块）/ point=知识点推进行（W5 §V2.3，kp 引用在 source_ref.kp_id）',
-  title VARCHAR(500) NOT NULL COMMENT '标题',
-  sort_order INT NOT NULL DEFAULT 0 COMMENT '同级顺序',
-  confirmed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '人工确认位（两级确认：section 与 unit 各自）',
-  covered TINYINT(1) NOT NULL DEFAULT 0 COMMENT '学习者勾选位（agent/编译永不写）',
-  type VARCHAR(16) COMMENT 'unit 行：text/formula/figure/quiz/flashcard',
-  payload JSON COMMENT 'unit 行内容定义（quiz/flashcard 不含判分，判分归 M-3）',
-  source_ref JSON COMMENT 'unit 行溯源 {ref_id,page,block_index}（逻辑引用素材页块）',
-  gen_status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/generated/failed（断点续编位）',
-  active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '当前编译版本位（重编不抹历史，旧行置 0）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  KEY idx_learn_unit_course (learn_course_id, level, sort_order)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习单元树（章节树+块序列合一，主链壳 M-1/M-2 契约）';
-```
-
-### qe_learn_unit_progress（学习单元进度表）
-
-**用途**：一行＝一个知识点的**学习事实**：终态位（done/skipped）＋质性门判定四列。与单元表分表
-是为了重编译换代不丢学习记录；课程百分比、结课态与掌握分数一律读时按本表与作答明细重算
-（派生非累加：分数不落列）。
-
-**涉及模块**：`backend/qed_engine/services/learn/base.py`（DDL + 进度读写 + 派生重算）、
-`api/learn.py`（`GET|POST /learn/courses/{id}/progress`、主链 M-3 的 `GET …/mastery` 与 `POST …/mastery/assess`，后者只写判定四列）、
-8903 `web-ui/src/pages/LearnWorkbench.tsx`（进度条与勾选）。
+[api-contracts.md](api-contracts.md) §⑥；门规则与三态口径见
+[learning-practice-ui.md](../design/frontend/learning-practice-ui.md)。
 
 **字段明细**：
 
 | 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `id` | BIGINT | PK | 自增 | 行 ID（自增主键） | |
-| `unit_id` | VARCHAR(64) | UQ | NOT NULL | 单元 ID | 逻辑引用 `qe_learn_unit`；一单元一行 |
-| `learn_course_id` | VARCHAR(64) | IDX | NOT NULL | 冗余课程 ID | 派生重算按课程聚合 |
-| `status` | VARCHAR(16) | – | NOT NULL | `done`/`skipped` | **pending＝无行**（读时派生，非累加） |
-| `qualitative_passed` | TINYINT(1) | – | 可空 | 质性门结论 `1`/`0`，NULL＝未判 | 仅 `concept`/`design` 知识点行有值；量化门不占列（读时按作答序列派生） |
-| `qualitative_note` | VARCHAR(1000) | – | 默认 `''` | 判读证据一句话 | v1 只存学习者自评理由；不得含密钥 |
-| `assessed_by` | VARCHAR(16) | – | 默认 `''` | provenance `learner`／`model` | `learner`＝自评位（裁决 D-M3-2 v1）；`model` 为 M-3b 预留，本轮端点拒绝 |
-| `assessed_at` | DATETIME | – | 可空 | 最近一次质性判定 UTC 时刻 | 与勾选通路（`status`）各写各的列，互不覆盖 |
-| `updated_at` | DATETIME | – | NOT NULL | UTC 更新时间 | 无 `created_at`：行只由终态写入 |
-
-**注释**：主链 M-3 兑现 0928/0930 两处裁决——知识点掌握行并入本表扩列（上限四列），无需第四张表。
-存量库由 `base.ensure_tables` 按 information_schema 幂等补列（判例 `qed_llm_calls`）；生产 `qed` 库
-不在此路径 ALTER＝D 类转人工随发布批次。
-门态清单＝本表判定列 × `qe_attempt` 作答序列（`attempts_by_kp`）× `qe_review_task` 到期计数（`due_counts_by_kp`）× 知识点投影行，四源在 `api/learn.py` 汇成、规则本体在 `services/learn/mastery.py`，分数与三态不落列。
-
-**建表语句**：
-
-```sql
-CREATE TABLE IF NOT EXISTS qe_learn_unit_progress (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
-  unit_id VARCHAR(64) NOT NULL COMMENT '单元 ID（逻辑引用 qe_learn_unit）',
-  learn_course_id VARCHAR(64) NOT NULL COMMENT '冗余课程 ID（派生重算按课程聚合）',
-  status VARCHAR(16) NOT NULL COMMENT 'done/skipped（pending=无行，读时派生重算非累加）',
-  qualitative_passed TINYINT(1) NULL COMMENT '质性门结论（仅 concept/design 知识点有值；NULL=未判）',
-  qualitative_note VARCHAR(1000) DEFAULT '' COMMENT '判读证据一句话（自评理由，不含密钥）',
-  assessed_by VARCHAR(16) DEFAULT '' COMMENT 'provenance：learner=判定者（v1 自评位）／model=M-3b 预留',
-  assessed_at DATETIME NULL COMMENT '最近一次质性判定 UTC 时刻',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  UNIQUE KEY uq_learn_progress_unit (unit_id),
-  KEY idx_learn_progress_course (learn_course_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习进度派生基（终态事实+质性门判定，进度与掌握分=读时重算，主链壳 M-1/M-3 契约）';
-```
-
-### qe_learn_kp_detail（知识点候选明细池）
-
-**用途**：一行＝一条候选叙述或版本。知识点生成管线的**待选池**：同一个知识点可多条并存
-（多版本、多叙述、多来源），经人工确认（`confirmed`）后才提升到共享主表 `qed_knowledge_point`。
-`intent` 与 `type` 正交：前者说明这条批注的用途（摘要/讲解），后者说明知识点分类。
-
-**涉及模块**：`backend/qed_engine/services/learn/knowledge.py`（DDL + 候选读写 + 提升）、
-`services/learn/annotations.py`（批注生成）、`services/learn/knowledge_memory.py`（存储层）、
-`api/learn.py`（`GET|POST /learn/kp-details`、`POST /learn/kp-details/{detail_id}/confirm|reject|like`、
-`POST /learn/annotations/generate`）、8903 `web-ui/src/pages/CourseKnowledge.tsx`（右栏本章候选）。
-
-**字段明细**：
-
-| 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| `detail_id` | VARCHAR(64) | PK | NOT NULL | 明细 ID（服务端生成 `kpd-<hex12>`） | 与 `kp_id` 不同族 |
-| `domain_id` | VARCHAR(64) | – | NOT NULL，默认 `''` | 领域坐标 | 逻辑引用 `qed_domain` |
-| `domain_label` | VARCHAR(255) | – | 默认 `''` | 领域名快照 | |
-| `course_id` | VARCHAR(64) | IDX | NOT NULL | 课程坐标 | 逻辑引用 `qed_course` |
-| `course_label` | VARCHAR(255) | – | 默认 `''` | 课程名快照 | |
-| `kp_id` | VARCHAR(64) | – | 可空 | 采纳后指向主表 | 未采纳允许悬空候选 |
-| `parent_kp_id` | VARCHAR(64) | IDX | 可空 | 所属 outline | 右栏「本章候选」据此过滤；提升时平移到主表 |
-| `intent` | VARCHAR(16) | – | NOT NULL，默认 `'explanation'` | 批注用途闭集 `summary`/`explanation` | 与 `type` 正交 |
-| `book_ref` | VARCHAR(64) | – | NOT NULL，默认 `''` | 批注来源书 | 提升后主表 point 行 `book_ref` 为 NULL，来源书只留本池 |
-| `name` | VARCHAR(500) | – | NOT NULL | 候选名（可含版本差异） | **不进唯一键** |
-| `norm_key` | VARCHAR(200) | – | NOT NULL | 去重键（与主表同口径） | 提升时校验 |
-| `type` | VARCHAR(16) | – | 可空 | 四分类闭集 `memory`/`procedure`/`concept`/`design` | |
-| `narrative` | MEDIUMTEXT | – | 可空 | 叙述正文 | 同一知识点多条并存＝多版本多叙述 |
-| `payload` | JSON | – | 可空 | 分栏内容 `{definition,theorem,proof,example...}` | **不含判分**，判分归判分层 `grading.py` |
-| `anchors` | JSON | – | 可空 | 来源锚点列表 | 与主表同形状 |
-| `gen_batch` | VARCHAR(64) | IDX | NOT NULL，默认 `''` | 生成批次＝版本组 | 一批候选可整批复核/清理 |
-| `map_seed` | VARCHAR(32) | – | 可空 | 确定性种子 | 同批次同图稳定复现（DeepTutor K5） |
-| `model_ref` | VARCHAR(128) | – | 可空 | 生成者标识（`manual`／模型名） | 不得含密钥（R11） |
-| `gen_status` | VARCHAR(16) | IDX | NOT NULL，默认 `'candidate'` | `draft`/`candidate`/`adopted`/`rejected` | 与 `confirmed` 分工：机器写本列，人工写确认位 |
-| `dedup_of` | VARCHAR(64) | – | 可空 | 指向既有 canonical `kp_id` | 合并候选，不另立主表行 |
-| `confirmed` | TINYINT(1) | – | NOT NULL，默认 0 | 人工确认位（置位才提升） | R6；**确认位只活在本池** |
+| `owner` | VARCHAR(64) | UQ/IDX | NOT NULL，默认 `'admin'` | 学习者标识 | v1.0 恒 `admin`，多用户扩展位；唯一键前缀（不加则第二学习者的行会被幂等键吃掉） |
+| `target_kind` | VARCHAR(16) | UQ | NOT NULL | 闭集 `course`=学习课程行 / `kp`=知识点行 | 单表继承位：两类行各取所需列，其余列 NULL |
+| `target_id` | VARCHAR(64) | UQ/IDX | NOT NULL | course 行＝共享 `qed_course.course_id`；kp 行＝共享 `qed_knowledge_point.kp_id` | R5 只引用不复制，不存名称快照；课程坐标即本行身份 |
+| `status` | VARCHAR(16) | – | NOT NULL | course 行 `active`/`paused`/`done`；kp 行 `done`/`skipped`/`pending` | kp 行 `pending`＝只有质性判定或勾选撤销的痕迹，既不计 done 也不计 skipped；未落笔＝无行（读时派生，非累加） |
+| `config` | JSON | – | 可空 | course 行专用 `{resources:[{kind,ref_id,label}],kp_path:[kp_id…]}` | 学习路径＝`kp_path` 的有序数组，数组序即学习序；缺键／`[]`＝按主表 `order_hint` 走；`resources.kind` 闭集 `book`/`af_version`/`knowledge`；整行读出不内部筛选，不触 R7 |
+| `qualitative_passed` | TINYINT(1) | – | 可空 | kp 行专用：质性门结论 `1`/`0`，NULL＝未判 | 仅 `concept`/`design` 知识点行有值；量化门不占列（读时按作答序列派生） |
+| `qualitative_note` | VARCHAR(1000) | – | 默认 `''` | kp 行专用：判读证据一句话 | v1 只存学习者自评理由；不得含密钥 |
+| `assessed_by` | VARCHAR(16) | – | 默认 `''` | kp 行专用：provenance `learner`／`model` | `learner`＝自评位；`model` 为预留，当前端点拒绝 |
+| `assessed_at` | DATETIME | – | 可空 | kp 行专用：最近一次质性判定 UTC 时刻 | 与勾选通路（`status`）各写各的列，互不覆盖 |
+| `learner_note` | TEXT | – | 可空 | 学习者备注（course 行与 kp 行通用） | **人工位**，机器永不写（R6） |
 | `created_at` | DATETIME | – | NOT NULL | UTC 创建时间 | |
 | `updated_at` | DATETIME | – | NOT NULL | UTC 更新时间 | |
 
+**注释**：唯一键 `uq_learning_target (owner, target_kind, target_id)`＝幂等位，一个学习者对一个
+目标至多一行；`idx_learning_course (owner, target_id, status)` 服务「按课程取全部 kp 行重算进度」
+与结课判定。质性门的四列上限由主链 M-3 兑现：门态清单＝本表判定列 × `qe_attempt` 作答序列 ×
+知识点投影行，三源在 `api/learn.py` 汇成、规则本体在 `services/learn/mastery.py`，分数与三态不落列。
+`kp` 行的角色是学习者终态事实、`course` 行是主数据，故本表是**单表继承的跨角色例外**，重建档位取
+较严的一档（见 4.5 与 7.3）。
+
 **建表语句**：
 
 ```sql
-CREATE TABLE IF NOT EXISTS qe_learn_kp_detail (
-  detail_id VARCHAR(64) PRIMARY KEY COMMENT '明细 ID（服务端生成 kpd-<hex12>）',
-  domain_id VARCHAR(64) NOT NULL DEFAULT '' COMMENT '领域坐标（逻辑引用 qed_domain）',
-  domain_label VARCHAR(255) DEFAULT '' COMMENT '领域名快照',
-  course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course）',
-  course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  kp_id VARCHAR(64) COMMENT '采纳后指向主表（未采纳允许悬空候选）',
-  parent_kp_id VARCHAR(64) COMMENT '所属 outline（本章候选列表据此过滤；提升时平移到主表）',
-  intent VARCHAR(16) NOT NULL DEFAULT 'explanation' COMMENT '批注用途闭集 summary/explanation（与 type 正交）',
-  book_ref VARCHAR(64) NOT NULL DEFAULT '' COMMENT '批注来源书（与主表 outline 同口径，提升后主表 point 行 book_ref 为 NULL，来源书只留本池）',
-  name VARCHAR(500) NOT NULL COMMENT '候选名（可含版本差异，不进唯一键）',
-  norm_key VARCHAR(200) NOT NULL COMMENT '去重键（与主表同口径，提升时校验）',
-  type VARCHAR(16) COMMENT '四分类闭集 memory/procedure/concept/design',
-  narrative MEDIUMTEXT COMMENT '叙述正文（同一知识点可多条并存=多版本多叙述）',
-  payload JSON COMMENT '分栏内容 {definition,theorem,proof,example...}（不含判分，判分归主链 M-3）',
-  anchors JSON COMMENT '来源锚点列表（与主表同形状）',
-  gen_batch VARCHAR(64) NOT NULL DEFAULT '' COMMENT '生成批次=版本组（一批候选可整批复核/清理）',
-  map_seed VARCHAR(32) COMMENT '确定性种子（同批次同图稳定复现，DeepTutor K5）',
-  model_ref VARCHAR(128) COMMENT '生成者标识（manual/模型名；不含密钥）',
-  gen_status VARCHAR(16) NOT NULL DEFAULT 'candidate' COMMENT 'draft/candidate/adopted/rejected',
-  dedup_of VARCHAR(64) COMMENT '指向既有 canonical kp_id（合并候选，不另立主表行）',
-  confirmed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '人工确认位（置位才提升）',
+CREATE TABLE IF NOT EXISTS qe_learning (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
+  owner VARCHAR(64) NOT NULL DEFAULT 'admin' COMMENT '学习者标识（v1.0 恒 admin，多用户扩展位）',
+  target_kind VARCHAR(16) NOT NULL COMMENT '闭集 course=学习课程行 / kp=知识点行（单表继承）',
+  target_id VARCHAR(64) NOT NULL COMMENT 'course 行=共享 qed_course.course_id；kp 行=共享 qed_knowledge_point.kp_id（只引用不复制，不存名称快照）',
+  status VARCHAR(16) NOT NULL COMMENT 'course 行：active/paused/done；kp 行：done/skipped/pending（pending＝只有质性判定或撤销痕迹，不计入完成数；未落笔=无行）',
+  config JSON COMMENT 'course 行专用：{resources:[{kind,ref_id,label}],kp_path:[kp_id…]}；kp 行 NULL（整行读出、不内部筛选）',
+  qualitative_passed TINYINT(1) NULL COMMENT 'kp 行专用：质性门结论 1/0，NULL=未判（仅 concept/design 知识点有值）',
+  qualitative_note VARCHAR(1000) DEFAULT '' COMMENT 'kp 行专用：判读证据一句话（v1 只存学习者自评理由；不含密钥）',
+  assessed_by VARCHAR(16) DEFAULT '' COMMENT 'kp 行专用：provenance learner=自评位／model=预留（本轮端点拒绝）',
+  assessed_at DATETIME NULL COMMENT 'kp 行专用：最近一次质性判定 UTC 时刻',
+  learner_note TEXT NULL COMMENT '学习者备注（课程级与知识点级通用；人工位，机器不写）',
   created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
   updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  KEY idx_kpd_course (course_id, gen_status),
-  KEY idx_kpd_batch (gen_batch),
-  KEY idx_kpd_parent (parent_kp_id)
+  UNIQUE KEY uq_learning_target (owner, target_kind, target_id),
+  KEY idx_learning_course (owner, target_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='知识点候选明细池（根私有，8901/8902 不读；一行=一条叙述/版本，人工确认后提升到 qed_knowledge_point）';
+COMMENT='学习记录（owner×目标×状态单表：course 行=选课与学习路径，kp 行=终态与质性门；进度百分比与掌握分读时重算，所有权 QED-Engine）';
 ```
 
 ### qe_question（题目与记忆卡表）
 
 **用途**：一行＝一道题或一张卡。承载抽取式题源入库的全套事实：题面与去重键、服务端判分依据、
 形态与题型闭集、题源与答案来源溯源、产出批次与产出者。**判分依据只在作答后才回传**，题面下发
-响应剔除 `expected_answer`/`keywords`/`explanation`。
+响应剔除 `expected_answer`/`keywords`/`explanation`。**本表不加 `owner`**——题库是内容、
+跨学习者共享的主数据（一题多学习者共用），多用户按 `qe_attempt.owner` 分账；给题库加 `owner`
+会造成同题多份复制，违「一处登记、多处消费」。题与课的关系只有两条腿：`course_id` 共享坐标
+与 `kp_id` 归档（后者可空＝未归档池）。
 
 **涉及模块**：`backend/qed_engine/services/learn/practice.py`（DDL + `MySQLPracticeStore`）、
 `services/learn/grading.py`（确定性判分）、`api/learn.py`（`GET /learn/question-books`、
@@ -771,9 +644,6 @@ COMMENT='知识点候选明细池（根私有，8901/8902 不读；一行=一条
 | --- | --- | --- | --- | --- | --- |
 | `question_id` | VARCHAR(64) | PK | NOT NULL | 题目 ID（服务端生成 `q-<hex12>`） | |
 | `course_id` | VARCHAR(64) | UQ/IDX | NOT NULL | 课程坐标 | 与知识点主表/星图/目录工作台同源；去重键前缀 |
-| `course_label` | VARCHAR(255) | – | 默认 `''` | 课程名快照 | |
-| `learn_course_id` | VARCHAR(64) | – | 可空 | 所属学习课程 | 逻辑引用 `qe_learn_course`；非编译链路出题=NULL |
-| `unit_id` | VARCHAR(64) | – | 可空 | 关联块 | 逻辑引用 `qe_learn_unit`；编译接线后启用，v1 可空 |
 | `kp_id` | VARCHAR(64) | IDX | 可空 | 归属细知识点 | 逻辑引用 `qed_knowledge_point` 的 point 行；NULL＝未归档题 |
 | `kind` | VARCHAR(16) | IDX | NOT NULL，默认 `'quiz'` | 闭集 `quiz`=判分题 / `flashcard`=记忆卡（自评不判分） | `answer_source=none` 时强制本值 |
 | `question_type` | VARCHAR(16) | – | 可空 | quiz 行判分闭集 `choice`/`short`/`open` | 与判分三类一一对应；flashcard 行 NULL |
@@ -803,9 +673,6 @@ COMMENT='知识点候选明细池（根私有，8901/8902 不读；一行=一条
 CREATE TABLE IF NOT EXISTS qe_question (
   question_id VARCHAR(64) PRIMARY KEY COMMENT '题目 ID（服务端生成 q-<hex12>）',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course，与知识点主表/星图/M6 工作台同源）',
-  course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  learn_course_id VARCHAR(64) COMMENT '所属学习课程（逻辑引用 qe_learn_course；非编译链路出题=NULL）',
-  unit_id VARCHAR(64) COMMENT '关联块（逻辑引用 qe_learn_unit；M-2 编译接线后启用，v1 可空）',
   kp_id VARCHAR(64) COMMENT '归属细知识点（逻辑引用 qed_knowledge_point 的 point 行；NULL=未归档题）',
   kind VARCHAR(16) NOT NULL DEFAULT 'quiz' COMMENT '闭集 quiz=判分题 / flashcard=记忆卡（自评，不判分；裁决 ⑨：answer_source=none 时强制本值）',
   question_type VARCHAR(16) COMMENT 'quiz 行判分闭集 choice/short/open（与 M-3 三类一一对应）；flashcard 行 NULL',
@@ -839,12 +706,17 @@ COMMENT='练习题库（根自建；一行=一道题/一张卡，expected_answer
 
 ### qe_attempt（作答事实表）
 
-**用途**：一行＝一次作答事实（含判分结果与趋势），是掌握门的唯一数据源。
+**用途**：一行＝一次作答事实（含判分结果），是掌握门与复习调度的**唯一数据源**。
 **全量保留逐次行**，不做「只留终态」的合并；判分由服务端确定性函数写入，不信任客户端。
+两个派生量**不落列**：趋势 `score_trend` 是 `(上一次 is_correct, 本次 is_correct)` 的确定性四分支
+函数（new／improved／declined／unchanged），到期档位与间隔序列是同一序列的逐档推进——都在读时
+重放算出，端点响应字段名不变（前端零扰动）。`owner` 是本表的分账位：题库跨学习者共享，
+「谁答的、答成怎样、谁的错题本」全部落在这里。
 
-**涉及模块**：`backend/qed_engine/services/learn/practice.py`（DDL + 写入与幂等 + 错题本派生）、
-`services/learn/grading.py`（判分与趋势计算）、`api/learn.py`（`POST /learn/attempts`、
-`GET /learn/mistakes`、`PATCH /learn/attempts/{attempt_id}`、主链 M-3 门经 `attempts_by_kp` 取逐知识点作答序列）、
+**涉及模块**：`backend/qed_engine/services/learn/practice.py`（DDL + 写入与幂等 + 错题本派生 +
+到期队列重放）、`services/learn/grading.py`（判分与趋势派生）、`api/learn.py`（`POST /learn/attempts`、
+`GET /learn/review/due`、`GET /learn/mistakes`、`PATCH /learn/attempts/{attempt_id}`、
+掌握门经 `attempts_by_kp` 取逐知识点作答序列）、
 8903 `web-ui/src/pages/Practice.tsx`。
 
 **字段明细**：
@@ -852,96 +724,50 @@ COMMENT='练习题库（根自建；一行=一道题/一张卡，expected_answer
 | 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | `attempt_id` | BIGINT | PK | 自增 | 行 ID（时序即事实序） | |
+| `owner` | VARCHAR(64) | UQ/IDX | NOT NULL，默认 `'admin'` | 学习者标识 | v1.0 恒 `admin`，多用户扩展位；**必须是唯一键前缀**，否则第二学习者的作答被幂等键静默吃掉 |
 | `question_id` | VARCHAR(64) | UQ/IDX | NOT NULL | 题目 | 逻辑引用 `qe_question` |
 | `course_id` | VARCHAR(64) | IDX | NOT NULL | 冗余课程坐标 | 错题本与统计按课程聚合 |
 | `kp_id` | VARCHAR(64) | IDX | 可空 | 冗余知识点 | 掌握门按 kp 取近因序列、复习错题优先级判定 |
 | `origin` | VARCHAR(16) | UQ | NOT NULL，默认 `'new'` | 闭集 `new`=首练 / `review`=复习队列 / `manual`=人工重做 | 唯一键成员 |
-| `review_date` | DATETIME | UQ | 可空 | `origin=review` 时＝当次 `due_at` | 调度回写的幂等依据；NULL 允许同题重复练 |
+| `review_date` | DATETIME | UQ | 可空 | `origin=review` 时＝当次到期时刻 | 重放幂等依据；NULL 允许同题重复练 |
 | `user_answer` | TEXT | – | NOT NULL | 学习者作答原文 | 不清洗不截断，判分函数内部规范化 |
 | `is_correct` | TINYINT(1) | IDX | NOT NULL，默认 0 | 判分结果 | **服务端确定性判分写入**；自评卡由 `self_result` 置位 |
 | `method` | VARCHAR(16) | – | NOT NULL，默认 `'deterministic'` | 闭集 `deterministic`/`llm`/`self` | open 题 LLM 批改与 flashcard 自评 |
 | `judge_note` | VARCHAR(1000) | – | 默认 `''` | 判分/批改说明 | `method=llm` 时存模型意见；不含密钥 |
-| `score_trend` | VARCHAR(16) | – | NOT NULL，默认 `'new'` | 闭集 `new`/`improved`/`declined`/`unchanged` | 该题先前无行＝new，同＝unchanged，翻转＝improved/declined |
-| `resolved` | TINYINT(1) | IDX | NOT NULL，默认 0 | 已解决位 | 本次对=1，历史对而过本次错=0，其余保留旧值（DeepTutor CASE 语义直译） |
+| `resolved` | TINYINT(1) | IDX | NOT NULL，默认 0 | 已解决位（**纯人工位**） | 只由学习者在错题本工位置位，机器判分不写本列（R6，与 `bookmarked` 同族） |
 | `bookmarked` | TINYINT(1) | – | NOT NULL，默认 0 | 错题本收藏 | **人工位，机器不写**（R6） |
 | `answered_at` | DATETIME | IDX | NOT NULL | UTC 作答时间 | 近因加权排序键 |
+
+**注释**：判分只写 `is_correct`／`method`／`judge_note`，`resolved` 与 `bookmarked` 两列机器恒不写，
+故 `idx_attempt_open (course_id, resolved, is_correct)` 承载的是「按课程取未解决错题」这一真实选择度。
+到期队列与间隔档位是本表全量流水的确定性重放（读时按 `kp_type` 取间隔序列、从末次作答逐档推进），
+`due_counts_by_kp` 的到期计数同源。
 
 **建表语句**：
 
 ```sql
 CREATE TABLE IF NOT EXISTS qe_attempt (
   attempt_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键，时序即事实序）',
+  owner VARCHAR(64) NOT NULL DEFAULT 'admin' COMMENT '学习者标识（v1.0 恒 admin，多用户扩展位；幂等键前缀）',
   question_id VARCHAR(64) NOT NULL COMMENT '题目（逻辑引用 qe_question）',
   course_id VARCHAR(64) NOT NULL COMMENT '冗余课程坐标（错题本与统计按课程聚合）',
-  kp_id VARCHAR(64) COMMENT '冗余知识点（M-3 掌握门按 kp 取近因序列、复习错题优先级判定）',
+  kp_id VARCHAR(64) COMMENT '冗余知识点（掌握门按 kp 取近因序列、复习错题优先级判定）',
   origin VARCHAR(16) NOT NULL DEFAULT 'new' COMMENT '闭集 new=首练 / review=复习队列 / manual=人工重做',
-  review_date DATETIME COMMENT 'origin=review 时=当次 due_at（调度回写的幂等依据）',
+  review_date DATETIME COMMENT 'origin=review 时=当次到期时刻（重放幂等依据）',
   user_answer TEXT NOT NULL COMMENT '学习者作答原文（不清洗不截断，判分函数内部规范化）',
   is_correct TINYINT(1) NOT NULL DEFAULT 0 COMMENT '判分结果（**服务端确定性判分写入，不信任客户端**，缝 1；自评卡由 self_result 置位）',
   method VARCHAR(16) NOT NULL DEFAULT 'deterministic' COMMENT '闭集 deterministic/llm/self（open 题 LLM 批改与 flashcard 自评）',
   judge_note VARCHAR(1000) DEFAULT '' COMMENT '判分/批改说明（method=llm 时存模型意见；不含密钥）',
-  score_trend VARCHAR(16) NOT NULL DEFAULT 'new' COMMENT '闭集 new/improved/declined/unchanged（该题先前无行=new，同=unchanged，翻转=improved/declined）',
-  resolved TINYINT(1) NOT NULL DEFAULT 0 COMMENT '已解决位：本次对=1，历史对而过本次错=0，其余保留旧值（DeepTutor CASE 语义直译）',
+  resolved TINYINT(1) NOT NULL DEFAULT 0 COMMENT '已解决位（**纯人工位**：只由学习者在错题本工位置位，机器判分不写本列）',
   bookmarked TINYINT(1) NOT NULL DEFAULT 0 COMMENT '错题本收藏（人工位，机器不写）',
   answered_at DATETIME NOT NULL COMMENT 'UTC 作答时间（近因加权排序键）',
-  UNIQUE KEY uq_attempt_idem (question_id, review_date, origin),
-  KEY idx_attempt_question (question_id, answered_at),
-  KEY idx_attempt_kp (kp_id, answered_at),
-  KEY idx_attempt_course (course_id, answered_at),
+  UNIQUE KEY uq_attempt_idem (owner, question_id, review_date, origin),
+  KEY idx_attempt_question (owner, question_id, answered_at),
+  KEY idx_attempt_kp (owner, kp_id, answered_at),
+  KEY idx_attempt_course (owner, course_id, answered_at),
   KEY idx_attempt_open (course_id, resolved, is_correct)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='答题事实明细（M-3 掌握门的唯一数据源；全量保留逐次行不做只留终态的合并，缝 4）';
-```
-
-### qe_review_task（间隔复习调度表）
-
-**用途**：一行＝一个间隔复习调度态，双粒度：一道具体题/卡（`target_kind=question`）或一个知识点
-整体（`target_kind=kp`）。调度态持久化到 MySQL 是为了「重启不丢进度」；到期队列按
-`(course_id, status, due_at)` 取。
-
-**涉及模块**：`backend/qed_engine/services/learn/practice.py`（DDL + `interval_sequence()` +
-`schedule_next()` + 到期队列与回写 + `due_counts_by_kp` 按知识点到期计数）、`api/learn.py`（`GET /learn/review/due`、
-`POST /learn/attempts` 内的档位回写）、8903 `web-ui/src/pages/Practice.tsx`（复习队列）。
-
-**字段明细**：
-
-| 字段 | 类型 | 键 | 空/默认 | 说明 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| `id` | BIGINT | PK | 自增 | 行 ID | |
-| `target_kind` | VARCHAR(16) | UQ | NOT NULL | 闭集 `question`=具体题/卡 / `kp`=知识点整体节律 | kp 粒度供 v2 按知识点推题 |
-| `target_id` | VARCHAR(64) | UQ | NOT NULL | `question_id` 或 `kp_id` | 与 `target_kind` 组成唯一键 |
-| `course_id` | VARCHAR(64) | IDX | NOT NULL | 课程坐标 | 到期队列按课程取 |
-| `kp_type` | VARCHAR(16) | – | NOT NULL | 间隔序列依据 | kp 目标取主表 `type`，question 目标取该行 `kp_type` 快照；无分类回落 memory 序列并记 `meta` |
-| `interval_index` | TINYINT | – | NOT NULL，默认 0 | 当前档位（序列下标） | |
-| `consecutive_correct` | TINYINT | – | NOT NULL，默认 0 | 连对计数 | ≥2 跳两档后清零 |
-| `consecutive_wrong` | TINYINT | – | NOT NULL，默认 0 | 连错计数 | ≥2 清零，档位已回退 |
-| `due_at` | DATETIME | IDX | NOT NULL | UTC 到期时间 | S2「重启不丢进度」的核验点 |
-| `status` | VARCHAR(16) | IDX | NOT NULL，默认 `'active'` | 闭集 `active`/`archived` | 知识点删除或题 retired → 归档不删行 |
-| `created_at` | DATETIME | – | NOT NULL | UTC 创建时间 | |
-| `updated_at` | DATETIME | – | NOT NULL | UTC 更新时间 | |
-
-**注释**：错题本不是表——优先级与错题清单一律读时派生，本表只持久化调度态。
-
-**建表语句**：
-
-```sql
-CREATE TABLE IF NOT EXISTS qe_review_task (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  target_kind VARCHAR(16) NOT NULL COMMENT '闭集 question=具体题/卡（错题重练与闪卡节律）/ kp=知识点整体节律（v2 按知识点推题时用）',
-  target_id VARCHAR(64) NOT NULL COMMENT 'question_id 或 kp_id',
-  course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（到期队列按课程取）',
-  kp_type VARCHAR(16) NOT NULL COMMENT '间隔序列依据（kp 目标取主表 type，question 目标取该行 kp_type 快照；无分类回落 memory 序列并记 meta）',
-  interval_index TINYINT NOT NULL DEFAULT 0 COMMENT '当前档位（序列下标）',
-  consecutive_correct TINYINT NOT NULL DEFAULT 0 COMMENT '连对计数（≥2 跳两档后清零）',
-  consecutive_wrong TINYINT NOT NULL DEFAULT 0 COMMENT '连错计数（≥2 清零，档位已回退）',
-  due_at DATETIME NOT NULL COMMENT 'UTC 到期时间（S2「重启不丢进度」的核验点）',
-  status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '闭集 active/archived（知识点删除/题 retired → 归档不删行）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  UNIQUE KEY uq_review_target (target_kind, target_id),
-  KEY idx_review_due (course_id, status, due_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化，双粒度，重启不丢；所有权 QED-Engine）';
+COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次行不做只留终态的合并，缝 4；趋势与到期档位读时重放不落列）';
 ```
 
 ## 六、他项目表族与同步契约
@@ -952,7 +778,12 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
   列序、类型与宽度、可空性、注释、索引），不在各自仓库另立一份定义。
 - **受托建表不改变正本归属**：`qed_domain`/`qed_course` 的可执行面是 QED-Tracker 的 ORM（模型即
   schema），本文写等价展示 DDL 并与其列名·列序·类型·可空性对齐；两侧任一改动未随步即契约红。
-- **根私有 `qe_*` 七表**本文同样是正本，两项目不读不写（R2）。
+- **根私有 `qe_*` 三表**本文同样是正本，两项目不读不写（R2）；三表即「课程学习一张 ＋
+  课后练习两张」，学习者面与内容面的分账只在 `owner` 列，不跨族暴露。
+- **共享主表加列的跨项目口径**：`qed_knowledge_point` 的 `aliases`／`narrative_ref`／`angles`
+  三列对 8901/8902 是**追加式且只读方零破坏**（两项目对本表只读、且不消费这三列），故按 R3 走
+  「先改本文与接口契约 → 通知消费方」即可，**不发跨项目请求函**；仅当对方 ORM 做全列映射而需随步
+  时，才在通知里附转告窗口。根私有族变更一律不同步（下表第三行）。
 - **`qt_*`/`af_*` 的列级正本在各自仓库文档**，本文只登记总览行与路由指针；其列级晋升为本文正本
   属后续批次，届时对方文档的「唯一事实源」声明改为本文镜像。
 
@@ -973,13 +804,15 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
 
 | 族 | 表数 | 形状事实源 | 建表面 | 根侧消费方式 |
 | --- | --- | --- | --- | --- |
-| `af_*` | 5 | `Axiom-Flow/docs/architecture/database-design.md` | 线性迁移链（head `20260928_0001`）；业务库需人工升级，服务不自动迁移 | 经 8902 HTTP API 透传（`api/axiom.py` + `clients/axiom_client.py`）；全链路语义见 [parsing-flow.md](../design/parsing-flow.md) §2 |
+| `af_*` | 4 | `Axiom-Flow/docs/architecture/database-design.md` | 线性迁移链（四表整族重建 head `20261022_0001`）；业务库需人工升级，服务不自动迁移，库内现状见 7.8 T11 | 经 8902 HTTP API 透传（`api/axiom.py` + `clients/axiom_client.py`）；知识点梳理的根侧提升面按本文拉取腿消费，全链路语义见 [parsing-flow.md](../design/parsing-flow.md) §2 |
 | `qt_*` | 5 | `QED-Tracker/docs/architecture/database-private-tables.md` | 该仓库**无迁移链**：`models.py` 即 schema，`create_all`/`ensure_schema` 建表 | 经 8901 HTTP API 透传（`api/tracker.py` + `clients/tracker_client.py`），不直连（R2） |
 
 ### 6.4 同步的验收
 
-- **机械守护**：总览↔读写矩阵↔角色分类三处表集合与表数一致（21 表）；正本 11 表的逐列定义与
-  建表语句对齐实现事实源；他项目私有表不得在本文出现逐列小节（详见第八章）。
+- **机械守护**：总览↔读写矩阵↔角色分类三处表集合与表数一致（**16 表**）；正本 **7 表**的逐列定义与
+  建表语句对齐实现事实源（其中五张根侧表逐字相等）；他项目私有表不得在本文出现逐列小节（详见第八章）。
+  数值硬编在 `tests/contract/test_architecture_documents.py`（总览断言、`MASTER_TABLES`、
+  `ROOT_PRIVATE_TABLES`、COLLATE 计数），表族增删须同批改守护，漏改即红。
 - **表级变更以本文总览行为完成标志**：对方改名／新增／删除后本文总览未随步，即视为同步未完成。
 - **跨仓引用一律写纯路径**（不做相对链接、不猜 URL）；仓库内相对链接由链接守护校验。
 
@@ -1015,17 +848,19 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
 | --- | --- | --- | --- |
 | 自由重建档 | 数据可自动或低成本再生 | 工作库 `qed_test` 全库、纯日志账目表 | 改模型 → DROP+CREATE 重建或建表面自愈；**免四步窗口、免备份** |
 | **有外部写方例外档** | 本仓库建表但别的项目也在直写，重建即毁他项目历史 | `qed_llm_calls`（8901/8902 local 直写审计行） | 只做**追加式 ALTER**（加列／加索引／改注释）；**绝不 DROP 重建** |
-| 备份确认档 | 再生昂贵（重跑需数小时 GPU 或原件不可重得） | 解析产物登记 `af_*`、下载原件与登记（`qt_*` 中指向不可重得文件的行）、库内已跑出的知识点树与练习数据 | 免四步仪式，但**临时备份 → 用户确认 → 重建**三步不可免；备份只为本次回滚窗口存在，落点 `dataset/backups/YYYY-MM-DD-<任务标识>`，验收确认后全部清理不留残留 |
+| 备份确认档 | 再生昂贵（重跑需数小时 GPU 或原件不可重得） | 解析产物登记 `af_*`、下载原件与登记（`qt_*` 中指向不可重得文件的行）、库内已跑出的知识点树与练习数据、**学习记录中的人工位**（`qe_learning` 的 kp 行终态与 `learner_note`、`qe_attempt` 的 `resolved`/`bookmarked`） | 免四步仪式，但**临时备份 → 用户确认 → 重建**三步不可免；备份只为本次回滚窗口存在，落点 `dataset/backups/YYYY-MM-DD-<任务标识>`，验收确认后全部清理不留残留 |
 | 生产库红线 | — | 生产 `qed` 库 | 任何档位都不适用本条：生产库 DDL 一律属人工窗口 |
 
 - 档位误判缓解：判不清先按备份确认档走，降档须用户裁决。
-- `qed_knowledge_point` 与 `qe_learn_kp_detail` 有「可删除重建」授权（无数据搬迁义务），但当前
-  落地形态是就地 ALTER；授权继续有效，只是本次不用。
+- **单表继承表按较严的一档定档**：v1.0 定档的 `qe_learning` 里 course 行可低成本再生（重选课即可）、
+  kp 行含不可再生的人工位（学习者备注与自评理由），故**整表按备份确认档**走，不因半数行可再生而降档。
+- `qed_knowledge_point` 与 `qe_question`／`qe_attempt`／`qe_learning` 有「可删除重建」授权
+  （无数据搬迁义务），但重建前一步的备份确认档不可免；生产 `qed` 库走人工窗口。
 
 ### 7.4 建表与幂等维护
 
 - **同一张表只允许一个建表面**：共享 `qed_domain`/`qed_course` 在 QED-Tracker 的 ORM 建表面，
-  其余共享两表与根私有七表在根侧，`qt_*` 私有表在 QED-Tracker，`af_*` 在其迁移链。
+  其余共享两表与根私有三表在根侧，`qt_*` 私有表在 QED-Tracker，`af_*` 在其迁移链。
 - 根侧：DDL 常量 + `ensure_tables()` 由**首个相关端点请求**懒建，启动路径不触碰 MySQL；
   **根不引入迁移框架**（R10）。
 - 补列／补索引／补注释一律幂等（存在性由 `information_schema` 探查），绝不隐式 DROP。
@@ -1055,7 +890,28 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
 - 库内改名形态按**目标名是否已由懒建实存**分流：目标名**未实存**且旧名表有数据 → 直接一条
   `RENAME TABLE`（练习三表即此形态，REQ-132 W1）；目标名**已实存** → 旧名表有数据则迁移到新名后删旧表、
   为空表则直接删除后由懒建重建（此时 `RENAME` 必撞「表已存在」）。
+- `RENAME TABLE` **不改存量表的排序规则**：改名后的表沿用建表时的 collation，故新名实存不等于形状已归一，
+  collation 分裂的处置另按 7.8 登记（P3）。
 - 生产 `qed` 库的 DDL 执行（建表、ALTER、索引变更）属人工窗口，随发布批次执行。
+- **表族简化的批次归属**（2026-10-21 用户裁决，同日升级为 v1.0 定档）＝判据正本分两级：**规则级**
+  （为什么是三张、哪些列不加、执行怎么编排）在
+  `docs/adr/0026-v1-root-table-family-freeze.md`；**逐列级与取证锚**（三张的逐列形状、三刀取证读数、
+  黄金样本对拍判据、退役端点清单）在
+  [REQ-137 壳](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md)。原
+  [REQ-132 壳 W5 判定表](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md)的四枚判定（废表／并层／
+  删列／删粒度）**已被 ADR 0026 吸收**：其中 `qe_kp_detail` 废表与 `qe_unit` 的 section 并层升级为
+  整表退出，`qe_review_task` 的删粒度升级为整表退出，八枚死列退出随 `qe_course_state` 整表退出而
+  自然兑现。本文只在 §三 备注列与 7.8 T10/T12 留指针，不复制清单（R5）。本文 §三 与 §五 已按
+  **三张与目标列面**书写为 v1.0 定档正文（全库 16 张）；库内形状仍落后于本文，其一次性现状与
+  执行窗口见 7.8，本文不叙述。
+- **五张判退表的库内处置按「是否含不可再生的人工位」分流**（与上面的改名分流规则不同形）：
+  ① 无独有信息的 `qe_unit`、已判废池的 `qe_kp_detail` 及其两组旧名表（`qed_learn_*` 与上一批作废名
+  `qe_learn_*`）**不迁不重命名**——迁进一张已判退出的表等于把清错面再造一次，直接「备份 → 整表 DROP」；
+  ② 含人工位存量行的 `qe_course_state`／`qe_unit_progress` 须先**迁进** `qe_learning`
+  （按 `target_kind` 分别落 course 行与 kp 行，`learn_course_id` → `qed_course.course_id` 的映射在
+  迁移时解析、解析不出即停在原地报人工）；③ `qe_review_task` 须先**dump 全量行做黄金样本对拍**
+  再 DROP（逐档比对 `interval_index` 与 `due_at`，判据见 ADR 0026 D3 与 7.8 T12），不一致即回退
+  保留本表并重开「调度态是否落列」裁决。三步「备份 → 用户确认 → 重建」不可免（7.3 备份确认档）。
 - 库内一次性现状见 7.8，本文不在正文叙述。
 
 ### 7.7 敏感字段与连接配置
@@ -1074,40 +930,56 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
 
 | 编号 | 事实/待定项 | 归属 |
 | --- | --- | --- |
-| T1 | **表名定档**：根私有七表定档为摘除 `learn_` 段的 `qe_*`＝`qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_kp_detail`／`qe_question`／`qe_attempt`／`qe_review_task`；练习三表已随 REQ-132 W1 落地（本文、代码 DDL 与库内同批），余四张待 W2 | REQ-120 → REQ-132 W1/W2 |
-| T2 | `qed_test` 内 `qed_learn_*` 旧名表与新名**双前缀并存**：练习三表已由 W1 的 `RENAME TABLE` 归一（旧名不再存在），其余四张的旧名表与代码懒建的新名表并存、改名批次待执行 | REQ-132 W3 |
-| T3 | 生产 `qed` 库**未建**根私有七表；首次落地属人工窗口 | REQ-120 |
+| T1 | **表名定档**：根私有族定档为三张＝`qe_learning`／`qe_question`／`qe_attempt`（前缀规则仍是摘除 `learn_` 子域段的 `qe_*`，2026-10-21 用户裁决）；三枚名字已全部随步本文与代码 DDL。历史七名中的练习三表已由 REQ-132 W1 含库内改名实存，余四张（`qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_kp_detail`）与 `qe_review_task` 整表退出，其名字只作为库内旧名表的清点键存在（处置分流见 7.6） | REQ-120 → REQ-132 W1/W2 → REQ-137 |
+| T2 | `qed_test` 内**三张目标表已实存、形状与代码 DDL 逐字相等**（2026-10-22 REQ-137 W1 窗口零迁移清空重建，12 项出口判据全绿）：`qe_learning` 13 列（course 2 行／kp 0 行）、`qe_question` 24 列（2 行）、`qe_attempt` 14 列（6 行、全带 `owner='admin'`），表级与**列级** collation 全 `utf8mb4_0900_ai_ci`（未归一列数 0）；旧名表 `qed_learn_*` 四张、作废名表 `qe_learn_*` 四张与 `qe_review_task` 已 `DROP`，`qed_learn_%` 与 `qe_learn_%` **双双零存活**；全库 25 → **17 张**（＝v1.0 的 16 张＋`alembic_version`），共享四张行数与基线逐条相等（1／12／96／116）。共享主表 25 列——三列经 `ALTER ADD COLUMN` 追加，故**物理列序落 `updated_at` 之后**，与 §五 声明序「同集合不同序」（`backend/` 零 SQL JOIN、唯一 `SELECT *` 落在未动的 `qed_llm_calls`、按行取值游标皆 `DictCursor` ⇒ 列序差无消费方）；主表 collation 仍 `utf8mb4_unicode_ci`＝用户 2026-10-22 三裁③**明写不纳入本窗口、不计红**，归一另批 | REQ-137 W1（**已执行**）；主表 collation 归一另批 |
+| T3 | 生产 `qed` 库**未建**根私有三表；首次落地属人工窗口，**零迁移**——首次建表即按目标三张建，不存在「先建七张再改三张」的中间态；命令原文随执行批出，agent 不代执行 | REQ-120 → REQ-137 W6 |
 | T4 | `qed_domain`/`qed_course` 在生产库的 `meta` 落物理末位（追加式 ALTER），与 ORM 声明序**同集合不同序**；`domain_id` 宽度现状 VARCHAR(32) | REQ-119 R1/R2 |
 | T5 | `qt_sources.book_id` VARCHAR(100) 与 `qt_books.book_id` 主键 VARCHAR(32) 宽度不匹配，MySQL 重建外键有 3780 风险 | 待 QED-Tracker 裁决 |
 | T6 | 课程 `exploration_stage` 写路径＝8901 `PATCH /courses` 在线优先，仅其不可达或写失败时降级直写（例外与恢复条件、越界历史行检出 SQL 见 [downloads-flow.md](../design/downloads-flow.md) §5.4）；取值按课程 5 态分档校验，`qed` 与 `qed_test` 两库只读核验 5 态外取值 0 行 | DEFECT-014 |
 | T7 | `af_*`／`qt_*` 列级内容尚未晋升为本文正本；对方两份文档的「唯一事实源」声明改为镜像的请求待承接 | 本文后续批次 |
-| T8 | Axiom-Flow 文档自陈业务库迁移停在 `20260926_0001`，与生产 `qed` 库实存 `af_page_regions`／`af_parse_jobs.parser_signature` 不符 | 随请求稿告知对方 |
+| T8 | Axiom-Flow 文档自陈业务库迁移停在 `20260926_0001`；根侧 2026-10-21 只读探针实测 `qed` 与 `qed_test` 两库 `alembic_version` **均为 `20260928_0001`**，且 `af_page_regions` 表与 `af_parse_jobs.parser_signature` 列在生产库实存——落后的是其文档自陈，不是库内指针 | [REQ-136 综合请求 R1](../plans/2026-10-21-af-family-rebuild-consolidated-request.md)（原 `REQ-135` R1，其请求稿壳 2026-10-21 归并后归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-af-family-rebuild-kp-tables-request.md)；读数可同机复算） |
 | T9 | `qed_course.related_targets`（空转）与 `qed_domain.path_results`（活列）两列**已由用户 2026-10-18 复裁为删除**，2026-10-15 的改判收回；两库实测列仍在（`qed_test` 只读核验 2026-10-18），须连 8901 响应字段与其 `api.md` 同批摘除，执行归所有权方 | REQ-119 R5 |
+| T10 | 根私有表族**简化判定**（2026-10-21 用户四裁）＝`qe_kp_detail` 整表退出（梳理工作区与候选池正本归 Axiom-Flow `af_kp`）、`qe_unit` 的 `level='section'` 层并到知识点层级、`qe_course_state` 八枚死列退出、`qe_review_task` 的 `target_kind='kp'` 粒度删除。**本行同日已被 ADR 0026 吸收并升级**：四枚判定中三枚升为整表退出、八枚死列随整表退出自然兑现，本行原写的「执行后本族六张、全库 20 张」**作废**。W5 的逐枚取证读数仍有效，正本在 [REQ-132 壳 W5 判定表](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) | REQ-132 W5 → 已并入 ADR 0026／REQ-137 |
+| T12 | **v1.0 根私有表族定档＝三张**（2026-10-21 用户裁决；2026-10-22 第六批「A 全批同改」授权本文正文、代码 DDL 与守护数值同批落地）：① `qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_review_task` 四张整表退出，前三张的有效信息合并为 `qe_learning` 单表（13 列，`target_kind` 闭集 course／kp 单表继承），第四张改作答流水读时重放；② `qe_question` 删 `unit_id`／`learn_course_id`／`course_label` 三列（27 → 24）；③ `qe_attempt` 加 `owner`、幂等唯一键改 `(owner, question_id, review_date, origin)`、三枚索引加 `owner` 前缀、`score_trend` 退列、`resolved` 改判纯人工位（14 → 14）；④ 共享主表加 `aliases`／`narrative_ref`／`angles` 三列（22 → 25），长文正文落数据根 `parsed/**`（白名单不新增条目，ADR 0018 不动），读经 `GET /learn/knowledge-points/{kp_id}/narrative`（越根双闸）；⑤ 骨架编译链路与候选池端点族整链退役（12 枚），point 行产面平移为 `POST /learn/knowledge-points`。定档后本族 **3 张**、全库 **16 张**、根侧列数 116 → **51**。**`qed_test` 已于 2026-10-22 落地**（零迁移清空重建，库内实存读数见 T2；黄金样本对拍＝`target_kind='question'` 两行与作答流水重放态**逐值相等**，取证与退役端点清单在归档壳）；**生产 `qed` 仍未建**，属人工窗口、零迁移（T3）；同批守护数值＝`ROOT_PRIVATE_TABLES` 三枚、总览断言 16、正本 7、COLLATE 计数 5 | ADR 0026 → REQ-137 W1~W7（**2026-10-22 Achieved 收口**，壳归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md)） |
+| T11 | Axiom-Flow 已定档 `af_*` 由五张收为**四张**（`af_books` 零改列 22 列／`af_operations` 事件明细 27 列／`af_pages` 结果索引 11 列／`af_kp` 知识点单表 23 列，档位＝档 B 整族重建，迁移链 head `20261022_0001` 已在对方仓库落地）；本文 §三／§4.4／§6.3 **已按四张登记**（表级登记只写表名与路由，不写其逐列形状，不领先库内），其**库内升级窗口未执行**＝对方业务库仍在旧五表（见 T8），旧表消失前根侧不直连消费新表。列级正本在 `Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md`（根侧 [REQ-134 壳](../plans/2026-10-21-af-table-architecture-design.md) 同日退为指针） | REQ-134 W7 → 待对方执行批 |
 
 ### 7.9 账本与作业表的保留期口径
 
 治理对象＝四张只增不删的流水表：`qed_llm_calls`（调用账）、`qt_tasks`／`qt_selections`（下载与选书
-作业）、`af_parse_jobs`（解析作业）。三处口径的分工：本节回答**什么时候裁剪**，7.3 回答**能不能重建**，
+作业）、`af_operations`（解析与编辑事件流，承自原 `af_parse_jobs`，随 AF 四表定档改名，见 7.8 T11）。
+三处口径的分工：本节回答**什么时候裁剪**，7.3 回答**能不能重建**，
 [storage-conventions.md](../standards/storage-conventions.md) 回答**盘上** `dataset/`·`logs/`·`tmp/`
 的清理与备份；三条口径各自成文，互不覆盖、互不引用对方数值。
 
 - **不设固定天数，只设触发条件**（用户裁决 2026-10-18）。立论依据＝现网无容量压力：`qed_test` 内
-  `qed_llm_calls` 116 行／1.5 MB、`qt_tasks` 31 行、`qt_selections` 0 行、`af_parse_jobs` 7 行；
+  `qed_llm_calls` 116 行／1.5 MB、`qt_tasks` 31 行、`qt_selections` 0 行、`af_operations`（现名
+  `af_parse_jobs`）7 行；
   预设天数只会让口径先于事实漂移。任一表命中下列之一即**另立任务**处置，且不得在建表或写入路径
   里挂自动清理：
   - 表体积 ≥ 1 GB，或行数 ≥ 10 万行；
   - 消费端点（`GET /llm/calls` 与各作业列表）延迟因该表体积可辨识劣化；
   - 备份／迁移窗口因该表体积无法在人工窗口内完成。
-- **裁剪粒度＝终态流水行**：未到终态的作业行与被指针引用的行永不裁剪（`af_books.active_job_id`、
-  `qed_course.active_job_id`、学习面 `ref_id` 指向的行必须保留）；调用账只裁早于保留窗口的行，
+- **裁剪粒度＝终态流水行，且四类行不可裁剪**（2026-10-21 按代码实读更正本条举拯，
+  原判据两处举了代码中不存在的指针）：① 未到终态的作业行（`qt_tasks` 与 `af_operations` 的
+  running／pending 态）；② 被**生效指针**引用的行＝`af_books.active_job_id` 所指的解析版本行
+  （该列归 Axiom-Flow 所有，根侧只读消费）；③ 被**跨表句柄**引用的行＝`qt_tasks.task_id`（8900 侧
+  任务适配按此回读进度）与 `qt_selections.selection_id`；④ **派生集合的输入表**：`qt_selections`
+  不是流水表而是**数据源表**——`QED-Tracker/src/qed_tracker/db/selection_repository.py:183-190` 的
+  `downloaded_arxiv_ids()` 以**全表** `payload.downloads` 派生论文去重集，按时间裁剪会缩小去重集并
+  导致重复下载，故该表整表不入裁剪窗口。学习面 `ref_id` 的 `kind` 闭集为 book／af_version／knowledge，
+  指向书目与版本行而非作业行，不构成对作业表的引用。`qed_llm_calls` 只裁早于保留窗口的行，
   窗口取值随触发任务一并裁决，不在本节预设。
 - **分表口径**：
   - `qed_llm_calls`（根建表、8901／8902 直写）落 7.3 的**有外部写方例外档**＝可按行 DELETE 流水，
     **绝不 DROP 重建**；删除前只要求台账留下计数与被删行的时间范围，不强制 dump。
-  - `qt_tasks`／`qt_selections`（QED-Tracker 所有）＝终态作业行可裁剪；保留窗与执行由所有权方自定，
-    根侧不代设数值、不代执行，约束已作为出站请求登记（REQ-128）。
-  - `af_parse_jobs`（Axiom-Flow 所有）＝版本化产物，删行等于抹掉一段解析版本史，按 7.3 的
-    **备份确认档**走；保留窗由所有权方自定，约束已作为出站请求登记（REQ-129）。
+  - `qt_tasks`／`qt_selections`（QED-Tracker 所有）＝只有 `qt_tasks` 的终态作业行可裁剪，`qt_selections`
+    按上条 ④ 整表保留；保留窗与执行由所有权方自定，根侧不代设数值、不代执行。原出站请求
+    REQ-128 经用户 2026-10-21 裁决取消＝根侧边界由本节成文即已成立，不需对方回执，取消依据见
+    completed.md 该行。
+  - `af_operations`（Axiom-Flow 所有）＝版本化产物的事件史，删行等于抹掉一段解析版本史，按 7.3 的
+    **备份确认档**走；保留窗由所有权方自定，且须声明被 `af_books.active_job_id` 引用之行永不裁剪；
+  出站口径已并入综合请求 [REQ-136](../plans/2026-10-21-af-family-rebuild-consolidated-request.md) 其工作项 R5
+  （原 REQ-129 行经用户同日裁决并入，见 completed.md 该行）。
 - **归档形态**：库内不建历史表、不设归档区。需要留证的批次以单表 dump 落
   `dataset/backups/YYYY-MM-DD-<任务标识>`，只为本次回滚窗口存在、验收即清（7.3 与 ADR 0019 同口径）；
   长期可追溯由台账的计数与时间范围承载，不靠物理副本。
@@ -1117,18 +989,21 @@ COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化�
 
 | 守护 | 判据 | 文件 |
 | --- | --- | --- |
-| 逐列定义对齐 | 本文 11 张表的字段明细列名与列序 ↔ 实现事实源（根代码 DDL／对方 ORM）逐一对应 | `tests/contract/test_architecture_documents.py::test_database_design_carries_column_definitions_for_tables_it_owns` |
-| 建表语句逐字对齐 | 九张根侧表的文档 DDL 围栏 ↔ 代码**渲染后**语句逐字相等（`qed_llm_calls` 的注释常量与转义花括号须先渲染） | `::test_database_design_ddl_matches_code_verbatim` |
+| 逐列定义对齐 | 本文 7 张表的字段明细列名与列序 ↔ 实现事实源（根代码 DDL／对方 ORM）逐一对应 | `tests/contract/test_architecture_documents.py::test_database_design_carries_column_definitions_for_tables_it_owns` |
+| 建表语句逐字对齐 | 五张根侧表的文档 DDL 围栏 ↔ 代码**渲染后**语句逐字相等（`qed_llm_calls` 的注释常量与转义花括号须先渲染） | `::test_database_design_ddl_matches_code_verbatim` |
 | 等价展示 DDL 对齐 | `qed_domain`/`qed_course` 文档语句 ↔ 对方 ORM 的列名·列序·类型·可空性 | `::test_database_design_display_ddl_matches_tracker_orm` |
-| 每表四件套 | 11 张小节均含用途、涉及模块、字段明细、建表语句 | `::test_database_design_table_sections_carry_four_parts` |
-| 总览↔矩阵↔角色一致 | 全库总览 21 张表与读写矩阵、表角色分类覆盖的表集合、表数一致 | `::test_database_design_inventory_matrix_and_roles_cover_same_tables` |
+| 每表四件套 | 7 张小节均含用途、涉及模块、字段明细、建表语句 | `::test_database_design_table_sections_carry_four_parts` |
+| 总览↔矩阵↔角色一致 | 全库总览 16 张表与读写矩阵、表角色分类覆盖的表集合、表数一致 | `::test_database_design_inventory_matrix_and_roles_cover_same_tables` |
 | 他项目私有表越界 | `qt_*`/`af_*` 在本文不得出现逐列小节 | `::test_database_design_does_not_define_other_projects_private_tables` |
-| 前缀与排序规则 | 根侧七表前缀 `qe_`（练习三表已摘 `learn_` 段，定档进度见 7.8 T1）、九张建表语句显式声明库默认 collation、代码无 `qed_learn_` 残留 | `::test_root_private_table_prefix_and_collation_match_database_design` |
+| 前缀与排序规则 | 根侧三表前缀 `qe_` 且不带 `learn_` 子域段（三枚定档名见 7.8 T1）、五张建表语句显式声明库默认 collation、代码内 `qed_learn_` 与 `qe_learn_` 两种旧形均为零 | `::test_root_private_table_prefix_and_collation_match_database_design` |
 | 关系视图 | 本文保留 mermaid ER 图 | `::test_database_design_keeps_er_diagram` |
 | 文档元数据 | 设计状态/实现状态/关联代码/关联测试/关联 ADR/确认状态各恰好声明一次 | `::test_fixed_api_and_database_documents_declare_metadata` |
 
 - 门禁：`pytest tests/contract -q` + 全量 `pytest -q` + `ruff check backend tests`（解释器
   按[开发指南](../guides/development.md)「环境速查与命令矩阵」）。
+- **守护数值（硬编在 `tests/contract/test_architecture_documents.py`，本文改表数而守护不改即红）**：
+  `ROOT_PRIVATE_TABLES` ＝三枚、总览表数断言＝16、`MASTER_TABLES`＝7、代码 DDL 表集合＝
+  {`qed_knowledge_point`, `qed_llm_calls`} ∪ 根私有三枚、COLLATE 显式声明计数＝5。表族增删须两侧同批。
 - 运行面核验：8900 `/config/database` 实测返回真实连接状态（`reachable`/`reason`），响应不含密码。
 - 跨仓引用一律写纯路径（不做相对链接）；仓库内相对链接由 `tests/contract/test_markdown_links.py` 守护。
 - 子项目数据库冒烟以其各自仓库门禁为准。

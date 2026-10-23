@@ -5,8 +5,8 @@
 最后更新：2026-09-24
 关联 ADR：无新增（登记方式沿用 [ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md) 一任务一行一壳；
 设计文档结构遵循 [ADR 0017](../../../adr/0017-design-doc-structure-contract.md)）
-关联设计：[admin-dashboard.md](../../../design/admin-dashboard.md)（本壳 W1 重写为三块制）、
-[admin-console.md](../../../design/admin-console.md)（资源监控标注口径小修，另见 design-bugfix-log BUGFIX-017）、
+关联设计：[admin-dashboard.md](../../../design/frontend/admin-dashboard.md)（本壳 W1 重写为三块制）、
+[admin-console.md](../../../design/frontend/admin-console.md)（资源监控标注口径小修，另见 design-bugfix-log BUGFIX-017）、
 [api-contracts.md](../../../architecture/api-contracts.md)（`/monitor/gpu`、`/parse-jobs` 消费面，无新端点）、
 [local-model-management.md](../../../design/local-model-management.md)（单活互斥与监督器分工背景）
 关联 Tracker：docs/trackers/todo.md（REQ-033 任务行，一任务一行一壳）
@@ -44,7 +44,7 @@ nvidia-smi×2 仅 0.07s、tasklist 0.03s 可忽略。前端 `fetchAll` 用 `Prom
 ## 设计方案（蓝图，W1 落 design/）
 
 > **二改修订（2026-09-24 用户验收裁决，最终形态以
-> [admin-dashboard.md](../../../design/admin-dashboard.md) 为准，本蓝图仅留一版史）**：
+> [admin-dashboard.md](../../../design/frontend/admin-dashboard.md) 为准，本蓝图仅留一版史）**：
 > 一版实现经用户浏览器验收后判「与预期不符」，三点裁决：
 > ① 块一「服务详情＝服务在线情况 + 本地模型状况两段**并行**（非包含）」，水位行
 > （MySQL/显存/在跑/解析服务）**整行删除不留 MySQL**；三块 extra 备注只说「这块是做什么的」；
@@ -55,7 +55,7 @@ nvidia-smi×2 仅 0.07s、tasklist 0.03s 可忽略。前端 `fetchAll` 用 `Prom
 > （Axiom-Flow ADR 0007：生效版本 `active_job_id` 才叫已完成，分母恒为 `page_count`，
 > 页齐未激活显示「未生效」），`/parse-jobs` 仅装饰「失败 N 页」。
 >
-> **三改修订（2026-09-24 二次验收裁决，形态以 [admin-dashboard.md](../../../design/admin-dashboard.md) §1/§3 为准）**：
+> **三改修订（2026-09-24 二次验收裁决，形态以 [admin-dashboard.md](../../../design/frontend/admin-dashboard.md) §1/§3 为准）**：
 > ① 块一**去嵌套为并列两张卡**（用户原话「不是包含关系是并行关系，只是放在同一个大的
 > 模块之中」），左卡「服务详情」+ 右卡「本地模型状况」（全 api 时右卡自隐藏、左卡占满行）；
 > 〔误令回退注记：曾有改令「服务详情改 QED服务及本地模型状态」，用户澄清系发错窗口的
@@ -66,7 +66,7 @@ nvidia-smi×2 仅 0.07s、tasklist 0.03s 可忽略。前端 `fetchAll` 用 `Prom
 > ③ 右卡去掉**显存标识**与「数据源监督器探针 · 启停操作请到控制台」措辞；本页无 GPU
 > 数据消费者后 `fetchGpu` 移出 30s 轮询。
 >
-> **四改修订（2026-09-24 三次验收裁决，形态以 [admin-dashboard.md](../../../design/admin-dashboard.md) §3/§4 为准）**：
+> **四改修订（2026-09-24 三次验收裁决，形态以 [admin-dashboard.md](../../../design/frontend/admin-dashboard.md) §3/§4 为准）**：
 > ① 块一**合并为一张卡**（改判三改「并列两卡」形态，用户裁决「不分左右、分上下，能一个
 > 卡片尽量一个卡片」）：卡标题保持「服务详情」，extra 改**「QED服务及本地模型启动详情」**
 > （用户原文，经确认作 extra 小字、不改标题）；徽章段恒在上，下方新增固定分节
@@ -255,7 +255,7 @@ runtime store / GpuOverview / Dashboard 及 dashboard store、design/ 两份文�
 ## 关闭与归档
 
 关闭条件达成（2026-09-24 用户验收五改并发令收尾）：S1~S5 全达、W0~W12 收口；
-五改设计事实已晋升 [admin-dashboard.md](../../../design/admin-dashboard.md)（§1 标题层级与
+五改设计事实已晋升 [admin-dashboard.md](../../../design/frontend/admin-dashboard.md)（§1 标题层级与
 extra 收缩、§3 本地模型列表两栏、§4 格子四段行+图例、§5 KPI 序、§6 聚合表）与
 [local-model-management.md](../../../design/local-model-management.md)（双口径节分节名/模型名
 显示口径）；帮助文案 help/sections.ts 同步五改。本壳 Retain 归档 history/plans/2026-09/，

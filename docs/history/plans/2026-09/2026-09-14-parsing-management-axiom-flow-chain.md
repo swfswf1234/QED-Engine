@@ -7,7 +7,7 @@
 关联设计：[dataset-conventions.md](../../../design/dataset-conventions.md)（数据根三区）、
 [local-model-management.md](../../../design/local-model-management.md)（模型生命周期与槽位）、
 [llm-gateway.md](../../../design/llm-gateway.md)（网关与调用记录）、
-[解析管理 UI 设计](../../../design/parsing-ui.md)（界面消费）
+[解析管理 UI 设计](../../../design/frontend/parsing-ui.md)（界面消费）
 关联 Tracker：docs/trackers/todo.md（PLAN-044）
 归档判定：Retain（设计确定后按 ADR 0011 晋升 `design/`；本轮暂留 `plans/`）
 
@@ -34,7 +34,7 @@ Axiom-Flow（解析管线）、本地模型服务（MinerU 等）三方的职责
 ingest、解析编排、引擎适配、产物落盘、对照供给、编辑落库；`qed` 库 `af_*` 表；
 `QED_DATA_ROOT/parsed` 产物布局；引擎适配（MinerU / PaddleOCR-VL / qwen-vl）。
 
-**非目标**：前端界面（见[解析管理 UI 设计](../../../design/parsing-ui.md)）；
+**非目标**：前端界面（见[解析管理 UI 设计](../../../design/frontend/parsing-ui.md)）；
 切分与召回（探索轮）；Milvus 向量库；`axiom`/`xqfm` 库删除与 dataset 物理清理
 （D 类数据操作，另立计划）。
 
@@ -278,7 +278,7 @@ CREATE TABLE af_block_edits (
 
 ## 回滚
 
-- 设计文档回滚：删除本文件与[解析管理 UI 设计](../../../design/parsing-ui.md)，
+- 设计文档回滚：删除本文件与[解析管理 UI 设计](../../../design/frontend/parsing-ui.md)，
   恢复 [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 前的模型形态；
 - 实施回滚：`af_*` 表 Alembic 降级；8902 端点移除；`parsed/` 产物为可再生数据，可清理。
 
@@ -290,7 +290,7 @@ CREATE TABLE af_block_edits (
 ### 收尾裁决记录（2026-09-23，PLAN-044 关闭）
 
 - **晋升落位**：设计正文独立晋升 [design/parsing-flow.md](../../../design/parsing-flow.md)，
-  **不与 [parsing-ui.md](../../../design/parsing-ui.md) 合并**（用户裁决）——两文档分别对应
+  **不与 [parsing-ui.md](../../../design/frontend/parsing-ui.md) 合并**（用户裁决）——两文档分别对应
   [ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md) 的「后端全链路」与
   「界面消费」两侧，互链不互抄；design/ 按模块划分，parsing-ui 已 267 行且在实现中，
   合并只会产出一篇超长文档。

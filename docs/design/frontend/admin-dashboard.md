@@ -4,11 +4,11 @@
 实现状态：In Progress
 最后更新：2026-09-24
 确认状态：已确认
-关联代码：`web-ui/src/pages/Dashboard.tsx`、`web-ui/src/stores/dashboard.ts`、`web-ui/src/components/dashboard/LocalModelStatus.tsx`、`web-ui/src/api/axiom.ts`、`web-ui/src/stores/runtime.ts`（后端透传端点见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
+关联代码：`web-ui/src/pages/Dashboard.tsx`、`web-ui/src/stores/dashboard.ts`、`web-ui/src/components/dashboard/LocalModelStatus.tsx`、`web-ui/src/api/axiom.ts`、`web-ui/src/stores/runtime.ts`（后端透传端点见 [api-contracts](../../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Dashboard.test.tsx`、`web-ui/src/stores/dashboard.aggregate.test.ts`
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
-关联设计：[前端架构](../architecture/frontend-architecture.md)、[数据库总纲](../architecture/database-design.md)、[downloads-flow.md](downloads-flow.md)（探索状态机口径）、[downloads-ui.md](downloads-ui.md)（筛选档状态口径）、[admin-console.md](admin-console.md)（控制台，服务数据共享方）
-关联计划：[REQ-033 承载壳（已归档）](../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)；
+关联 ADR：[ADR 0002](../../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0017](../../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
+关联设计：[前端架构](../../architecture/frontend-architecture.md)、[数据库总纲](../../architecture/database-design.md)、[downloads-flow.md](../downloads-flow.md)（探索状态机口径）、[downloads-ui.md](downloads-ui.md)（筛选档状态口径）、[admin-console.md](admin-console.md)（控制台，服务数据共享方）
+关联计划：[REQ-033 承载壳（已归档）](../../history/plans/2026-09/2026-09-24-req033-admin-display-optimization.md)；
 界面演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 1. 定位与目标
@@ -36,14 +36,14 @@
 **范围**：仪表盘页面的三块结构、状态判定口径、Store 与聚合函数、降级矩阵。
 **非目标**：不涉及其他管理页面；不承载服务启停操作（归控制台）。
 
-本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律：UI 文档只写消费语义，不复制字段级契约）：
+本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律：UI 文档只写消费语义，不复制字段级契约）：
 
 | 内容 | 唯一事实源 |
 | --- | --- |
-| `/knowledge`、`/knowledge/{id}`、`/courses`、`/books`、`/parse-jobs` 端点路径与响应形状 | [api-contracts.md](../architecture/api-contracts.md)（数据域透传） |
+| `/knowledge`、`/knowledge/{id}`、`/courses`、`/books`、`/parse-jobs` 端点路径与响应形状 | [api-contracts.md](../../architecture/api-contracts.md)（数据域透传） |
 | `af_books` 列语义（`parse_status` 进度 / `last_parse_result` 结局 / `active_job_id` 生效版本）与任务状态机 | Axiom-Flow 仓库 `docs/adr/0007-parse-status-semantics.md` 与 `docs/architecture/database-design.md`（本档 §5 只写 UI 消费口径） |
-| `qt_*` / `qed_*` 表结构与记录字段定义 | QED-Tracker `docs/architecture/database-private-tables.md` / `database-shared-tables.md`；根侧登记见 [database-design.md](../architecture/database-design.md) |
-| 领域/课程探索状态机口径 | [downloads-flow.md](downloads-flow.md) |
+| `qt_*` / `qed_*` 表结构与记录字段定义 | QED-Tracker `docs/architecture/database-private-tables.md` / `database-shared-tables.md`；根侧登记见 [database-design.md](../../architecture/database-design.md) |
+| 领域/课程探索状态机口径 | [downloads-flow.md](../downloads-flow.md) |
 | 下载管理页展示层级与筛选档 | [downloads-ui.md](downloads-ui.md) |
 | 服务启停/模型操作与显存/槽位展示 | [admin-console.md](admin-console.md) |
 

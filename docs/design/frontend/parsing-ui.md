@@ -12,13 +12,13 @@ TypographyPanel/ResourceWatch/blocks.ts/typography.ts/regions.ts）
 `web-ui/src/components/parsing/ParseToolbar.test.tsx`（§8 四行与动作三态/确认弹窗）、
 `web-ui/src/components/parsing/PageImagePane.test.tsx`（§10 框编辑交互与右键菜单）、
 `tests/contract/test_design_documents.py`（本文件入 CURRENT_DOCUMENTS）
-关联 ADR：[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
-关联设计：[frontend-architecture.md](../architecture/frontend-architecture.md)（8903 信息架构与视觉规范）、
+关联 ADR：[ADR 0014](../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界）、[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0017](../../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
+关联设计：[frontend-architecture.md](../../architecture/frontend-architecture.md)（8903 信息架构与视觉规范）、
 [downloads-ui.md](downloads-ui.md)（左树与状态点风格参照）、
-[local-model-management.md](local-model-management.md)（模型生命周期操作面）、
-[parsing-flow.md](parsing-flow.md)（后端全链路设计）
+[local-model-management.md](../local-model-management.md)（模型生命周期操作面）、
+[parsing-flow.md](../parsing-flow.md)（后端全链路设计）
 关联计划：界面形态演进经 git 历史与 `history/plans/2026-09/` 各计划壳追溯；
-编辑模式框图与版式重排版由 [REQ-098 壳](../history/plans/2026-09/2026-09-26-req098-parsing-region-edit-typography.md)
+编辑模式框图与版式重排版由 [REQ-098 壳](../../history/plans/2026-09/2026-09-26-req098-parsing-region-edit-typography.md)
 设计与实施（§4.6 顶栏四行重排与编辑两口径；关闭后归档 `history/plans/2026-09/`）
 
 ## 1. 定位与目标
@@ -36,16 +36,16 @@ TypographyPanel/ResourceWatch/blocks.ts/typography.ts/regions.ts）
 
 ## 2. 范围与非目标
 
-本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律：UI 文档只写消费语义，不复制端点形状与数据契约）：
+本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律：UI 文档只写消费语义，不复制端点形状与数据契约）：
 
 | 内容 | 唯一事实源 |
 | --- | --- |
-| 后端全链路职责、任务状态机、版本激活与续跑规则 | [parsing-flow.md](parsing-flow.md) |
-| 端点路径与请求/响应形状（本档 §6 只登记消费要点） | [api-contracts.md](../architecture/api-contracts.md) §④ |
-| `af_*` 表结构与 `parsed/` 产物布局 | [parsing-flow.md](parsing-flow.md) §2 指针表所列事实源 |
-| blocks 产物 schema 与字段语义 | [parsing-flow.md](parsing-flow.md) §6 |
-| 模型启停/探针/槽位生命周期设计 | [local-model-management.md](local-model-management.md) |
-| 8903 全局信息架构与视觉基线 | [frontend-architecture.md](../architecture/frontend-architecture.md) |
+| 后端全链路职责、任务状态机、版本激活与续跑规则 | [parsing-flow.md](../parsing-flow.md) |
+| 端点路径与请求/响应形状（本档 §6 只登记消费要点） | [api-contracts.md](../../architecture/api-contracts.md) §④ |
+| `af_*` 表结构与 `parsed/` 产物布局 | [parsing-flow.md](../parsing-flow.md) §2 指针表所列事实源 |
+| blocks 产物 schema 与字段语义 | [parsing-flow.md](../parsing-flow.md) §6 |
+| 模型启停/探针/槽位生命周期设计 | [local-model-management.md](../local-model-management.md) |
+| 8903 全局信息架构与视觉基线 | [frontend-architecture.md](../../architecture/frontend-architecture.md) |
 
 ## 3. 信息架构与路由（单屏：左树 + 右对照）
 
@@ -103,6 +103,7 @@ interface ParsingStore {
   tree: ParsingTreeNode[];
   treeLoading: boolean;
   treeError: string | null;
+  treeSources: ParsingTreeSources | null;  // /parsing/tree 信封 sources（DEFECT-015 S3）
   // 书目元数据（GET /books，用于选中书的 ingest/parse/file_path/page_count）
   books: BookMeta[];
   booksLoading: boolean;
@@ -192,14 +193,14 @@ interface ParsingStore {
 
 ## 6. 数据契约（消费要点）
 
-端点路径与请求/响应形状以 [api-contracts.md](../architecture/api-contracts.md) §④ 为
+端点路径与请求/响应形状以 [api-contracts.md](../../architecture/api-contracts.md) §④ 为
 唯一事实源（本档不复制维护）；下表只登记 UI 消费口径——动作、判据与节奏。
 
 | UI 动作 | 端点 | 消费要点（判据 / 节奏 / 超时） |
 | --- | --- | --- |
 | 书目元数据 / 打开书目 | `GET /books`、`GET /books/{id}` | `ingest_status`/`parse_status`/`pages_done`/`page_count`/`file_path` 是 ingest 与解析按钮态判据 |
 | 同步书目（顶部「刷新」） | `POST /books/sync` | 成功后重拉 `GET /books` + 树；失败不阻塞查看 |
-| 书目树数据 | `GET /parsing/tree` | 8902 离线 → 仅领域→课程（§12 降级行） |
+| 书目树数据 | `GET /parsing/tree` | 信封 `{nodes, sources}`：`sources.axiom_flow=offline` → 仅领域→课程、`sources.shared_tables=empty` → 全空，两种空态分话术（§12 降级行） |
 | 书页入库（ingest） | `POST /books/{id}/ingest` | 页图渲染分钟级 → 请求超时 8903/8900→8902 均 300s |
 | 载入页 / 原页图 | `GET /books/{id}/pages/{no}`（+ `/image`） | 404=未解析（非错误）；页图经 8900 代理，浏览器只连 8900 |
 | 解析本页/全本/失败页 | `POST /parse-jobs` | 单页 `pages:[n]`、全本省略；提交期探活失败 503 **不建任务**（§12） |
@@ -211,13 +212,14 @@ interface ParsingStore {
   `getBookPage`/`putBlockEdit`/`getPageEdits`/`createParseJob`/`getParseJob`/`listParseJobs`；
   ResourceWatch 复用控制域既有封装 `monitorGpu`（`api/services.ts`）与 `getSlotStatus`（`api/llm.ts`））；
 - UI 依赖的跨层口径（正文事实源见指针）：任务对象主键字段名为 `id`；块编辑判定三态
-  `''/ok/bad`；空白页分显判据 `quality.blank_page`（[parsing-flow.md](parsing-flow.md) §6）；
+  `''/ok/bad`；空白页分显判据 `quality.blank_page`（[parsing-flow.md](../parsing-flow.md) §6）；
 - 8900 侧另有 `/review` 兼容门面（内部转 `/edit`），仅存量兼容，本设计消费面一律 `/edit`。
 
 ## 7. 左侧栏：书目树（BookTree，纯选择）
 
 - 三级折叠树：**领域 → 课程 → 书目**，数据源 `GET /parsing/tree`（8902 离线时仅领域→课程，
-  黄色降级横幅 + 树空态）；
+  黄色降级横幅 + 树空态）；树空态话术按信封 `sources` 分流（`web-ui/src/components/parsing/treeEmptyHint.ts`，
+  「共享表登记为空」与「8902 离线」两种同形空态自此可区分，DEFECT-015 S3）；
 - **只做选择**：点书名片段 → `openWorkbench(book_id)`，右侧对照区切换；当前选中书高亮；
   无状态 Tag、无进度徽标、无筛选行、无搜索框（侧栏保持干净）；
 - 树样式沿用 `downloads.css` 的 `dl-tree-*` 类（与文档下载管理左树同风格）；
@@ -372,7 +374,7 @@ interface ParsingStore {
 
 ## 11. 视觉规范
 
-- 配色与对比度遵循[前端架构](../architecture/frontend-architecture.md)（蓝白主体、状态色配同色系浅底、
+- 配色与对比度遵循[前端架构](../../architecture/frontend-architecture.md)（蓝白主体、状态色配同色系浅底、
   字体与背景大区分、响应式栅格、theme token 统一）；
 - bbox 方框按块类型固定色板，选中态加粗高亮；状态提示复用 downloads 的状态色 token；
 - 左树沿用 `downloads.css` `dl-tree-*` 样式；对照两栏纸面 `overflowX auto`
@@ -384,6 +386,7 @@ interface ParsingStore {
 | --- | --- | --- |
 | 8900 不可达 | 请求失败（非上游 503） | 顶部错误横幅 + 「刷新」重试；树/页显示空态 |
 | 8902 离线（503） | 数据域请求 503 | 黄色降级横幅；树仅显示领域→课程、对照不可用 |
+| 左树空态（200 + `sources`） | `/parsing/tree` 返 `{nodes: [], sources}`（不抛 503） | 空态话术按 `sources` 分流（`treeEmptyHint`）：`shared_tables=empty` 只说「共享表暂无领域/课程登记」不提离线；`axiom_flow=offline` 只说「8902 离线，书目未加载」不提共享表；两者同时则两句话都出（DEFECT-015 S3） |
 | 8901 离线 | `POST /books/sync` 503 | 同步失败提示（不阻塞查看已同步书目） |
 | 未入库（ingest） | `ingest_status != ingested` | 对照区 `iframe` 直显源 PDF、解析栏隐藏（§9）；顶栏「书页入库」按钮 |
 | 未解析页 | `pageParsed=false`（页数据 404 / blocks 空） | **解析栏整体隐藏**，原页图占满，无错误横幅；解析入口在顶栏 |
@@ -410,9 +413,9 @@ interface ParsingStore {
 
 ## 13. 已知约束与维护规则
 
-- 端点增删与形状变化先落 [api-contracts.md](../architecture/api-contracts.md) §④，本档
+- 端点增删与形状变化先落 [api-contracts.md](../../architecture/api-contracts.md) §④，本档
   §6 只回核消费口径（超时/轮询/判据）是否仍成立；
-- 任务状态机、版本激活与续跑语义以 [parsing-flow.md](parsing-flow.md) §4 为准，本档不
+- 任务状态机、版本激活与续跑语义以 [parsing-flow.md](../parsing-flow.md) §4 为准，本档不
   复制状态定义；
 - UI 无 engine 选择（固定服务端默认）；图上框编辑（拉伸/移动/画新框/删除/合并）与版式重排版
   已由 REQ-098 轮纳入设计（§9.1/§10），其中框删除/合并/新框落库与区域驱动重解析依赖

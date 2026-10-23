@@ -4,7 +4,7 @@
 任务类型：A
 最后更新：2026-09-22
 关联 ADR：无新增（治理沿用 [ADR 0011](../../adr/v0.1/0011-pending-design-location.md) 不确定文档暂居 plans/）
-关联设计：[parsing-ui.md](../../../design/parsing-ui.md)（对照工作台与渲染消费面）、
+关联设计：[parsing-ui.md](../../../design/frontend/parsing-ui.md)（对照工作台与渲染消费面）、
 [frontend-architecture.md](../../../architecture/frontend-architecture.md)（8903 服务架构）
 关联 Tracker：docs/trackers/todo.md（原 ARCH-026 主线 + PLAN-051 镜像行，已随并轮移除）
 归档判定：Retain（渲染边界裁决与滚动口径由取代壳承接；本壳留档承载 2026-09-22「渲染归前端，

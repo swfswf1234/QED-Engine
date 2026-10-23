@@ -33,8 +33,11 @@ REQ-047 的 S1/S3（总纲保持零 DDL 纯登记层、根侧无 DDL 快照副�
    SQL 类型与宽度、可空性、默认值语义、列注释、索引与约束、建表语句；**不负责任**迁移执行
    编排、运行时连接配置、数据搬迁脚本（这些指向代码与各仓库迁移面）。
 2. **建表语句进文档**（反转「零 DDL 纯登记层」）：
-   - 根侧代码持有 DDL 的九张表（`qed_knowledge_point`、`qed_llm_calls` 与七张 `qe_learn_*`）
+   - 根侧代码持有 DDL 的九张表（`qed_knowledge_point`、`qed_llm_calls` 与七张根私有表）
      在本文写建表语句，且**与代码渲染结果逐字对齐**，由契约守护比对，任一侧改动即红。
+     （表名随步注记 2026-10-21：七张根私有表定档为不带 `learn_` 子域段的 `qe_*`＝
+     `qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_kp_detail`／`qe_question`／`qe_attempt`／`qe_review_task`，
+     执行见 REQ-132 与总纲 7.8 T1；本决定的判据（逐字对齐守护）不因此改变。）
    - 形状事实源在 QED-Tracker ORM 的两张共享表（`qed_domain`、`qed_course`）在本文写
      **等价展示 DDL**（由 ORM 派生，可执行面仍是对方 `create_all`/`ensure_schema`），守护
      比对列名、列序、类型与可空性，不比对逐字。

@@ -84,7 +84,7 @@ flowchart LR
 ## 三中心产品形态
 
 - **学习中心**：前端主界面（`#/`）的最终形态——课程学习（按知识节点推进）+ 知识问答
-  （多 Agent），向用户展示的核心功能（[学习功能现状](../plans/2026-09-10-learning-center-current-state.md)）。
+  （多 Agent），向用户展示的核心功能（[学习功能现状](../history/plans/2026-10/2026-09-10-learning-center-current-state.md)）。
 - **管理中心**：后台内容管理——文档下载管理 / 文档解析管理（左树右对照：书目同步、块级判定）。
 - **控制中心**：后台运行控制——8900 对 8901/8902/8903 服务启停托管
   （[服务控制设计](../design/service-hosting.md)，Accepted / Implemented；容器化依赖只进规划）。

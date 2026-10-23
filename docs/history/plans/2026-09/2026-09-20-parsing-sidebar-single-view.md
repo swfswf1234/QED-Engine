@@ -6,7 +6,7 @@
 不符合预期，回到「左树+右对照」一屏；树纯选择；顶部筛选栏与模型选择全部去除；无实验决策内容）
 最后更新：2026-09-20
 关联 ADR：[ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析管线归 Axiom-Flow）
-关联设计：[design/parsing-ui.md](../../../design/parsing-ui.md)（本轮裁决已并入正文 §1/§2/§3/§4/§6/§7/§12/§13/§14）
+关联设计：[design/parsing-ui.md](../../../design/frontend/parsing-ui.md)（本轮裁决已并入正文 §1/§2/§3/§4/§6/§7/§12/§13/§14）
 关联 Tracker：ARCH-020-G（本计划镜像行）、ARCH-020-WB（前轮，其列表态设计被本轮取代）、ARCH-020-D（实现承接），镜像见 [docs/trackers/todo.md](../../../trackers/todo.md)
 归档判定：Retain（设计裁决已并入 parsing-ui.md；G 轮实现完成并经用户浏览器确认后计划壳归档）
 

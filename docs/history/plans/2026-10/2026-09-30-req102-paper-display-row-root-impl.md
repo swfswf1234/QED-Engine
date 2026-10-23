@@ -7,7 +7,7 @@
 [ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md)、
 [ADR 0017](../../../adr/0017-design-doc-structure-contract.md)（事实源唯一铁律——论文状态派生只落 downloads-flow）
 关联设计：[downloads-flow.md](../../../design/downloads-flow.md)（W1 晋升论文行状态派生节的宿主）、
-[downloads-ui.md](../../../design/downloads-ui.md)（W1 晋升论文展示行展示规范的宿主）、
+[downloads-ui.md](../../../design/frontend/downloads-ui.md)（W1 晋升论文展示行展示规范的宿主）、
 [dataset-conventions.md](../../../design/dataset-conventions.md)（W1 增 kind=paper 落盘豁免注）、
 [api-contracts.md](../../../architecture/api-contracts.md)（W2 透传端点登记宿主）、
 [REQ-101 请求壳](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)（对方能力面 R1～R4 事实源指针）

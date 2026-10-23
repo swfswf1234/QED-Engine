@@ -9,7 +9,7 @@
 
 > **归档说明（2026-09-11，PLAN-038）**：本计划已 Superseded——其状态机口径（旧 8 态按钮矩阵、
 > 教程 reject/supersede/complete、探索弹窗流与 mock）与现行设计冲突，交互与状态机事实源统一由
-> [downloads-flow.md](../../../design/downloads-flow.md) 与 [downloads-ui.md](../../../design/downloads-ui.md)
+> [downloads-flow.md](../../../design/downloads-flow.md) 与 [downloads-ui.md](../../../design/frontend/downloads-ui.md)
 > 承接；本文件仅作历史留档。
 关联 Tracker：docs/trackers/todo.md（本计划行 PLAN-023；REQ-053、REQ-059、REQ-060、ARCH-019）
 归档判定：Merge 倾向（开发完成后操作契约并入 docs/architecture/frontend-architecture.md 或 design/ 固定文档，计划壳归档 history/plans/）

@@ -8,7 +8,7 @@
 [ADR 0007](../../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、
 [ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md)（一任务一行一壳）、
 [ADR 0017](../../../adr/0017-design-doc-structure-contract.md)（晋升目标文档结构契约）
-关联设计：[parsing-ui.md](../../../design/parsing-ui.md)（本任务评审通过后的大幅改写对象）、
+关联设计：[parsing-ui.md](../../../design/frontend/parsing-ui.md)（本任务评审通过后的大幅改写对象）、
 [parsing-flow.md](../../../design/parsing-flow.md)（blocks 产物 schema 与任务状态机事实源）
 关联 Tracker：docs/trackers/todo.md REQ-098（挂 ARCH-025「Axiom-Flow（V1.0）优化轮」节）
 归档判定：Retain（设计蓝图与实施记录随壳追溯；关闭时归档 history/plans/2026-09/）
@@ -196,7 +196,7 @@
 | # | 工作项 | 责任侧 | 状态 |
 | --- | --- | --- | --- |
 | W1 | 设计蓝图 §4 用户评审（含 §4.1「左/右修改」口径解释确认） | 根（用户） | 完成（2026-09-26 用户裁决：左＝框图修改、右＝内容替换；正文默认五号；页眉页脚版式态默认隐藏；发「开始执行」） |
-| W2 | 评审通过 → 晋升改写 [design/parsing-ui.md](../../../design/parsing-ui.md)（§4 组件树、§5 状态模型、§8 顶栏、§9 双栏、§10 bbox 规范大改 + 新增「版式重排版」节；去过程化，只写设计态） + `help/sections.ts` 解析节同步 | 根 | 完成（parsing-ui.md §1/§4/§5/§8/§9/§9.1/§10/§12/§13 按蓝图去过程化改写；help/sections.ts 新增「文档解析管理」节） |
+| W2 | 评审通过 → 晋升改写 [design/parsing-ui.md](../../../design/frontend/parsing-ui.md)（§4 组件树、§5 状态模型、§8 顶栏、§9 双栏、§10 bbox 规范大改 + 新增「版式重排版」节；去过程化，只写设计态） + `help/sections.ts` 解析节同步 | 根 | 完成（parsing-ui.md §1/§4/§5/§8/§9/§9.1/§10/§12/§13 按蓝图去过程化改写；help/sections.ts 新增「文档解析管理」节） |
 | W3 | Axiom-Flow 请求讨论稿（R1 区域驱动解析 / R2 块结构编辑 / R3 页框图读取 / R4 目录类型 / R5 节题与多栏取字）由 **REQ-099 请求行**承载（[2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md](../../../plans/2026-09-26-req098-parsing-region-edit-typography-axiom-flow-request.md)）；已复制移交，回执跟踪挂对方 PLAN-018 壳 | 根→对方 | 移交完成 2026-09-26（对方承接登记 PLAN-018/REQ-099，其契约 181 绿）；待逐条回执 |
 | W4 | 8903 实现：框编辑工作台（手柄拉伸/移动/多选合并/画新框 + 双口径切换）、版式重排版渲染器 + 样式面板（§4.4 全量）、store 扩展（regions/pending/structure 动作）——**发令后开工**；T1（拉伸+版式重排，纯前端+既有 edit 链）可先于对方承接 | 根 | 完成（2026-09-26：typography.ts/regions.ts 纯函数 + TypographyPanel + BlockList 版式重排渲染器 + PageImagePane 八手柄拉伸/移动即落库/画新框/多选删合本地草稿 + store editPane/boxSelection/regionDraft/typography + ParseToolbar 口径与操作条；结构操作按 §4.5 降级稳态=禁用+tooltip，落库随 W5） |
 | W9 | **撤销顶栏缩放**＋双栏按栏宽自适应（§4.6 追改裁决，2026-09-28 用户发令：缩放＝纯拉长无意义）：行3 去滑杆、`zoom`/`setZoom`/prop 移除、`PageImagePane` 改宿主宽自适应＋自然比例（A4 回退）、`objectFit` 不再拉伸；`ParseToolbar.test.tsx`/`PageImagePane.test.tsx` 用例随步 | 根 | 完成（2026-09-28 发令后实施；收尾批 2026-09-29 复验：vitest 353/353 + tsc -b 零错 + build 成功；浏览器实测 8903（dist 重建）b05 页＝顶栏无缩放文案与 `.ant-slider`、页图容器 `aspect-ratio 1699/2399`（自然尺寸）＋宽 100%，块列表正常出字） |

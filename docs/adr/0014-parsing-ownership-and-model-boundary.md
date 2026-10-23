@@ -56,7 +56,7 @@ v0.1 的模型调用形态由 [ADR 0007](../history/adr/v0.1/0007-qed-engine-bac
 - Axiom-Flow `llm_client.py` 的双模式视觉调用退役，改由引擎适配器承接；`qed_llm_calls` 调用
   记录由 Axiom-Flow 在直连成功路径自写（`service=axiom_flow`）。
 - 解析产物格式、`af_*` 表结构与 8902 契约需按新形态重新定义（详见两份设计文档：
-  [解析管理 UI 设计](../design/parsing-ui.md)、
+  [解析管理 UI 设计](../design/frontend/parsing-ui.md)、
   [文档解析管理·全链路设计](../design/parsing-flow.md)）。
 - 部分推翻 REQ-044 / V2-014 的「MinerU 仅经网关可达」实现约定；相关设计文档同步修订。
 
@@ -73,6 +73,6 @@ v0.1 的模型调用形态由 [ADR 0007](../history/adr/v0.1/0007-qed-engine-bac
   [api-contracts.md](../architecture/api-contracts.md)、
   [database-design.md](../architecture/database-design.md)
 - 计划：[与 Axiom-Flow 交互全链路（已归档壳）](../history/plans/2026-09/2026-09-14-parsing-management-axiom-flow-chain.md)、
-  [解析管理 UI 设计](../design/parsing-ui.md)
+  [解析管理 UI 设计](../design/frontend/parsing-ui.md)
 - 任务：ARCH-020（[任务台账](../trackers/todo.md)）
 - 子项目：Axiom-Flow `docs/adr/0004-model-boundary-and-pipeline-ownership.md`（同轮对齐）

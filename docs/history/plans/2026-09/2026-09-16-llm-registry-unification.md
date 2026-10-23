@@ -7,7 +7,7 @@
 （任务类型注记：B 确定性实现——设计与三轮关键裁决已由用户 2026-09-16 确认，无 C 类实验内容）
 最后更新：2026-09-21
 关联 ADR：[ADR 0007](../../adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（维持不推翻）、ADR 0011（待评审设计随本计划承载，确定后迁 design/）
-关联设计：[llm-gateway.md](../../../design/llm-gateway.md)、[local-model-management.md](../../../design/local-model-management.md)、[admin-console.md](../../../design/admin-console.md)、[api-contracts.md](../../../architecture/api-contracts.md)、[project-configuration.md](../../../design/project-configuration.md)（评审通过后由本计划工作项修订）
+关联设计：[llm-gateway.md](../../../design/llm-gateway.md)、[local-model-management.md](../../../design/local-model-management.md)、[admin-console.md](../../../design/frontend/admin-console.md)、[api-contracts.md](../../../architecture/api-contracts.md)、[project-configuration.md](../../../design/project-configuration.md)（评审通过后由本计划工作项修订）
 关联 Tracker：PLAN-046（本计划）、ARCH-023（主线），镜像见 [docs/trackers/todo.md](../../../trackers/todo.md)
 归档判定：Retain（设计事实并入上述两份 design/ 文档后，计划壳归档 history/plans/2026-09/）
 

@@ -7,7 +7,7 @@
 关联代码：`backend/qed_engine/services/llm/model_manager.py`、`backend/qed_engine/services/llm/supervisor.py`、`scripts/text-model/`、`scripts/image-model/`、`model/`（根模型文件目录）、`web-ui/src/stores/runtime.ts`（operateModel/selectModel/fetchSlots）、`web-ui/src/api/llm.ts`（operateModel/selectModel/getSlotStatus。注册表 `services/llm/registry.py` 主登记见 [llm-gateway.md](llm-gateway.md)、runtimes/ 适配器见本设计「槽位与 runtime」节，均在「关键组件文件」表引用；控制域路由注册与模型探针见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
 关联测试：`tests/test_llm_model_manager.py`、`tests/test_llm_supervisor.py`、`tests/test_llm_endpoints.py`、`web-ui/src/pages/Console.test.tsx`
 关联 ADR：[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0005](../history/adr/v0.1/0005-control-center-service-hosting.md)、[ADR 0014](../adr/0014-parsing-ownership-and-model-boundary.md)
-关联设计：[llm-gateway.md](llm-gateway.md)（网关/调用记录/全局模式/身份目录——分工见下）、[admin-console.md](admin-console.md)（控制台三区）、[dataset-conventions.md](dataset-conventions.md)（数据目录约定）
+关联设计：[llm-gateway.md](llm-gateway.md)（网关/调用记录/全局模式/身份目录——分工见下）、[admin-console.md](frontend/admin-console.md)（控制台三区）、[dataset-conventions.md](dataset-conventions.md)（数据目录约定）
 关联计划：[PLAN-046](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（定档来源）、[2026-09-06-console-refactor](../history/plans/2026-09/2026-09-06-console-refactor.md)（晋升来源）
 
 ## 背景与定位
@@ -173,7 +173,7 @@ def operate_model(slot: str, op: str) -> dict:
 - **受限启动走前端预检 + 确认两段式（ARCH-040，2026-10-03 用户裁决）**：点「启动」时若对方本地槽位
   在跑（`source=local` 且 `ready`），先出确认框说明「需先停止 <对方槽位>」，确认后按 stop→start 两段
   派发、取消则零请求；本模块的仲裁**不改行为**，继续作自动链路与竞态兜底。交互细节见
-  [admin-console.md](admin-console.md) §3.3。
+  [admin-console.md](frontend/admin-console.md) §3.3。
 
 ## 模型文件目录与 manifest 约定
 

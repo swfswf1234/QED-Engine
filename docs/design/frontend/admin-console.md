@@ -4,11 +4,11 @@
 实现状态：In Progress
 最后更新：2026-10-03
 确认状态：已确认
-关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../architecture/api-contracts.md)，不重复登记）
+关联代码：`web-ui/src/pages/Console.tsx`、`web-ui/src/pages/LlmCalls.tsx`、`web-ui/src/components/GpuOverview.tsx`、`web-ui/src/components/StatusBadge.tsx`、`web-ui/src/components/AdminLayout.tsx`、`web-ui/src/stores/runtime.ts`、`web-ui/src/stores/llmCalls.ts`、`web-ui/src/api/services.ts`、`web-ui/src/api/llm.ts`（后端控制域路由与资源探测见 [api-contracts](../../architecture/api-contracts.md)，不重复登记）
 关联测试：`web-ui/src/pages/Console.test.tsx`、`web-ui/src/pages/LlmCalls.test.tsx`、`web-ui/src/stores/llmCalls.test.ts`、`web-ui/src/components/GpuOverview.test.tsx`、`web-ui/src/stores/runtime.test.ts`、`tests/test_monitor.py`、`tests/test_llm_endpoints.py`
-关联 ADR：[ADR 0002](../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../history/adr/v0.1/0008-frontend-react-refactor.md)、[ADR 0017](../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
-关联设计：[service-hosting.md](service-hosting.md)（服务托管）、[local-model-management.md](local-model-management.md)（本地模型生命周期）、[llm-gateway.md](llm-gateway.md)（模型网关/调用记录）、[api-contracts](../architecture/api-contracts.md)（固定 API）
-关联计划：[PLAN-046](../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（槽位卡定档来源）；
+关联 ADR：[ADR 0002](../../history/adr/v0.1/0002-frontend-and-port-centralization.md)、[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)、[ADR 0008](../../history/adr/v0.1/0008-frontend-react-refactor.md)、[ADR 0017](../../adr/0017-design-doc-structure-contract.md)（本文档结构契约与事实源唯一铁律）
+关联设计：[service-hosting.md](../service-hosting.md)（服务托管）、[local-model-management.md](../local-model-management.md)（本地模型生命周期）、[llm-gateway.md](../llm-gateway.md)（模型网关/调用记录）、[api-contracts](../../architecture/api-contracts.md)（固定 API）
+关联计划：[PLAN-046](../../history/plans/2026-09/2026-09-16-llm-registry-unification.md)（槽位卡定档来源）；
 界面演进经 git 历史与 `history/plans/` 各计划壳追溯
 
 ## 1. 定位与目标
@@ -27,22 +27,22 @@
 
 ## 2. 范围与非目标
 
-本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律）：
+本档**不**维护以下内容，逐条给出唯一事实源指针（[ADR 0017](../../adr/0017-design-doc-structure-contract.md) 事实源唯一铁律）：
 
 | 内容 | 唯一事实源 |
 | --- | --- |
-| 服务托管细节（注册表/启停单元/生命周期脚本） | [service-hosting.md](service-hosting.md) |
-| 模型单活仲裁、启停与选择的后端行为 | [local-model-management.md](local-model-management.md) |
-| 网关路由、调用记录表结构与写入方 | [llm-gateway.md](llm-gateway.md) |
-| 控制域/网关端点路径与请求/响应形状（本档 §6 只登记消费链路） | [api-contracts.md](../architecture/api-contracts.md) |
-| 8903 全局信息架构与视觉基线 | [frontend-architecture.md](../architecture/frontend-architecture.md) |
+| 服务托管细节（注册表/启停单元/生命周期脚本） | [service-hosting.md](../service-hosting.md) |
+| 模型单活仲裁、启停与选择的后端行为 | [local-model-management.md](../local-model-management.md) |
+| 网关路由、调用记录表结构与写入方 | [llm-gateway.md](../llm-gateway.md) |
+| 控制域/网关端点路径与请求/响应形状（本档 §6 只登记消费链路） | [api-contracts.md](../../architecture/api-contracts.md) |
+| 8903 全局信息架构与视觉基线 | [frontend-architecture.md](../../architecture/frontend-architecture.md) |
 
 - 全部数据与操作**一律经 8900 聚合**（ADR 0007）：8901/8902 未启动时前端降级不白屏；
   8900 离线时前端用本地判定 + 错误横幅。
 
 ## 3. 三区结构
 
-顺序固定：**服务管理 → 基础设施 → 资源监控（GPU 状态 + 文字/图像/向量三槽位卡）**。
+顺序固定：**服务管理 → 基础设施 → 资源监控（GPU 状态 + 文字/图像两槽位卡；向量槽位不出卡，口径见 §3.3）**。
 
 ### 3.1 区 1：服务管理（四服务卡，ServiceCard）
 
@@ -138,7 +138,7 @@ tooltip 追加在跑身份名。刷新：60 秒自动刷新，操作期间暂停
   `fetchAll` 轮询入 store（`slots.embedding`），验证入口 `POST /llm/test/embedding` 保留在
   store 动作层，不占控制台版面。
 - **来源 = local 才渲染**启停/重启按钮（`POST /models/{slot}/{start|stop|restart}`，单活仲裁在
-  model_manager，见 [local-model-management.md](local-model-management.md)）；来源 = api 时仅验证。
+  model_manager，见 [local-model-management.md](../local-model-management.md)）；来源 = api 时仅验证。
 
 - **启动受限的显式化（ARCH-040：前端预检 + 确认两段式）**：本地模型单活下，点一个槽位的「启动」
   会静默停掉另一个在跑的本地模型（后端仲裁行为，见 local-model-management.md）。用户裁决
@@ -158,7 +158,7 @@ tooltip 追加在跑身份名。刷新：60 秒自动刷新，操作期间暂停
 
 ## 4. 模型调用记录页（`#/admin/llm-calls`）
 
-`qed_llm_calls` 表（三项目可写，见 [llm-gateway.md](llm-gateway.md)）
+`qed_llm_calls` 表（三项目可写，见 [llm-gateway.md](../llm-gateway.md)）
 的检索与审核界面；后端契约 `GET /llm/calls` + `PATCH /llm/calls/{id}/review`。
 
 ### 4.1 筛选栏
@@ -276,7 +276,7 @@ options: {value,label,description}[]; notes?; error? }
 
 ## 6. API 链路（消费要点）
 
-控制域端点路径与请求/响应形状以 [api-contracts.md](../architecture/api-contracts.md) 为
+控制域端点路径与请求/响应形状以 [api-contracts.md](../../architecture/api-contracts.md) 为
 唯一事实源（本档不复制维护）；此处只登记消费链路与节奏：
 
 - **初始加载**：`fetchAll` 并行 8 请求——`/services`、`/config/database`、`/monitor/gpu`、
@@ -330,5 +330,5 @@ Browser (8903)
 7. **口径一致性**：指标行与进程/饼图显存口径不同（物理驻留 vs 分配），利用率必须展示
    `utilization_source` 上下文（WDDM 下 nvidia-smi 利用率失真）。
 8. **全部经 8900**（ADR 0007）：前端不直连 8901/8902/本地模型端口/数据库。
-9. **维护规则**：端点增删与形状变化先落 [api-contracts.md](../architecture/api-contracts.md)，
+9. **维护规则**：端点增删与形状变化先落 [api-contracts.md](../../architecture/api-contracts.md)，
    本档 §6 只回核消费链路与收敛节奏是否仍成立。

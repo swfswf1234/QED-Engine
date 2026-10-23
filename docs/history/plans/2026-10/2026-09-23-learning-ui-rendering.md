@@ -4,7 +4,7 @@
 任务类型：B
 最后更新：2026-10-09
 关联 ADR：无新增（重划登记沿用 [ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md) 一任务一行一壳）
-关联设计：[parsing-ui.md](../../../design/parsing-ui.md)（对照工作台渲染消费面先例）、
+关联设计：[parsing-ui.md](../../../design/frontend/parsing-ui.md)（对照工作台渲染消费面先例）、
 [frontend-architecture.md](../../../architecture/frontend-architecture.md)（8903 服务架构）
 关联 Tracker：docs/trackers/todo.md（ARCH-027-M1 任务行已于 2026-10-09 移除，收口行见
 completed.md；主链与其余模块见 [学习设计轮主链壳](../../../plans/2026-09-22-learning-design-mainline.md)）
@@ -194,7 +194,7 @@ L9 Little Tutor 选区追问交互评估与承接。
 **2026-10-09 关闭执行**（用户裁决「先补图片面再收口」）：S1/S2/S3 逐条达成（核销证据见
 「S1 图片面补交付与判据核销」节），关闭结果 **Achieved**，本壳 Retain 归档
 `docs/history/plans/2026-10/`，todo 移除 `ARCH-027-M1` 行并写入 completed.md。
-登记表现在态：UI-2/UI-3/UI-4 已交付，UI-1 渲染基线的口径由 [parsing-ui.md §9/§9.1](../../../design/parsing-ui.md)
+登记表现在态：UI-2/UI-3/UI-4 已交付，UI-1 渲染基线的口径由 [parsing-ui.md §9/§9.1](../../../design/frontend/parsing-ui.md)
 与 [frontend-architecture.md](../../../architecture/frontend-architecture.md) 承载（滚动行随本壳关闭，
 后续优化项触发时按 roadmap 另立项），UI-5（Little Tutor 选区追问，L9 判定表 M1+M4 双承接）
 **评估未做、归属待用户裁决**——本壳不留进行中态，也不擅自改判他行。
@@ -210,9 +210,9 @@ L9 Little Tutor 选区追问交互评估与承接。
   `../../../plans/…`；入链六档同步改道（`completed.md` 两行、tracker-v1 壳、主链壳、ARCH-025 壳两处、
   `history/plans/2026-09` 渲染壳、以及 `ChainPanes.tsx`／`chainFromOutline.ts` 头注的规格正本路径）。
   脚本自检：本次触及的八档全部相对链接落盘可解析、零死链。
-- **设计晋升**：[parsing-ui.md](../../../design/parsing-ui.md) §9 新增「image 块＝整页页图内联裁切」
+- **设计晋升**：[parsing-ui.md](../../../design/frontend/parsing-ui.md) §9 新增「image 块＝整页页图内联裁切」
   契约（容器 `aspect-ratio`+`overflow:hidden`、页/bbox 百分比换算、无地址或无 bbox 回退题注、
-  块图资产无 HTTP 路由故裁切为唯一现行通路）；[learning-workbench-ui.md](../../../design/learning-workbench-ui.md)
+  块图资产无 HTTP 路由故裁切为唯一现行通路）；[learning-workbench-ui.md](learning-workbench-ui.md)
   新增 §12 学习书架（状态徽章口径、引用式注册、`ref_id` 首门匹配桥与多门并存边界、书目独立取数降级）
   与 §13「阅读／链路」双模式（生成链路口径、勾选式推进、看板/结课只读派生、断点续学、链路降级矩阵），
   其 关联代码/关联测试 行补入 `LearnShelf`／`ChainPanes`／`chainFromOutline`／`learnChain` 及三份用例；

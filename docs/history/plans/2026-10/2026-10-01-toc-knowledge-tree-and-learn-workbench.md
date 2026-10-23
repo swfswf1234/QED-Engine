@@ -5,9 +5,9 @@
 最后更新：2026-10-05
 关联 ADR：无新增（两表结构改判沿用 M5 判例 D6＝不新立 ADR，以 `database-design.md` 登记成文为准；
 立项与一任务一行一壳沿用 [ADR 0016](../../../adr/0016-todo-registration-one-task-one-plan.md)）
-关联设计：[learning-star-map.md](../../../design/learning-star-map.md)（星图徽标与课程节点下钻的受影响消费面）、
-[parsing-ui.md](../../../design/parsing-ui.md)（§9 双栏对照与 §9.1 版式重排＝中栏渲染组件复用源）、
-[learning-workbench-ui.md](../../../design/learning-workbench-ui.md)（本壳 W6 晋升＝工作台设计态事实源）、
+关联设计：[learning-star-map.md](learning-star-map.md)（星图徽标与课程节点下钻的受影响消费面）、
+[parsing-ui.md](../../../design/frontend/parsing-ui.md)（§9 双栏对照与 §9.1 版式重排＝中栏渲染组件复用源）、
+[learning-workbench-ui.md](learning-workbench-ui.md)（本壳 W6 晋升＝工作台设计态事实源）、
 [frontend-architecture.md](../../../architecture/frontend-architecture.md)（8903 只连 8900）
 关联 Tracker：docs/trackers/todo.md（ARCH-027-M6 任务行；主链与 M1~M5 见
 [学习设计轮主链壳](../../../plans/2026-09-22-learning-design-mainline.md)）
@@ -333,7 +333,7 @@ M-1 存储接入 + M-2 编译产物）。本模块的三栏工作台**不等编�
     未知课程 GET 404、`kp-details` 缺名 422、非法 `intent` 422。
   - S4 真机口径核验：确认提升后 `GET /knowledge-points` 默认**只出 point 行**（total=1，kinds=[point]），
     `?include_outline=true` 才带 outline 行（total=3）；`GET /outline` 只出 outline 行并带 `point_count`。
-  - 设计晋升四处（S6）：新建 [learning-workbench-ui.md](../../../design/learning-workbench-ui.md)
+  - 设计晋升四处（S6）：新建 [learning-workbench-ui.md](learning-workbench-ui.md)
     （Accepted / 实现状态 In Progress，目录解析七条规格由壳内晋升为设计态事实源）＋
     `docs/design/index.md` 学习中心表新增行与头部日期＋`tests/contract/test_design_documents.py` 的
     `CURRENT_DOCUMENTS` 登记（契约门禁复跑绿）＋`docs/architecture/frontend-architecture.md` 补
