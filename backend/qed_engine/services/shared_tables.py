@@ -1,9 +1,10 @@
 """共享表直读写层（PLAN-022 B4，裁决 D2）：exploration_stage 状态流转 + 完整 CRUD。
 
-写优先级（D1/D2）：8901 在线时优先走 8901 API（PATCH /domains 支持
-exploration_stage）；离线或 8901 课程端点暂不支持该字段时（PATCH /courses
-无 exploration_stage，REQ-064 ④ 承接中），8900 经 QED_DB_* 直写共享表——
-该直写权限修订已登记 REQ-064 ④（对方 shared-tables.md 审阅中）。
+写优先级（D1/D2）：8901 在线时优先走 8901 API（PATCH /domains 与 PATCH /courses
+均透传 exploration_stage，对方仓储层各自校验值域）；8901 不可达或其写失败时，
+8900 经 QED_DB_* 直写共享表（降级例外，登记见 docs/design/downloads-flow.md §5.4）。
+exploration_stage 取值按表分档校验：领域 6 态、课程 5 态（无领域专用的「已生成」），
+越界值抛 ValueError（DEFECT-014）。
 
 QED_DB_PASSWORD 未配置（如测试环境）时直写静默跳过（返回 False，记日志），
 不阻塞会话主流程；状态回退（未开始）同语义。
@@ -32,6 +33,12 @@ STAGE_RUNNING = "探索中"
 STAGE_COMPLETED = "已完成"
 STAGE_FAILED = "失败"
 STAGE_PENDING = "待确认"
+
+# exploration_stage 值域按表分档（QED-Tracker knowledge_repository.update_course 同口径：
+# 课程 5 态无「已生成」，越界值一律拒写）
+_DOMAIN_STAGES = (STAGE_NOT_STARTED, STAGE_RUNNING, STAGE_PENDING, STAGE_GENERATED,
+                  STAGE_COMPLETED, STAGE_FAILED)
+_COURSE_STAGES = (STAGE_NOT_STARTED, STAGE_RUNNING, STAGE_PENDING, STAGE_COMPLETED, STAGE_FAILED)
 
 # 默认 stages（学习阶段）
 DEFAULT_STAGES = ["基础", "主干", "分支", "前沿"]
@@ -612,14 +619,25 @@ def delete_course(settings: Settings, course_id: str) -> bool:
 
 # --- 原有函数（保持兼容） ---
 
+def _require_stage(table: str, stage: str) -> None:
+    """按表校验 exploration_stage 值域：课程 5 态没有领域专用的「已生成」（DEFECT-014）。"""
+    allowed = _DOMAIN_STAGES if table == "qed_domain" else _COURSE_STAGES
+    if stage not in allowed:
+        raise ValueError(
+            f"{table}.exploration_stage 非法取值 {stage!r}（允许：{'、'.join(allowed)}）"
+        )
+
+
 def direct_write_stage(settings: Settings, table: str, row_id: str, stage: str) -> bool:
     """直写 qed_domain/qed_course 的 exploration_stage 列。
 
     返回 True=已写入；False=跳过（无密码配置）或失败（连接/SQL 异常，记日志不抛）。
     table 仅允许 qed_domain/qed_course（防注入白名单），row_id 经参数化查询。
+    取值受按表分档的枚举校验，越界值抛 ValueError。
     """
     if table not in ("qed_domain", "qed_course"):
         raise ValueError(f"非法共享表：{table}")
+    _require_stage(table, stage)
     if not settings.qed_db_password.get_secret_value():
         logger.debug("QED_DB_PASSWORD 未配置：跳过 %s.exploration_stage 直写（%s）", table, row_id)
         return False
@@ -662,12 +680,19 @@ def set_domain_stage(
 def set_course_stage(
     settings: Settings, tracker, course_id: str, stage: str, *, online: bool
 ) -> bool:
-    """课程 exploration_stage 写入。
+    """课程 exploration_stage 写入：在线 PATCH /courses/{id}，失败/离线降级直写。
 
-    8901 PATCH /courses 暂不支持 exploration_stage（REQ-064 ④ 承接中），故当前
-    一律直写 qed_course；对方端点补齐后可在此切换在线路径（保留 online 参数）。
+    8901 `PATCH /api/v1/courses/{course_id}` 已按 REQ-077（D3=B）透传本列，并在其仓储层
+    做课程 5 态校验；`online=False` 或 8901 不可用时才降级 `direct_write_stage`（DEFECT-014
+    登记的例外写路径，恢复条件＝8901 常驻后不再走降级）。两条写路径都先过 `_require_stage`。
     """
-    del tracker  # 端点补齐前无在线写路径
+    _require_stage("qed_course", stage)
+    if online:
+        try:
+            tracker.update_course(course_id, exploration_stage=stage)
+            return True
+        except Exception as exc:  # noqa: BLE001 - 降级直写
+            logger.info("课程 stage 经 8901 写入失败（%s → %s），降级直写：%s", course_id, stage, exc)
     return direct_write_stage(settings, "qed_course", course_id, stage)
 
 

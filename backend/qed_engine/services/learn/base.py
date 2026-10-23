@@ -1,9 +1,11 @@
-"""学习域（learn）存储服务基座：异常分层 + MySQL 三表幂等建表 + 三表 MySQL 存储。
+"""学习域（learn）存储服务基座：异常分层 + `qe_learning` 幂等建表 + 学习记录存储。
 
-模块职责：定义学习域三表（qe_learn_course / qe_learn_unit / qe_learn_unit_progress）
-的存储契约与异常映射（NotFound→404、Conflict→409），并给出 MySQL 实现 `MySQLLearnStore`
-（接口与 `InMemoryLearnStore` 同形，懒挂载见 api/learn.py）；表结构与派生口径事实源＝
-学习设计轮主链壳「M-1/M-2 契约设计稿」节（实现收口后晋升 database-design.md 登记）。
+模块职责：定义学习记录单表 `qe_learning`（单表继承两型行：course 行＝选课与学习路径、
+kp 行＝知识点终态与质性门）的存储契约与异常映射（NotFound→404、Conflict→409），并给出
+MySQL 实现 `MySQLLearnStore`（接口与 `InMemoryLearnStore` 同形，懒挂载见 api/learn.py）。
+课程百分比、结课态与教材级进度一律读时重算、不落列，派生入口在本模块尾部两个纯函数。
+表结构与列面事实源＝docs/architecture/database-design.md §五（两侧 DDL 逐字相等，
+由 tests/contract/test_architecture_documents.py 守护）。
 设计关联（DesignRef）：docs/architecture/database-design.md
 实现状态：Current
 关联测试：tests/test_learn.py
@@ -12,78 +14,47 @@
 from __future__ import annotations
 
 import json
-import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
 import pymysql
 
 CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS qe_learn_course (
-  learn_course_id VARCHAR(64) PRIMARY KEY COMMENT '学习课程 ID（服务端生成，≠共享表 qed_course）',
-  name VARCHAR(255) NOT NULL COMMENT '课程名',
-  domain_ref JSON COMMENT '领域坐标引用 {ref_id,label}（逻辑引用 qed_domain）',
-  course_ref JSON COMMENT '课程坐标引用 {ref_id,label}（逻辑引用 qed_course）',
-  direction VARCHAR(255) DEFAULT '' COMMENT '方向 label 快照（共享表无方向实体，仅存文本）',
-  resources JSON NOT NULL COMMENT '素材引用列表 [{kind,ref_id,label}]，kind 闭集 book/af_version/knowledge',
-  compile_status VARCHAR(16) COMMENT '编译作业态：NULL/proposed/running/completed/failed（D3：课程行自 carry）',
-  compile_done INT NOT NULL DEFAULT 0 COMMENT '已生成活动块数',
-  compile_total INT NOT NULL DEFAULT 0 COMMENT '活动块总数',
-  failure_count INT NOT NULL DEFAULT 0 COMMENT '本作业块级失败计数（熔断判据，M-2 接线）',
-  page_windows JSON COMMENT '人工页窗 [{start,end}]（propose 输入，不依赖检索）',
-  compile_fingerprint VARCHAR(64) COMMENT '上次编译的源指纹（drift 判定）',
-  instructions VARCHAR(4000) DEFAULT '' COMMENT '学习者通道（限长 4000）',
-  agent_notes VARCHAR(4000) DEFAULT '' COMMENT 'agent 通道（限长 4000）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习课程注册表（引用式，所有权 QED-Engine，主链壳 M-1 契约）';
-
-CREATE TABLE IF NOT EXISTS qe_learn_unit (
-  unit_id VARCHAR(64) PRIMARY KEY COMMENT '单元 ID（服务端生成）',
-  learn_course_id VARCHAR(64) NOT NULL COMMENT '所属学习课程（逻辑引用）',
-  parent_id VARCHAR(64) COMMENT '父节点（unit→section；section 为 NULL）',
-  level VARCHAR(16) NOT NULL COMMENT 'section=章节大纲节点 / unit=最小学习单元（块）/ point=知识点推进行（W5 §V2.3，kp 引用在 source_ref.kp_id）',
-  title VARCHAR(500) NOT NULL COMMENT '标题',
-  sort_order INT NOT NULL DEFAULT 0 COMMENT '同级顺序',
-  confirmed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '人工确认位（两级确认：section 与 unit 各自）',
-  covered TINYINT(1) NOT NULL DEFAULT 0 COMMENT '学习者勾选位（agent/编译永不写）',
-  type VARCHAR(16) COMMENT 'unit 行：text/formula/figure/quiz/flashcard',
-  payload JSON COMMENT 'unit 行内容定义（quiz/flashcard 不含判分，判分归 M-3）',
-  source_ref JSON COMMENT 'unit 行溯源 {ref_id,page,block_index}（逻辑引用素材页块）',
-  gen_status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/generated/failed（断点续编位）',
-  active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '当前编译版本位（重编不抹历史，旧行置 0）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  KEY idx_learn_unit_course (learn_course_id, level, sort_order)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习单元树（章节树+块序列合一，主链壳 M-1/M-2 契约）';
-
-CREATE TABLE IF NOT EXISTS qe_learn_unit_progress (
+CREATE TABLE IF NOT EXISTS qe_learning (
   id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
-  unit_id VARCHAR(64) NOT NULL COMMENT '单元 ID（逻辑引用 qe_learn_unit）',
-  learn_course_id VARCHAR(64) NOT NULL COMMENT '冗余课程 ID（派生重算按课程聚合）',
-  status VARCHAR(16) NOT NULL COMMENT 'done/skipped（pending=无行，读时派生重算非累加）',
-  qualitative_passed TINYINT(1) NULL COMMENT '质性门结论（仅 concept/design 知识点有值；NULL=未判）',
-  qualitative_note VARCHAR(1000) DEFAULT '' COMMENT '判读证据一句话（自评理由，不含密钥）',
-  assessed_by VARCHAR(16) DEFAULT '' COMMENT 'provenance：learner=判定者（v1 自评位）／model=M-3b 预留',
-  assessed_at DATETIME NULL COMMENT '最近一次质性判定 UTC 时刻',
+  owner VARCHAR(64) NOT NULL DEFAULT 'admin' COMMENT '学习者标识（v1.0 恒 admin，多用户扩展位）',
+  target_kind VARCHAR(16) NOT NULL COMMENT '闭集 course=学习课程行 / kp=知识点行（单表继承）',
+  target_id VARCHAR(64) NOT NULL COMMENT 'course 行=共享 qed_course.course_id；kp 行=共享 qed_knowledge_point.kp_id（只引用不复制，不存名称快照）',
+  status VARCHAR(16) NOT NULL COMMENT 'course 行：active/paused/done；kp 行：done/skipped/pending（pending＝只有质性判定或撤销痕迹，不计入完成数；未落笔=无行）',
+  config JSON COMMENT 'course 行专用：{resources:[{kind,ref_id,label}],kp_path:[kp_id…]}；kp 行 NULL（整行读出、不内部筛选）',
+  qualitative_passed TINYINT(1) NULL COMMENT 'kp 行专用：质性门结论 1/0，NULL=未判（仅 concept/design 知识点有值）',
+  qualitative_note VARCHAR(1000) DEFAULT '' COMMENT 'kp 行专用：判读证据一句话（v1 只存学习者自评理由；不含密钥）',
+  assessed_by VARCHAR(16) DEFAULT '' COMMENT 'kp 行专用：provenance learner=自评位／model=预留（本轮端点拒绝）',
+  assessed_at DATETIME NULL COMMENT 'kp 行专用：最近一次质性判定 UTC 时刻',
+  learner_note TEXT NULL COMMENT '学习者备注（课程级与知识点级通用；人工位，机器不写）',
+  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
   updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  UNIQUE KEY uq_learn_progress_unit (unit_id),
-  KEY idx_learn_progress_course (learn_course_id)
+  UNIQUE KEY uq_learning_target (owner, target_kind, target_id),
+  KEY idx_learning_course (owner, target_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='学习进度派生基（终态事实+质性门判定，进度与掌握分=读时重算，主链壳 M-1/M-3 契约）';
+COMMENT='学习记录（owner×目标×状态单表：course 行=选课与学习路径，kp 行=终态与质性门；进度百分比与掌握分读时重算，所有权 QED-Engine）';
 """
 
 
-# 存量库幂等补列注册表（判例 qed_llm_calls._REQUIRED_COLUMNS）：CREATE TABLE IF NOT EXISTS
-# 不迁移已有表，M-3 质性门四列按 information_schema 比对逐列 ALTER。
-PROGRESS_GATE_COLUMNS: dict[str, str] = {
-    "qualitative_passed": "TINYINT(1) NULL",
-    "qualitative_note": "VARCHAR(1000) DEFAULT ''",
-    "assessed_by": "VARCHAR(16) DEFAULT ''",
-    "assessed_at": "DATETIME NULL",
-}
+DEFAULT_OWNER = "admin"
+COURSE_TARGET = "course"
+KP_TARGET = "kp"
+COURSE_STATUSES = ("active", "paused", "done")
+KP_STATUSES = ("done", "skipped", "pending")
+ASSESSED_BY = ("learner", "model")
+
+_LEARNING_COLUMNS = (
+    "owner, target_kind, target_id, status, config, qualitative_passed, qualitative_note, "
+    "assessed_by, assessed_at, learner_note, created_at, updated_at"
+)
+_LEARNING_FIELDS = tuple(_LEARNING_COLUMNS.replace(" ", "").split(","))
+_COURSE_UPDATABLE = ("status", "resources", "kp_path", "learner_note")
 
 
 class LearnNotFound(Exception):
@@ -95,10 +66,7 @@ class LearnConflict(Exception):
 
 
 def ensure_tables(settings: Any) -> None:
-    """幂等建表 + 存量库补列（判例 qed_llm_calls）；数据库不可达由调用方降级。
-
-    四列齐备后本函数零 ALTER（幂等）；生产 `qed` 库不在此路径 ALTER＝D 类转人工随发布批次。
-    """
+    """幂等建表（R10：根侧不引迁移框架，首个端点请求懒建）；数据库不可达由调用方降级。"""
     from qed_engine.services.llm.call_log import _connect
 
     conn = _connect(settings)
@@ -108,49 +76,9 @@ def ensure_tables(settings: Any) -> None:
                 sql = statement.strip()
                 if sql:
                     cursor.execute(sql)
-            cursor.execute(
-                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'qe_learn_unit_progress'",
-                (settings.qed_db_name,),
-            )
-            existing = {row[0] for row in cursor.fetchall()}
-            for column, column_ddl in PROGRESS_GATE_COLUMNS.items():
-                if column not in existing:
-                    cursor.execute(
-                        f"ALTER TABLE qe_learn_unit_progress ADD COLUMN {column} {column_ddl}"
-                    )
         conn.commit()
     finally:
         conn.close()
-
-
-def fingerprint(windows: list[dict[str, int]], resources: list[dict[str, str]]) -> str:
-    """源指纹＝页窗+素材引用摘要（drift 判定输入，M-2 接线后并入 active_job_id）。"""
-    import hashlib
-
-    payload = json.dumps({"w": windows, "r": resources}, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-_COURSE_JSON_COLUMNS = ("domain_ref", "course_ref", "resources", "page_windows")
-_UNIT_JSON_COLUMNS = ("payload", "source_ref")
-_COURSE_COLUMNS = (
-    "learn_course_id, name, domain_ref, course_ref, direction, resources, compile_status, "
-    "compile_done, compile_total, failure_count, page_windows, compile_fingerprint, "
-    "instructions, agent_notes, created_at, updated_at"
-)
-_UNIT_COLUMNS = (
-    "unit_id, learn_course_id, parent_id, level, title, sort_order, confirmed, covered, type, "
-    "payload, source_ref, gen_status, active, created_at, updated_at"
-)
-_COURSE_FIELDS = tuple(_COURSE_COLUMNS.replace(" ", "").split(","))
-_UNIT_FIELDS = tuple(_UNIT_COLUMNS.replace(" ", "").split(","))
-_COURSE_UPDATABLE = (
-    "name", "domain_ref", "course_ref", "direction", "resources", "compile_status", "compile_done",
-    "compile_total", "failure_count", "page_windows", "compile_fingerprint", "instructions",
-    "agent_notes",
-)
-_UNIT_UPDATABLE = ("title", "sort_order", "confirmed", "covered", "type", "payload", "gen_status", "active")
 
 
 def _now() -> datetime:
@@ -159,25 +87,6 @@ def _now() -> datetime:
 
 def _iso(value: Any) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else (value or None)
-
-
-def _progress_view(row: dict[str, Any]) -> dict[str, Any]:
-    """进度行归一投影（两实现同形）：质性门 TINYINT→三态 bool/None，时刻→isoformat。"""
-    gate = row.get("qualitative_passed")
-    return {
-        "unit_id": str(row["unit_id"]),
-        "status": str(row["status"]),
-        "qualitative_passed": None if gate is None else bool(gate),
-        "qualitative_note": str(row.get("qualitative_note") or ""),
-        "assessed_by": str(row.get("assessed_by") or ""),
-        "assessed_at": _iso(row.get("assessed_at")),
-        "updated_at": _iso(row.get("updated_at")),
-    }
-
-
-def has_page_window(source_ref: Any) -> bool:
-    """节点已声明页窗（目录导入的块）＝编译不写占位正文，正文由解析产物按页窗渲染。"""
-    return bool(isinstance(source_ref, dict) and (source_ref.get("page_start") or source_ref.get("page_end")))
 
 
 def _to_json(value: Any) -> str | None:
@@ -193,40 +102,102 @@ def _from_json(value: Any) -> Any:
     return value
 
 
-def _row_to_course(row: dict[str, Any] | None) -> dict[str, Any]:
-    if row is None:
-        return {}
-    out = dict(row)
-    for column in _COURSE_JSON_COLUMNS:
-        if column in out:
-            out[column] = _from_json(out[column])
-    for column in ("created_at", "updated_at"):
-        if out.get(column) is not None:
-            out[column] = out[column].isoformat()
-    return out
+def _config(resources: list[dict[str, Any]], kp_path: Iterable[str]) -> dict[str, Any]:
+    return {"resources": list(resources or []), "kp_path": [str(kp_id) for kp_id in kp_path or ()]}
 
 
-def _row_to_unit(row: dict[str, Any] | None) -> dict[str, Any]:
-    if row is None:
-        return {}
-    out = dict(row)
-    for column in _UNIT_JSON_COLUMNS:
-        if column in out:
-            out[column] = _from_json(out[column])
-    for column in ("confirmed", "covered", "active"):
-        if column in out:
-            out[column] = bool(out[column])
-    for column in ("created_at", "updated_at"):
-        if out.get(column) is not None:
-            out[column] = out[column].isoformat()
-    return out
+def _check_status(target_kind: str, status: str) -> str:
+    closed = COURSE_STATUSES if target_kind == COURSE_TARGET else KP_STATUSES
+    if status not in closed:
+        raise LearnConflict(f"{target_kind} 行 status 必须是 {closed} 之一，收到 {status!r}")
+    return status
+
+
+def course_view(row: dict[str, Any]) -> dict[str, Any]:
+    """course 行归一投影（两实现同形）：`config` 摊平；`learn_course_id`＝共享课程 ID（ADR 0026 D4）。
+
+    `owner` 列不进投影（D7）：它只承载唯一键前缀与多用户扩展位，本域契约面不收不回显。
+    """
+    config = row.get("config") or {}
+    return {
+        "learn_course_id": str(row["target_id"]),
+        "status": str(row["status"]),
+        "resources": list(config.get("resources") or []),
+        "kp_path": [str(kp_id) for kp_id in (config.get("kp_path") or [])],
+        "learner_note": str(row.get("learner_note") or ""),
+        "created_at": _iso(row.get("created_at")),
+        "updated_at": _iso(row.get("updated_at")),
+    }
+
+
+def kp_view(row: dict[str, Any]) -> dict[str, Any]:
+    """kp 行归一投影（两实现同形）：质性门 TINYINT→三态 bool/None，时刻→isoformat；`owner` 不出面（D7）。"""
+    gate = row.get("qualitative_passed")
+    return {
+        "kp_id": str(row["target_id"]),
+        "status": str(row["status"]),
+        "qualitative_passed": None if gate is None else bool(gate),
+        "qualitative_note": str(row.get("qualitative_note") or ""),
+        "assessed_by": str(row.get("assessed_by") or ""),
+        "assessed_at": _iso(row.get("assessed_at")),
+        "learner_note": str(row.get("learner_note") or ""),
+        "updated_at": _iso(row.get("updated_at")),
+    }
+
+
+def derive_progress(units: list[dict[str, Any]], rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """课程进度＝知识点投影序列 × kp 行读时重算（非累加）；`pending` 行既不计 done 也不计 skipped。"""
+    statuses = [rows.get(str(unit.get("kp_id") or ""), {}).get("status") for unit in units]
+    total = len(units)
+    done = sum(1 for status in statuses if status == "done")
+    skipped = sum(1 for status in statuses if status == "skipped")
+    current = next(
+        (
+            str(unit["unit_id"])
+            for unit, status in zip(units, statuses, strict=True)
+            if status not in ("done", "skipped")
+        ),
+        None,
+    )
+    return {
+        "total": total,
+        "done": done,
+        "skipped": skipped,
+        "percent": round(100.0 * done / total, 1) if total else 0.0,
+        "current_unit_id": current,
+        "completed": total > 0 and done + skipped == total,
+    }
+
+
+def derive_books_progress(
+    units: list[dict[str, Any]], rows: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """教材级进度：计数单位行按取材 `source_ref.ref_id` 归集（书架清单卡片，REQ-117 W8/C9）。"""
+    grouped: dict[str, dict[str, int]] = {}
+    for unit in units:
+        ref_id = str((unit.get("source_ref") or {}).get("ref_id") or "")
+        if not ref_id:
+            continue
+        bucket = grouped.setdefault(ref_id, {"total": 0, "done": 0})
+        bucket["total"] += 1
+        if rows.get(str(unit.get("kp_id") or ""), {}).get("status") == "done":
+            bucket["done"] += 1
+    return [
+        {
+            "ref_id": ref_id,
+            "total": bucket["total"],
+            "done": bucket["done"],
+            "percent": round(100.0 * bucket["done"] / bucket["total"], 1),
+        }
+        for ref_id, bucket in grouped.items()
+    ]
 
 
 class MySQLLearnStore:
-    """学习域三表 MySQL 存储（qe_learn_course / _unit / _unit_progress）。
+    """学习记录 `qe_learning` 的 MySQL 存储（单表继承：course 行 + kp 行）。
 
-    接口与 `InMemoryLearnStore` 同形（公开方法签名由契约测试守护）；派生进度读时重算、
-    课程行自 carry 编译作业态（D3）。
+    接口与 `InMemoryLearnStore` 同形（公开方法签名由契约测试守护）；百分比与掌握分不落列，
+    调用方取投影序列 × `kp_rows()` 走 `derive_progress` 重算。
     """
 
     def __init__(self, settings: Any) -> None:
@@ -237,407 +208,222 @@ class MySQLLearnStore:
 
         return _connect(self._settings)
 
-    # ---------- 课程 ----------
+    def _row(self, owner: str, target_kind: str, target_id: str) -> dict[str, Any] | None:
+        sql = (
+            f"SELECT id, {_LEARNING_COLUMNS} FROM qe_learning "
+            "WHERE owner=%s AND target_kind=%s AND target_id=%s"
+        )
+        with self._connect() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(sql, (owner, target_kind, target_id))
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return {**row, "config": _from_json(row.get("config"))}
 
-    def create_course(self, *, name: str, resources: list[dict[str, str]], **fields: Any) -> dict[str, Any]:
-        course_id = f"lc-{uuid.uuid4().hex[:12]}"
+    def _upsert(self, row: dict[str, Any]) -> None:
+        params = tuple(
+            _to_json(row.get(column)) if column == "config" else row.get(column)
+            for column in _LEARNING_FIELDS
+        )
+        assignments = ", ".join(
+            f"{column}=VALUES({column})"
+            for column in ("status", "config", "qualitative_passed", "qualitative_note", "assessed_by", "assessed_at", "learner_note", "updated_at")
+        )
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"INSERT INTO qe_learning ({_LEARNING_COLUMNS}) VALUES "
+                    f"({', '.join(['%s'] * len(_LEARNING_FIELDS))}) ON DUPLICATE KEY UPDATE {assignments}",
+                    params,
+                )
+            conn.commit()
+
+    def _delete(self, owner: str, target_kind: str, target_id: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM qe_learning WHERE owner=%s AND target_kind=%s AND target_id=%s",
+                    (owner, target_kind, target_id),
+                )
+            conn.commit()
+
+    def _kp_base_row(self, kp_id: str, owner: str) -> dict[str, Any]:
+        existing = self._row(owner, KP_TARGET, kp_id) or {}
+        return {
+            "owner": owner,
+            "target_kind": KP_TARGET,
+            "target_id": str(kp_id),
+            "status": existing.get("status") or "pending",
+            "config": None,
+            "qualitative_passed": existing.get("qualitative_passed"),
+            "qualitative_note": existing.get("qualitative_note") or "",
+            "assessed_by": existing.get("assessed_by") or "",
+            "assessed_at": existing.get("assessed_at"),
+            "learner_note": existing.get("learner_note"),
+            "created_at": existing.get("created_at") or _now(),
+            "updated_at": _now(),
+        }
+
+    # ---------- 选课（course 行） ----------
+
+    def create_course(
+        self,
+        *,
+        course_id: str,
+        resources: list[dict[str, Any]],
+        kp_path: Iterable[str] = (),
+        learner_note: str = "",
+        owner: str = DEFAULT_OWNER,
+    ) -> dict[str, Any]:
+        if not str(course_id or "").strip():
+            raise LearnConflict("course_id 不可为空（选课即引用共享 qed_course.course_id）")
+        if not resources:
+            raise LearnConflict("resources 至少一项")
+        target_id = str(course_id)
+        if self._row(owner, COURSE_TARGET, target_id) is not None:
+            raise LearnConflict(f"该课程已在学习面：{course_id}")
         stamp = _now()
         row = {
-            "learn_course_id": course_id,
-            "name": name,
-            "domain_ref": fields.get("domain_ref"),
-            "course_ref": fields.get("course_ref"),
-            "direction": fields.get("direction", ""),
-            "resources": resources,
-            "compile_status": None,
-            "compile_done": 0,
-            "compile_total": 0,
-            "failure_count": 0,
-            "page_windows": fields.get("page_windows"),
-            "compile_fingerprint": None,
-            "instructions": fields.get("instructions", ""),
-            "agent_notes": fields.get("agent_notes", ""),
+            "owner": owner,
+            "target_kind": COURSE_TARGET,
+            "target_id": target_id,
+            "status": "active",
+            "config": _config(resources, kp_path),
+            "qualitative_passed": None,
+            "qualitative_note": "",
+            "assessed_by": "",
+            "assessed_at": None,
+            "learner_note": learner_note,
             "created_at": stamp,
             "updated_at": stamp,
         }
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"INSERT INTO qe_learn_course ({_COURSE_COLUMNS}) VALUES "
-                    f"({', '.join(['%s'] * len(_COURSE_FIELDS))})",
-                    tuple(
-                        _to_json(row[column]) if column in _COURSE_JSON_COLUMNS else row[column]
-                        for column in _COURSE_FIELDS
-                    ),
-                )
-            conn.commit()
-        return _row_to_course(row)
+        self._upsert(row)
+        return course_view(row)
 
-    def get_course(self, course_id: str) -> dict[str, Any]:
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    f"SELECT {_COURSE_COLUMNS} FROM qe_learn_course WHERE learn_course_id=%s",
-                    (course_id,),
-                )
-                row = cursor.fetchone()
+    def get_course(self, course_id: str, *, owner: str = DEFAULT_OWNER) -> dict[str, Any]:
+        row = self._row(owner, COURSE_TARGET, course_id)
         if row is None:
             raise LearnNotFound(course_id)
-        return _row_to_course(row)
+        return course_view(row)
 
-    def list_courses(self) -> list[dict[str, Any]]:
+    def list_courses(self, *, owner: str = DEFAULT_OWNER) -> list[dict[str, Any]]:
+        sql = (
+            f"SELECT id, {_LEARNING_COLUMNS} FROM qe_learning "
+            "WHERE owner=%s AND target_kind=%s ORDER BY created_at"
+        )
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(f"SELECT {_COURSE_COLUMNS} FROM qe_learn_course ORDER BY created_at")
+                cursor.execute(sql, (owner, COURSE_TARGET))
                 rows = cursor.fetchall()
-        return [_row_to_course(row) for row in rows]
+        return [
+            course_view({**row, "config": _from_json(row.get("config"))}) for row in rows
+        ]
 
-    def update_course(self, course_id: str, **fields: Any) -> dict[str, Any]:
-        columns = [key for key in fields if key in _COURSE_UPDATABLE]
-        unknown = set(fields) - set(columns)
+    def update_course(
+        self, course_id: str, *, owner: str = DEFAULT_OWNER, **fields: Any
+    ) -> dict[str, Any]:
+        unknown = set(fields) - set(_COURSE_UPDATABLE)
         if unknown:
             raise LearnConflict(f"课程字段不可写：{sorted(unknown)}")
-        self.get_course(course_id)
-        if columns:
-            assignments = ", ".join(f"{column}=%s" for column in columns)
-            params = [
-                _to_json(fields[column]) if column in _COURSE_JSON_COLUMNS else fields[column]
-                for column in columns
-            ]
-            with self._connect() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        f"UPDATE qe_learn_course SET {assignments}, updated_at=%s WHERE learn_course_id=%s",
-                        (*params, _now(), course_id),
-                    )
-                conn.commit()
-        return self.get_course(course_id)
+        course = self.get_course(course_id, owner=owner)
+        if "status" in fields:
+            course["status"] = _check_status(COURSE_TARGET, str(fields["status"]))
+        if "resources" in fields:
+            if not fields["resources"]:
+                raise LearnConflict("resources 不可清空")
+            course["resources"] = list(fields["resources"])
+        if "kp_path" in fields:
+            course["kp_path"] = [str(kp_id) for kp_id in (fields["kp_path"] or [])]
+        if "learner_note" in fields:
+            course["learner_note"] = str(fields["learner_note"] or "")
+        row = self._row(owner, COURSE_TARGET, course_id) or {}
+        self._upsert(
+            {
+                **row,
+                "target_kind": COURSE_TARGET,
+                "status": course["status"],
+                "config": _config(course["resources"], course["kp_path"]),
+                "learner_note": course["learner_note"],
+                "updated_at": _now(),
+            }
+        )
+        return self.get_course(course_id, owner=owner)
 
-    def delete_course(self, course_id: str) -> None:
-        self.get_course(course_id)
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM qe_learn_unit_progress WHERE learn_course_id=%s", (course_id,))
-                cursor.execute("DELETE FROM qe_learn_unit WHERE learn_course_id=%s", (course_id,))
-                cursor.execute("DELETE FROM qe_learn_course WHERE learn_course_id=%s", (course_id,))
-            conn.commit()
+    def delete_course(self, course_id: str, *, owner: str = DEFAULT_OWNER) -> None:
+        """只退选课行；kp 行是学习者对知识点的独立记录，跨课程共享，不随课程删除。"""
+        if self._row(owner, COURSE_TARGET, course_id) is None:
+            raise LearnNotFound(course_id)
+        self._delete(owner, COURSE_TARGET, course_id)
 
-    # ---------- 单元树 ----------
+    # ---------- 知识点终态与质性门（kp 行） ----------
 
-    def replace_tree(self, course_id: str, nodes: list[dict[str, Any]]) -> None:
-        """整树草稿覆写：旧行连同进度一并清除（与内存实现同语义，重编换代归 M-2 版本位）。"""
-        self.get_course(course_id)
-        stamp = _now()
-        rows: list[tuple[Any, ...]] = []
-        seq = 0
-
-        def _collect(node: dict[str, Any], parent: str | None, level: str) -> None:
-            nonlocal seq
-            seq += 1
-            unit_id = f"lu-{uuid.uuid4().hex[:12]}"
-            rows.append(
-                (
-                    unit_id, course_id, parent, level, str(node["title"]),
-                    int(node.get("order", seq)), 1 if node.get("confirmed") else 0, 0,
-                    str(node.get("type") or "text"), _to_json(node.get("payload") or {}),
-                    _to_json(node["source_ref"]) if node.get("source_ref") else None,
-                    "pending", 1, stamp, stamp,
-                )
-            )
-            for child in node.get("children") or []:
-                # 深度守卫在路由层（≤3 级）：L1=section，L2/L3=unit（块）
-                _collect(child, unit_id, "unit")
-
-        for n in nodes:
-            _collect(n, None, "section")
-
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM qe_learn_unit_progress WHERE learn_course_id=%s", (course_id,))
-                cursor.execute("DELETE FROM qe_learn_unit WHERE learn_course_id=%s", (course_id,))
-                if rows:
-                    cursor.executemany(
-                        f"INSERT INTO qe_learn_unit ({_UNIT_COLUMNS}) VALUES ("
-                        + ", ".join(["%s"] * len(rows[0]))
-                        + ")",
-                        rows,
-                    )
-            conn.commit()
-
-    def get_unit(self, unit_id: str) -> dict[str, Any]:
+    def kp_rows(self, *, owner: str = DEFAULT_OWNER) -> dict[str, dict[str, Any]]:
+        """全部 kp 行（`kp_id` → 归一投影）；未落笔的知识点无键，读侧按投影序列取用。"""
+        sql = (
+            f"SELECT id, {_LEARNING_COLUMNS} FROM qe_learning "
+            "WHERE owner=%s AND target_kind=%s"
+        )
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    f"SELECT {_UNIT_COLUMNS} FROM qe_learn_unit WHERE unit_id=%s", (unit_id,)
-                )
-                row = cursor.fetchone()
+                cursor.execute(sql, (owner, KP_TARGET))
+                rows = cursor.fetchall()
+        return {str(row["target_id"]): kp_view(row) for row in rows}
+
+    def get_kp_row(self, kp_id: str, *, owner: str = DEFAULT_OWNER) -> dict[str, Any]:
+        row = self._row(owner, KP_TARGET, kp_id)
         if row is None:
-            raise LearnNotFound(unit_id)
-        return _row_to_unit(row)
+            raise LearnNotFound(kp_id)
+        return kp_view(row)
 
-    def patch_unit(self, unit_id: str, **fields: Any) -> dict[str, Any]:
-        if "order" in fields:
-            fields["sort_order"] = fields.pop("order")
-        columns = [key for key in _UNIT_UPDATABLE if key in fields]
-        unknown = set(fields) - set(columns)
-        if unknown:
-            raise LearnConflict(f"单元字段不可写：{sorted(unknown)}")
-        row = self.get_unit(unit_id)
-        if fields.get("covered") is True and not row["confirmed"]:
-            raise LearnConflict("未 confirmed 的单元不可勾选 covered")
-        if columns:
-            assignments = ", ".join(f"{column}=%s" for column in columns)
-            params = [
-                _to_json(fields[column]) if column in _UNIT_JSON_COLUMNS else fields[column]
-                for column in columns
-            ]
-            with self._connect() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(
-                        f"UPDATE qe_learn_unit SET {assignments}, updated_at=%s WHERE unit_id=%s",
-                        (*params, _now(), unit_id),
-                    )
-                conn.commit()
-        return self.get_unit(unit_id)
-
-    def list_units(self, course_id: str, level: str | None = None) -> list[dict[str, Any]]:
-        self.get_course(course_id)
-        sql = f"SELECT {_UNIT_COLUMNS} FROM qe_learn_unit WHERE learn_course_id=%s"
-        params: list[Any] = [course_id]
-        if level:
-            sql += " AND level=%s"
-            params.append(level)
-        sql += " ORDER BY sort_order"
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(sql, tuple(params))
-                rows = cursor.fetchall()
-        return [_row_to_unit(row) for row in rows]
-
-    def active_units(self, course_id: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    f"SELECT {_UNIT_COLUMNS} FROM qe_learn_unit "
-                    "WHERE learn_course_id=%s AND level='unit' AND active=1 ORDER BY sort_order",
-                    (course_id,),
-                )
-                rows = cursor.fetchall()
-        return [_row_to_unit(row) for row in rows]
-
-    def ensure_point_unit(
-        self,
-        course_id: str,
-        *,
-        unit_id: str,
-        kp_id: str,
-        parent_id: str | None,
-        title: str,
-        sort_order: int,
-        source_ref: dict[str, Any] | None,
-        covered: bool,
+    def set_kp_status(
+        self, kp_id: str, status: str, *, owner: str = DEFAULT_OWNER
     ) -> dict[str, Any]:
-        """知识点派生键首次落笔才物化（§V2.3 读时投影；零 DDL＝level='point' + kp 引用入 source_ref）。"""
-        self.get_course(course_id)
-        stamp = _now()
-        ref = {**(source_ref or {}), "kp_id": kp_id}
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO qe_learn_unit "
-                    "(unit_id, learn_course_id, parent_id, level, title, sort_order, confirmed, covered, "
-                    " type, payload, source_ref, gen_status, active, created_at, updated_at) "
-                    "VALUES (%s, %s, %s, 'point', %s, %s, 1, %s, NULL, NULL, %s, 'generated', 1, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE parent_id=VALUES(parent_id), title=VALUES(title), "
-                    "sort_order=VALUES(sort_order), covered=VALUES(covered), source_ref=VALUES(source_ref), "
-                    "updated_at=VALUES(updated_at)",
-                    (
-                        unit_id,
-                        course_id,
-                        parent_id,
-                        title,
-                        sort_order,
-                        int(covered),
-                        _to_json(ref),
-                        stamp,
-                        stamp,
-                    ),
-                )
-            conn.commit()
-        return self.get_unit(unit_id)
-
-    # ---------- 编译作业（课程行自 carry，D3 裁决） ----------
-
-    def start_compile(self, course_id: str) -> dict[str, Any]:
-        course = self.get_course(course_id)
-        if course["compile_status"] == "running":
-            raise LearnConflict("已有编译在跑")
-        rows = self.list_units(course_id)
-        if not rows:
-            raise LearnConflict("两级确认未齐备（树为空）")
-        if not all(r["confirmed"] for r in rows):
-            raise LearnConflict("两级确认未齐备（存在未确认节点）")
-        self.update_course(course_id, compile_status="running", failure_count=0)
-        self._recount(course_id)
-        return self.get_course(course_id)
-
-    def finish_compile(self, course_id: str) -> None:
-        """M-1 骨架编译：活动 unit 行逐一置 generated，只补空位不覆写人工/目录已声明的承载位。"""
-        course = self.get_course(course_id)
-        ref_id = (course["resources"] or [{}])[0].get("ref_id")
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                for row in self.active_units(course_id):
-                    source_ref = row["source_ref"] or {"ref_id": ref_id, "page": None, "block_index": None}
-                    payload = row["payload"] or {}
-                    if not has_page_window(source_ref) and not str(payload.get("text") or ""):
-                        payload = {"text": f"「{row['title']}」骨架正文（M-1 占位，M-2 接生成管线）"}
-                    cursor.execute(
-                        "UPDATE qe_learn_unit SET gen_status='generated', payload=%s, source_ref=%s, "
-                        "updated_at=%s WHERE unit_id=%s",
-                        (_to_json(payload), _to_json(source_ref), _now(), row["unit_id"]),
-                    )
-            conn.commit()
-        self._recount(course_id)
-        self.update_course(course_id, compile_status="completed")
-
-    def _recount(self, course_id: str) -> None:
-        rows = self.active_units(course_id)
-        self.update_course(
-            course_id,
-            compile_total=len(rows),
-            compile_done=sum(1 for r in rows if r["gen_status"] == "generated"),
-        )
-
-    # ---------- 进度派生基 ----------
-
-    def set_progress(self, course_id: str, unit_id: str, status: str) -> dict[str, Any]:
-        row = self.get_unit(unit_id)
-        if row["learn_course_id"] != course_id:
-            raise LearnNotFound(unit_id)
-        if row["level"] != "point":
-            raise LearnConflict("进度只可打在知识点行上（旧节/块行保留只读，§V2.3）")
-        stamp = _now()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO qe_learn_unit_progress (unit_id, learn_course_id, status, updated_at) "
-                    "VALUES (%s, %s, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE status=VALUES(status), updated_at=VALUES(updated_at)",
-                    (unit_id, course_id, status, stamp),
-                )
-            conn.commit()
-        return {"unit_id": unit_id, "learn_course_id": course_id, "status": status, "updated_at": stamp.isoformat()}
-
-    def derived_progress(self, course_id: str, units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        """学习进度＝读时重算；`units` 传入投影好的知识点行（缺省回落旧活动 unit 行）。"""
-        rows = self.active_units(course_id) if units is None else units
-        total = len(rows)
-        statuses: dict[str, str] = {}
-        if rows:
-            placeholders = ", ".join(["%s"] * total)
-            with self._connect() as conn:
-                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                    cursor.execute(
-                        "SELECT unit_id, status FROM qe_learn_unit_progress "
-                        f"WHERE unit_id IN ({placeholders})",
-                        tuple(r["unit_id"] for r in rows),
-                    )
-                    statuses = {row["unit_id"]: row["status"] for row in cursor.fetchall()}
-        done = sum(1 for r in rows if statuses.get(r["unit_id"]) == "done")
-        skipped = sum(1 for r in rows if statuses.get(r["unit_id"]) == "skipped")
-        current = next(
-            (r["unit_id"] for r in rows if statuses.get(r["unit_id"]) not in ("done", "skipped")), None
-        )
-        return {
-            "total": total,
-            "done": done,
-            "skipped": skipped,
-            "percent": round(100.0 * done / total, 1) if total else 0.0,
-            "current_unit_id": current,
-            "completed": total > 0 and done + skipped == total,
-        }
-
-    def progress_rows(self, course_id: str) -> dict[str, dict[str, Any]]:
-        """主链 M-3 门的读入面：按课程取进度行原值（`unit_id` → 归一投影），未落笔的知识点无键。"""
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    "SELECT unit_id, status, qualitative_passed, qualitative_note, assessed_by, "
-                    "assessed_at, updated_at FROM qe_learn_unit_progress WHERE learn_course_id=%s",
-                    (course_id,),
-                )
-                rows = cursor.fetchall()
-        return {str(row["unit_id"]): _progress_view(row) for row in rows}
+        """勾选落笔（done/skipped/pending）；`pending`＝撤销终态位，无质性判定痕迹时整行删除。"""
+        _check_status(KP_TARGET, status)
+        existing = self._row(owner, KP_TARGET, kp_id)
+        if status == "pending":
+            if existing is None:
+                return {"kp_id": str(kp_id), "status": "pending", "removed": True}
+            if existing.get("qualitative_passed") is None:
+                self._delete(owner, KP_TARGET, kp_id)
+                return {"kp_id": str(kp_id), "status": "pending", "removed": True}
+        self._upsert({**(existing or self._kp_base_row(kp_id, owner)), "status": status})
+        return self.get_kp_row(kp_id, owner=owner)
 
     def assess_qualitative(
         self,
-        course_id: str,
-        unit_id: str,
+        kp_id: str,
         *,
         passed: bool,
         note: str = "",
         assessed_by: str = "learner",
+        owner: str = DEFAULT_OWNER,
     ) -> dict[str, Any]:
-        """质性门判定落进度行（扩列即等于落知识点）：只写判定四列，终态位 `status` 不动。
+        """质性门判定落 kp 行：只写判定四列，终态位 `status` 不动（门与勾选各写各的列，D-M3-1）。
 
-        行不存在时以 `status='pending'` 起行（pending＝派生计数视为无行）；门是新增的 system
-        通路，不取代勾选通路（裁决 D-M3-1），故本方法与 set_progress 各写各的列。
+        行不存在时以 `status='pending'` 起行（pending 既不计 done 也不计 skipped）。
         """
-        row = self.get_unit(unit_id)
-        if row["learn_course_id"] != course_id:
-            raise LearnNotFound(unit_id)
-        if row["level"] != "point":
-            raise LearnConflict("质性判定只可打在知识点行上（旧节/块行保留只读，§V2.3）")
-        stamp = _now()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO qe_learn_unit_progress "
-                    "(unit_id, learn_course_id, status, qualitative_passed, qualitative_note, "
-                    "assessed_by, assessed_at, updated_at) "
-                    "VALUES (%s, %s, 'pending', %s, %s, %s, %s, %s) "
-                    "ON DUPLICATE KEY UPDATE qualitative_passed=VALUES(qualitative_passed), "
-                    "qualitative_note=VALUES(qualitative_note), assessed_by=VALUES(assessed_by), "
-                    "assessed_at=VALUES(assessed_at), updated_at=VALUES(updated_at)",
-                    (unit_id, course_id, int(bool(passed)), note, assessed_by, stamp, stamp),
-                )
-            conn.commit()
-        return self.progress_rows(course_id)[unit_id]
+        if assessed_by not in ASSESSED_BY:
+            raise LearnConflict(f"assessed_by 必须是 {ASSESSED_BY} 之一")
+        merged = self._kp_base_row(kp_id, owner)
+        merged.update(
+            qualitative_passed=int(bool(passed)),
+            qualitative_note=note,
+            assessed_by=assessed_by,
+            assessed_at=_now(),
+        )
+        self._upsert(merged)
+        return self.get_kp_row(kp_id, owner=owner)
 
-    def books_progress(self, course_id: str, units: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-        """教材级进度：计数单位行按 `source_ref.ref_id` 归集（书架清单卡片进度）。
-
-        `units` 传入投影好的知识点行（缺省回落旧活动 unit 行）。
-        只反映已进链路的教材；素材行有而单元行无的教材由路由层补 `total=0`。
-        """
-        rows = self.active_units(course_id) if units is None else units
-        statuses: dict[str, str] = {}
-        if rows:
-            placeholders = ", ".join(["%s"] * len(rows))
-            with self._connect() as conn:
-                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                    cursor.execute(
-                        "SELECT unit_id, status FROM qe_learn_unit_progress "
-                        f"WHERE unit_id IN ({placeholders})",
-                        tuple(r["unit_id"] for r in rows),
-                    )
-                    statuses = {row["unit_id"]: row["status"] for row in cursor.fetchall()}
-        grouped: dict[str, dict[str, int]] = {}
-        for row in rows:
-            ref_id = str((row.get("source_ref") or {}).get("ref_id") or "")
-            if not ref_id:
-                continue
-            bucket = grouped.setdefault(ref_id, {"total": 0, "done": 0})
-            bucket["total"] += 1
-            if statuses.get(row["unit_id"]) == "done":
-                bucket["done"] += 1
-        return [
-            {
-                "ref_id": ref_id,
-                "total": bucket["total"],
-                "done": bucket["done"],
-                "percent": round(100.0 * bucket["done"] / bucket["total"], 1),
-            }
-            for ref_id, bucket in grouped.items()
-        ]
+    def set_note(
+        self, target_kind: str, target_id: str, text: str, *, owner: str = DEFAULT_OWNER
+    ) -> dict[str, Any]:
+        """学习者备注（人工位，R6）：course 行与 kp 行通用；行不存在不起新行（404）。"""
+        kind = COURSE_TARGET if target_kind == COURSE_TARGET else KP_TARGET
+        row = self._row(owner, kind, target_id)
+        if row is None:
+            raise LearnNotFound(target_id)
+        merged = {**row, "learner_note": str(text or ""), "updated_at": _now()}
+        self._upsert(merged)
+        return course_view(merged) if kind == COURSE_TARGET else kp_view(merged)

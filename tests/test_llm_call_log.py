@@ -267,3 +267,90 @@ def test_ensure_comments_rebuilds_defaults(monkeypatch):
     sql = [s for s, _ in conn.executed if "MODIFY COLUMN" in s][0]
     assert "varchar(16)" in sql and "DEFAULT 'unreviewed'" in sql
     assert "COMMENT '审核态" in sql
+
+
+# --- REQ-118：meta 扩展槽 + 二级索引 + provider 注释口径 ---
+
+
+def test_create_table_sql_has_meta_slot_and_indexes():
+    """建表 SQL：meta JSON 扩展槽 + 三枚二级索引（时间窗/服务时间/任务步骤）。"""
+    sql = call_log.CREATE_TABLE_SQL
+    assert "meta JSON" in sql
+    assert "COMMENT '扩展槽" in sql
+    assert "KEY idx_llm_created (created_at)" in sql
+    assert "KEY idx_llm_service_created (service, created_at)" in sql
+    assert "KEY idx_llm_task_step (task, step)" in sql
+
+
+def test_provider_comment_covers_local_runtime_names():
+    """provider 注释改判：api 渠道为厂商名，local 模式为 runtime 名。"""
+    comment = call_log._COLUMN_COMMENTS["provider"]
+    for token in ("lmstudio", "llamacpp", "mineru"):
+        assert token in comment
+        assert token in call_log.CREATE_TABLE_SQL
+
+
+def test_record_call_writes_meta_as_json(monkeypatch):
+    """写入：record_call(meta=...) 以 JSON 文本进 meta 列。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    call_log.record_call(
+        _settings(),
+        service="qed_engine", mode="api", provider="qwen", model="qwen-plus",
+        endpoint="text", prompt="p", response="r", duration_ms=10, status="success",
+        meta={"usage": {"prompt_tokens": 11, "completion_tokens": 22}},
+    )
+    sql, params = conn.executed[1]
+    assert "meta" in sql
+    assert params["meta"].startswith("{")
+    assert "prompt_tokens" in params["meta"]
+
+
+def test_record_call_meta_defaults_to_null(monkeypatch):
+    """写入：缺省 meta 写 NULL（扩展槽不填即空）。"""
+    conn = FakeConn()
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    call_log.record_call(
+        _settings(),
+        service="qed_engine", mode="api", provider="qwen", model="m",
+        endpoint="text", prompt="p", response="r", duration_ms=1, status="success",
+    )
+    _, params = conn.executed[1]
+    assert params["meta"] is None
+
+
+def test_search_calls_decodes_meta(monkeypatch):
+    """检索：meta 列 JSON 文本解码回对象；非法 JSON 原样返回。"""
+    conn = FakeConn(
+        fetchone_result={"n": 2},
+        fetchall_result=[
+            {"id": 2, "meta": '{"usage": {"total_tokens": 33}}'},
+            {"id": 1, "meta": None},
+        ],
+    )
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    result = call_log.search_calls(_settings(), page=1, size=10)
+    assert result["items"][0]["meta"] == {"usage": {"total_tokens": 33}}
+    assert result["items"][1]["meta"] is None
+
+
+def test_ensure_indexes_adds_only_missing(monkeypatch):
+    """ensure_indexes：information_schema 对比，只对缺失索引发 ALTER ADD INDEX。"""
+    conn = FakeConn(fetchall_result=[("PRIMARY",), ("idx_llm_created",)])
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    added = call_log.ensure_indexes(_settings())
+    assert added == ["idx_llm_service_created", "idx_llm_task_step"]
+    alters = [s for s, _ in conn.executed if "ADD INDEX" in s]
+    assert len(alters) == 2
+    assert any("idx_llm_task_step (task, step)" in s for s in alters)
+
+
+def test_ensure_indexes_idempotent(monkeypatch):
+    """ensure_indexes：索引齐备时零 ALTER。"""
+    conn = FakeConn(fetchall_result=[
+        ("PRIMARY",), ("idx_llm_created",),
+        ("idx_llm_service_created",), ("idx_llm_task_step",),
+    ])
+    monkeypatch.setattr(call_log, "_connect", lambda settings: conn)
+    assert call_log.ensure_indexes(_settings()) == []
+    assert not [s for s, _ in conn.executed if "ADD INDEX" in s]

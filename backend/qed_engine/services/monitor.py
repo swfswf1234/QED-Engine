@@ -59,6 +59,19 @@ def _run_smi(cmd: list[str]) -> str:
     return result.stdout.decode("utf-8", errors="replace")
 
 
+def _decode_console(blob: object) -> str:
+    """控制台工具输出的容错解码（DEFECT-018）：字节按 UTF-8 替换解码，空值归一为空串。
+
+    真机中文 Windows 下 tasklist / Get-Counter 以 GBK 落管道，`text=True` 的 reader 线程抛
+    UnicodeDecodeError（ValueError 子类）并使 stdout=None。判例形态＝上方 `_run_smi`。
+    """
+    if not blob:
+        return ""
+    if isinstance(blob, bytes):
+        return blob.decode("utf-8", errors="replace")
+    return blob if isinstance(blob, str) else str(blob)
+
+
 def probe_memory() -> dict:
     """系统内存（Windows GlobalMemoryStatusEx；非 Windows 尽力报告失败原因）。"""
     if sys.platform != "win32":
@@ -115,13 +128,17 @@ def _pdh_cmd() -> list[str]:
 
 
 def _run_pdh(runner=None) -> str:
-    """执行合并 PDH 探测；超时/失败返回空串（尽力降级，不抛异常）。"""
+    """执行合并 PDH 探测；超时/失败/输出不可解码或为空一律降级为空串（尽力降级，不抛异常）。
+
+    DEFECT-018：默认 runner 按字节捕获后容错解码（不再用 `text=True`），并把 ValueError
+    （含 UnicodeDecodeError）纳入降级——`Get-Counter` 中文计数器名解码失败曾逃逸出 `probe_gpu`。
+    """
     run = runner or (
-        lambda cmd, **kw: subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+        lambda cmd, **kw: subprocess.run(cmd, capture_output=True, timeout=15).stdout
     )
     try:
-        return run(_pdh_cmd()) or ""
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return _decode_console(run(_pdh_cmd()))
+    except (FileNotFoundError, OSError, subprocess.SubprocessError, ValueError):
         return ""
 
 
@@ -189,18 +206,23 @@ def probe_pdh(runner=None) -> dict:
 
 
 def resolve_process_name(pid: int, runner=None) -> str | None:
-    """按 pid 经 tasklist CSV 补全进程真实名（Windows）；失败/未找到返回 None。
+    """按 pid 经 tasklist CSV 补全进程真实名（Windows）；失败/未找到/输出为空返回 None。
 
     背景（Task 3，2026-09-06）：WDDM 下 nvidia-smi 对系统/受限进程显示 `[Insufficient Permissions]`，
     tasklist 能按 pid 取真实名（如 LM Studio.exe）。runner 可注入（测试）；失败不抛异常。
+
+    DEFECT-018（2026-10-17）：改为字节捕获 + 容错解码并把 ValueError 纳入降级——真机 tasklist 的
+    GBK 输出在 `text=True` 下解码失败使 stdout=None，原代码未判空即 `.splitlines()` 抛
+    AttributeError，显存监控因此长期沿用旧缓存。
     """
     run = runner or subprocess.run
     try:
         result = run(["tasklist", "/FO", "CSV", "/NH", "/FI", f"PID eq {pid}"],
-                     capture_output=True, text=True, timeout=10)
-    except (FileNotFoundError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+                     capture_output=True, timeout=10)
+    except (FileNotFoundError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired,
+            ValueError):
         return None
-    stdout = result.stdout if isinstance(result, subprocess.CompletedProcess) else result
+    stdout = _decode_console(getattr(result, "stdout", result))
     for line in stdout.splitlines():
         parts = line.split('","')
         if len(parts) >= 2 and parts[1].strip('"') == str(pid):

@@ -65,6 +65,7 @@ def test_root_test_files_are_the_config_center_suite():
         "test_learn.py",
         "test_learn_knowledge.py",
         "test_learn_practice.py",
+        "test_learn_mastery.py",
         "test_log_viewer.py",
         "test_monitor.py",
         "test_qed_engine_service.py",

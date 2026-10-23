@@ -289,3 +289,165 @@ def test_domain_requires_name_course_requires_id_422(monkeypatch):
     client = _client(monkeypatch, tracker=_tracker_client(lambda r: httpx.Response(404)))
     assert client.post("/api/v1/explore-sessions", json={"target": "domain", "mode": "direct"}).status_code == 422
     assert client.post("/api/v1/explore-sessions", json={"target": "course", "mode": "direct"}).status_code == 422
+
+
+# --- DEFECT-014：课程 stage 越界写 ---
+
+
+def test_course_stage_writes_go_online_and_adopt_writes_completed(monkeypatch):
+    """课程 stage 写点经 8901 在线路径；采纳后写课程 5 态的「已完成」，领域专用的「已生成」不落课程列。"""
+    seen: list[dict] = []
+    tutorials = [
+        {"proposal_id": "pp_1", "set_no": "1", "set_name": "套一",
+         "textbook": {"title": "数据结构（C语言版）", "authors": ["严蔚敏"], "version": {}, "intro": "i"},
+         "exercise": None, "reason": "r"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        path = request.url.path
+        if request.method == "POST" and "prompt-explores/dry-run" in path:
+            return httpx.Response(200, json={
+                "dry_run": True,
+                "report": {"course": {"course_id": "c_ds"}, "tutorials": tutorials},
+                "calls": [{"step": "tutorials", "template_id": "course-explore/tutorials@v1", "duration_ms": 2}],
+            })
+        if request.method == "POST" and path == "/api/v1/courses/c_ds/knowledge":
+            return httpx.Response(201, json={"created": [{"knowledge_id": "kn_1", "set_name": "套一"}]})
+        if request.method == "PATCH" and path == "/api/v1/courses/c_ds":
+            body = _json.loads(request.content.decode("utf-8"))
+            seen.append(body)
+            return httpx.Response(200, json={"course_id": "c_ds", **body})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/explore-sessions", json={
+        "target": "course", "course_id": "c_ds", "mode": "direct",
+    })
+    assert resp.status_code == 202
+    sid = resp.json()["session_id"]
+    _wait_status(client, sid, {"ready"})
+    assert client.post(f"/api/v1/explore-sessions/{sid}/apply", json={"selected": [tutorials[0]]}).status_code == 200
+
+    assert [b.get("exploration_stage") for b in seen] == ["探索中", "待确认", "已完成"]
+
+
+def test_direct_write_stage_gates_stage_values_by_table(monkeypatch):
+    """降级直写按表分档校验取值：领域 6 态含「已生成」，课程 5 态拒绝它（越界值不再可能有写通道）。"""
+    from types import SimpleNamespace
+
+    import pytest
+    from qed_engine.services import shared_tables
+
+    calls: list[tuple[str, tuple]] = []
+
+    class _Cursor:
+        def __enter__(self) -> "_Cursor":
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+        def execute(self, sql, params=None) -> int:
+            calls.append((sql, params))
+            return 1
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def commit(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(shared_tables, "_connect", lambda settings: _Conn())
+    settings = SimpleNamespace(qed_db_password=SimpleNamespace(get_secret_value=lambda: "probe"))
+
+    assert shared_tables.direct_write_stage(settings, "qed_domain", "d1", "已生成") is True
+    assert shared_tables.direct_write_stage(settings, "qed_course", "c1", "已完成") is True
+    with pytest.raises(ValueError, match="qed_course"):
+        shared_tables.direct_write_stage(settings, "qed_course", "c1", "已生成")
+    assert len(calls) == 2
+
+
+# --- DEFECT-017：课程侧探索失败原因落库 ---
+
+
+def _start_course_session(monkeypatch, handler) -> tuple[TestClient, str]:
+    client = _client(monkeypatch, tracker=_tracker_client(handler))
+    resp = client.post("/api/v1/explore-sessions", json={
+        "target": "course", "course_id": "c_ds", "mode": "direct",
+    })
+    assert resp.status_code == 202, resp.text
+    return client, resp.json()["session_id"]
+
+
+def test_course_failure_writes_pending_online_and_merges_existing_keys(monkeypatch):
+    """课程探索失败与领域分支对称：失败原因经 8901 在线写 explore_pending={kind:'failed', error}，并合并同列既有键。"""
+    from qed_engine.services import shared_tables
+
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        path = request.url.path
+        if request.method == "POST" and "prompt-explores/dry-run" in path:
+            return httpx.Response(502, json={"detail": {"code": "PIPELINE_ERROR", "message": "boom"}})
+        if request.method == "PATCH" and path == "/api/v1/courses/c_ds":
+            seen.append(_json.loads(request.content.decode("utf-8")))
+            return httpx.Response(200, json={"course_id": "c_ds"})
+        return httpx.Response(404, json={"detail": "unexpected"})
+
+    monkeypatch.setattr(
+        shared_tables, "get_course",
+        lambda settings, course_id: {"course_id": course_id, "explore_pending": {"retry_hint": "r"}},
+    )
+    direct: list[dict] = []
+    monkeypatch.setattr(
+        shared_tables, "update_course",
+        lambda settings, course_id, **kw: (direct.append(kw), {"course_id": course_id})[1],
+    )
+
+    client, sid = _start_course_session(monkeypatch, handler)
+    session = _wait_status(client, sid, {"failed"})
+    assert "boom" in (session.get("error") or "")
+
+    pendings = [b["explore_pending"] for b in seen if "explore_pending" in b]
+    assert len(pendings) == 1, seen
+    assert pendings[0]["kind"] == "failed"
+    assert "boom" in pendings[0]["error"]
+    assert len(pendings[0]["error"]) <= 500
+    assert pendings[0]["retry_hint"] == "r"
+    assert "session_id" not in pendings[0]
+    assert [b["exploration_stage"] for b in seen if "exploration_stage" in b] == ["探索中", "失败"]
+    assert all("explore_pending" not in kw for kw in direct), direct
+
+
+def test_course_failure_without_8901_keeps_pending_unwritten(monkeypatch):
+    """8901 不可达时失败原因不落库：课程 explore_pending 属 8900 禁写列，直写腿不得长出该列。"""
+    import inspect
+
+    from qed_engine.services import shared_tables
+
+    assert "explore_pending" not in inspect.signature(shared_tables.update_course).parameters
+
+    patches: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("8901 down")
+
+    direct: list[dict] = []
+
+    def _direct_update(settings, course_id, **kw):
+        direct.append(kw)
+        return None
+
+    monkeypatch.setattr(shared_tables, "update_course", _direct_update)
+
+    client, sid = _start_course_session(monkeypatch, handler)
+    session = _wait_status(client, sid, {"failed"})
+    assert session.get("error")
+    assert patches == []
+    assert all("explore_pending" not in kw for kw in direct), direct

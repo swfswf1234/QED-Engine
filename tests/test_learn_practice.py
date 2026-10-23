@@ -1,15 +1,17 @@
-"""学习域·练习与复习（M2）契约测试：三表语义 + 8 端点 + 404/409/422/503 清单 + 调度纯函数。
+"""学习域·练习与复习（ADR 0026 定档后两表）契约测试：表语义 + 8 端点 + 404/409/422/503 + 调度纯函数。
 
-模块职责：守护 M2 壳 2026-10-03 冻结的练习域契约——题库批量入库（`stem_hash` 幂等跳重、
+模块职责：守护 `qe_question` + `qe_attempt` 两表的练习域契约——题库批量入库（`stem_hash` 幂等跳重、
 `answer_source=none` 强制 flashcard 即裁决 ⑨）、题面下发响应的敏感列投影（缝 2）、
-人工面白名单与 ⑨ 的升级路径、作答同事务判分与 `score_trend/resolved`（缝 6）、
-间隔复习双粒度调度（`schedule_next` 升降档/钳位、错题 priority=1、到期队列投影）、
+人工面白名单与 ⑨ 的升级路径、作答同事务落库（缝 6）、间隔复习的**读时流水重放**
+（`schedule_next` 升降档/钳位 + `replay_due`；调度表 `qe_review_task` 与其 `target_kind='kp'`
+粒度行随 D3 整表退出，档位与到期都不落列）、错题 `priority=1` 与到期队列投影、
 主链 M-3 门的两张读入面（`attempts_by_kp` 全序作答序列、`due_counts_by_kp` 按知识点到期计数）、
-错题本派生查询与统计、题源书目 `roles` 过滤；内存 store 承载，不写运行数据库。
-设计关联（DesignRef）：docs/architecture/api-contracts.md
+`score_trend` 退列后的读时派生（D9-C1）与 `resolved` 纯人工位（D9-C2/R6）、
+错题本派生查询与统计、题源书目 `roles` 过滤、`owner` 不出契约面（D7）；
+内存 store 承载，不写运行数据库。设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/api/learn.py、backend/qed_engine/services/learn/practice.py
-失效后果：M2 练习面按错误形状联调，判分依据随题面泄露，复习节律与错题事实漂移
+失效后果：练习面按错误形状联调，判分依据随题面泄露，复习节律与错题事实漂移
 """
 
 from datetime import datetime, timedelta
@@ -187,7 +189,8 @@ def _answer(client, question_id, user_answer, **extra):
 # ---------- 题库入库（POST /learn/questions） ----------
 
 
-def test_add_questions_creates_rows_and_question_review_tasks(client, store):
+def test_new_questions_are_due_at_ingest_time_by_replay(client, store):
+    """D3 建行口径：未作答的题在其入库时刻即到期（`seed_state` 复刻退役前 `_ensure_task`）。"""
     response = _post(client, [_choice(), _flashcard()])
     assert response.status_code == 200, response.text
     body = response.json()
@@ -197,7 +200,8 @@ def test_add_questions_creates_rows_and_question_review_tasks(client, store):
     assert {row["kind"] for row in rows} == {"quiz", "flashcard"}
     tasks = store.review_due("math_analysis", max_tasks=10)
     assert {task["target_id"] for task in tasks} == {row["question_id"] for row in rows}
-    assert all(task["target_kind"] == "question" for task in tasks)
+    assert all(task["target_kind"] == "question" for task in tasks)  # 重放只出题粒度任务
+    assert all(task["interval_index"] == 0 and task["reason"] == "type" for task in tasks)
 
 
 def test_duplicate_stem_is_skipped_by_normalised_hash(client):
@@ -282,6 +286,24 @@ def test_read_and_write_responses_strip_sensitive_columns(client):
         assert "expected_answer" not in item["last_attempt"]
 
 
+def test_attempt_owner_never_leaves_the_contract_surface(client):
+    """D7：`qe_attempt.owner` 只承载幂等键前缀与扩展位——请求不收、响应不回显。"""
+    _post(client, [_choice()])
+    quiz_id = _first_id(client)
+    attempt = _answer(client, quiz_id, "C").json()
+    assert "owner" not in attempt
+    due = client.get("/api/v1/learn/review/due").json()["tasks"][0]
+    assert "owner" not in due and "owner" not in due["question"]
+    mistake = client.get("/api/v1/learn/mistakes").json()["items"][0]
+    assert "owner" not in mistake["last_attempt"] and "owner" not in mistake["question"]
+    patched = client.patch(f"/api/v1/learn/attempts/{attempt['attempt_id']}",
+                           json={"bookmarked": True}).json()
+    assert "owner" not in patched
+    assert client.post("/api/v1/learn/attempts",
+                       json={"question_id": quiz_id, "user_answer": "B", "owner": "mallory"}
+                       ).status_code == 422
+
+
 def test_list_questions_filters_and_paging(client):
     _post(client, [_choice(kp_id="kp-a", kp_type="concept"), _flashcard(kp_id="kp-b")])
     assert len(_list(client, kind="quiz")) == 1
@@ -360,20 +382,24 @@ def test_attempt_returns_grade_and_reveals_answer_afterwards(client):
     assert body["is_correct"] is True and body["method"] == "deterministic"
     assert body["question_id"] == question_id
     assert body["expected_answer"] == "B" and "重要极限" in body["explanation"]
-    assert body["score_trend"] == "new" and body["resolved"] is True
+    assert body["score_trend"] == "new"
+    # D9-C2／R6：答对不自动出错题本——`resolved` 是纯人工位，机器判分恒不写
+    assert body["resolved"] is False
     assert body["attempt_id"] > 0 and body["answered_at"]
     assert body["review"]["target_kind"] == "question"
+    assert body["review"]["target_id"] == question_id
     assert body["review"]["interval_index"] == 1
     assert body["review"]["next_due_at"] > body["answered_at"]
 
 
-def test_attempt_wrong_then_correct_flips_trend_and_resolved(client):
+def test_attempt_wrong_then_correct_flips_trend_only(client):
+    """趋势＝流水读时派生（D9-C1 退列后字段名不变）；`resolved` 不参与机器判定。"""
     _post(client, [_choice()])
     question_id = _first_id(client)
     first = _answer(client, question_id, "C").json()
     assert first["is_correct"] is False and first["resolved"] is False and first["score_trend"] == "new"
     second = _answer(client, question_id, "B", origin="manual").json()
-    assert second["score_trend"] == "improved" and second["resolved"] is True
+    assert second["score_trend"] == "improved" and second["resolved"] is False
     third = _answer(client, question_id, "D", origin="review",
                     review_date="2026-10-03T10:00:00").json()
     assert third["score_trend"] == "declined" and third["resolved"] is False
@@ -381,7 +407,13 @@ def test_attempt_wrong_then_correct_flips_trend_and_resolved(client):
                      review_date="2026-10-04T10:00:00").json()
     assert fourth["is_correct"] is False and fourth["score_trend"] == "unchanged"
     fifth = _answer(client, question_id, "B").json()
-    assert fifth["score_trend"] == "improved" and fifth["resolved"] is True
+    assert fifth["score_trend"] == "improved" and fifth["resolved"] is False
+    # 出错题本只由人工位承载
+    assert client.get("/api/v1/learn/mistakes").json()["total"] == 1
+    patched = client.patch(f"/api/v1/learn/attempts/{fifth['attempt_id']}",
+                           json={"resolved": True})
+    assert patched.status_code == 200 and patched.json()["resolved"] is True
+    assert client.get("/api/v1/learn/mistakes").json()["total"] == 0
 
 
 def test_short_fuzzy_threshold(client):
@@ -514,7 +546,8 @@ def test_schedule_next_sequence_by_type_and_default():
 
 
 def test_review_due_queue_shape_priority_and_reason(client):
-    _post(client, [_choice(kp_type="concept"), _flashcard(kp_type="memory"),
+    _post(client, [_choice(kp_id="kp-concept", kp_type="concept"),
+                   _flashcard(kp_id="kp-card", kp_type="memory"),
                    _choice(stem="第三题面：求导数。", kp_id="kp-mem", kp_type="memory")])
     response = client.get("/api/v1/learn/review/due", params={"course": "math_analysis"})
     assert response.status_code == 200, response.text
@@ -526,12 +559,20 @@ def test_review_due_queue_shape_priority_and_reason(client):
     assert task["priority"] == 2 and task["reason"] == "type"  # memory 优先于 concept
     assert task["question"]["question_id"] == task["target_id"]
 
-    # 错题优先只作用于队列内部：concept 档答错退到 3 天后（不在队），memory 档答错留当日
+    # 错题优先只作用于队列内部：memory 档答错退到当日 0 天档，仍留队并置 reason=wrong
     memory_quiz_id = _first_id(client, kp="kp-mem")
     _answer(client, memory_quiz_id, "C")
     after = client.get("/api/v1/learn/review/due", params={"course": "math_analysis"}).json()
-    assert {task["target_id"] for task in after["tasks"][:2]} == {memory_quiz_id, "kp-mem"}
-    assert all(task["priority"] == 1 and task["reason"] == "wrong" for task in after["tasks"][:2])
+    assert after["total_due"] == 3
+    assert after["tasks"][0]["target_id"] == memory_quiz_id
+    assert after["tasks"][0]["priority"] == 1 and after["tasks"][0]["reason"] == "wrong"
+
+    # concept 档答错退到序列首档（3 天后）＝离开当日队列
+    concept_quiz_id = _first_id(client, kp="kp-concept")
+    _answer(client, concept_quiz_id, "Z")
+    left = client.get("/api/v1/learn/review/due", params={"course": "math_analysis"}).json()
+    assert left["total_due"] == 2
+    assert concept_quiz_id not in {task["target_id"] for task in left["tasks"]}
 
 
 def test_review_due_overdue_days_and_max_tasks(client):
@@ -557,18 +598,26 @@ def test_answered_questions_leave_today_queue(client):
     assert client.get("/api/v1/learn/review/due").json() == {"course_id": None, "tasks": [], "total_due": 0}
 
 
-def test_kp_granularity_task_is_created_on_first_answer(client, store):
-    """裁决 ⑧：知识点粒度行在该 point 首次被作答时建。"""
+def test_schedule_table_and_kp_granularity_rows_are_retired(client, store):
+    """ADR 0026 D3 退场守护：`qe_review_task` 整表与其 `target_kind='kp'` 粒度行不得复活。
+
+    到期态只能由流水重放派生；答对后题行按序列推进，同知识点的 kp 粒度任务不再另起一行。
+    """
+    from qed_engine.services.learn import practice as practice_module
+
+    assert "qe_review_task" not in practice_module.CREATE_TABLE_SQL
+    assert not hasattr(store, "_review_tasks")
+    assert not [
+        path for path in {route.path for route in client.app.routes} if "review-task" in path
+    ]
     _post(client, [_choice(kp_id="kp-demo")])
     quiz_id = _first_id(client)
     _answer(client, quiz_id, "B")
-    targets = {(task["target_kind"], task["target_id"])
-               for task in store.review_due("math_analysis", max_tasks=20)}
-    assert ("kp", "kp-demo") in targets
-    assert ("question", quiz_id) not in targets  # 答对后档位推进，已出当日队列
+    assert store.review_due("math_analysis", max_tasks=20) == []  # memory 档进 1 天后＝离开当日队列
     store.add_attempt(question_id=quiz_id, user_answer="C", origin="manual")
-    again = client.get("/api/v1/learn/review/due").json()["tasks"]
-    assert ("kp", "kp-demo") in {(task["target_kind"], task["target_id"]) for task in again}
+    again = store.review_due("math_analysis", max_tasks=20)
+    assert [(task["target_kind"], task["target_id"]) for task in again] == [("question", quiz_id)]
+    assert again[0]["priority"] == 1 and again[0]["reason"] == "wrong"
 
 
 # ---------- 错题本（派生查询 + PATCH 人工位） ----------
@@ -594,14 +643,21 @@ def test_mistakes_are_derived_and_stats_report(client):
 
 
 def test_mistakes_latest_only_and_bookmark_patch(client):
+    """错题本一题一行取最近作答；`resolved` 位读最近一次作答行（D9-C2：机器不置位）。"""
     _post(client, [_choice()])
     quiz_id = _first_id(client)
     attempt_id = _answer(client, quiz_id, "C").json()["attempt_id"]
     assert client.get("/api/v1/learn/mistakes").json()["total"] == 1
-    _answer(client, quiz_id, "B")
+    second_id = _answer(client, quiz_id, "B").json()["attempt_id"]
+    after_correct = client.get("/api/v1/learn/mistakes").json()
+    assert after_correct["total"] == 1  # 答对不自动出本——错题退本只由人工位承载
+    item = after_correct["items"][0]
+    assert item["attempt_count"] == 2 and item["is_correct"] is True
+    assert item["score_trend"] == "improved" and item["resolved"] is False
+    assert client.get("/api/v1/learn/mistakes", params={"resolved": "true"}).json()["total"] == 0
+    assert client.patch(f"/api/v1/learn/attempts/{second_id}",
+                        json={"resolved": True}).json()["resolved"] is True
     assert client.get("/api/v1/learn/mistakes").json()["total"] == 0
-    resolved_all = client.get("/api/v1/learn/mistakes", params={"resolved": "all"}).json()
-    assert resolved_all["total"] == 1 and resolved_all["items"][0]["attempt_count"] == 2
     patched = client.patch(f"/api/v1/learn/attempts/{attempt_id}", json={"bookmarked": True})
     assert patched.status_code == 200 and patched.json()["bookmarked"] is True
     assert patched.json()["is_correct"] is False
@@ -616,11 +672,14 @@ def test_mistakes_latest_only_and_bookmark_patch(client):
                         json={"bookmarked": True}).status_code == 404
 
 
-def test_wrong_answer_reappears_after_resolve(client):
+def test_wrong_answer_reappears_after_manual_resolve(client):
+    """未解决视角作用于最近一次作答行：新行 `resolved` 恒 0，再答错即重新入本（D9-C2）。"""
     _post(client, [_choice()])
     quiz_id = _first_id(client)
     _answer(client, quiz_id, "C")
-    _answer(client, quiz_id, "B")
+    correct_id = _answer(client, quiz_id, "B").json()["attempt_id"]
+    assert client.get("/api/v1/learn/mistakes").json()["total"] == 1
+    client.patch(f"/api/v1/learn/attempts/{correct_id}", json={"resolved": True})
     assert client.get("/api/v1/learn/mistakes").json()["total"] == 0
     _answer(client, quiz_id, "D", origin="review", review_date="2026-10-06T08:00:00")
     body = client.get("/api/v1/learn/mistakes").json()
@@ -727,16 +786,20 @@ def test_mysql_practice_store_interface_matches_memory_store():
     assert _api(InMemoryPracticeStore) - _api(MySQLPracticeStore) == set()
 
 
-def test_due_counts_by_kp_groups_by_expression_not_alias():
-    """DEFECT-021 回归：`GROUP BY kp_id` 指向计算列别名在 only_full_group_by 下报 1055，
-    归集语句必须重复表达式本体。"""
+def test_due_counts_by_kp_replays_instead_of_aggregating_in_sql():
+    """DEFECT-021 的归集 SQL 腿随 D3 整表退出：到期计数只由重放分组，两实现都不发 `GROUP BY`。
+
+    复活 SQL 聚合＝重新引入调度表口径，并带回 `only_full_group_by` 下计算列别名 1055 的老坑。
+    """
     import inspect
 
     from qed_engine.services.learn.practice import MySQLPracticeStore
+    from qed_engine.services.learn.practice_memory import InMemoryPracticeStore
 
-    sql = inspect.getsource(MySQLPracticeStore.due_counts_by_kp)
-    assert "GROUP BY IF(t.target_kind='kp', t.target_id, q.kp_id)" in sql
-    assert "GROUP BY kp_id" not in sql
+    for cls in (MySQLPracticeStore, InMemoryPracticeStore):
+        source = inspect.getsource(cls.due_counts_by_kp)
+        assert "GROUP BY" not in source
+        assert "self._replay(" in source
 
 
 def test_add_questions_is_atomic_on_validation_failure(store):
@@ -751,14 +814,20 @@ def test_add_questions_is_atomic_on_validation_failure(store):
 
 
 def test_clock_is_injected_for_scheduler_tests(store):
-    """DeepTutor 的 time.time() 直取时钟不移植：入库与回写都用注入时钟。"""
+    """DeepTutor 的 time.time() 直取时钟不移植：入库、作答与重放都吃注入时钟。"""
     question_id = store.add_questions(course_id="math_analysis", items=[_item(stem="时钟注入题面。")],
                                       now=datetime(2026, 12, 1, 8, 0, 0))["questions"][0]["question_id"]
+    due = store.review_due("math_analysis", now=datetime(2026, 12, 1, 9, 0, 0))
+    assert [task["target_id"] for task in due] == [question_id]  # 未作答＝入库时刻即到期
     result = store.add_attempt(question_id=question_id, user_answer="A", origin="new",
                                now=datetime(2026, 12, 1, 9, 0, 0))
-    assert store._review_tasks[("question", question_id)]["due_at"] == datetime(2026, 12, 2, 9, 0, 0)
     assert result["review"]["next_due_at"] == "2026-12-02T09:00:00"
     assert result["attempt"]["answered_at"] == "2026-12-01T09:00:00"
+    # 到期判定同样只认注入时钟：次日 9 点前不出队，到点即出队（无第二次取时）
+    assert store.review_due("math_analysis", now=datetime(2026, 12, 1, 23, 0, 0)) == []
+    later = store.review_due("math_analysis", now=datetime(2026, 12, 2, 9, 0, 0))
+    assert [task["target_id"] for task in later] == [question_id]
+    assert later[0]["interval_index"] == 1
 
 
 def test_attempt_leaves_no_trace_when_rejected(client, store):
@@ -817,14 +886,17 @@ def test_attempts_by_kp_returns_the_whole_history(store):
 
 # ---------- 主链 M-3 W3：门输入面（按知识点到期计数） ----------
 
-def test_due_counts_by_kp_groups_question_and_kp_granularity_tasks(client, store):
-    """门游标的复习腿：到期任务按知识点归集（题行＋裁决 ⑧ 的 kp 粒度行两路都算，未归档题不进门）。"""
+def test_due_counts_by_kp_follows_the_replayed_queue(client, store):
+    """门游标的复习腿：到期题行按知识点归集，与队列同一次重放（kp 粒度腿随 D3 退出）。"""
     _post(client, [_choice(kp_id="kp-m3", kp_type="procedure")])
     quiz_id = _first_id(client, kp="kp-m3")
     assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}  # 题行当日到期
+    assert len(store.review_due("math_analysis", max_tasks=20)) == 1
     _answer(client, quiz_id, "B")
-    # 答对后题行退到 7 天后，kp 粒度行由首次作答建、当日到期：计数仍归到该知识点
-    assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}
+    # 答对退到第二档（procedure 序列 7 天后）：没有 kp 粒度行补位，计数与队列同时清空
+    assert store.due_counts_by_kp("math_analysis") == {}
+    assert store.review_due("math_analysis", max_tasks=20) == []
     assert store.due_counts_by_kp("other_course") == {}
     _post(client, [_choice(stem="未归档题面：求导数。")])  # kp_id 空＝不进任何门（裁决 D-M3-4）
-    assert store.due_counts_by_kp("math_analysis") == {"kp-m3": 1}
+    assert store.due_counts_by_kp("math_analysis") == {}
+    assert len(store.review_due("math_analysis", max_tasks=20)) == 1  # 只进队列、不进门

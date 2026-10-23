@@ -687,3 +687,98 @@ def test_probe_gpu_resolves_insufficient_permissions_name():
         return {"processes_mb": {29052: 1580.5}, "utilization_percent": 0.4}
     result = monitor.probe_gpu(runner=runner, pdh_fn=pdh, tasklist_fn=name_runner)
     assert result["processes"][0]["name"] == "LM Studio.exe"
+
+
+# --- DEFECT-018：子进程输出容错解码（真机两栈＝解码异常逃逸 / stdout=None 崩溃）---
+
+class _CompletedLike:
+    """subprocess.CompletedProcess 替身：只暴露 returncode / stdout。"""
+
+    def __init__(self, stdout, returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_run_pdh_default_runner_decodes_non_utf8_bytes(monkeypatch):
+    """PDH 默认 runner 字节捕获后容错解码：GBK 中文计数器名不得抛 UnicodeDecodeError。"""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return _CompletedLike("MEM|pid_1_图像扩展|524288000.0".encode("gbk"))
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+    out = monitor._run_pdh()
+    assert isinstance(out, str) and "MEM|" in out and "524288000.0" in out
+    assert captured.get("text") is not True and "encoding" not in captured, \
+        "DEFECT-018：PDH runner 回到 text=True 文本模式即重犯"
+
+
+def test_run_pdh_default_runner_none_stdout_degrades(monkeypatch):
+    """PDH 默认 runner 取到空 stdout（None）时降级为空串，不抛异常。"""
+    monkeypatch.setattr(monitor.subprocess, "run", lambda cmd, **kw: _CompletedLike(None))
+    assert monitor._run_pdh() == ""
+
+
+def test_resolve_process_name_default_runner_decodes_non_utf8_bytes(monkeypatch):
+    """tasklist 默认 runner 容错解码：GBK 输出下仍按 pid 取到真实进程名。"""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return _CompletedLike('"python.exe","1234","Console","1","1,234 K"'.encode("gbk"))
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+    assert monitor.resolve_process_name(1234) == "python.exe"
+    assert captured.get("text") is not True and "encoding" not in captured, \
+        "DEFECT-018：tasklist runner 回到 text=True 文本模式即重犯"
+
+
+def test_resolve_process_name_none_stdout_returns_none(monkeypatch):
+    """stdout 为 None（原崩溃点＝无判空的 .splitlines()）时按未找到降级。"""
+    monkeypatch.setattr(monitor.subprocess, "run", lambda cmd, **kw: _CompletedLike(None))
+    assert monitor.resolve_process_name(1234) is None
+
+
+def test_resolve_process_name_decode_error_returns_none(monkeypatch):
+    """解码类异常（UnicodeDecodeError 属 ValueError）不得逃逸出探针。"""
+    def fake_run(cmd, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xd0", 0, 1, "invalid continuation byte")
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+    assert monitor.resolve_process_name(1234) is None
+
+
+def test_probe_gpu_pdh_gbk_output_does_not_escape(monkeypatch):
+    """probe_gpu 集成面：PDH 中文输出不得使整卡探针抛异常（原象＝沿用旧缓存）。"""
+    def fake_run(cmd, **kwargs):
+        if "nvidia-smi" in cmd[0]:
+            line = "NVIDIA GeForce RTX 4080, 16376, 2705, 8" if "--query-gpu=" in cmd[1] else ""
+            return _CompletedLike(line.encode("utf-8"))
+        return _CompletedLike("MEM|pid_1_图像扩展|524288000.0".encode("gbk"))
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+    result = monitor.probe_gpu()
+    assert result["available"] is True
+    assert result["utilization_source"] in ("pdh", "nvidia-smi")
+
+
+def test_probe_gpu_tasklist_none_stdout_keeps_raw_name(monkeypatch):
+    """逐进程名补全失败（stdout=None）时保留 nvidia-smi 原值，清单不整体崩溃。"""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd[0])
+        if cmd[0] == "nvidia-smi":
+            line = "" if "--query-gpu=" in cmd[1] else "29052, [Insufficient Permissions], [N/A]"
+            if "--query-gpu=" in cmd[1]:
+                line = "NVIDIA GeForce RTX 4080, 16376, 2705, 8"
+            return _CompletedLike(line.encode("utf-8"))
+        return _CompletedLike(None)
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+    result = monitor.probe_gpu(pdh_fn=lambda: {"processes_mb": {}, "utilization_percent": None})
+    assert result["available"] is True
+    assert [proc["pid"] for proc in result["processes"]] == [29052]
+    assert result["processes"][0]["name"] == "[Insufficient Permissions]"
+    assert "tasklist" in calls

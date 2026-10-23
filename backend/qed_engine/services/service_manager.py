@@ -43,6 +43,7 @@ CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM)
 RESTART_DELAY_SECONDS = 2.0  # 新进程延迟启动秒数（ping -n N 近似等待，N = delay+1）
 RESTART_EXIT_DELAY_SECONDS = 1.0  # 旧进程延迟退出：先确认新进程 spawn 成功
 SCRIPT_TIMEOUT_SECONDS = 30.0  # 子项目生命周期脚本调用超时（start 拉起即返 / stop 含 5s 宽限 + 强杀）
+SCRIPT_EXIT_UNMANAGED = 3  # 脚本回报「端口由非本脚本启动的进程监听、只检测不杀」（DEFECT-020）
 
 # PID 存活判定常量（Windows kernel32，口径同 scripts/qed_web_service.py:_proc_alive）
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -86,6 +87,13 @@ _LOCKED: set[str] = set()
 _OPS: dict[str, tuple[str, float]] = {}
 _MANAGED: dict[str, ManagedProcess] = {}
 _RESTARTING = False  # self-restart 并发防抖标志
+# 根解析出的数据库配置（DEFECT-015 S1）：随 configure() 刷新，派发子服务时显式注入子进程环境。
+# 根 .env 由 pydantic-settings 进程内读取、值从不进 os.environ，不注入时 8901/8902 各自按
+# 「真实环境变量 > 自身 .env > 兜底默认」解析，可与根静默连到不同库。密码只进子进程环境，
+# 绝不进 /services 响应、日志或异常文本。
+_DB_ENV: dict[str, str] = {}
+_LAUNCHED_DB: dict[str, str] = {}  # 单元名 → 最近一次经 8900 托管派发时注入的库名
+_DB_WARNED: set[tuple[str, str, str]] = set()  # 已告警的（单元, 派发库名, 根库名）：轮询不刷屏
 
 
 def _port_of(url: str, default: int) -> int:
@@ -156,6 +164,14 @@ def configure(settings: Settings | None = None) -> None:
     _SPECS.clear()
     _SPECS.update(specs)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    global _DB_ENV
+    _DB_ENV = {
+        "QED_DB_HOST": resolved.qed_db_host,
+        "QED_DB_PORT": str(resolved.qed_db_port),
+        "QED_DB_NAME": resolved.qed_db_name,
+        "QED_DB_USER": resolved.qed_db_user,
+        "QED_DB_PASSWORD": resolved.qed_db_password.get_secret_value(),
+    }
 
 
 # --- 状态判定 ---
@@ -257,6 +273,43 @@ def unit_log_path(spec: ServiceSpec) -> Path:
     return LOG_DIR / f"{spec.log_name}.log"
 
 
+def root_db_name() -> str:
+    """根（8900）当前解析到的数据库名——派发子服务时注入的即此值。"""
+    return _DB_ENV.get("QED_DB_NAME", "")
+
+
+def _db_view(spec: ServiceSpec) -> dict:
+    """单元的生效库名视图（DEFECT-015 S2）：只透出库名与来源，绝不含主机/用户/口令。
+
+    - `self`＝config 单元即 8900 自身，生效库名恒等于根库名；
+    - `injected`＝本进程经生命周期脚本派发过该单元，注入值即其生效值（子服务配置链里真实
+      环境变量优先级最高）；
+    - `unknown`＝单元状态由端口探测得出但本进程无派发记录（人工/外部启动，或 8900 先重启），
+      此时不谎报一致，只如实标不可验证；
+    `db_mismatch` 仅在 `injected` 且派发库名≠当前根库名时为真（根 `.env` 改了库名而子服务
+    仍是旧进程），同形态只写一次事件账，避免前端轮询刷屏。
+    """
+    current = root_db_name()
+    if spec.name == "config":
+        return {"db_name": current, "db_source": "self", "db_mismatch": False}
+    launched = _LAUNCHED_DB.get(spec.name)
+    if launched is None:
+        return {"db_name": "", "db_source": "unknown", "db_mismatch": False}
+    mismatch = launched != current
+    if mismatch:
+        key = (spec.name, launched, current)
+        if key not in _DB_WARNED:
+            _DB_WARNED.add(key)
+            LOG.warning(
+                "db_mismatch unit=%s launched_db=%s root_db=%s：该单元由旧库名派发且仍在运行，"
+                "读写可落在不同库（重启该单元以重新派发）",
+                spec.name,
+                launched,
+                current,
+            )
+    return {"db_name": launched, "db_source": "injected", "db_mismatch": mismatch}
+
+
 def service_status(spec: ServiceSpec) -> dict:
     """单服务状态快照：config 恒 online；其余优先过渡态，其次 HTTP 探测。"""
     base = {
@@ -264,6 +317,7 @@ def service_status(spec: ServiceSpec) -> dict:
         "label": spec.label,
         "port": spec.port,
         "log_path": str(unit_log_path(spec)),
+        **_db_view(spec),
     }
     if spec.name == "config":
         return {**base, "status": "online", "pid": None, "started_at": None, "reason": ""}
@@ -328,9 +382,9 @@ def get_specs() -> dict[str, ServiceSpec]:
 # --- 子项目生命周期脚本接入（REQ-017①，QED-032 接入契约：service-lifecycle.md） ---
 
 
-def _parse_script_pid(stdout: str) -> int | None:
+def _parse_script_pid(stdout: str | None) -> int | None:
     """解析脚本 stdout 首行 `pid: <n>`；无匹配返回 None。"""
-    for line in stdout.splitlines():
+    for line in (stdout or "").splitlines():
         line = line.strip()
         if line.startswith("pid:"):
             try:
@@ -338,6 +392,15 @@ def _parse_script_pid(stdout: str) -> int | None:
             except ValueError:
                 return None
     return None
+
+
+def _child_env() -> dict[str, str]:
+    """派发子进程的环境：`os.environ` 副本 + 根解析出的 `QED_DB_*`（DEFECT-015 S1）。
+
+    真实环境变量在两个子服务的配置链里优先级最高，故注入即钉定其生效库名；只写在这份副本里，
+    根进程 `os.environ` 不被改（配置正本仍是根 `.env`，不新增环境变量键）。
+    """
+    return {**os.environ, **_DB_ENV}
 
 
 def _read_pid_file(path: Path) -> int | None:
@@ -363,16 +426,18 @@ def _start_via_script(spec: ServiceSpec) -> int:
             cwd=spec.workdir,
             capture_output=True,
             text=True,
+            errors="replace",  # DEFECT-019: GBK console output must not kill the reader thread
             timeout=SCRIPT_TIMEOUT_SECONDS,
-            env=os.environ.copy(),
+            env=_child_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ServiceError(f"{spec.label} 生命周期脚本执行失败：{exc}", status_code=500) from exc
     if result.returncode != 0:
         raise ServiceError(
-            f"{spec.label} 启动失败（脚本退出码 {result.returncode}）：{result.stderr.strip()}",
+            f"{spec.label} 启动失败（脚本退出码 {result.returncode}）：{(result.stderr or "").strip()}",
             status_code=500,
         )
+    _LAUNCHED_DB[spec.name] = _DB_ENV.get("QED_DB_NAME", "")
     pid = _parse_script_pid(result.stdout)
     if pid is None:
         pid = _read_pid_file(Path(spec.workdir) / "logs" / f"qed-{spec.name}.pid")
@@ -381,8 +446,13 @@ def _start_via_script(spec: ServiceSpec) -> int:
     return pid
 
 
-def _stop_via_script(spec: ServiceSpec) -> None:
-    """经脚本停止：优雅停止 + 强杀兜底由脚本自含（幂等退出 0）；失败抛 ServiceError(500)。"""
+def _stop_via_script(spec: ServiceSpec) -> str:
+    """经脚本停止：优雅停止 + 强杀兜底由脚本自含（幂等退出 0）；失败抛 ServiceError(500)。
+
+    返回脚本 stdout 供停止后复核使用——脚本对「无 PID 文件」的实例只打印提示并退出 0，
+    根侧自有脚本（8903 web / 8900 engine）在该形另以 `SCRIPT_EXIT_UNMANAGED`（3）回报，
+    两者都只说明「脚本没动过进程」，不足以判定停止是否生效，故一并交端口复核裁决。
+    """
     script = spec.lifecycle_script
     assert script is not None
     try:
@@ -391,16 +461,48 @@ def _stop_via_script(spec: ServiceSpec) -> None:
             cwd=spec.workdir,
             capture_output=True,
             text=True,
+            errors="replace",  # DEFECT-019: GBK console output must not kill the reader thread
             timeout=SCRIPT_TIMEOUT_SECONDS,
-            env=os.environ.copy(),
+            env=_child_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ServiceError(f"{spec.label} 停止脚本执行失败：{exc}", status_code=500) from exc
-    if result.returncode != 0:
+    if result.returncode not in (0, SCRIPT_EXIT_UNMANAGED):
         raise ServiceError(
-            f"{spec.label} 停止失败（脚本退出码 {result.returncode}）：{result.stderr.strip()}",
+            f"{spec.label} 停止失败（脚本退出码 {result.returncode}）：{(result.stderr or "").strip()}",
             status_code=500,
         )
+    return result.stdout or ""
+
+
+def _parse_netstat_pid(text: str, port: int) -> int | None:
+    """从 `netstat -ano` 文本取该端口 LISTENING 行的 PID；无匹配返回 None。"""
+    suffix = f":{port}"
+    for line in text.splitlines():
+        cols = line.split()
+        if len(cols) < 5 or cols[0] != "TCP" or cols[3] != "LISTENING":
+            continue
+        if cols[1].endswith(suffix):
+            try:
+                return int(cols[4])
+            except ValueError:
+                return None
+    return None
+
+
+def _listening_pid(port: int) -> int | None:
+    """端口反查监听进程 PID（OPS-001 只读诊断，根侧不据此终止任何进程）。
+
+    形态同 `monitor._run_smi`：字节捕获 + 容错解码（本机 netstat 走 GBK 管道）；
+    命令不可用或输出无法解析时返回 None，由调用方降级为「未取得监听 PID」。
+    """
+    try:
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    blob = result.stdout
+    text = blob.decode("utf-8", errors="replace") if isinstance(blob, bytes) else (blob or "")
+    return _parse_netstat_pid(text, port)
 
 
 def _start(spec: ServiceSpec) -> dict:
@@ -485,7 +587,20 @@ def _stop(spec: ServiceSpec) -> dict:
     _LOCKED.add(spec.name)
     try:
         if spec.lifecycle_script:
-            _stop_via_script(spec)
+            script_stdout = _stop_via_script(spec)
+            # OPS-001：脚本对「无 PID 文件」的实例只打印提示并以 0 退出，退出码不足以判定停止
+            # 生效。派发后按端口复核——脚本回报未纳管而端口仍监听时如实报错（原因给出端口反查
+            # 到的监听 PID），不返回裸 stopping、不置过渡标记；根侧不终止非本中心启动的进程。
+            if _probe_http(spec.port):
+                pid = _listening_pid(spec.port)
+                who = f"监听 PID {pid}" if pid is not None else "监听 PID 未取得"
+                raise ServiceError(
+                    f"{spec.label} 未经本控制中心纳管，停止未生效（端口 {spec.port} 仍监听，"
+                    f"{who}，脚本回报：{(script_stdout or '').strip() or '无输出'}）；"
+                    "控制中心不终止非本中心启动的进程，请用该服务自身的生命周期脚本或人工停止",
+                    status_code=409,
+                )
+            _LAUNCHED_DB.pop(spec.name, None)
         else:
             procs = [managed.process, *managed.extra_processes]
             reason = ""

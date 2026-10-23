@@ -108,13 +108,9 @@ def test_code_map_declares_metadata_and_mapped_modules():
 
 
 ROOT_PRIVATE_TABLES = (
-    "qe_learn_course",
-    "qe_learn_unit",
-    "qe_learn_unit_progress",
-    "qe_learn_kp_detail",
+    "qe_learning",
     "qe_question",
     "qe_attempt",
-    "qe_review_task",
 )
 
 
@@ -122,19 +118,19 @@ def test_root_private_table_prefix_and_collation_match_database_design():
     """总纲第四段与代码 DDL 两侧同步（REQ-120）：前缀 qe_ 且排序规则取库默认。"""
     sources = list((ROOT / "backend").rglob("*.py"))
     code = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8") for path in sources}
-    stale = [name for name, text in code.items() if "qed_learn_" in text]
-    assert not stale, f"旧前缀仍留在代码里：{stale}"
+    stale = [name for name, text in code.items() if "qed_learn_" in text or "qe_learn_" in text]
+    assert not stale, f"旧前缀或 learn_ 子域段仍留在代码里：{stale}"
     joined = "\n".join(code.values())
     for table in ROOT_PRIVATE_TABLES:
         assert f"CREATE TABLE IF NOT EXISTS {table}" in joined, f"代码 DDL 缺 {table}"
         assert table in (ARCHITECTURE / "database-design.md").read_text(encoding="utf-8"), table
     unicode_ci = [name for name, text in code.items() if "utf8mb4_unicode_ci" in text]
     assert not unicode_ci, f"根侧 DDL 仍声明与共享族分裂的排序规则：{unicode_ci}"
-    assert joined.count("COLLATE=utf8mb4_0900_ai_ci") >= 9, "九张根侧建表语句应显式声明库默认排序规则"
+    assert joined.count("COLLATE=utf8mb4_0900_ai_ci") >= 5, "五张根侧建表语句应显式声明库默认排序规则"
 
 
-# REQ-122：database-design.md 是共享 qed_* 四表与根专业 qe_learn_* 七表的**设计正本**——
-# 逐列定义表与建表语句都落在文档里（ADR 0025 决定 2）：九张根侧表的文档语句与代码渲染结果
+# REQ-122：database-design.md 是共享 qed_* 四表与根专业 qe_* 三表的**设计正本**——
+# 逐列定义表与建表语句都落在文档里（ADR 0025 决定 2）：五张根侧表的文档语句与代码渲染结果
 # 逐字相等，受托两表按对方 ORM 派生为等价展示，两侧任一改动未随步即红。
 DDL_BLOCK = re.compile(r"CREATE TABLE IF NOT EXISTS (?P<name>\w+) \((?P<body>.*?)\n\) ENGINE", re.DOTALL)
 DDL_NON_COLUMN = {"KEY", "UNIQUE", "PRIMARY", "CONSTRAINT", "INDEX", "FOREIGN", "FULLTEXT"}
@@ -184,7 +180,7 @@ def _tracker_columns(class_name: str) -> list[str] | None:
 
 
 def test_database_design_carries_column_definitions_for_tables_it_owns():
-    """REQ-122：本文正本的 11 张表逐列定义齐备且与实现事实源同列同序。"""
+    """REQ-122：本文正本的 7 张表逐列定义齐备且与实现事实源同列同序。"""
     content = (ARCHITECTURE / "database-design.md").read_text(encoding="utf-8")
     code = _code_columns()
     assert set(code) == {"qed_knowledge_point", "qed_llm_calls", *ROOT_PRIVATE_TABLES}, sorted(code)
@@ -237,7 +233,7 @@ ORM_TYPE_MAP = {
     "BigInt": "BIGINT",
     "DateTime": "DATETIME",
 }
-# 本文正本的 11 张表（共享四 + 根私有七）；`qed_domain`/`qed_course` 为受托建表、等价展示。
+# 本文正本的 7 张表（共享四 + 根私有三）；`qed_domain`/`qed_course` 为受托建表、等价展示。
 MASTER_TABLES = ("qed_domain", "qed_course", "qed_knowledge_point", "qed_llm_calls", *ROOT_PRIVATE_TABLES)
 DISPLAY_DDL_TABLES = (("qed_domain", "QedDomain"), ("qed_course", "QedCourse"))
 FOUR_PARTS = ("**用途**", "**涉及模块**", "**字段明细**", "**建表语句**")
@@ -341,13 +337,13 @@ def _orm_mapped_columns(class_name: str) -> list[tuple[str, str, bool]] | None:
 
 
 def test_database_design_ddl_matches_code_verbatim():
-    """本文九张根侧表的建表语句 ↔ 代码渲染结果逐字相等（ADR 0025 决定 2）。"""
+    """本文五张根侧表的建表语句 ↔ 代码渲染结果逐字相等（ADR 0025 决定 2）。"""
     content = (ARCHITECTURE / "database-design.md").read_text(encoding="utf-8")
     statements = _code_ddl_statements()
     assert set(statements) == {"qed_knowledge_point", "qed_llm_calls", *ROOT_PRIVATE_TABLES}
     fences = _doc_sql_fences(content)
     assert set(fences) == {*statements, *(table for table, _ in DISPLAY_DDL_TABLES)}, (
-        "文档 sql 围栏的表集合与正本 11 表不符"
+        "文档 sql 围栏的表集合与正本 7 表不符"
     )
     drifted = sorted(table for table in statements if fences[table] != statements[table])
     assert not drifted, (
@@ -369,7 +365,7 @@ def test_database_design_display_ddl_matches_tracker_orm():
 
 
 def test_database_design_table_sections_carry_four_parts():
-    """正本 11 表每节四件套齐备：用途、涉及模块、字段明细、建表语句。"""
+    """正本 7 表每节四件套齐备：用途、涉及模块、字段明细、建表语句。"""
     content = (ARCHITECTURE / "database-design.md").read_text(encoding="utf-8")
     for table in MASTER_TABLES:
         section = _doc_table_section(content, table)
@@ -410,5 +406,5 @@ def test_database_design_inventory_matrix_and_roles_cover_same_tables():
         f"总览/矩阵/角色分类表集合不一致：仅总览 {sorted(inventory - matrix - roles)}，"
         f"仅矩阵 {sorted(matrix - inventory)}，仅角色 {sorted(roles - inventory)}"
     )
-    assert len(inventory) == 21, f"全库总览应为 21 张表（共享 4 + 根私有 7 + af_ 5 + qt_ 5），现状 {len(inventory)}"
+    assert len(inventory) == 16, f"全库总览应为 16 张表（共享 4 + 根私有 3 + af_ 4 + qt_ 5），现状 {len(inventory)}"
     assert {*MASTER_TABLES, "af_books", "qt_books"} <= inventory

@@ -1,9 +1,10 @@
-"""练习域三表存储的内存实现（M2）：契约测试注入 + 数据库未接入期降级。
+"""练习域两表存储的内存实现（M2）：契约测试注入 + 数据库未接入期降级。
 
 模块职责：InMemoryPracticeStore——题库批量入库（`stem_hash` 幂等跳重、整批原子）、
-作答的事务语义内存等价（先整批构造再落，被拒绝的作答不留痕）、间隔复习双粒度调度态
-（`(target_kind, target_id)` 一行）与到期队列、错题本派生查询与统计的进程内实现，
-接口与 MySQLPracticeStore 同形（公开方法由 parity 测试守护）。
+作答的事务语义内存等价（先整批构造再落，被拒绝的作答不留痕）、到期态与趋势的
+**读时流水重放**（`replay_due`，与 MySQL 实现共用同一纯函数）、错题本派生查询与统计的
+进程内实现，接口与 MySQLPracticeStore 同形（公开方法由 parity 测试守护）。
+调度表 `qe_review_task` 已随 ADR 0026 D3 退出，本类不再有第三份状态。
 隔离铁律：默认测试走本类，不写运行数据库；时钟由参数注入（`now=`），不读 `time.time()`。
 设计关联（DesignRef）：docs/architecture/database-design.md
 实现状态：Current
@@ -16,31 +17,32 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from qed_engine.services.learn.base import LearnConflict, LearnNotFound
+from qed_engine.services.learn.base import DEFAULT_OWNER, LearnConflict, LearnNotFound
 from qed_engine.services.learn.grading import ISSUE_MISSING_EXPECTED, grade
 from qed_engine.services.learn.practice import (
-    DEFAULT_KP_TYPE,
     DEFAULT_MAX_TASKS,
     _as_naive,
     _now,
     _record_issue,
     _serialize,
     build_question_row,
+    derive_trend,
     filter_mistakes,
-    resolve_trend,
-    schedule_next,
+    is_unresolved,
+    mistake_item,
+    replay_due,
+    replay_rows,
     stem_hash,
     task_view,
 )
 
 
 class InMemoryPracticeStore:
-    """练习域三表的进程内存储（题/卡 + 作答事实 + 复习调度态）。"""
+    """练习域两表的进程内存储（题/卡 + 作答事实；调度态读时重放）。"""
 
     def __init__(self) -> None:
         self._questions: dict[str, dict[str, Any]] = {}
         self._attempts: list[dict[str, Any]] = []
-        self._review_tasks: dict[tuple[str, str], dict[str, Any]] = {}
         self._attempt_seq = 0
         self._lock = threading.RLock()
 
@@ -53,20 +55,13 @@ class InMemoryPracticeStore:
         items: list[dict[str, Any]],
         gen_batch: str = "",
         model_ref: str = "",
-        learn_course_id: str | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         """批量入库：先整批构造（一项非法即抛、整批不落＝缝 6 的内存等价），再逐行落库。"""
         stamp = now or _now()
         built = [
-            build_question_row(
-                item,
-                course_id=course_id,
-                gen_batch=gen_batch,
-                model_ref=model_ref,
-                learn_course_id=learn_course_id,
-                now=stamp,
-            )
+            build_question_row(item, course_id=course_id, gen_batch=gen_batch,
+                               model_ref=model_ref, now=stamp)
             for item in items
         ]
         created = 0
@@ -86,8 +81,6 @@ class InMemoryPracticeStore:
                 seen[row["stem_hash"]] = row["question_id"]
                 created += 1
                 rows.append(_serialize(row))
-                self._ensure_task("question", row["question_id"], course_id,
-                                  row["kp_type"] or DEFAULT_KP_TYPE, stamp)
         return {
             "created": created,
             "skipped_duplicates": skipped,
@@ -165,11 +158,6 @@ class InMemoryPracticeStore:
                 updated["stem_hash"] = stem_hash(fields["stem"] or "")
             updated["updated_at"] = _now()
             self._questions[question_id] = updated
-            if "retired" in fields:
-                task = self._review_tasks.get(("question", question_id))
-                if task is not None:
-                    task["status"] = "archived" if bool(fields["retired"]) else "active"
-                    task["updated_at"] = _now()
             return _serialize(updated)
 
     # ---------- 作答与判分（缝 1/2/6） ----------
@@ -183,8 +171,9 @@ class InMemoryPracticeStore:
         review_date: datetime | str | None = None,
         self_result: str | None = None,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> dict[str, Any]:
-        """判分 + 作答行 + 趋势/解决位 + 调度回写：任一步抛出即不留作答、不动调度态。"""
+        """判分 + 作答行落库：任一步抛出即不留作答（缝 6 的内存等价）；`review` 与趋势读时派生。"""
         stamp = now or _now()
         review_when = _as_naive(review_date)
         with self._lock:
@@ -192,7 +181,8 @@ class InMemoryPracticeStore:
             if question is None or bool(question["retired"]):
                 raise LearnNotFound(f"题目不存在：{question_id}")
             if review_when is not None and any(
-                attempt["question_id"] == question_id
+                attempt["owner"] == owner
+                and attempt["question_id"] == question_id
                 and attempt["origin"] == origin
                 and attempt["review_date"] == review_when
                 for attempt in self._attempts
@@ -200,17 +190,19 @@ class InMemoryPracticeStore:
                 raise LearnConflict(
                     f"同一题在同期望复习日（{origin} / {review_when.isoformat()}）已作答，不重复计"
                 )
-            previous = self._latest_attempt(question_id)
             if question["kind"] == "flashcard":
                 correct = self_result == "correct"
                 verdict = {"is_correct": correct, "method": "self", "note": "自评记忆卡"}
             else:
                 verdict = grade(question, user_answer)
                 correct = bool(verdict["is_correct"])
-            trend, resolved = resolve_trend(previous, correct)
+            if verdict["note"] == ISSUE_MISSING_EXPECTED:
+                self._questions[question_id] = _record_issue(dict(question), ISSUE_MISSING_EXPECTED)
+                question = self._questions[question_id]
             self._attempt_seq += 1
             attempt = {
                 "attempt_id": self._attempt_seq,
+                "owner": owner,
                 "question_id": question_id,
                 "course_id": question["course_id"],
                 "kp_id": question["kp_id"],
@@ -220,98 +212,72 @@ class InMemoryPracticeStore:
                 "is_correct": correct,
                 "method": verdict["method"],
                 "judge_note": (verdict["note"] or "")[:1000],
-                "score_trend": trend,
-                "resolved": resolved,
+                "resolved": False,
                 "bookmarked": False,
                 "answered_at": stamp,
             }
-            if verdict["note"] == ISSUE_MISSING_EXPECTED:
-                self._questions[question_id] = _record_issue(dict(question), ISSUE_MISSING_EXPECTED)
-                question = self._questions[question_id]
             self._attempts.append(attempt)
-            kp_type = question["kp_type"] or DEFAULT_KP_TYPE
-            self._ensure_task("question", question_id, question["course_id"], kp_type, stamp)
-            review = self._write_back(question_id, question["course_id"], kp_type, correct, stamp)
-            if question["kp_id"]:
-                self._ensure_task("kp", question["kp_id"], question["course_id"], kp_type, stamp)
+            attempts = self._attempt_stream(question_id, owner)
+            state = replay_due(question, attempts, stamp)
             revealed = question["kind"] != "flashcard"
             return {
-                "attempt": _serialize(attempt),
+                "attempt": {**_serialize(attempt), "score_trend": derive_trend(attempts)},
                 "grade": verdict,
-                "review": review,
+                "review": {
+                    "target_kind": "question",
+                    "target_id": question_id,
+                    "kp_type": state["kp_type"],
+                    "interval_index": state["interval_index"],
+                    "due_at": state["due_at"].isoformat(),
+                    "next_due_at": state["due_at"].isoformat(),
+                },
                 "expected_answer": (question.get("expected_answer") or None) if revealed else None,
                 "explanation": (question.get("explanation") or None) if revealed else None,
             }
 
-    def _latest_attempt(self, question_id: str) -> dict[str, Any] | None:
-        rows = [attempt for attempt in self._attempts if attempt["question_id"] == question_id]
-        if not rows:
-            return None
-        return max(rows, key=lambda a: (a["answered_at"], a["attempt_id"]))
+    def _attempt_stream(self, question_id: str, owner: str) -> list[dict[str, Any]]:
+        """单题流水（事实序升序）。"""
+        return sorted(
+            (
+                attempt
+                for attempt in self._attempts
+                if attempt["question_id"] == question_id and attempt["owner"] == owner
+            ),
+            key=lambda a: (a["answered_at"], a["attempt_id"]),
+        )
 
-    def _write_back(
-        self, question_id: str, course_id: str, kp_type: str, correct: bool, now: datetime
-    ) -> dict[str, Any]:
-        task = self._review_tasks[("question", question_id)]
-        state = schedule_next(task, correct, now)
-        task.update(state)
-        task["updated_at"] = now
-        return {
-            "target_kind": "question",
-            "target_id": question_id,
-            "course_id": course_id,
-            "kp_type": task["kp_type"],
-            "interval_index": state["interval_index"],
-            "due_at": state["due_at"].isoformat(),
-            "next_due_at": state["due_at"].isoformat(),
-        }
-
-    def _ensure_task(
-        self, target_kind: str, target_id: str, course_id: str, kp_type: str, now: datetime
-    ) -> None:
-        key = (target_kind, target_id)
-        if key in self._review_tasks:
-            return
-        self._review_tasks[key] = {
-            "target_kind": target_kind,
-            "target_id": target_id,
-            "course_id": course_id,
-            "kp_type": kp_type,
-            "interval_index": 0,
-            "consecutive_correct": 0,
-            "consecutive_wrong": 0,
-            "due_at": now,
-            "status": "active",
-            "created_at": now,
-            "updated_at": now,
-        }
-
-    def get_attempt(self, attempt_id: int) -> dict[str, Any]:
+    def get_attempt(self, attempt_id: int, *, owner: str = DEFAULT_OWNER) -> dict[str, Any]:
         with self._lock:
             for attempt in self._attempts:
-                if attempt["attempt_id"] == attempt_id:
+                if attempt["attempt_id"] == attempt_id and attempt["owner"] == owner:
                     return _serialize(attempt)
         raise LearnNotFound(f"作答记录不存在：{attempt_id}")
 
-    def patch_attempt(self, attempt_id: int, **fields: Any) -> dict[str, Any]:
+    def patch_attempt(
+        self, attempt_id: int, *, owner: str = DEFAULT_OWNER, **fields: Any
+    ) -> dict[str, Any]:
         """错题本人工位（bookmarked/resolved）；判分结果列不在白名单（API 面拦）。"""
         with self._lock:
             for attempt in self._attempts:
-                if attempt["attempt_id"] == attempt_id:
+                if attempt["attempt_id"] == attempt_id and attempt["owner"] == owner:
                     attempt.update({key: bool(value) for key, value in fields.items()})
                     return _serialize(attempt)
         raise LearnNotFound(f"作答记录不存在：{attempt_id}")
 
-    # ---------- 复习队列（纯函数调度 + 持久态） ----------
+    # ---------- 到期队列与错题本（流水重放） ----------
 
-    def attempts_by_kp(self, course_id: str) -> dict[str, list[bool]]:
+    def attempts_by_kp(
+        self, course_id: str, *, owner: str = DEFAULT_OWNER
+    ) -> dict[str, list[bool]]:
         """与 MySQL 存储同语义的门输入面：全序事实，`kp_id` 空的未归档题不进门。"""
         with self._lock:
             rows = sorted(
                 (
                     attempt
                     for attempt in self._attempts
-                    if attempt["course_id"] == course_id and attempt["kp_id"]
+                    if attempt["owner"] == owner
+                    and attempt["course_id"] == course_id
+                    and attempt["kp_id"]
                 ),
                 key=lambda attempt: (str(attempt["kp_id"]), attempt["answered_at"], attempt["attempt_id"]),
             )
@@ -320,108 +286,85 @@ class InMemoryPracticeStore:
             sequences.setdefault(str(attempt["kp_id"]), []).append(bool(attempt["is_correct"]))
         return sequences
 
-    def due_counts_by_kp(self, course_id: str, now: datetime | None = None) -> dict[str, int]:
-        """与 MySQL 存储同语义的复习腿：到期行按知识点归集（题行＋kp 粒度行），未归档题不计。"""
-        when = now or _now()
+    def _replay(
+        self, course_id: str | None, owner: str, now: datetime
+    ) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]]:
+        """未软删题行 × 流水 → 重放态（队列、计数、到期档位与错题本共用一次装配）。"""
         with self._lock:
-            counts: dict[str, int] = {}
-            for task in self._review_tasks.values():
-                if task["status"] != "active" or task["due_at"] > when or task["course_id"] != course_id:
+            questions = sorted(
+                (
+                    dict(question)
+                    for question in self._questions.values()
+                    if not question["retired"] and (not course_id or question["course_id"] == course_id)
+                ),
+                key=lambda q: (str(q["created_at"]), q["question_id"]),
+            )
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for attempt in sorted(self._attempts, key=lambda a: (a["answered_at"], a["attempt_id"])):
+                if attempt["owner"] != owner:
                     continue
-                if task["target_kind"] == "kp":
-                    kp_id = str(task["target_id"])
-                else:
-                    question = self._questions.get(task["target_id"])
-                    kp_id = str(question["kp_id"]) if question and question["kp_id"] else ""
-                if not kp_id:
-                    continue
-                counts[kp_id] = counts.get(kp_id, 0) + 1
-            return counts
+                grouped.setdefault(str(attempt["question_id"]), []).append(dict(attempt))
+        return replay_rows(questions, grouped, now)
 
     def review_due(
         self,
         course_id: str | None = None,
         max_tasks: int = DEFAULT_MAX_TASKS,
         now: datetime | None = None,
+        *,
+        owner: str = DEFAULT_OWNER,
     ) -> list[dict[str, Any]]:
         when = now or _now()
-        with self._lock:
-            wrong = self._wrong_targets(course_id)
-            tasks = [
-                task_view(task, when, task["target_id"] in wrong)
-                for task in self._review_tasks.values()
-                if task["status"] == "active"
-                and task["due_at"] <= when
-                and (not course_id or task["course_id"] == course_id)
-            ]
-            tasks.sort(key=lambda t: (t["priority"], t["due_at"], t["target_id"]))
-            for task in tasks[:max_tasks]:
-                if task["target_kind"] == "question":
-                    row = self._questions.get(task["target_id"])
-                    task["question"] = _serialize(row) if row else None
-        return tasks[:max_tasks]
+        scored = [
+            (task_view(question, state, when, is_unresolved(attempts)), question)
+            for question, attempts, state in self._replay(course_id, owner, when)
+            if state["due_at"] <= when
+        ]
+        scored.sort(key=lambda pair: (pair[0]["priority"], pair[0]["due_at"], pair[0]["target_id"]))
+        out = []
+        for task, question in scored[:max_tasks]:
+            task["question"] = _serialize(question)
+            out.append(task)
+        return out
 
-    def _wrong_targets(self, course_id: str | None) -> set[str]:
-        """未解决错题（判例 DeepTutor `error_records` status=active）：最近一次作答判错的题与其 kp。"""
-        unresolved: set[str] = set()
-        for question in self._questions.values():
-            if question["retired"] or (course_id and question["course_id"] != course_id):
-                continue
-            latest = self._latest_attempt(question["question_id"])
-            if latest and not latest["is_correct"] and not latest["resolved"]:
-                unresolved.add(question["question_id"])
-                if question["kp_id"]:
-                    unresolved.add(question["kp_id"])
-        return unresolved
-
-    def count_review_due(self, course_id: str | None = None, now: datetime | None = None) -> int:
+    def count_review_due(
+        self, course_id: str | None = None, now: datetime | None = None, *,
+        owner: str = DEFAULT_OWNER,
+    ) -> int:
         when = now or _now()
-        with self._lock:
-            return sum(
-                1
-                for task in self._review_tasks.values()
-                if task["status"] == "active"
-                and task["due_at"] <= when
-                and (not course_id or task["course_id"] == course_id)
-            )
+        return sum(1 for _q, _a, state in self._replay(course_id, owner, when) if state["due_at"] <= when)
 
-    # ---------- 错题本（派生查询，不建表） ----------
+    def due_counts_by_kp(
+        self, course_id: str, now: datetime | None = None, *, owner: str = DEFAULT_OWNER
+    ) -> dict[str, int]:
+        """与 MySQL 存储同语义的复习腿：到期题行按所属知识点归集，未归档题不计。"""
+        when = now or _now()
+        counts: dict[str, int] = {}
+        for question, _attempts, state in self._replay(course_id, owner, when):
+            if state["due_at"] > when or not question["kp_id"]:
+                continue
+            kp_id = str(question["kp_id"])
+            counts[kp_id] = counts.get(kp_id, 0) + 1
+        return counts
 
     def _mistake_rows(
-        self, *, course_id: str | None, kp_id: str | None, book_ref: str | None, now: datetime
+        self,
+        *,
+        course_id: str | None,
+        kp_id: str | None,
+        book_ref: str | None,
+        now: datetime,
+        owner: str,
     ) -> list[dict[str, Any]]:
-        scope = (("course_id", course_id), ("kp_id", kp_id), ("book_ref", book_ref))
-        with self._lock:
-            items: list[dict[str, Any]] = []
-            for question in self._questions.values():
-                if question["retired"] or any(value and question[key] != value for key, value in scope):
-                    continue
-                attempts = [a for a in self._attempts if a["question_id"] == question["question_id"]]
-                if not attempts:
-                    continue
-                attempts.sort(key=lambda a: (a["answered_at"], a["attempt_id"]), reverse=True)
-                latest = attempts[0]
-                if all(bool(a["is_correct"]) for a in attempts):
-                    continue
-                items.append(
-                    {
-                        "question": _serialize(question),
-                        "last_attempt": _serialize(latest),
-                        "attempt_count": len(attempts),
-                        "wrong_count": sum(1 for a in attempts if not a["is_correct"]),
-                        "is_correct": bool(latest["is_correct"]),
-                        "resolved": bool(latest["resolved"]),
-                        "bookmarked": any(bool(a["bookmarked"]) for a in attempts),
-                        "score_trend": latest["score_trend"],
-                        "due_today": self._is_due_today(question["question_id"], now),
-                    }
-                )
+        items: list[dict[str, Any]] = []
+        for question, attempts, state in self._replay(course_id, owner, now):
+            if (kp_id and question["kp_id"] != kp_id) or (book_ref and question["book_ref"] != book_ref):
+                continue
+            if not attempts or all(bool(a["is_correct"]) for a in attempts):
+                continue
+            items.append(mistake_item(question, attempts, state, now))
         items.sort(key=lambda item: item["question"]["created_at"])
         return items
-
-    def _is_due_today(self, question_id: str, now: datetime) -> bool:
-        task = self._review_tasks.get(("question", question_id))
-        return bool(task and task["status"] == "active" and task["due_at"] <= now)
 
     def list_mistakes(
         self,
@@ -435,10 +378,12 @@ class InMemoryPracticeStore:
         limit: int = 50,
         offset: int = 0,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> tuple[list[dict[str, Any]], int]:
         items = filter_mistakes(
             self._mistake_rows(
-                course_id=course_id, kp_id=kp_id, book_ref=book_ref, now=now or _now()
+                course_id=course_id, kp_id=kp_id, book_ref=book_ref,
+                now=now or _now(), owner=owner,
             ),
             resolved=resolved,
             bookmarked=bookmarked,
@@ -453,23 +398,24 @@ class InMemoryPracticeStore:
         kp_id: str | None = None,
         book_ref: str | None = None,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> dict[str, Any]:
         when = now or _now()
-        scope = (("course_id", course_id), ("kp_id", kp_id), ("book_ref", book_ref))
-        with self._lock:
-            questions = [
-                question
-                for question in self._questions.values()
-                if not question["retired"]
-                and all(not value or question[key] == value for key, value in scope)
-            ]
-            due_today = sum(1 for question in questions
-                            if self._is_due_today(question["question_id"], when))
-        rows = self._mistake_rows(course_id=course_id, kp_id=kp_id, book_ref=book_ref, now=when)
+        scoped = [
+            (question, attempts, state)
+            for question, attempts, state in self._replay(course_id, owner, when)
+            if (not kp_id or question["kp_id"] == kp_id)
+            and (not book_ref or question["book_ref"] == book_ref)
+        ]
+        rows = [
+            mistake_item(question, attempts, state, when)
+            for question, attempts, state in scoped
+            if attempts and not all(bool(a["is_correct"]) for a in attempts)
+        ]
         return {
-            "total": len(questions),
-            "wrong": len(rows),
+            "total": len(scoped),
+            "wrong": len({row["question"]["question_id"] for row in rows}),
             "unresolved": sum(1 for row in rows if not row["resolved"]),
             "bookmarked": sum(1 for row in rows if row["bookmarked"]),
-            "due_today": due_today,
+            "due_today": sum(1 for _q, _a, state in scoped if state["due_at"] <= when),
         }

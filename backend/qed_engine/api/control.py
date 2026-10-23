@@ -104,8 +104,15 @@ def _service_call(fn, *args, **kwargs):
 
 @router.get("/services")
 def list_services() -> dict:
-    """三服务状态快照，同步返回（service-hosting.md 契约）。"""
-    return {"services": [service_status(spec) for spec in get_specs().values()]}
+    """三服务状态快照，同步返回（service-hosting.md 契约）。
+
+    顶层 `db_name` 与每单元 `db_name`/`db_source`/`db_mismatch` 承载库名一致性口径
+    （DEFECT-015 S2）：单元字段只透出库名，不含主机、用户与口令。
+    """
+    return {
+        "services": [service_status(spec) for spec in get_specs().values()],
+        "db_name": sm.root_db_name(),
+    }
 
 
 @router.post("/services/{name}/start", response_model=ActionResponse)

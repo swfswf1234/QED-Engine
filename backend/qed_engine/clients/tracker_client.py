@@ -618,6 +618,7 @@ class TrackerClient:
         aliases: list[str] | None = None,
         prerequisites: list[str] | None = None,
         exploration_stage: str | None = None,
+        explore_pending: dict | str | None = None,
     ) -> dict:
         """PATCH /courses/{course_id}：修改课程阶段/排序/备注（仅提交显式字段）。
         
@@ -641,8 +642,13 @@ class TrackerClient:
                 body["prerequisites"] = prerequisites
             if exploration_stage is not None:
                 body["exploration_stage"] = exploration_stage
+            if explore_pending is not None:
+                body["explore_pending"] = explore_pending
             return self._request("PATCH", f"{API_PREFIX}/courses/{course_id}", json=body)
         except TrackerError as exc:
+            if explore_pending is not None:
+                # 总纲读写矩阵：课程 explore_pending 属 8900 禁写列，无直写腿可降级
+                raise
             if self._settings:
                 import logging
                 logger = logging.getLogger("qed_engine.tracker")

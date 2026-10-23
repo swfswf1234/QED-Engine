@@ -10,6 +10,10 @@ gateway / model_manager / 端点层统一消费，不抛异常（槽位失败写
 解析优先级：来源 = manifest.source > QED_API_SELECT；渠道 = manifest.runtime > 槽位默认
 （text = QED_LOCAL_RUNTIME，vision = docker）；身份 = manifest.active > .env 身份变量 > 槽位默认。
 
+A-6 继承兜底（M3，2026-10-18 用户裁决形态 A）：文字槽位在生效 runtime 取不到本地引用时
+不判失败——`Resolved.model` 留空，由调用侧经 OpenAI 兼容端点发现式继承单活 runtime 已加载
+模型（本模块纯解析不发网络请求）；`QED_LLM_LOCAL_ADAPT=false` 回退严格报错口径。
+
 设计关联（DesignRef）：docs/design/llm-gateway.md
 实现状态：Current
 关联测试：tests/test_llm_registry.py
@@ -372,6 +376,11 @@ def _resolve_local(slot: str, ident_name: str, settings: Settings,
 
     manifest_root 必须贯穿（BUGFIX-003）：local_binding 内部会按 manifest.active
     重算生效身份，丢失注入根会回读真实仓库运行态、覆盖外层解析结果。
+
+    A-6 继承兜底（2026-10-18 用户裁决形态 A）：文字槽位取不到本地绑定时不再判失败，
+    `model` 留空由调用侧经 OpenAI 兼容端点发现式继承单活 runtime 已加载模型（本函数
+    纯解析不发网络请求，探测归 `clients.qwen_chat` 的空 model 分支）；`QED_LLM_LOCAL_ADAPT=false`
+    回到严格口径。图像槽位不适用——MinerU 是一脚本一模型的固定部署，无「已加载模型」可继承。
     """
     if slot == "embedding":
         return Resolved(slot, "local", ident_name, "", "",
@@ -379,6 +388,11 @@ def _resolve_local(slot: str, ident_name: str, settings: Settings,
     binding = local_binding(settings, slot, manifest_root)
     if binding is None:
         runtime = slot_runtime(settings, slot, manifest_root)
+        if slot == "text" and settings.qed_llm_local_adapt:
+            return Resolved(
+                slot, "local", ident_name, runtime, "", _local_base_url(settings, slot, runtime),
+                notes=[f"身份 {ident_name} 在 runtime {runtime} 无本地引用，"
+                       "继承单活 runtime 已加载模型（A-6）"])
         return Resolved(slot, "local", ident_name, "", "",
                         error=f"runtime {runtime} 无可用本地身份（槽位 {slot}）")
     rt, model_ref, eff_ident, notes = binding

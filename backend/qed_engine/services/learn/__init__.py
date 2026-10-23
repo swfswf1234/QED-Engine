@@ -1,4 +1,4 @@
-"""学习域（learn）存储服务包：主链 M-1 契约的三表存储。
+"""学习域（learn）存储服务包：v1.0 三张根私有表的存储实现。
 
 设计关联（DesignRef）：docs/architecture/database-design.md
 实现状态：Current
@@ -8,7 +8,6 @@ from qed_engine.services.learn.base import (
     LearnConflict,
     LearnNotFound,
     ensure_tables,
-    fingerprint,
 )
 from qed_engine.services.learn.knowledge import KP_TYPES, MySQLKnowledgeStore, norm_key
 from qed_engine.services.learn.knowledge_memory import InMemoryKnowledgeStore
@@ -24,6 +23,5 @@ __all__ = [
     "LearnNotFound",
     "MySQLKnowledgeStore",
     "ensure_tables",
-    "fingerprint",
     "norm_key",
 ]

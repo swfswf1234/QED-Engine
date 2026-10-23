@@ -20,14 +20,17 @@ CURRENT_DOCUMENTS = {
     "service-hosting.md",
     "dataset-conventions.md",
     "tech-stack.md",
-    "admin-console.md",
-    "admin-dashboard.md",
-    "downloads-ui.md",
     "downloads-flow.md",
     "parsing-flow.md",
-    "parsing-ui.md",
-    "learning-star-map.md",
-    "learning-workbench-ui.md",
+    # design/frontend/ 子目录（REQ-115 前端设计整合轮迁入，递归守护下仍受元数据/索引校验）
+    "frontend/frontend-overview.md",
+    "frontend/admin-console.md",
+    "frontend/admin-dashboard.md",
+    "frontend/downloads-ui.md",
+    "frontend/parsing-ui.md",
+    "frontend/learning-practice-ui.md",
+    "frontend/learning-course-ui.md",
+    "frontend/knowledge-point-exploration-ui.md",
 }
 VALID_DESIGN_STATUSES = {"Draft", "Proposed", "Accepted", "Rejected", "Superseded", "Historical"}
 VALID_IMPLEMENTATION_STATUSES = {
@@ -49,7 +52,7 @@ def _field(content: str, name: str) -> str:
 
 
 def test_design_directory_has_one_index_and_current_contracts():
-    assert {path.name for path in DESIGN.glob("*.md")} == {"index.md", *CURRENT_DOCUMENTS}
+    assert {str(p.relative_to(DESIGN)).replace("\\", "/") for p in DESIGN.rglob("*.md")} == {"index.md", *CURRENT_DOCUMENTS}
     index = (DESIGN / "index.md").read_text(encoding="utf-8")
     for document in CURRENT_DOCUMENTS:
         assert f"]({document})" in index

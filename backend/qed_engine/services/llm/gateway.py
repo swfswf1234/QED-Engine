@@ -48,7 +48,7 @@ def _qwen_chat_with_adapt(settings, resolved, messages, max_tokens, response_for
         messages=messages,
         timeout=settings.qed_llm_timeout,
         max_tokens=max_tokens,
-        model=resolved.model,  # 注册表本地引用 = LM Studio 实际模型 id（单活已加载）
+        model=resolved.model,  # 注册表本地引用 = LM Studio 实际模型 id；空 = A-6 继承兜底（clients 发现式取已加载模型）
         api_key=settings.resolved_lmstudio_token(),  # LM Studio API 认证（空=不带头）
         response_format=fmt,
         reasoning_effort=reasoning_effort,

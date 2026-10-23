@@ -10,7 +10,7 @@ GET /parse-jobs/{id}、
 POST /books/sync（聚合 8901 verified 书籍，按 BookSyncItem 形状转发 8902 upsert）、
 PUT/GET /books/{id}/pages/{no}/blocks/{index}/review（8900 对前端保持 /review 门面与
 BlockReview 响应形状，内部转 8902 /edit + 页级 /edits 过滤）、
-GET /parsing/tree（左侧树聚合：8900 共享表领域课程 + 8902 书目）。
+GET /parsing/tree（左侧树聚合信封：nodes ＋ sources 两种降级来源标记）。
 
 错误映射：8902 返回 4xx（400 参数非法 / 404 book/page 不存在）→ 同码透传 detail；
 连接失败/5xx → 503 + 明确提示（前端据此降级显示，独立性铁律：8902 离线不破坏其他界面）。
@@ -346,32 +346,41 @@ def get_parse_job(job_id: str, request: Request) -> dict:
 
 
 @router.get("/parsing/tree")
-def get_parsing_tree(request: Request) -> list:
-    """左侧树聚合端点：8900 共享表领域课程 + 8902 书目。
+def get_parsing_tree(request: Request) -> dict:
+    """左侧树聚合端点（信封形状）：`{"nodes": [...], "sources": {...}}`。
 
     数据源：
-    - 领域→课程结构：8900 共享表 list_domains_with_courses()（独立于8902）
+    - 领域→课程结构：8900 共享表 list_domains_with_courses()（独立于 8902）
     - 书目列表：8902 GET /books（af_books，含解析进度）
 
-    降级逻辑：
-    - 8902 离线 → 返回领域→课程（书目为空），前端据此显示降级提示
-    - 8900 共享表为空 → 返回空列表
+    `sources` 把两种降级写成可区分的事实（DEFECT-015 S3）：修复前 8902 离线只把书目置空、
+    共享表为空只落空数组，两者同形使「页面为什么是空的」无从判定；现在
+    - `axiom_flow`：`ok`／`offline`（离线时 `nodes` 仍出领域→课程，只是课程下无书目）；
+    - `shared_tables`：`ok`／`empty`（为空时整棵树为空数组，与管理库是否连通无关的登记缺口）。
     """
     from qed_engine.services.shared_tables import list_domains_with_courses
 
     settings = request.app.state.settings
 
-    # 1. 从8900 共享表获取领域→课程结构（独立于8902）
+    # 1. 从 8900 共享表获取领域→课程结构（独立于 8902）
     domains_with_courses = list_domains_with_courses(settings)
 
-    # 2. 从8902获取书目列表（失败时降级为空）
+    # 2. 从 8902 获取书目列表（失败时降级为空，但仍如实回报来源）
     try:
         books = _axiom(request).list_books()
+        axiom_flow = "ok"
     except AxiomError:
         books = []  # 8902 离线 → 书目为空，仍显示领域→课程
+        axiom_flow = "offline"
 
     # 3. 聚合：按 domain_id + course_id 匹配书目到课程
-    return _build_parsing_tree(domains_with_courses, books)
+    return {
+        "nodes": _build_parsing_tree(domains_with_courses, books),
+        "sources": {
+            "shared_tables": "empty" if not domains_with_courses else "ok",
+            "axiom_flow": axiom_flow,
+        },
+    }
 
 
 def _build_parsing_tree(domains_with_courses: list, books: list) -> list:

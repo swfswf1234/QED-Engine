@@ -87,7 +87,7 @@ def create_app(
     """组装 API；测试可注入确定性 Settings 与 8901/8902 客户端（MockTransport）。
 
     learn_store：学习域存储注入点（测试用 InMemoryLearnStore，隔离铁律）；
-    缺省 None 时由首个 /learn 课程请求懒建 qed_learn_* 三表并挂载 MySQL 存储（判例 qed_llm_calls）。
+    缺省 None 时由首个 /learn 课程请求懒建 qe_* 三表并挂载 MySQL 存储（判例 qed_llm_calls）。
     knowledge_store：M5 知识点两表存储注入点（测试用 InMemoryKnowledgeStore）；
     缺省 None 时由首个 /learn 知识点请求懒建两表并挂载（判例 qed_llm_calls）。
     """
@@ -124,9 +124,11 @@ def create_app(
     configure_services(resolved)
     try:
         llm_call_log.ensure_table(resolved)
+        llm_call_log.ensure_columns(resolved)
         llm_call_log.ensure_comments(resolved)
+        llm_call_log.ensure_indexes(resolved)
     except Exception as exc:  # 数据库不可达：降级日志，不阻塞启动
-        logger.warning("qed_llm_calls 建表/注释补齐跳过（数据库不可达）：%s", type(exc).__name__)
+        logger.warning("qed_llm_calls 建表/列/注释/索引补齐跳过（数据库不可达）：%s", type(exc).__name__)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

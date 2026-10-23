@@ -172,3 +172,37 @@ def test_console_message_feedback():
     assert "App.useApp()" in src, "Console 应使用 App.useApp().message（主题上下文）"
     assert "message.success" in src, "成功提示用 message.success"
     assert "message.warning" in src, "失败/未生效提示用 message.warning"
+
+
+# --- 前端源码 ↔ 设计正本互指（REQ-117 C22~C24 复发防护，2026-10-18 随课程学习详设晋升改指详设档） ---
+
+LEARN_UI_DESIGN = ROOT / "docs" / "design" / "frontend" / "learning-course-ui.md"
+
+
+def test_learn_workbench_source_declares_design_reference():
+    """课程学习工作台源码必须写明设计正本指针。
+
+    根因：`tests/contract/test_code_document_mapping.py` 的受管目录只扫
+    backend/qed_engine 与 tests 下的 .py，web-ui 源码天然不在 code-map 映射面内，
+    「实现时不看 design/」不会被追溯门挡住（REQ-117 W9 现场复现）。缺口收在本文件
+    （其 DesignRef 即前端架构文档，属已受管模块）。
+    """
+    assert LEARN_UI_DESIGN.is_file(), "课程学习面设计正本缺失"
+    src = (SRC / "pages" / "LearnWorkbench.tsx").read_text(encoding="utf-8")
+    assert "设计关联：docs/design/frontend/learning-course-ui.md" in src, (
+        "LearnWorkbench.tsx 头部注释缺「设计关联」指针（形态口径以 design 正本为准）"
+    )
+
+
+def test_learn_plane_form_shape_pinned_to_single_source_constant():
+    """目录两档左缘（C24）必须由源码单一常量承载，且设计正本点名该常量。
+
+    守护的是形态：`textAlign:'left'` 对 antd Button 的 flex 内容无效（DEFECT-016 根因），
+    故对齐只能落在 `outlineRowStyle` 导出的 padding-left 两档上；正本写死常量名，
+    改实现必先改正本。
+    """
+    src = (SRC / "pages" / "LearnWorkbench.tsx").read_text(encoding="utf-8")
+    design = LEARN_UI_DESIGN.read_text(encoding="utf-8")
+    for token in ("outlineRowStyle", "OUTLINE_INDENT_PX"):
+        assert token in src, f"LearnWorkbench.tsx 应定义目录行形态单一来源：{token}"
+        assert token in design, f"设计正本 learning-course-ui.md 应点名形态单一来源：{token}"

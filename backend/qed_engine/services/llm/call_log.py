@@ -9,6 +9,7 @@
 关联测试：tests/test_llm_call_log.py
 """
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -18,15 +19,17 @@ from qed_engine.config import Settings
 
 logger = logging.getLogger("qed_engine.llm")
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS qed_llm_calls (
+META_COMMENT = "扩展槽：未定档字段先入本列（只读不筛，不进 WHERE/索引）；定档后升为实体列并清空对应键（REQ-118）"
+PROVIDER_COMMENT = "模型提供方：api 渠道为厂商名（qwen/deepseek/glm/gateway），local 模式为 runtime 名（lmstudio/llamacpp/mineru）"
+
+CREATE_TABLE_SQL = f"""CREATE TABLE IF NOT EXISTS qed_llm_calls (
   id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键）',
   service VARCHAR(32) NOT NULL COMMENT '调用方标识：qed_engine/qed_tracker/axiom_flow',
   mode VARCHAR(16) NOT NULL COMMENT '调用模式：api（经 8900 网关）/ local（直连厂商）',
-  provider VARCHAR(32) NOT NULL COMMENT '模型提供方：qwen/deepseek/glm/gateway',
+  provider VARCHAR(32) NOT NULL COMMENT '{PROVIDER_COMMENT}',
   model VARCHAR(64) NOT NULL COMMENT '实际模型名（如 qwen-plus、qwen3.7-plus）',
   endpoint VARCHAR(16) NOT NULL COMMENT '调用类型：text/vision/embedding',
-  prompt_template VARCHAR(255) COMMENT '模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）',
+  prompt_template VARCHAR(255) COMMENT '模板编号（{{task}}/{{step}}@v{{n}}，如 domain-explore/domain@v2）',
   prompt MEDIUMTEXT COMMENT '完整 prompt（JSON 序列化的 messages 数组）',
   response MEDIUMTEXT COMMENT '模型原始响应文本',
   duration_ms INT COMMENT '调用耗时（毫秒）',
@@ -36,8 +39,12 @@ CREATE TABLE IF NOT EXISTS qed_llm_calls (
   task VARCHAR(64) COMMENT '任务标识（REQ-060 扩展，如 paper-plan、domain-explore）',
   step VARCHAR(32) COMMENT '步骤标识（REQ-060 扩展，如 plan、assess、domain）',
   review_status VARCHAR(16) DEFAULT 'unreviewed' COMMENT '审核态：unreviewed/passed/rejected（REQ-060 扩展）',
-  review_note VARCHAR(1000) DEFAULT '' COMMENT '审核备注（REQ-060 扩展）'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  review_note VARCHAR(1000) DEFAULT '' COMMENT '审核备注（REQ-060 扩展）',
+  meta JSON COMMENT '{META_COMMENT}',
+  KEY idx_llm_created (created_at),
+  KEY idx_llm_service_created (service, created_at),
+  KEY idx_llm_task_step (task, step)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='LLM 调用审计表：一行 = 一次 LLM 调用（成功或失败），记录完整 prompt 输入、模型响应、耗时与审核态（三项目共用，service 区分调用方）'
 """
 
@@ -45,7 +52,7 @@ CREATE TABLE IF NOT EXISTS qed_llm_calls (
 _COLUMN_COMMENTS: dict[str, str] = {
     "service": "调用方标识：qed_engine/qed_tracker/axiom_flow",
     "mode": "调用模式：api（经 8900 网关）/ local（直连厂商）",
-    "provider": "模型提供方：qwen/deepseek/glm/gateway",
+    "provider": PROVIDER_COMMENT,
     "model": "实际模型名（如 qwen-plus、qwen3.7-plus）",
     "endpoint": "调用类型：text/vision/embedding",
     "prompt_template": "模板编号（{task}/{step}@v{n}，如 domain-explore/domain@v2）",
@@ -59,6 +66,7 @@ _COLUMN_COMMENTS: dict[str, str] = {
     "step": "步骤标识（REQ-060 扩展，如 plan、assess、domain）",
     "review_status": "审核态：unreviewed/passed/rejected（REQ-060 扩展）",
     "review_note": "审核备注（REQ-060 扩展）",
+    "meta": META_COMMENT,
 }
 
 TABLE_COMMENT = (
@@ -69,12 +77,35 @@ TABLE_COMMENT = (
 INSERT_SQL = """
 INSERT INTO qed_llm_calls
   (service, mode, provider, model, endpoint, prompt_template, prompt, response,
-   duration_ms, status, error, created_at, task, step, review_status, review_note)
+   duration_ms, status, error, created_at, task, step, review_status, review_note, meta)
 VALUES
   (%(service)s, %(mode)s, %(provider)s, %(model)s, %(endpoint)s, %(prompt_template)s,
    %(prompt)s, %(response)s, %(duration_ms)s, %(status)s, %(error)s, %(created_at)s,
-   %(task)s, %(step)s, %(review_status)s, %(review_note)s)
+   %(task)s, %(step)s, %(review_status)s, %(review_note)s, %(meta)s)
 """
+
+
+def _to_json(value: object) -> str | None:
+    """扩展槽写入：dict 转 JSON 文本（None 保持 NULL）；不可序列化对象降级为 str。"""
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _from_json(value: object) -> object:
+    """扩展槽读回：JSON 文本转对象；解析失败原样返回（账目表只读，不因脏值抛错）。"""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _with_decoded_meta(row: dict) -> dict:
+    if "meta" in row:
+        return {**row, "meta": _from_json(row["meta"])}
+    return row
 
 
 def _connect(settings: Settings) -> pymysql.Connection:
@@ -108,6 +139,7 @@ _REQUIRED_COLUMNS: dict[str, str] = {
     "step": "VARCHAR(32)",
     "review_status": "VARCHAR(16) DEFAULT 'unreviewed'",
     "review_note": "VARCHAR(1000) DEFAULT ''",
+    "meta": f"JSON COMMENT '{META_COMMENT}'",
 }
 
 
@@ -184,6 +216,36 @@ def ensure_comments(settings: Settings) -> list[str]:
         conn.close()
 
 
+# 二级索引注册表（REQ-118）：账表按时间窗/服务/任务步骤检索，存量表零二级索引即全表扫。
+_REQUIRED_INDEXES: dict[str, str] = {
+    "idx_llm_created": "created_at",
+    "idx_llm_service_created": "service, created_at",
+    "idx_llm_task_step": "task, step",
+}
+
+
+def ensure_indexes(settings: Settings) -> list[str]:
+    """幂等补齐二级索引（information_schema 对比）；返回本次新增的索引名。"""
+    conn = _connect(settings)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'qed_llm_calls'",
+                (settings.qed_db_name,),
+            )
+            existing = {row[0] for row in cursor.fetchall()}
+            added: list[str] = []
+            for name, columns in _REQUIRED_INDEXES.items():
+                if name not in existing:
+                    cursor.execute(f"ALTER TABLE qed_llm_calls ADD INDEX {name} ({columns})")
+                    added.append(name)
+        conn.commit()
+        return added
+    finally:
+        conn.close()
+
+
 def record_call(
     settings: Settings,
     *,
@@ -202,6 +264,7 @@ def record_call(
     step: str | None = None,
     review_status: str = "unreviewed",
     review_note: str = "",
+    meta: dict | None = None,
 ) -> int | None:
     """写入一条调用记录；数据库不可达降级返回 None（记日志），不抛异常。"""
     try:
@@ -219,6 +282,7 @@ def record_call(
                 "error": error[:500], "created_at": datetime.now(UTC).replace(tzinfo=None),
                 "task": task, "step": step,
                 "review_status": review_status, "review_note": review_note,
+                "meta": _to_json(meta),
             })
             lastrowid = cursor.lastrowid
         conn.commit()
@@ -236,6 +300,7 @@ def record_call(
                         duration_ms=duration_ms, status=status, error=error,
                         prompt_template=prompt_template, task=task, step=step,
                         review_status=review_status, review_note=review_note,
+                        meta=meta,
                     )
             except Exception as mig_exc:
                 logger.warning("qed_llm_calls 补列失败：%s", mig_exc)
@@ -312,7 +377,7 @@ def search_calls(
                 f"SELECT * FROM qed_llm_calls {clause} ORDER BY id DESC LIMIT %s OFFSET %s",
                 [*params, size, offset],
             )
-            items = cursor.fetchall()
+            items = [_with_decoded_meta(row) for row in cursor.fetchall()]
         return {"items": items, "total": total, "page": page, "size": size}
     except Exception as exc:
         logger.warning("qed_llm_calls 检索失败：%s", type(exc).__name__)

@@ -28,6 +28,7 @@ from qed_engine.clients.tracker_client import TrackerClient, TrackerError
 from qed_engine.config import Settings
 from qed_engine.services import shared_tables
 from qed_engine.services.shared_tables import (
+    STAGE_COMPLETED,
     STAGE_FAILED,
     STAGE_GENERATED,
     STAGE_NOT_STARTED,
@@ -259,9 +260,9 @@ class ExploreSessionManager:
     def _apply_course(self, session: ExploreSession, selected: list[dict]) -> dict:
         result = self._tracker.adopt_course_knowledge(session.course_id, tutorials=selected)
         created = result.get("created", [])
-        # 采纳落库 → 课程 exploration_stage=已生成（直写，REQ-064 ④）
+        # 采纳落库 → 课程 exploration_stage=已完成（课程 5 态无领域专用的「已生成」，DEFECT-014）
         shared_tables.set_course_stage(
-            self._settings, self._tracker, session.course_id, STAGE_GENERATED, online=True
+            self._settings, self._tracker, session.course_id, STAGE_COMPLETED, online=True
         )
         session.updated_at = time.monotonic()
         return {"applied": created, "conflicts": []}
@@ -292,7 +293,10 @@ class ExploreSessionManager:
             logger.warning("探索会话 %s 失败：%s", session.session_id, exc)
 
     def _write_failure(self, session: ExploreSession, error: str) -> None:
-        """管线失败落库：失败态 + explore_pending={kind:'failed'}（可重试依据，PLAN-034 §3）。"""
+        """管线失败落库：失败态 + explore_pending={kind:'failed'}（可重试依据，PLAN-034 §3）。
+
+        课程分支的 explore_pending 只经 8901 在线腿写（该列属 8900 禁写），不可达即不落库。
+        """
         try:
             if session.target == "domain" and session.domain_id:
                 shared_tables.set_domain_stage(
@@ -307,6 +311,16 @@ class ExploreSessionManager:
                 shared_tables.set_course_stage(
                     self._settings, self._tracker, session.course_id, STAGE_FAILED, online=True
                 )
+                try:
+                    current = shared_tables.get_course(self._settings, session.course_id) or {}
+                    existing = current.get("explore_pending")
+                    base = existing if isinstance(existing, dict) else {}
+                    self._tracker.update_course(
+                        session.course_id,
+                        explore_pending={**base, "kind": "failed", "error": error},
+                    )
+                except Exception as exc:  # noqa: BLE001 - 该列无直写腿，在线不可达即跳过
+                    logger.info("课程 %s 失败原因不落库（8901 不可达）：%s", session.course_id, exc)
         except Exception as exc:  # noqa: BLE001 - 落库失败不影响会话失败态
             logger.debug("探索会话 %s 失败态落库跳过：%s", session.session_id, exc)
 

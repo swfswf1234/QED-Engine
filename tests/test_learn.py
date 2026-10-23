@@ -1,11 +1,16 @@
-"""学习域（/api/v1/learn/*）契约测试：M-1 三表语义 + 9 端点 + M-3 门两端点 + 错误码清单。
+"""学习域（/api/v1/learn/*，27 端点）契约测试：v1.0 三表口径的课程面、门面与注解面。
 
-模块职责：守护学习设计轮主链 M-1/M-2 冻结契约（课程注册 kind 闭集与限长、单元树两级、
-covered 学习者独占、编译状态机与两级确认门、派生进度只读）、主链 M-3 的知识点门态清单、质性门自评位（量化型 409 拒绝）与门游标扩字段。
+模块职责：守护 ADR 0026 定档后的学习记录单表 `qe_learning` 语义——course 行＝引用共享
+`qed_course.course_id` 的选课行（D4 不发独立 ID、D7 `owner` 列不出契约面）、kp 行＝知识点
+终态位与质性门四列（勾选与判定分居两通路，`pending` 撤销无判定痕迹即删行）、推进序列＝主表
+point 行的读时投影（派生键 `kp:{kp_id}`、零物化）、按需生成腿的章行覆写与条级 `angles` 追加
+（D10）、三域存储懒挂载窗口（判例 DEFECT-009）。编译族／单元树族／候选池族随 D1/D2 退出，
+其用例一并删除；知识点主表自身形状与星图见 tests/test_learn_knowledge.py，练习与复习见
+tests/test_learn_practice.py。
 设计关联（DesignRef）：docs/architecture/api-contracts.md
 实现状态：Current
 被测代码：backend/qed_engine/api/learn.py、backend/qed_engine/services/learn/
-失效后果：学习域契约漂移，M1/M2 模块按错误形状联调
+失效后果：学习域契约漂移，8903 学习面按错误形状联调
 """
 
 import time
@@ -22,11 +27,10 @@ from qed_engine.services.learn import (
     InMemoryPracticeStore,
 )
 
+STUDY_COURSE = "math_analysis"  # 共享课程 ID＝学习课程 ID＝题库课程键（D4 之后一枚坐标）
+
 COURSE_BODY = {
-    "name": "数学分析",
-    "domain_ref": {"ref_id": "math-advanced", "label": "数学（高等数学）"},
-    "course_ref": {"ref_id": "ma-course-01", "label": "数学分析"},
-    "direction": "教材主线",
+    "course_id": STUDY_COURSE,
     "resources": [
         {"kind": "book", "ref_id": "mathanalysis-b05", "label": "数学分析原理"},
         {"kind": "af_version", "ref_id": "mathanalysis-b05", "label": "b05 生效版本"},
@@ -34,16 +38,24 @@ COURSE_BODY = {
     ],
 }
 
-# 合法最深形态（section→unit→block 三级）；四级树在守卫测试内单独构造
-VALID_TREE = [
+BOOK_RESOURCE = {"kind": "book", "ref_id": "mathanalysis-b05", "label": "数学分析教程"}
+
+# 章→节两级目录树（outline 行；页范围＝PDF 页序）
+DEFAULT_OUTLINE = [
     {
-        "title": "第一章",
-        "children": [
-            {"title": "1.1 实数", "children": [{"title": "正文"}, {"title": "测验"}]},
-            {"title": "1.2 序列", "children": [{"title": "正文"}]},
-        ],
+        "name": "第一章 实数",
+        "page_start": 21,
+        "page_end": 30,
+        "children": [{"name": "1.1 实数的完备性", "page_start": 21, "page_end": 24}],
     }
 ]
+
+GATE_COLUMNS = ("qualitative_passed", "qualitative_note", "assessed_by", "assessed_at")
+
+MASTERY_ITEM_FIELDS = {
+    "unit_id", "kp_id", "kp_type", "gate", "mastery", "threshold", "attempt_count",
+    "provenance", "status", "qualitative_passed", "due_reviews",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -59,33 +71,8 @@ def _mock_startup_probes(monkeypatch):
 
 @pytest.fixture()
 def client(monkeypatch):
-    monkeypatch.setenv("API_KEY", "")
-    monkeypatch.setenv("QED_API_SELECT", "api")
-    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
-    monkeypatch.setenv("QED_DB_HOST", "127.0.0.1")
-    monkeypatch.setenv("QED_DB_PORT", "3306")
-    monkeypatch.setenv("QED_DB_NAME", "qed_test")
-    monkeypatch.setenv("QED_DB_USER", "root")
-    monkeypatch.setenv("QED_DB_PASSWORD", "")
-    app = create_app(learn_store=InMemoryLearnStore())
-    return TestClient(app)
-
-
-@pytest.fixture()
-def stall_compile(monkeypatch):
-    """闸门：冻结骨架编译后台线程，制造确定的 running 窗口（在跑禁删 409 用）。"""
-    import threading
-
-    gate = threading.Event()
-    store_cls = InMemoryLearnStore
-    original = store_cls.finish_compile
-
-    def _stalled(self, course_id):
-        assert gate.wait(timeout=5), "测试未释放编译闸门"
-        original(self, course_id)
-
-    monkeypatch.setattr(store_cls, "finish_compile", _stalled)
-    return gate
+    _env(monkeypatch)
+    return TestClient(create_app(learn_store=InMemoryLearnStore()))
 
 
 def _make_course(client) -> str:
@@ -94,31 +81,21 @@ def _make_course(client) -> str:
     return resp.json()["learn_course_id"]
 
 
-def _prepare_compilable(client, course_id: str) -> None:
-    """propose → 写入合法两级树 → 逐级 confirmed（两级人工确认齐备）。"""
-    assert client.post(
-        f"/api/v1/learn/courses/{course_id}/compile/propose",
-        json={"page_windows": [{"start": 1, "end": 10}]},
-    ).status_code == 200
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": VALID_TREE}
-    ).status_code == 200
-    units = client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]
-    for unit in units:
-        assert client.patch(f"/api/v1/learn/units/{unit['unit_id']}", json={"confirmed": True}).status_code == 200
+# ---------- 选课（qe_learning 的 course 行，D4 引用式注册） ----------
 
 
-# ---------- 课程注册（表1 语义） ----------
-
-
-def test_course_register_returns_id_and_defaults(client):
+def test_course_register_returns_shared_id_and_defaults(client):
+    """学习课程 ID＝共享 `qed_course.course_id`（D4：本域不再发第二套 ID）。"""
     course_id = _make_course(client)
-    assert course_id
+    assert course_id == STUDY_COURSE
     detail = client.get(f"/api/v1/learn/courses/{course_id}").json()
-    assert detail["compile_status"] is None
+    assert detail["status"] == "active"
     assert detail["resources"][0]["kind"] == "book"
-    assert detail["derived"]["status"] == "draft"
-    assert client.get("/api/v1/learn/courses").json()["courses"][0]["learn_course_id"] == course_id
+    assert detail["kp_path"] == [] and detail["learner_note"] == ""
+    assert detail["unit_count"] == 0 and detail["derived"]["status"] == "draft"
+    listed = client.get("/api/v1/learn/courses").json()["courses"][0]
+    assert listed == detail  # 列表与详情共用同一课程投影
+    assert listed["learn_course_id"] == course_id
 
 
 def test_course_register_rejects_unknown_kind(client):
@@ -126,177 +103,318 @@ def test_course_register_rejects_unknown_kind(client):
     assert client.post("/api/v1/learn/courses", json=body).status_code == 422
 
 
-def test_course_register_requires_resources(client):
-    assert client.post("/api/v1/learn/courses", json={"name": "空素材"}).status_code == 422
+def test_course_register_requires_resources_and_course_id(client):
+    assert client.post("/api/v1/learn/courses", json={"course_id": "x"}).status_code == 422
+    assert client.post(
+        "/api/v1/learn/courses", json={"course_id": "", "resources": [BOOK_RESOURCE]}
+    ).status_code == 422
     bad = {**COURSE_BODY, "resources": [{"kind": "book", "ref_id": "", "label": "l"}]}
     assert client.post("/api/v1/learn/courses", json=bad).status_code == 422
 
 
-def test_channel_length_limit(client):
-    body = {**COURSE_BODY, "instructions": "长" * 4001}
-    assert client.post("/api/v1/learn/courses", json=body).status_code == 422
-    course_id = _make_course(client)
-    patch = client.patch(f"/api/v1/learn/courses/{course_id}", json={"agent_notes": "长" * 4001})
-    assert patch.status_code == 422
+def test_course_register_is_idempotent_on_shared_id(client):
+    """同枚共享课程 ID 二次加入＝409（唯一键 owner×target_kind×target_id 的端点口径）。"""
+    _make_course(client)
+    again = client.post("/api/v1/learn/courses", json=COURSE_BODY)
+    assert again.status_code == 409
+    assert "已在学习面" in again.json()["detail"]
 
 
-def test_course_delete_and_404(client):
+def test_patch_course_whitelist_keeps_names_off_the_learning_row(client):
+    """课程行白名单（extra=forbid）：名称/领域/坐标列归共享表，本域改即 422（R5 引用不复制）。"""
     course_id = _make_course(client)
+    for body in ({"name": "自定名"}, {"course_ref": {"ref_id": "x", "label": "y"}},
+                 {"compile_status": "completed"}, {"status": "archived"}):
+        assert client.patch(f"/api/v1/learn/courses/{course_id}", json=body).status_code == 422
+    patched = client.patch(
+        f"/api/v1/learn/courses/{course_id}",
+        json={"status": "paused", "kp_path": ["kp-1"], "learner_note": "先修完线代"},
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["status"] == "paused" and body["kp_path"] == ["kp-1"]
+    assert body["learner_note"] == "先修完线代"
+
+
+def test_course_delete_keeps_knowledge_point_rows(monkeypatch):
+    """退课只删 course 行：kp 行是跨课程的学习者记录，不随退课蒸发（D4）。"""
+    client, course_id, rows = _study_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")
+    kp_id = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
+    assert client.post(
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": kp_id, "status": "done"}
+    ).status_code == 200
     assert client.delete(f"/api/v1/learn/courses/{course_id}").status_code == 200
     assert client.get(f"/api/v1/learn/courses/{course_id}").status_code == 404
-    assert client.patch(f"/api/v1/learn/courses/{course_id}", json={"name": "x"}).status_code == 404
-    assert client.get("/api/v1/learn/units/nope").status_code == 404
+    assert client.patch(f"/api/v1/learn/courses/{course_id}", json={"status": "done"}).status_code == 404
+    store = client.app.state.learn_store
+    assert store.kp_rows()[kp_id]["status"] == "done"
+    assert client.delete("/api/v1/learn/courses/never-enrolled").status_code == 404
 
 
-def test_delete_blocked_while_compiling(client, stall_compile):
-    course_id = _make_course(client)
-    _prepare_compilable(client, course_id)
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 202
-    assert client.delete(f"/api/v1/learn/courses/{course_id}").status_code == 409
-    stall_compile.set()
-
-
-# ---------- 单元树（表2 语义） ----------
-
-
-def test_propose_requires_page_windows(client):
-    course_id = _make_course(client)
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/propose", json={}).status_code == 422
+def test_owner_never_leaves_the_contract_surface(monkeypatch):
+    """D7：`owner` 只承载唯一键前缀与扩展位——本域端点不收、不回显。"""
+    client, course_id, rows = _study_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")
+    kp_id = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
     assert client.post(
-        f"/api/v1/learn/courses/{course_id}/compile/propose", json={"page_windows": [{"start": 1}]}
+        "/api/v1/learn/courses", json={**COURSE_BODY, "owner": "mallory"}
     ).status_code == 422
+    posted = client.post(
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": kp_id, "status": "done"}
+    )
+    assert posted.status_code == 200, posted.text
+    assert "owner" not in posted.json()
+    for payload in (
+        client.get(f"/api/v1/learn/courses/{course_id}").json(),
+        client.get("/api/v1/learn/courses").json()["courses"][0],
+        posted.json()["derived"],
+    ):
+        assert "owner" not in payload, payload
+    learner = client.get(f"/api/v1/learn/courses/{course_id}/knowledge-points").json()[
+        "sequence"
+    ]["units"][0]["learner"]
+    assert learner["status"] == "done" and "owner" not in learner
 
 
-def test_syllabus_rejects_over_three_level_tree(client):
-    course_id = _make_course(client)
-    client.post(f"/api/v1/learn/courses/{course_id}/compile/propose", json={"page_windows": [{"start": 1, "end": 5}]})
-    four_level = [{"title": "章", "children": [{"title": "节", "children": [{"title": "块", "children": [{"title": "四级"}]}]}]}]
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": four_level}
-    ).status_code == 422
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": [{"title": ""}]}
-    ).status_code == 422
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": []}
-    ).status_code == 422
+# ---------- kp 行存储面：单表继承、门四列与撤销语义（两实现同语义） ----------
 
 
-def test_unit_patch_only_allowlist_fields(client):
-    course_id = _make_course(client)
-    client.post(f"/api/v1/learn/courses/{course_id}/compile/propose", json={"page_windows": [{"start": 1, "end": 5}]})
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": VALID_TREE}
-    ).status_code == 200
-    units = client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]
-    unit_id = units[-1]["unit_id"]
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"payload": {}}).status_code == 422
-    assert client.patch("/api/v1/learn/units/nope", json={"order": 5}).status_code == 404
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"order": 5}).status_code == 200
-    # covered 只能打在已 confirmed 的单元上（学习者勾选前提）
-    assert client.get(f"/api/v1/learn/units/{unit_id}").json()["confirmed"] is False
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"covered": True}).status_code == 409
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"confirmed": False}).status_code == 200
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"confirmed": True}).status_code == 200
-    assert client.patch(f"/api/v1/learn/units/{unit_id}", json={"covered": True}).status_code == 200
-    assert client.get(f"/api/v1/learn/units/{unit_id}").json()["covered"] is True
+def _kp_store() -> InMemoryLearnStore:
+    store = InMemoryLearnStore()
+    store.create_course(course_id="c1", resources=[BOOK_RESOURCE])
+    return store
 
 
-def test_units_level_filter_and_contract_fields(client):
-    course_id = _make_course(client)
-    _prepare_compilable(client, course_id)
-    sections = client.get(f"/api/v1/learn/courses/{course_id}/units", params={"level": "section"}).json()["units"]
-    assert len(sections) == 1
-    both = client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]
-    assert {u["level"] for u in both} == {"section", "unit"}
-    assert {"gen_status", "active", "confirmed", "covered", "type"} <= set(both[0])
-    assert client.get("/api/v1/learn/courses/missing/units").status_code == 404
-    # W5（§V2.3）：闭集扩为 section/unit/point——point 是读时投影，无知识点时给空态不报错
-    point_rows = client.get(f"/api/v1/learn/courses/{course_id}/units", params={"level": "point"})
-    assert point_rows.status_code == 200
-    assert point_rows.json() == {"units": [], "chapters": []}
-    assert client.get(
-        f"/api/v1/learn/courses/{course_id}/units", params={"level": "bad"}
-    ).status_code == 422
+def test_kp_row_status_is_a_closed_set_and_pending_deletes_the_row():
+    """kp 行 status 闭集 done/skipped/pending；`pending`＝撤销，无判定痕迹时整行删除（读时派生非累加）。"""
+    from qed_engine.services.learn.base import LearnConflict, LearnNotFound
+
+    store = _kp_store()
+    with pytest.raises(LearnConflict):
+        store.set_kp_status("kp-1", "active")  # course 行的态不得打在 kp 行上
+    with pytest.raises(LearnConflict):
+        store.set_kp_status("kp-1", "bogus")
+    assert store.kp_rows() == {}  # 未落笔＝无行
+    row = store.set_kp_status("kp-1", "done")
+    assert row["kp_id"] == "kp-1" and row["status"] == "done"
+    assert row["qualitative_passed"] is None and row["assessed_by"] == ""
+    revoked = store.set_kp_status("kp-1", "pending")
+    assert revoked["removed"] is True and store.kp_rows() == {}
+    assert store.set_kp_status("kp-none", "pending")["removed"] is True
+    with pytest.raises(LearnNotFound):
+        store.get_kp_row("kp-none")
 
 
-# ---------- 编译作业（D3：课程行自 carry） ----------
+def test_pending_keeps_the_row_when_a_qualitative_trace_exists():
+    """撤销终态位但有质性判定＝保留行、只把 status 打回 pending（判定四列不因撤销蒸发）。"""
+    store = _kp_store()
+    store.assess_qualitative("kp-2", passed=True, note="讲清了", assessed_by="learner")
+    store.set_kp_status("kp-2", "done")
+    row = store.set_kp_status("kp-2", "pending")
+    assert "removed" not in row and row["status"] == "pending"
+    assert row["qualitative_passed"] is True and row["assessed_by"] == "learner"
 
 
-def test_compile_start_requires_two_level_confirmation(client):
-    course_id = _make_course(client)
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 409
-    client.post(f"/api/v1/learn/courses/{course_id}/compile/propose", json={"page_windows": [{"start": 1, "end": 5}]})
-    client.put(f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": VALID_TREE})
-    # 有草稿树但未逐级 confirmed → 仍 409
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 409
+def test_assess_qualitative_writes_gate_columns_and_starts_pending():
+    """D-M3-2 v1 自评位：判定落四列、终态位不受影响（派生计数不因判定而虚增）。"""
+    store = _kp_store()
+    row = store.assess_qualitative(
+        "kp-limit", passed=True, note="能用自己的话说清 ε-δ", assessed_by="learner"
+    )
+    assert row["kp_id"] == "kp-limit" and row["status"] == "pending"
+    assert row["qualitative_passed"] is True
+    assert row["qualitative_note"] == "能用自己的话说清 ε-δ"
+    assert row["assessed_by"] == "learner" and row["assessed_at"]
+    read = store.kp_rows()["kp-limit"]
+    assert read["qualitative_passed"] is True and read["assessed_by"] == "learner"
 
 
-def test_compile_lifecycle_202_poll_and_units(client):
-    course_id = _make_course(client)
-    _prepare_compilable(client, course_id)
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 202
-    status = _await_compile(client, course_id)
-    assert status["compile_status"] == "completed"
-    assert status["done"] == status["total"] >= 3
-    blocks = client.get(f"/api/v1/learn/courses/{course_id}/units", params={"level": "unit"}).json()["units"]
-    assert blocks and all(b["gen_status"] == "generated" and b["active"] for b in blocks)
-    assert blocks[0]["source_ref"]  # 块级溯源位存在
+def test_assess_qualitative_overwrites_and_preserves_terminal_status():
+    """重复判定覆盖同一行（一知识点只留最新质性结论）；已有 done 终态不被抹掉。"""
+    store = _kp_store()
+    store.set_kp_status("kp-limit", "done")
+    first = store.assess_qualitative("kp-limit", passed=True, note="讲清了")
+    second = store.assess_qualitative("kp-limit", passed=False, note="重讲仍含混")
+    assert first["status"] == second["status"] == "done"
+    assert second["qualitative_passed"] is False and second["qualitative_note"] == "重讲仍含混"
+    assert store.kp_rows()["kp-limit"]["qualitative_passed"] is False
+    assert len(store.kp_rows()) == 1
 
 
-def _await_compile(client, course_id: str) -> dict:
-    for _ in range(200):
-        status = client.get(f"/api/v1/learn/courses/{course_id}/compile").json()
-        if status["compile_status"] != "running":
-            return status
-        time.sleep(0.01)
-    pytest.fail("compile 未收敛")
+def test_assess_qualitative_rejects_unknown_assessed_by():
+    """`assessed_by` 闭集 learner/model（model 判读腿属 M-3b，存储层先兜住）。"""
+    from qed_engine.services.learn.base import LearnConflict
+
+    store = _kp_store()
+    with pytest.raises(LearnConflict):
+        store.assess_qualitative("kp-1", passed=True, assessed_by="machine")
 
 
-def test_compile_status_without_job_is_empty_state(client):
-    course_id = _make_course(client)
-    assert client.get(f"/api/v1/learn/courses/{course_id}/compile").json()["compile_status"] is None
+def test_set_kp_status_does_not_wipe_gate_columns():
+    """勾选与质性判定分居两条通路：写终态位不得抹掉判定四列（MySQL ON DUPLICATE 同语义）。"""
+    store = _kp_store()
+    store.assess_qualitative("kp-1", passed=True, note="讲清了")
+    row = store.set_kp_status("kp-1", "skipped")
+    assert row["status"] == "skipped" and row["qualitative_passed"] is True
+    assert row["qualitative_note"] == "讲清了" and row["assessed_by"] == "learner"
 
 
-# ---------- 派生进度（表3：只读、重算非累加） ----------
+def test_learner_note_is_a_manual_column_on_both_row_kinds():
+    """备注＝单列（course 行与 kp 行通用，R6 人工位）；行不存在不起新行。"""
+    from qed_engine.services.learn.base import LearnNotFound
+
+    store = InMemoryLearnStore()
+    store.create_course(course_id="c1", resources=[BOOK_RESOURCE], learner_note="开课备注")
+    assert store.get_course("c1")["learner_note"] == "开课备注"
+    store.set_kp_status("kp-1", "done")
+    assert store.set_note("kp", "kp-1", "这一条我的说法")["learner_note"] == "这一条我的说法"
+    assert store.set_note("course", "c1", "改备注")["learner_note"] == "改备注"
+    assert store.get_kp_row("kp-1")["learner_note"] == "这一条我的说法"
+    with pytest.raises(LearnNotFound):
+        store.set_note("kp", "kp-none", "无人行")
 
 
-def test_progress_is_derived_and_readonly(client):
-    """W5 口径：计数单位＝知识点行；旧 section/unit 行保留只读，不再承载进度。"""
-    course_id = _make_course(client)
-    _prepare_compilable(client, course_id)
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 202
-    _await_compile(client, course_id)
-    prog = client.get(f"/api/v1/learn/courses/{course_id}/progress").json()
-    assert prog["total"] == 0 and prog["done"] == 0 and prog["percent"] == 0.0
-    assert prog["current_unit_id"] is None
-    # 编译计数仍按 unit 行（M-1 语义不动），与学习进度口径正交
-    assert client.get(f"/api/v1/learn/courses/{course_id}/compile").json()["total"] >= 3
-    unit_id = client.get(
-        f"/api/v1/learn/courses/{course_id}/units", params={"level": "unit"}
-    ).json()["units"][0]["unit_id"]
-    assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": unit_id, "status": "done"}
-    ).status_code == 409
-    assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": "kp-missing", "status": "bogus"}
-    ).status_code == 422
-    assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": "kp-missing", "status": "done"}
-    ).status_code == 404
+def test_owner_partition_isolates_rows_at_store_level():
+    """D7 唯一键 owner 前缀：同一目标在不同 owner 下各自成行，读面按 owner 切分。"""
+    store = InMemoryLearnStore()
+    alice = store.create_course(course_id="c1", resources=[BOOK_RESOURCE], owner="alice")
+    bob = store.create_course(course_id="c1", resources=[BOOK_RESOURCE], owner="bob")
+    assert alice["learn_course_id"] == bob["learn_course_id"] == "c1"
+    assert len(store.list_courses(owner="alice")) == 1
+    assert store.list_courses(owner="carol") == []
+    store.set_kp_status("kp-1", "done", owner="alice")
+    assert set(store.kp_rows(owner="alice")) == {"kp-1"}
+    assert store.kp_rows(owner="bob") == {}
 
 
-# ---------- W5：推进单位＝知识点（§V2.3 读时投影 · 派生键 · 计数改口径） ----------
+def test_learning_ddl_declares_owner_gate_columns_and_unique_key():
+    """列面进建表 DDL：`qe_learning` 单表继承两型行，四枚判定列与 owner 前缀唯一键齐备。"""
+    from qed_engine.services.learn import base as learn_base
 
-STUDY_COURSE = "math_analysis"  # 目录课程 ID（学习课程经 course_ref.ref_id 指向它）
-DEFAULT_OUTLINE = [
+    ddl = learn_base.CREATE_TABLE_SQL
+    assert "CREATE TABLE IF NOT EXISTS qe_learning" in ddl
+    for column in ("owner", "target_kind", "target_id", "status", "config", "learner_note", *GATE_COLUMNS):
+        assert f"  {column} " in ddl, column
+    assert "UNIQUE KEY uq_learning_target (owner, target_kind, target_id)" in ddl
+    assert "COLLATE=utf8mb4_0900_ai_ci" in ddl
+    assert "PROGRESS_GATE_COLUMNS" not in dir(learn_base)  # 补列注册表随编译链退役
+
+
+def test_mysql_learn_store_interface_matches_memory_store():
+    """两实现同形：内存实现的公开方法在 MySQL 存储上缺一不可（签名漂移即红）。"""
+    import inspect
+
+    from qed_engine.services.learn.base import MySQLLearnStore
+
+    def _api(cls):
+        return {
+            name
+            for name, member in inspect.getmembers(cls, predicate=inspect.isfunction)
+            if not name.startswith("_")
+        }
+
+    assert _api(InMemoryLearnStore) - _api(MySQLLearnStore) == set()
+
+
+# ---------- 推进序列＝主表 point 行的读时投影（§V2.3 派生键，零物化） ----------
+
+
+def _env(monkeypatch) -> None:
+    monkeypatch.setenv("API_KEY", "")
+    monkeypatch.setenv("QED_API_SELECT", "api")
+    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
+    monkeypatch.setenv("QED_DB_HOST", "127.0.0.1")
+    monkeypatch.setenv("QED_DB_PORT", "3306")
+    monkeypatch.setenv("QED_DB_NAME", "qed_test")
+    monkeypatch.setenv("QED_DB_USER", "root")
+    monkeypatch.setenv("QED_DB_PASSWORD", "")
+
+
+# 8901 领域课程目录快照（正式名称与领域坐标只在共享表，R5）
+SYNC_DOMAINS = [
     {
-        "name": "第一章 实数",
-        "page_start": 21,
-        "page_end": 30,
-        "children": [{"name": "1.1 实数的完备性", "page_start": 21, "page_end": 24}],
+        "domain_id": "math-advanced",
+        "name": "数学（高等数学）",
+        "courses": [
+            {"course_id": "math_analysis", "name": "数学分析", "stage": "beginner"},
+            {"course_id": "linear_algebra", "name": "高等代数", "stage": "advanced"},
+        ],
     }
 ]
+
+# 8901 教程套（qt_knowledge）：书级两列现网不存在，展示元数据暂由套级字段联接
+SYNC_KNOWLEDGE = [
+    {"knowledge_id": "k-ma", "course_id": "math_analysis", "name": "数学分析教程",
+     "intro": "面向数学专业本科一年级的教材套", "position": "beginner"},
+    {"knowledge_id": "k-la", "course_id": "linear_algebra", "name": "高等代数教程",
+     "intro": "面向数学专业高年级的深入教材套", "position": "advanced"},
+]
+
+# 8902 书目快照：b09 未解析（active_job_id 空）应 PASS；quantum 无课程归属应 PASS
+SYNC_BOOKS = [
+    {"book_id": "mathanalysis-b05", "title": "数学分析", "display_title": "数学分析（第5版）上册",
+     "course_id": "math_analysis", "knowledge_id": "k-ma", "active_job_id": "job-05", "page_count": 317},
+    {"book_id": "mathanalysis-b07", "title": "数分习题", "display_title": "数学分析习题集",
+     "course_id": "math_analysis", "knowledge_id": "k-ma", "active_job_id": "job-07", "page_count": 200},
+    {"book_id": "mathanalysis-b09", "title": "未解析的书", "display_title": "未解析的书",
+     "course_id": "math_analysis", "active_job_id": "", "page_count": 100},
+    {"book_id": "quantum-b01", "title": "量子力学导论", "display_title": "量子力学导论",
+     "course_id": "", "active_job_id": "job-q", "page_count": 90},
+    {"book_id": "linearalgebra-b01", "title": "线性代数", "display_title": "线性代数（第六版）",
+     "course_id": "linear_algebra", "knowledge_id": "k-la", "active_job_id": "job-01", "page_count": 486},
+]
+
+
+def _sync_client(
+    monkeypatch,
+    books=None,
+    *,
+    axiom_online=True,
+    knowledge_online=True,
+    knowledge_store=None,
+    pages=None,
+    practice_store=None,
+):
+    """8901/8902 双侧 MockTransport（判例 test_api）；books 传入可变列表以便同场改解析态。
+
+    knowledge_store：投影序列用例的注入点（学习记录与知识点主表同场，仍不触真实库）。
+    """
+    _env(monkeypatch)
+    rows = SYNC_BOOKS if books is None else books
+
+    def _tracker_handler(request):
+        if request.url.path.endswith("/knowledge"):
+            if not knowledge_online:
+                raise httpx.ConnectError("knowledge down", request=request)
+            return httpx.Response(200, json=SYNC_KNOWLEDGE)
+        return httpx.Response(200, json=SYNC_DOMAINS)
+
+    tracker = TrackerClient(
+        base_url="http://tracker.test", transport=httpx.MockTransport(_tracker_handler)
+    )
+
+    def _axiom_handler(request):
+        if not axiom_online:
+            raise httpx.ConnectError("axiom down", request=request)
+        parts = request.url.path.split("/")
+        if "pages" in parts:  # /api/v1/books/{book_id}/pages/{page_no}（注解取材腿）
+            index = parts.index("pages")
+            key = f"{parts[index - 1]}:{parts[index + 1]}"
+            return httpx.Response(200, json=(pages or {}).get(key, {"blocks": []}))
+        return httpx.Response(200, json=list(rows))
+
+    axiom = AxiomClient(
+        base_url="http://axiom.test", transport=httpx.MockTransport(_axiom_handler)
+    )
+    app = create_app(
+        learn_store=InMemoryLearnStore(),
+        tracker_client=tracker,
+        axiom_client=axiom,
+        knowledge_store=knowledge_store,
+        practice_store=practice_store,
+    )
+    return TestClient(app)
 
 
 def _study_client(
@@ -308,7 +426,7 @@ def _study_client(
     knowledge_store=None,
     practice_store=None,
 ):
-    """sync 出 math_analysis 学习课程 + 知识点两表同场，返回 (client, learn_course_id, outline 行)。"""
+    """sync 出 math_analysis 学习课程 + 知识点主表同场，返回 (client, course_id, outline 行)。"""
     client = _sync_client(
         monkeypatch,
         knowledge_store=knowledge_store or InMemoryKnowledgeStore(),
@@ -316,7 +434,7 @@ def _study_client(
         practice_store=practice_store,
     )
     client.post("/api/v1/learn/courses/sync")
-    course_id = _courses_by_ref(client)[STUDY_COURSE]["learn_course_id"]
+    course_id = _courses_by_id(client)[STUDY_COURSE]["learn_course_id"]
     rows = client.put(
         f"/api/v1/learn/courses/{STUDY_COURSE}/outline",
         json={"book_ref": book_ref, "tree": outline or DEFAULT_OUTLINE},
@@ -329,51 +447,56 @@ def _outline_row(rows, name):
 
 
 def _confirm_point(
-    client, name, *, parent=None, anchors=None, order_hint=None, point_type="concept"
+    client, name, *, parent=None, anchors=None, order_hint=None, point_type="concept",
+    summary=None, aliases=None, narrative_ref="",
 ) -> str:
-    """登记候选并人工确认提升（主表只存已确认行＝学习面唯一消费口径，C14）。"""
+    """直登记一条 point 行＝候选池退役后主表的唯一产面（写入这一动作即承载确认，D10）。"""
     body = {
         "course_id": STUDY_COURSE,
         "name": name,
-        "narrative": f"{name}的叙述",
         "type": point_type,
+        "summary": summary if summary is not None else f"{name}的叙述",
         "anchors": anchors or [],
-        "gen_batch": "w5-demo",
-        "model_ref": "manual-demo",
+        "aliases": aliases or [],
+        "narrative_ref": narrative_ref,
     }
     if parent is not None:
         body["parent_kp_id"] = parent
-    detail = client.post("/api/v1/learn/kp-details", json=body)
-    assert detail.status_code == 200, detail.text
-    confirmed = client.post(f"/api/v1/learn/kp-details/{detail.json()['detail_id']}/confirm")
-    assert confirmed.status_code == 200, confirmed.text
-    kp_id = confirmed.json()["point"]["kp_id"]
     if order_hint is not None:
-        patched = client.patch(f"/api/v1/learn/knowledge-points/{kp_id}", json={"order_hint": order_hint})
-        assert patched.status_code == 200, patched.text
-    return kp_id
+        body["order_hint"] = order_hint
+    resp = client.post("/api/v1/learn/knowledge-points", json=body)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["kp_id"]
 
 
-def _point_units(client, course_id):
-    return client.get(f"/api/v1/learn/courses/{course_id}/units", params={"level": "point"}).json()
+def _courses_by_id(client):
+    return {
+        c["learn_course_id"]: c
+        for c in client.get("/api/v1/learn/courses").json()["courses"]
+    }
+
+
+def _sequence(client, course_id):
+    return client.get(f"/api/v1/learn/courses/{course_id}/knowledge-points").json()["sequence"]
 
 
 def test_point_units_project_confirmed_points_without_writing(monkeypatch):
+    """投影序列：已确认 point 行按章折叠、派生键 `kp:{kp_id}`，未落笔时 learner 全空（零物化）。"""
     client, course_id, rows = _study_client(monkeypatch)
     chapter = _outline_row(rows, "第一章 实数")
     section = _outline_row(rows, "1.1 实数的完备性")
     first = _confirm_point(client, "确界原理", parent=section["kp_id"])
     second = _confirm_point(client, "单调有界定理", parent=chapter["kp_id"])
 
-    body = _point_units(client, course_id)
+    body = _sequence(client, course_id)
     units = body["units"]
-    assert [u["unit_id"] for u in units] == [f"kp:{first}", f"kp:{second}"]  # 稳定派生键
+    assert body["enrolled"] is True and body["kp_path"] == []
+    assert [u["unit_id"] for u in units] == [f"kp:{first}", f"kp:{second}"]
     assert [u["kp_id"] for u in units] == [first, second]
-    assert {u["level"] for u in units} == {"point"}
-    assert units[0]["title"] == "确界原理"
-    assert units[0]["parent_id"] == f"kp:{chapter['kp_id']}"  # 节层不下显：归属折到所属章（C15）
-    assert units[0]["summary"] == "确界原理的叙述"
-    assert units[0]["confirmed"] is True and units[0]["covered"] is False
+    assert units[0]["title"] == "确界原理" and units[0]["summary"] == "确界原理的叙述"
+    assert units[0]["parent_id"] == f"kp:{chapter['kp_id']}"  # 节层不下显：归属折叠到所属章
+    assert units[0]["chapter_kp_id"] == chapter["kp_id"]
+    assert units[0]["learner"] is None  # 未落笔＝无 kp 行
     assert units[0]["window_source"] == "chapter"  # 知识点自身无页范围 → 整章页窗兜底
     assert units[0]["source_ref"]["ref_id"] == "mathanalysis-b05"
     assert units[0]["source_ref"]["page_start"] == 21 and units[0]["source_ref"]["page_end"] == 30
@@ -383,17 +506,18 @@ def test_point_units_project_confirmed_points_without_writing(monkeypatch):
     assert chapters[0]["name"] == "第一章 实数"
     assert chapters[0]["point_count"] == 2
 
-    # 读时投影零写入：未落笔时单元表没有 point 行
-    assert client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"] == []
+    assert client.app.state.learn_store.kp_rows() == {}
 
 
 def test_point_projection_falls_back_to_anchor_pages(monkeypatch):
+    """三级回落第二档：知识点自带锚点页优先于所属章页窗，ref 取锚点自己的书。"""
     client, course_id, rows = _study_client(monkeypatch)
     chapter = _outline_row(rows, "第一章 实数")
     kp_id = _confirm_point(
-        client, "区间套定理", parent=chapter["kp_id"], anchors=[{"kind": "book", "ref_id": "mathanalysis-b07", "page": 88}]
+        client, "区间套定理", parent=chapter["kp_id"],
+        anchors=[{"kind": "book", "ref_id": "mathanalysis-b07", "page": 88}],
     )
-    unit = _point_units(client, course_id)["units"][0]
+    unit = _sequence(client, course_id)["units"][0]
     assert unit["window_source"] == "anchor"
     assert unit["source_ref"]["ref_id"] == "mathanalysis-b07"
     assert unit["source_ref"]["page_start"] == unit["source_ref"]["page_end"] == 88
@@ -401,6 +525,7 @@ def test_point_projection_falls_back_to_anchor_pages(monkeypatch):
 
 
 def test_point_projection_orders_by_chapter_sequence_then_hint(monkeypatch):
+    """序＝章序（order_hint 在前、其余按创建序）× 章内同口径；未归档池不进推进序列。"""
     client, course_id, rows = _study_client(
         monkeypatch,
         outline=[
@@ -410,14 +535,15 @@ def test_point_projection_orders_by_chapter_sequence_then_hint(monkeypatch):
     )
     ch1 = _outline_row(rows, "第一章 实数")
     ch2 = _outline_row(rows, "第二章 极限")
-    _confirm_point(client, "未归档点")  # parent_kp_id NULL＝未归档池，不进推进序列
+    _confirm_point(client, "未归档点")  # parent_kp_id NULL＝未归档池
     _confirm_point(client, "章二后学", parent=ch2["kp_id"], order_hint=2)
     _confirm_point(client, "章二先学", parent=ch2["kp_id"], order_hint=1)
     _confirm_point(client, "章一无序甲", parent=ch1["kp_id"])
     _confirm_point(client, "章一有号", parent=ch1["kp_id"], order_hint=9)
     _confirm_point(client, "章一无序乙", parent=ch1["kp_id"])
 
-    units = _point_units(client, course_id)["units"]
+    body = client.get(f"/api/v1/learn/courses/{course_id}/knowledge-points").json()
+    units = body["sequence"]["units"]
     assert [u["title"] for u in units] == [
         "章一有号",
         "章一无序甲",
@@ -426,52 +552,111 @@ def test_point_projection_orders_by_chapter_sequence_then_hint(monkeypatch):
         "章二后学",
     ]
     assert [u["sort_order"] for u in units] == sorted(u["sort_order"] for u in units)
+    assert "未归档点" not in {u["title"] for u in units}
+    assert body["total"] == 6  # 主数据面照出未归档池，只有推进序列排除它
 
 
-def test_progress_on_derived_key_materializes_once_and_counts_points(monkeypatch):
+def test_kp_path_reorders_the_projection_sequence(monkeypatch):
+    """`kp_path`＝学习者给定的顺序：列入者按其序，未列入者按默认序垫尾。"""
     client, course_id, rows = _study_client(monkeypatch)
     chapter = _outline_row(rows, "第一章 实数")
     first = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
     second = _confirm_point(client, "单调有界定理", parent=chapter["kp_id"])
-    units = _point_units(client, course_id)["units"]
+    assert client.patch(
+        f"/api/v1/learn/courses/{course_id}", json={"kp_path": [second]}
+    ).status_code == 200
+
+    body = _sequence(client, course_id)
+    assert body["kp_path"] == [second]
+    assert [u["kp_id"] for u in body["units"]] == [second, first]
+    assert [u["sort_order"] for u in body["units"]] == [0, 1]
+
+
+def test_progress_writes_kp_row_and_counts_points(monkeypatch):
+    """勾选落笔＝写 kp 行终态位（首笔起行、重复幂等）；进度与结课态一律读时重算。"""
+    client, course_id, rows = _study_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")
+    first = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
+    second = _confirm_point(client, "单调有界定理", parent=chapter["kp_id"])
+    units = _sequence(client, course_id)["units"]
 
     prog = client.get(f"/api/v1/learn/courses/{course_id}/progress").json()
     assert (prog["total"], prog["done"], prog["percent"]) == (2, 0, 0.0)
     assert prog["current_unit_id"] == units[0]["unit_id"]
 
     posted = client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": f"kp:{first}", "status": "done"}
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": first, "status": "done"}
     )
     assert posted.status_code == 200, posted.text
+    assert posted.json()["status"] == "done"
     assert posted.json()["derived"]["done"] == 1 and posted.json()["derived"]["percent"] == 50.0
 
-    # 首次落笔才物化：重复勾选同一派生键不产生第二行
     assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": f"kp:{first}", "status": "done"}
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": first, "status": "done"}
     ).status_code == 200
-    materialized = [
-        u for u in client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"] if u["level"] == "point"
-    ]
-    assert len(materialized) == 1
-    assert materialized[0]["unit_id"] == f"kp:{first}"
-    assert materialized[0]["title"] == "确界原理"
-    assert materialized[0]["parent_id"] == f"kp:{chapter['kp_id']}"
-
-    # 投影行读回物化后的勾选位
-    assert _point_units(client, course_id)["units"][0]["covered"] is True
+    store = client.app.state.learn_store
+    assert set(store.kp_rows()) == {first}  # 重复勾选不起第二行
+    assert _sequence(client, course_id)["units"][0]["learner"]["status"] == "done"
 
     assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": f"kp:{second}", "status": "skipped"}
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": second, "status": "skipped"}
     ).status_code == 200
     final = client.get(f"/api/v1/learn/courses/{course_id}/progress").json()
     assert final["skipped"] == 1 and final["completed"] is True and final["percent"] == 50.0
     assert final["current_unit_id"] is None
 
+    revoked = client.post(
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": second, "status": "pending"}
+    )
+    assert revoked.json()["removed"] is True and revoked.json()["derived"]["completed"] is False
+    assert set(store.kp_rows()) == {first}
+
+
+def test_progress_body_requires_kp_id_and_rejects_retired_names(monkeypatch):
+    """入参闭集：`unit_id` 随单元树退役（extra=forbid → 422）；目标与课程不存在分别 404。"""
+    client, course_id, rows = _study_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")
+    kp_id = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
+    url = f"/api/v1/learn/courses/{course_id}/progress"
+    assert client.post(url, json={"unit_id": f"kp:{kp_id}", "status": "done"}).status_code == 422
+    assert client.post(url, json={"kp_id": kp_id}).status_code == 422
+    assert client.post(url, json={"kp_id": kp_id, "status": "bogus"}).status_code == 422
+    assert client.post(url, json={"kp_id": "kp-missing", "status": "done"}).status_code == 404
+    assert client.post(
+        "/api/v1/learn/courses/lc-missing/progress", json={"kp_id": kp_id, "status": "done"}
+    ).status_code == 404
+    assert client.app.state.learn_store.kp_rows() == {}
+
+
+def test_progress_note_lands_on_the_learner_note_column(monkeypatch):
+    """备注随勾选落 kp 行 `learner_note`（人工位，R6）；整行被撤销时备注随行作废。"""
+    client, course_id, rows = _study_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")
+    kp_id = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
+    posted = client.post(
+        f"/api/v1/learn/courses/{course_id}/progress",
+        json={"kp_id": kp_id, "status": "done", "note": "课本 p21 的定义更清楚"},
+    )
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["learner_note"] == "课本 p21 的定义更清楚"
+    assert _sequence(client, course_id)["units"][0]["learner"]["learner_note"] == "课本 p21 的定义更清楚"
+    revoked = client.post(
+        f"/api/v1/learn/courses/{course_id}/progress",
+        json={"kp_id": kp_id, "status": "pending", "note": "不该留下新行"},
+    )
+    assert revoked.json()["removed"] is True
+    assert client.app.state.learn_store.kp_rows() == {}
+    assert client.post(
+        f"/api/v1/learn/courses/{course_id}/progress",
+        json={"kp_id": kp_id, "status": "done", "note": "n" * 2001},
+    ).status_code == 422
+
 
 def test_derived_status_and_books_count_knowledge_points(monkeypatch):
+    """派生态三态与教材级进度同一口径（计数单位＝投影知识点行 × kp 行，读时重算）。"""
     client = _sync_client(monkeypatch, knowledge_store=InMemoryKnowledgeStore())
     client.post("/api/v1/learn/courses/sync")
-    course_id = _courses_by_ref(client)[STUDY_COURSE]["learn_course_id"]
+    course_id = _courses_by_id(client)[STUDY_COURSE]["learn_course_id"]
     b05 = client.put(
         f"/api/v1/learn/courses/{STUDY_COURSE}/outline",
         json={"book_ref": "mathanalysis-b05", "tree": [{"name": "第一章 实数", "page_start": 21, "page_end": 30}]},
@@ -480,11 +665,11 @@ def test_derived_status_and_books_count_knowledge_points(monkeypatch):
     first = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
     _confirm_point(client, "单调有界定理", parent=chapter["kp_id"])
     assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": f"kp:{first}", "status": "done"}
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": first, "status": "done"}
     ).status_code == 200
 
-    listed = client.get("/api/v1/learn/courses").json()["courses"]
-    target = next(c for c in listed if c["learn_course_id"] == course_id)
+    target = _courses_by_id(client)[course_id]
+    assert target["unit_count"] == 2
     assert target["derived"]["status"] == "learning"
     assert target["derived"]["total"] == 2 and target["derived"]["done"] == 1
     books = {b["ref_id"]: b for b in target["derived"]["books"]}
@@ -497,7 +682,7 @@ def test_derived_status_and_books_count_knowledge_points(monkeypatch):
     assert "mathanalysis-b09" not in books
 
 
-# ---------- W1：learn 域三表存储懒挂载（消 503；判例 DEFECT-009） ----------
+# ---------- W1：learn 域存储懒挂载（消 503；判例 DEFECT-009） ----------
 
 
 def _lazy_learn_client(monkeypatch, ensure_tables):
@@ -516,7 +701,7 @@ def _lazy_learn_client(monkeypatch, ensure_tables):
 
 
 def test_learn_courses_mount_store_on_first_request(monkeypatch):
-    """W1：首个 /learn/courses 请求幂等建三表并挂载，503 消除且只建一次。"""
+    """首个 /learn/courses 请求幂等建表并挂载，503 消除且只建一次。"""
     calls: list[object] = []
     client = _lazy_learn_client(monkeypatch, lambda settings: calls.append(settings))
 
@@ -525,7 +710,7 @@ def test_learn_courses_mount_store_on_first_request(monkeypatch):
 
     assert client.post("/api/v1/learn/courses", json=COURSE_BODY).status_code == 200
     courses = client.get("/api/v1/learn/courses").json()["courses"]
-    assert courses[0]["name"] == "数学分析"
+    assert courses[0]["name"] == STUDY_COURSE  # 目录不可达时名称回落 course_id
     assert len(calls) == 1  # 挂载后不重复建表
 
 
@@ -575,252 +760,22 @@ def test_learn_store_mount_skipped_without_db_password(monkeypatch):
     assert calls == []  # 未配置密码不尝试建表
 
 
-def test_mysql_learn_store_interface_matches_memory_store():
-    """两实现同形：内存实现的公开方法在 MySQL 存储上缺一不可（签名漂移即红）。"""
-    import inspect
-
-    from qed_engine.services.learn.base import MySQLLearnStore
-
-    def _api(cls):
-        return {
-            name
-            for name, member in inspect.getmembers(cls, predicate=inspect.isfunction)
-            if not name.startswith("_")
-        }
-
-    assert _api(InMemoryLearnStore) - _api(MySQLLearnStore) == set()
-
-
-# ---------- M1 承接：单元树节点承载位（type / payload / source_ref 页窗） ----------
-
-
-def test_syllabus_carries_node_type_payload_and_source_ref(client):
-    """草稿整树写入保留节点级承载位（链路视图与真实正文渲染的数据源）。"""
-    course_id = _make_course(client)
-    tree = [
-        {
-            "title": "第一章 极限",
-            "children": [
-                {
-                    "title": "1.1 数列极限",
-                    "type": "text",
-                    "source_ref": {"ref_id": "mathanalysis-b05", "page_start": 21, "page_end": 28},
-                    "payload": {"text": "书内正文摘要"},
-                },
-                {"title": "1.2 图示", "type": "figure"},
-            ],
-        }
-    ]
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": tree}
-    ).status_code == 200
-    units = client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]
-    by_title = {u["title"]: u for u in units}
-    text_block = by_title["1.1 数列极限"]
-    assert text_block["type"] == "text"
-    assert text_block["source_ref"] == {
-        "ref_id": "mathanalysis-b05",
-        "page_start": 21,
-        "page_end": 28,
-    }
-    assert text_block["payload"] == {"text": "书内正文摘要"}
-    figure_block = by_title["1.2 图示"]
-    assert figure_block["type"] == "figure"
-    assert figure_block["source_ref"] is None
-    assert figure_block["payload"] == {}
-
-
-def test_syllabus_rejects_unknown_node_type(client):
-    course_id = _make_course(client)
-    bad = [{"title": "坏类型", "type": "video"}]
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": bad}
-    ).status_code == 422
-    assert client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"] == []
-
-
-def test_skeleton_compile_preserves_declared_source_ref_and_payload(client):
-    """骨架编译只补空位：已声明的溯源页窗与正文不被占位文本覆写。"""
-    course_id = _make_course(client)
-    assert client.post(
-        f"/api/v1/learn/courses/{course_id}/compile/propose",
-        json={"page_windows": [{"start": 21, "end": 28}]},
-    ).status_code == 200
-    tree = [
-        {
-            "title": "第一章",
-            "children": [
-                {
-                    "title": "1.1 已绑真实页",
-                    "type": "text",
-                    "source_ref": {"ref_id": "mathanalysis-b05", "page_start": 21, "page_end": 28},
-                },
-                {"title": "1.2 未绑页", "type": "text"},
-            ],
-        }
-    ]
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": tree}
-    ).status_code == 200
-    for unit in client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]:
-        assert client.patch(f"/api/v1/learn/units/{unit['unit_id']}", json={"confirmed": True}).status_code == 200
-    assert client.post(f"/api/v1/learn/courses/{course_id}/compile/start").status_code == 202
-    assert _await_compile(client, course_id)["compile_status"] == "completed"
-    blocks = {
-        b["title"]: b
-        for b in client.get(
-            f"/api/v1/learn/courses/{course_id}/units", params={"level": "unit"}
-        ).json()["units"]
-    }
-    bound = blocks["1.1 已绑真实页"]
-    assert bound["gen_status"] == "generated"
-    assert bound["source_ref"]["page_start"] == 21
-    assert bound["payload"] == {}  # 不写占位正文，前端按页窗渲染真实解析产物
-    unbound = blocks["1.2 未绑页"]
-    assert unbound["source_ref"]["ref_id"] == "mathanalysis-b05"
-    assert unbound["source_ref"]["page"] is None
-    assert "骨架正文" in unbound["payload"]["text"]
-def test_course_list_carries_unit_count_for_shelf_badge(client):
-    """书架徽章口径：列表项与详情同带 unit_count（「待建链路／草稿」由链路节点数决定）。"""
-    course_id = _make_course(client)
-    listed = {
-        c["learn_course_id"]: c for c in client.get("/api/v1/learn/courses").json()["courses"]
-    }[course_id]
-    assert listed["unit_count"] == 0
-    assert listed["derived"]["status"] == "draft"
-
-    assert client.put(
-        f"/api/v1/learn/courses/{course_id}/syllabus", json={"tree": VALID_TREE}
-    ).status_code == 200
-    units = client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"]
-    listed = {
-        c["learn_course_id"]: c for c in client.get("/api/v1/learn/courses").json()["courses"]
-    }[course_id]
-    assert listed["unit_count"] == len(units)
-    assert listed["course_ref"]["ref_id"] == COURSE_BODY["course_ref"]["ref_id"]
-
-
-# ---------- REQ-117 W8：书架清单 v2（解析好即同步 + 教材级进度 + 教材级忽略位） ----------
-
-# 8901 领域课程目录快照（正式名称取共享表：linear_algebra 的正名是「高等代数」）
-SYNC_DOMAINS = [
-    {
-        "domain_id": "math-advanced",
-        "name": "数学（高等数学）",
-        "courses": [
-            {"course_id": "math_analysis", "name": "数学分析", "stage": "beginner"},
-            {"course_id": "linear_algebra", "name": "高等代数", "stage": "advanced"},
-        ],
-    }
-]
-
-# 8902 书目快照：b09 未解析（active_job_id 空）应 PASS；quantum 无课程归属应 PASS
-# 8901 教程套（qt_knowledge）：书级两列现网不存在，展示元数据暂由套级字段联接
-SYNC_KNOWLEDGE = [
-    {"knowledge_id": "k-ma", "course_id": "math_analysis", "name": "数学分析教程",
-     "intro": "面向数学专业本科一年级的教材套", "position": "beginner"},
-    {"knowledge_id": "k-la", "course_id": "linear_algebra", "name": "高等代数教程",
-     "intro": "面向数学专业高年级的深入教材套", "position": "advanced"},
-]
-
-SYNC_BOOKS = [
-    {"book_id": "mathanalysis-b05", "title": "数学分析", "display_title": "数学分析（第5版）上册",
-     "course_id": "math_analysis", "knowledge_id": "k-ma", "active_job_id": "job-05", "page_count": 317},
-    {"book_id": "mathanalysis-b07", "title": "数分习题", "display_title": "数学分析习题集",
-     "course_id": "math_analysis", "knowledge_id": "k-ma", "active_job_id": "job-07", "page_count": 200},
-    {"book_id": "mathanalysis-b09", "title": "未解析的书", "display_title": "未解析的书",
-     "course_id": "math_analysis", "active_job_id": "", "page_count": 100},
-    {"book_id": "quantum-b01", "title": "量子力学导论", "display_title": "量子力学导论",
-     "course_id": "", "active_job_id": "job-q", "page_count": 90},
-    {"book_id": "linearalgebra-b01", "title": "线性代数", "display_title": "线性代数（第六版）",
-     "course_id": "linear_algebra", "knowledge_id": "k-la", "active_job_id": "job-01", "page_count": 486},
-]
-
-
-def _env(monkeypatch) -> None:
-    monkeypatch.setenv("API_KEY", "")
-    monkeypatch.setenv("QED_API_SELECT", "api")
-    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
-    monkeypatch.setenv("QED_DB_HOST", "127.0.0.1")
-    monkeypatch.setenv("QED_DB_PORT", "3306")
-    monkeypatch.setenv("QED_DB_NAME", "qed_test")
-    monkeypatch.setenv("QED_DB_USER", "root")
-    monkeypatch.setenv("QED_DB_PASSWORD", "")
-
-
-def _sync_client(
-    monkeypatch,
-    books=None,
-    *,
-    axiom_online=True,
-    knowledge_online=True,
-    knowledge_store=None,
-    pages=None,
-    practice_store=None,
-):
-    """8901/8902 双侧 MockTransport（判例 test_api）；books 传入可变列表以便同场改解析态。
-
-    knowledge_store：W5 知识点投影用例的注入点（学习课程与知识点两表同场，仍不触真实库）。
-    """
-    _env(monkeypatch)
-    rows = SYNC_BOOKS if books is None else books
-
-    def _tracker_handler(request):
-        if request.url.path.endswith("/knowledge"):
-            if not knowledge_online:
-                raise httpx.ConnectError("knowledge down", request=request)
-            return httpx.Response(200, json=SYNC_KNOWLEDGE)
-        return httpx.Response(200, json=SYNC_DOMAINS)
-
-    tracker = TrackerClient(
-        base_url="http://tracker.test", transport=httpx.MockTransport(_tracker_handler)
-    )
-
-    def _axiom_handler(request):
-        if not axiom_online:
-            raise httpx.ConnectError("axiom down", request=request)
-        parts = request.url.path.split("/")
-        if "pages" in parts:  # /api/v1/books/{book_id}/pages/{page_no}（W9 取材腿）
-            index = parts.index("pages")
-            key = f"{parts[index - 1]}:{parts[index + 1]}"
-            return httpx.Response(200, json=(pages or {}).get(key, {"blocks": []}))
-        return httpx.Response(200, json=list(rows))
-
-    axiom = AxiomClient(
-        base_url="http://axiom.test", transport=httpx.MockTransport(_axiom_handler)
-    )
-    app = create_app(
-        learn_store=InMemoryLearnStore(),
-        tracker_client=tracker,
-        axiom_client=axiom,
-        knowledge_store=knowledge_store,
-        practice_store=practice_store,
-    )
-    return TestClient(app)
-
-
-def _courses_by_ref(client):
-    return {
-        c["course_ref"]["ref_id"]: c
-        for c in client.get("/api/v1/learn/courses").json()["courses"]
-    }
+# ---------- REQ-117 W8：书架清单 v2（解析好即同步 + 教材级忽略位） ----------
 
 
 def test_sync_creates_courses_from_parsed_books_with_official_names(monkeypatch):
-    """解析好即同步：只读物化为学习课程，正名取共享表，未解析/无归属者 PASS，二次调用幂等。"""
+    """解析好即同步：只读物化为 course 行，正名与领域取共享表，未解析/无归属者 PASS，二次幂等。"""
     client = _sync_client(monkeypatch)
     body = client.post("/api/v1/learn/courses/sync").json()
     assert body["created"] == ["linear_algebra", "math_analysis"]
     assert body["updated"] == []
     assert body["synced"] == 3
 
-    courses = _courses_by_ref(client)
+    courses = _courses_by_id(client)
     assert courses["math_analysis"]["name"] == "数学分析"
     assert courses["linear_algebra"]["name"] == "高等代数"
-    assert courses["math_analysis"]["domain_ref"] == {
-        "ref_id": "math-advanced",
-        "label": "数学（高等数学）",
-    }
+    assert courses["math_analysis"]["domain_id"] == "math-advanced"
+    assert courses["math_analysis"]["track"] == "未归类"
     refs = [r["ref_id"] for r in courses["math_analysis"]["resources"]]
     assert refs == ["mathanalysis-b05", "mathanalysis-b07"]
     assert courses["math_analysis"]["resources"][0]["kind"] == "book"
@@ -831,17 +786,16 @@ def test_sync_creates_courses_from_parsed_books_with_official_names(monkeypatch)
     assert len(client.get("/api/v1/learn/courses").json()["courses"]) == 2
 
 
-def test_sync_unions_new_books_and_preserves_dismissed_and_local_name(monkeypatch):
-    """并集补入：新书只追加，不覆盖用户的教材级忽略位与自定课程名。"""
+def test_sync_unions_new_books_and_preserves_the_dismissed_bit(monkeypatch):
+    """并集补入：新书只追加，不覆盖用户的教材级忽略位；名称归共享表（学习行不复制）。"""
     books = [dict(b) for b in SYNC_BOOKS]
     client = _sync_client(monkeypatch, books)
     client.post("/api/v1/learn/courses/sync")
-    course_id = _courses_by_ref(client)["math_analysis"]["learn_course_id"]
+    course_id = _courses_by_id(client)["math_analysis"]["learn_course_id"]
 
     assert client.patch(
         f"/api/v1/learn/courses/{course_id}",
         json={
-            "name": "自定名",
             "resources": [
                 {"kind": "book", "ref_id": "mathanalysis-b05", "label": "数学分析（第5版）上册"},
                 {"kind": "book", "ref_id": "mathanalysis-b07", "label": "数学分析习题集", "dismissed": True},
@@ -855,7 +809,7 @@ def test_sync_unions_new_books_and_preserves_dismissed_and_local_name(monkeypatc
     assert body["updated"] == ["math_analysis"]
 
     course = client.get(f"/api/v1/learn/courses/{course_id}").json()
-    assert course["name"] == "自定名"
+    assert course["name"] == "数学分析"
     by_ref = {r["ref_id"]: r for r in course["resources"]}
     assert set(by_ref) == {"mathanalysis-b05", "mathanalysis-b07", "mathanalysis-b09"}
     assert by_ref["mathanalysis-b07"]["dismissed"] is True
@@ -871,8 +825,35 @@ def test_sync_returns_503_when_axiom_offline_and_course_list_still_works(monkeyp
     assert "解析" in response.json()["detail"]
 
 
+def test_catalog_offline_degrades_names_without_breaking_the_shelf(monkeypatch):
+    """8901 不可达＝读面降级（名称回落 course_id），写面 sync 明确 503 不静默。"""
+    _env(monkeypatch)
+    monkeypatch.setattr(
+        TrackerClient, "list_courses_system",
+        lambda self: (_ for _ in ()).throw(httpx.ConnectError("tracker down")),
+    )
+    axiom = AxiomClient(base_url="http://axiom.test", transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=list(SYNC_BOOKS))
+    ))
+    client = TestClient(create_app(
+        learn_store=InMemoryLearnStore(),
+        tracker_client=TrackerClient(base_url="http://tracker.test", transport=httpx.MockTransport(
+            lambda request: (_ for _ in ()).throw(httpx.ConnectError("tracker down"))
+        )),
+        axiom_client=axiom,
+    ))
+    listed = client.get("/api/v1/learn/courses").json()
+    assert listed["courses"] == []
+    assert client.post("/api/v1/learn/courses", json=COURSE_BODY).status_code == 200
+    course = client.get(f"/api/v1/learn/courses/{STUDY_COURSE}").json()
+    assert course["name"] == STUDY_COURSE
+    assert course["domain_id"] == "" and course["track"] == "未归类"
+    sync = client.post("/api/v1/learn/courses/sync")
+    assert sync.status_code == 503 and "课程目录不可达" in sync.json()["detail"]
+
+
 def test_patch_course_resources_persists_dismissed_and_rejects_bad_kind(client):
-    """忽略位零 DDL：dismissed 落 resources JSON 键，整列提交可持久；kind 闭集仍守。"""
+    """忽略位零 DDL：dismissed 落 `config.resources` 键，整列提交可持久；kind 闭集仍守。"""
     course_id = _make_course(client)
     patched = client.patch(
         f"/api/v1/learn/courses/{course_id}",
@@ -888,6 +869,9 @@ def test_patch_course_resources_persists_dismissed_and_rejects_bad_kind(client):
         json={"resources": [{"kind": "pdf", "ref_id": "x", "label": "y"}]},
     )
     assert bad.status_code == 422
+    assert client.patch(
+        f"/api/v1/learn/courses/{course_id}", json={"resources": []}
+    ).status_code == 409
 
 
 def test_sync_returns_book_meta_with_intro_and_position(monkeypatch):
@@ -904,7 +888,7 @@ def test_sync_returns_book_meta_with_intro_and_position(monkeypatch):
 
 
 def test_sync_degrades_when_knowledge_unreachable(monkeypatch):
-    """8901 教程套读不到不阻断同步：展示字段留空，课程物化照常。"""
+    """8901 教程套读不到不阻断同步：展示字段留空，课程行照常物化。"""
     client = _sync_client(monkeypatch, knowledge_online=False)
     body = client.post("/api/v1/learn/courses/sync")
     assert body.status_code == 200
@@ -914,7 +898,7 @@ def test_sync_degrades_when_knowledge_unreachable(monkeypatch):
     assert meta["mathanalysis-b05"]["position"] == ""
 
 
-# ---------- W9：注解面与按需生成腿（§V2.11 两端点，C18~C21） ----------
+# ---------- W9：注解面与按需生成腿（§V2.11 一端点，D10 改道主表） ----------
 
 ANNOTATION_TEXT = "设 S 是非空有上界的数集，则 S 必有上确界。"
 GEN = "/api/v1/learn/annotations/generate"
@@ -931,7 +915,7 @@ def _annotation_pages():
 def _annotation_client(
     monkeypatch, *, pages=None, reply="这是生成结果。", success=True, error="", clock=None
 ):
-    """W9 用例场：学习课程＋目录＋已确认知识点＋书页可读同场，文字网关打桩（默认测试不调模型）。"""
+    """注解用例场：学习课程＋目录＋已确认知识点＋书页可读同场，文字网关打桩（默认测试不调模型）。"""
     from qed_engine.services.learn import annotations
 
     store = InMemoryKnowledgeStore()
@@ -963,7 +947,7 @@ def _generate(client, body):
 
 
 def test_generate_chapter_summary_persists_on_chapter_row(monkeypatch):
-    """章级总结＝写章行 summary（覆写、成品位单一），随 units 一次直读，前端不另取。"""
+    """章级总结＝覆写章行 `summary`（成品位单一），随 knowledge-points 的 chapters 一次直读。"""
     reply = "本章从实数的完备性出发，串起确界原理与单调有界原理的等价链条。"
     client, course_id, rows, store, _kp, calls = _annotation_client(monkeypatch, reply=reply)
     chapter = _outline_row(rows, "第一章 实数")
@@ -978,7 +962,7 @@ def test_generate_chapter_summary_persists_on_chapter_row(monkeypatch):
     assert calls[0]["max_tokens"] > 0
     assert ANNOTATION_TEXT in calls[0]["prompt"]  # 取材正文进 prompt（前端不拼 prompt）
     assert chapter["name"] in calls[0]["prompt"]
-    assert _point_units(client, course_id)["chapters"][0]["summary"] == reply
+    assert _sequence(client, course_id)["chapters"][0]["summary"] == reply
 
 
 def test_generate_chapter_key_points_overwrites_meta_slot(monkeypatch):
@@ -1012,12 +996,12 @@ def test_generate_chapter_key_points_overwrites_meta_slot(monkeypatch):
     second = _generate(client, body)
     assert second.json()["chapter"]["key_points"] == ["唯一要点"]
     assert store.get_point(chapter["kp_id"])["meta"]["chapter_key_points"] == ["唯一要点"]
-    assert _point_units(client, course_id)["chapters"][0]["key_points"] == ["唯一要点"]
+    assert _sequence(client, course_id)["chapters"][0]["key_points"] == ["唯一要点"]
     assert len(calls) == 2
 
 
-def test_generate_point_annotation_appends_candidate_versions(monkeypatch):
-    """条级注解＝候选池多版本并存（不覆写），主表与确认位一律不动（C19 承 C14）。"""
+def test_generate_point_annotation_appends_angle_note(monkeypatch):
+    """条级注解＝主表 `angles` 追加/覆写同角 note（候选池退役后的新落点，D10）；主表其余列不动。"""
     client, course_id, _rows, store, kp_id, _calls = _annotation_client(
         monkeypatch, reply=["第一版注解。", "第二版注解。"]
     )
@@ -1025,27 +1009,21 @@ def test_generate_point_annotation_appends_candidate_versions(monkeypatch):
     body = {"course_id": course_id, "target_kind": "point", "kp_id": kp_id, "part": "annotation"}
     resp = _generate(client, body)
     assert resp.status_code == 200, resp.text
-    detail = resp.json()["detail"]
-    assert detail["gen_status"] == "candidate"
-    assert detail["confirmed"] in (False, 0)
-    assert detail["intent"] == "summary"
-    assert detail["gen_batch"] == "learn-annotation"
-    assert detail["model_ref"] == "call-1"
-    assert detail["parent_kp_id"] == kp_id and detail["name"] == "确界原理"
-    anchor = detail["anchors"][0]
-    assert anchor["kind"] == "book" and anchor["ref_id"] == "mathanalysis-b05"
-    assert anchor["page"] == 21 and ANNOTATION_TEXT in anchor["snippet"]
+    point = resp.json()["point"]
+    assert point["kp_id"] == kp_id and point["name"] == "确界原理"
+    assert point["angles"] == [{"angle": "explanation", "note": "第一版注解。"}]
+    assert point["summary"] == before["summary"]
     again = _generate(client, body)
     assert again.status_code == 200, again.text
-    pool = store.list_details(course_id=STUDY_COURSE, batch="learn-annotation")
-    assert len(pool) == 2
-    assert {row["narrative"] for row in pool} == {"第一版注解。", "第二版注解。"}
-    point = store.get_point(kp_id)
-    assert point["summary"] == before["summary"] and point["name"] == before["name"]
+    assert again.json()["point"]["angles"] == [{"angle": "explanation", "note": "第二版注解。"}]
+    stored = store.get_point(kp_id)
+    assert len(stored["angles"]) == 1  # 同角不堆叠：数组序＝权威序，一形态只留最新成品
+    assert stored["summary"] == before["summary"] and stored["name"] == before["name"]
+    assert stored["narrative_ref"] == before["narrative_ref"]  # 长文指针只由人工登记腿改
 
 
-def test_chapter_generate_throttles_within_window_and_point_never_dedups(monkeypatch):
-    """章级 60s 内重复＝回上次成品（不重烧模型）；条级不去重（每次都是新版本）。"""
+def test_chapter_generate_throttles_within_window_and_point_always_regenerates(monkeypatch):
+    """章级 60s 内重复＝回上次成品（不重烧模型）；条级不去重（每次真生成，同角覆写成品）。"""
     client, course_id, rows, store, kp_id, calls = _annotation_client(
         monkeypatch, reply=["章总结。", "条注解一。", "条注解二。"]
     )
@@ -1065,7 +1043,7 @@ def test_chapter_generate_throttles_within_window_and_point_never_dedups(monkeyp
     assert _generate(client, point_body).status_code == 200
     assert _generate(client, point_body).status_code == 200
     assert len(calls) == 3
-    assert len(store.list_details(course_id=STUDY_COURSE, batch="learn-annotation")) == 2
+    assert store.get_point(kp_id)["angles"] == [{"angle": "explanation", "note": "条注解二。"}]
 
 
 def test_generate_without_readable_pages_returns_503_and_calls_nothing(monkeypatch):
@@ -1086,7 +1064,7 @@ def test_generate_without_readable_pages_returns_503_and_calls_nothing(monkeypat
 
 
 def test_generate_upstream_failure_returns_502_without_writing(monkeypatch):
-    """上游失败＝502 且给「可以再点一次」；失败批次不写章行、不写候选池。"""
+    """上游失败＝502 且给「可以再点一次」；失败批次不写章行、不追加 angles。"""
     client, course_id, rows, store, kp_id, calls = _annotation_client(
         monkeypatch, success=False, error="请求超时"
     )
@@ -1104,7 +1082,7 @@ def test_generate_upstream_failure_returns_502_without_writing(monkeypatch):
         {"course_id": course_id, "target_kind": "point", "kp_id": kp_id, "part": "annotation"},
     )
     assert point_bad.status_code == 502
-    assert store.list_details(course_id=STUDY_COURSE, batch="learn-annotation") == []
+    assert store.get_point(kp_id)["angles"] == []
 
 
 def test_generate_rejects_bad_combinations_and_unknown_targets(monkeypatch):
@@ -1130,8 +1108,8 @@ def test_generate_rejects_bad_combinations_and_unknown_targets(monkeypatch):
     assert calls == []
 
 
-def test_generate_returns_503_when_knowledge_tables_unreachable(client):
-    """知识点两表不可达＝503 降级话术，学习面其余功能不受影响（独立性铁律）。"""
+def test_generate_returns_503_when_knowledge_table_unreachable(client):
+    """知识点主表不可达＝503 降级话术，学习面其余功能不受影响（独立性铁律）。"""
     course_id = _make_course(client)
     resp = _generate(
         client, {"course_id": course_id, "target_kind": "chapter", "kp_id": "kp-1", "part": "summary"}
@@ -1140,211 +1118,22 @@ def test_generate_returns_503_when_knowledge_tables_unreachable(client):
     assert "还没准备好" in resp.json()["detail"]
 
 
-def test_like_writes_only_payload_flag(monkeypatch):
-    """点赞＝payload.liked 置位（保留），gen_status/confirmed/主表一律不动（C19）。"""
-    client, _course_id, _rows, store, kp_id, _calls = _annotation_client(monkeypatch)
-    _before_parent = store.get_point(kp_id)["parent_kp_id"]
-    detail = store.add_detail(
-        course_id=STUDY_COURSE,
-        name="确界原理",
-        narrative="既有候选",
-        gen_status="candidate",
-        parent_kp_id=kp_id,
-        payload={"definition": "原有批注载荷"},
-    )
-    resp = client.post(f"/api/v1/learn/kp-details/{detail['detail_id']}/like", json={"liked": True})
-    assert resp.status_code == 200, resp.text
-    row = resp.json()["detail"]
-    assert row["payload"]["liked"] is True
-    assert row["payload"]["definition"] == "原有批注载荷"
-    assert row["gen_status"] == "candidate" and row["confirmed"] in (False, 0)
-    point = store.get_point(kp_id)
-    assert point["summary"] == "确界原理的叙述" and point["parent_kp_id"] == _before_parent
-    off = client.post(
-        f"/api/v1/learn/kp-details/{detail['detail_id']}/like", json={"liked": False}
-    ).json()["detail"]
-    assert off["payload"]["liked"] is False
-    assert client.post("/api/v1/learn/kp-details/kpd-nope/like", json={"liked": True}).status_code == 404
-    assert client.post(f"/api/v1/learn/kp-details/{detail['detail_id']}/like", json={}).status_code == 422
+def test_course_surfaces_stay_readable_without_the_knowledge_leg(monkeypatch):
+    """知识点腿不可达（未注入主表）＝课程面出空序列而不是 503：投影只是读侧便利。"""
+    client = _sync_client(monkeypatch)  # knowledge_store=None
+    client.post("/api/v1/learn/courses/sync")
+    course = client.get(f"/api/v1/learn/courses/{STUDY_COURSE}").json()
+    assert course["unit_count"] == 0 and course["derived"]["total"] == 0
+    assert course["derived"]["status"] == "draft"
+    body = client.get(f"/api/v1/learn/courses/{STUDY_COURSE}/knowledge-points")
+    assert body.status_code == 503  # 主数据面自己才要 503
 
-
-def test_mysql_knowledge_store_gains_annotation_methods():
-    """两实现同形：注解腿的新方法在 MySQL 存储上必须存在（签名漂移即红）。"""
-    import inspect
-
-    from qed_engine.services.learn.knowledge import MySQLKnowledgeStore
-
-    for name in ("patch_point", "set_detail_liked"):
-        assert hasattr(MySQLKnowledgeStore, name), name
-        assert hasattr(InMemoryKnowledgeStore, name), name
-    memory = inspect.signature(InMemoryKnowledgeStore.set_detail_liked)
-    mysql = inspect.signature(MySQLKnowledgeStore.set_detail_liked)
-    assert list(memory.parameters) == list(mysql.parameters)
-
-
-# ---------- 主链 M-3 W2：进度表质性门四列与门态读写面（两实现同形） ----------
-
-GATE_COLUMNS = ("qualitative_passed", "qualitative_note", "assessed_by", "assessed_at")
-
-
-def _gate_store():
-    """只挂一个知识点行的课程：门态读写面的最小形态（不经 API，纯存储层）。"""
-    store = InMemoryLearnStore()
-    course = store.create_course(
-        name="数学分析",
-        resources=[{"kind": "book", "ref_id": "mathanalysis-b05", "label": "数学分析教程"}],
-        course_ref={"ref_id": "ma-course-01", "label": "数学分析"},
-    )
-    course_id = str(course["learn_course_id"])
-    store.ensure_point_unit(
-        course_id,
-        unit_id="kp-limit",
-        kp_id="kp-limit",
-        parent_id=None,
-        title="极限的定义",
-        sort_order=0,
-        source_ref={"ref_id": "mathanalysis-b05", "page": 12},
-        covered=False,
-    )
-    return store, course_id
-
-
-def test_assess_qualitative_writes_gate_columns_and_keeps_status_pending():
-    """D-M3-2 v1 自评位：质性判定落四列，终态位不受影响（派生计数不因判定而虚增）。"""
-    from qed_engine.services.learn.base import LearnNotFound
-
-    store, course_id = _gate_store()
-    assert store.progress_rows(course_id) == {}  # 未落笔＝无行
-    row = store.assess_qualitative(
-        course_id, "kp-limit", passed=True, note="能用自己的话说清 ε-δ", assessed_by="learner"
-    )
-    assert row["unit_id"] == "kp-limit" and row["status"] == "pending"
-    assert row["qualitative_passed"] is True
-    assert row["qualitative_note"] == "能用自己的话说清 ε-δ"
-    assert row["assessed_by"] == "learner" and row["assessed_at"]
-    read = store.progress_rows(course_id)["kp-limit"]
-    assert read["qualitative_passed"] is True and read["assessed_by"] == "learner"
-    with pytest.raises(LearnNotFound):
-        store.assess_qualitative("lc-missing", "kp-limit", passed=True, note="", assessed_by="learner")
-
-
-def test_assess_qualitative_overwrites_and_preserves_terminal_status():
-    """重复判定覆盖同一行（一知识点只留最新质性结论）；已有 done 终态不被抹掉。"""
-    store, course_id = _gate_store()
-    store.set_progress(course_id, "kp-limit", "done")
-    first = store.assess_qualitative(
-        course_id, "kp-limit", passed=True, note="讲清了", assessed_by="learner"
-    )
-    second = store.assess_qualitative(
-        course_id, "kp-limit", passed=False, note="重讲仍含混", assessed_by="learner"
-    )
-    assert first["status"] == second["status"] == "done"
-    assert second["qualitative_passed"] is False and second["qualitative_note"] == "重讲仍含混"
-    assert store.progress_rows(course_id)["kp-limit"]["qualitative_passed"] is False
-
-
-def test_set_progress_does_not_wipe_gate_columns():
-    """勾选与质性判定分居两条通路：写终态位不得抹掉判定四列（MySQL ON DUPLICATE 同语义）。"""
-    store, course_id = _gate_store()
-    store.assess_qualitative(
-        course_id, "kp-limit", passed=True, note="讲清了", assessed_by="learner"
-    )
-    store.set_progress(course_id, "kp-limit", "skipped")
-    row = store.progress_rows(course_id)["kp-limit"]
-    assert row["status"] == "skipped" and row["qualitative_passed"] is True
-
-
-def test_assess_qualitative_rejects_non_point_rows():
-    """门只挂知识点行：旧节/块行按 §V2.3 只读，落判定即 409（判例 set_progress）。"""
-    from qed_engine.services.learn.base import LearnConflict
-
-    store = InMemoryLearnStore()
-    course = store.create_course(name="数学分析", resources=[{"kind": "knowledge", "ref_id": "k-001"}])
-    course_id = str(course["learn_course_id"])
-    store.replace_tree(course_id, [{"title": "第一章", "children": [{"title": "1.1 实数"}]}])
-    for level in ("section", "unit"):
-        unit_id = store.list_units(course_id, level)[0]["unit_id"]
-        with pytest.raises(LearnConflict):
-            store.assess_qualitative(
-                course_id, unit_id, passed=True, note="不该落在这行", assessed_by="learner"
-            )
-
-
-def test_progress_gate_columns_are_declared_and_registered():
-    """四列进建表 DDL，并进存量库补列注册表（判例 qed_llm_calls 的 _REQUIRED_COLUMNS）。"""
-    from qed_engine.services.learn import base as learn_base
-
-    block = learn_base.CREATE_TABLE_SQL[
-        learn_base.CREATE_TABLE_SQL.index("qe_learn_unit_progress") :
-    ]
-    for column in GATE_COLUMNS:
-        assert f"  {column} " in block, column
-    assert set(learn_base.PROGRESS_GATE_COLUMNS) == set(GATE_COLUMNS)
-
-
-def test_ensure_tables_adds_only_missing_gate_columns(monkeypatch):
-    """存量库只 ALTER 缺的那一列；四列齐备后二次调用零 ALTER（幂等）。"""
-    from types import SimpleNamespace
-
-    from qed_engine.services.learn import base as learn_base
-    from qed_engine.services.llm import call_log as llm_call_log
-
-    existing = {
-        "columns": [
-            "id", "unit_id", "learn_course_id", "status",
-            "qualitative_passed", "qualitative_note", "assessed_at", "updated_at",
-        ]
-    }
-    executed: list[str] = []
-
-    class _Cursor:
-        _probe = False
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def execute(self, sql, params=None):
-            executed.append(sql)
-            self._probe = sql.startswith("SELECT COLUMN_NAME")
-
-        def fetchall(self):
-            return [(name,) for name in existing["columns"]] if self._probe else []
-
-    class _Conn:
-        def cursor(self):
-            return _Cursor()
-
-        def commit(self):
-            pass
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr(llm_call_log, "_connect", lambda settings: _Conn())
-    settings = SimpleNamespace(qed_db_name="qed_test")
-
-    learn_base.ensure_tables(settings)
-    alters = [sql for sql in executed if sql.startswith("ALTER TABLE")]
-    assert len(alters) == 1 and "ADD COLUMN assessed_by" in alters[0]
-
-    executed.clear()
-    existing["columns"].append("assessed_by")
-    learn_base.ensure_tables(settings)
-    assert [sql for sql in executed if sql.startswith("ALTER TABLE")] == []
 
 # ---------- 主链 M-3 W3：门态端点 · 质性判定端点 · progress 扩字段 ----------
 
-MASTERY_ITEM_FIELDS = {
-    "unit_id", "kp_id", "kp_type", "gate", "mastery", "threshold", "attempt_count",
-    "provenance", "status", "qualitative_passed", "due_reviews",
-}
-
 
 def _attach_point_questions(client, kp_id, *, kp_type="procedure", count=1):
-    """给知识点接题源（练习域 course_id＝目录课程 ID，现网口径）：返回题面 ID 列表。"""
+    """给知识点接题源（练习域 course_id＝同一枚共享课程坐标）：返回题面 ID 列表。"""
     items = [
         {
             "stem": f"门态用例 {kp_id} 第 {index} 题：求极限 lim(x→0) sin x / x。",
@@ -1415,17 +1204,17 @@ def test_mastery_lists_gate_states_and_degrades_without_practice(monkeypatch):
 
 
 def test_mastery_endpoints_report_unknown_course_and_unmounted_store(monkeypatch):
+    client = _sync_client(monkeypatch)
+    assert client.get("/api/v1/learn/courses/lc-missing/mastery").status_code == 404
+    assert client.post(
+        "/api/v1/learn/courses/lc-missing/mastery/assess", json={"kp_id": "kp-x", "passed": True}
+    ).status_code == 404
+
+    _env(monkeypatch)
     from qed_engine.clients import tracker_client
     from qed_engine.services.learn import base as learn_base
     from qed_engine.services.learn import practice as practice_base
 
-    client = _sync_client(monkeypatch)
-    assert client.get("/api/v1/learn/courses/lc-missing/mastery").status_code == 404
-    assert client.post(
-        "/api/v1/learn/courses/lc-missing/mastery/assess", json={"unit_id": "kp-x", "passed": True}
-    ).status_code == 404
-
-    _env(monkeypatch)
     monkeypatch.setattr(tracker_client.TrackerClient, "list_courses_system", lambda self: [])
     monkeypatch.setattr("qed_engine.api.main._startup_db_check", lambda settings: "mocked")
     monkeypatch.setattr(learn_base, "ensure_tables", lambda settings: None)
@@ -1433,7 +1222,7 @@ def test_mastery_endpoints_report_unknown_course_and_unmounted_store(monkeypatch
     offline = TestClient(create_app())
     assert offline.get("/api/v1/learn/courses/lc-1/mastery").status_code == 503
     assert offline.post(
-        "/api/v1/learn/courses/lc-1/mastery/assess", json={"unit_id": "kp-1", "passed": True}
+        "/api/v1/learn/courses/lc-1/mastery/assess", json={"kp_id": "kp-1", "passed": True}
     ).status_code == 503
 
 
@@ -1446,7 +1235,7 @@ def test_qualitative_assess_records_learner_provenance_and_moves_cursor(monkeypa
 
     posted = client.post(
         f"/api/v1/learn/courses/{course_id}/mastery/assess",
-        json={"unit_id": f"kp:{first}", "passed": True, "note": "能用自己的话说清 ε-δ"},
+        json={"kp_id": first, "passed": True, "note": "能用自己的话说清 ε-δ"},
     )
     assert posted.status_code == 200, posted.text
     item = posted.json()["item"]
@@ -1454,6 +1243,7 @@ def test_qualitative_assess_records_learner_provenance_and_moves_cursor(monkeypa
     assert item["status"] == "mastered" and item["provenance"] == "learner"
     assert item["qualitative_passed"] is True
     assert item["mastery"] == 1.0
+    assert "owner" not in posted.json()["kp_row"]
     assert posted.json()["next_step"]["action"] == "probe"
     assert posted.json()["next_step"]["unit_id"] == f"kp:{second}"
 
@@ -1464,40 +1254,39 @@ def test_qualitative_assess_records_learner_provenance_and_moves_cursor(monkeypa
     assert prog["current_unit_id"] == f"kp:{second}"
     states = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()["items"]
     assert states[0]["provenance"] == "learner" and states[1]["status"] == "new"
-    assert states[0]["qualitative_passed"] is True  # W2 判定四列经投影读回
+    assert states[0]["qualitative_passed"] is True  # 判定四列经投影读回
 
 
 def test_assess_refuses_quantitative_gate_point(monkeypatch):
-    """参照同款 refusal：量化型不接受质性判定（409），且不留判定行。"""
+    """量化型不接受质性判定（409），且不留判定行（kp 行只在受理后起）。"""
     client, course_id, rows = _study_client(monkeypatch, practice_store=InMemoryPracticeStore())
     chapter = _outline_row(rows, "第一章 实数")
     kp_id = _confirm_point(client, "极限运算法则", parent=chapter["kp_id"], point_type="procedure")
 
     response = client.post(
         f"/api/v1/learn/courses/{course_id}/mastery/assess",
-        json={"unit_id": f"kp:{kp_id}", "passed": True, "note": "自评讲清了"},
+        json={"kp_id": kp_id, "passed": True, "note": "自评讲清了"},
     )
     assert response.status_code == 409, response.text
     assert "量化门" in response.json()["detail"]
     item = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()["items"][0]
     assert item["gate"] == "quantitative" and item["threshold"] == 0.9
     assert item["qualitative_passed"] is None and item["status"] == "new"
+    assert client.app.state.learn_store.kp_rows() == {}
 
 
 def test_assess_validates_body_and_targets(monkeypatch):
+    """判定入参闭集：缺 passed／类型错／by=model／超长 note／白名单外键＝422；未知目标＝404。"""
     client, course_id, rows = _study_client(monkeypatch, practice_store=InMemoryPracticeStore())
     chapter = _outline_row(rows, "第一章 实数")
     kp_id = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
     url = f"/api/v1/learn/courses/{course_id}/mastery/assess"
-    assert client.post(url, json={"unit_id": f"kp:{kp_id}"}).status_code == 422
-    assert client.post(url, json={"unit_id": f"kp:{kp_id}", "passed": "讲清了"}).status_code == 422
-    assert client.post(
-        url, json={"unit_id": f"kp:{kp_id}", "passed": True, "by": "model"}
-    ).status_code == 422
-    assert client.post(
-        url, json={"unit_id": f"kp:{kp_id}", "passed": True, "note": "n" * 1001}
-    ).status_code == 422
-    assert client.post(url, json={"unit_id": "kp-missing", "passed": True}).status_code == 404
+    assert client.post(url, json={"kp_id": kp_id}).status_code == 422
+    assert client.post(url, json={"kp_id": kp_id, "passed": "讲清了"}).status_code == 422
+    assert client.post(url, json={"kp_id": kp_id, "passed": True, "by": "model"}).status_code == 422
+    assert client.post(url, json={"kp_id": kp_id, "passed": True, "note": "n" * 1001}).status_code == 422
+    assert client.post(url, json={"unit_id": kp_id, "passed": True}).status_code == 422
+    assert client.post(url, json={"kp_id": "kp-missing", "passed": True}).status_code == 404
 
 
 def test_attempt_sequence_over_gate_sets_system_provenance(monkeypatch):
@@ -1520,7 +1309,9 @@ def test_attempt_sequence_over_gate_sets_system_provenance(monkeypatch):
     assert prog["done"] == 0 and prog["mastered"] == 1
     assert prog["provenance"] == {"system": 1, "learner": 0}
     assert prog["current_unit_id"] == f"kp:{untouched}"
-    assert client.get(f"/api/v1/learn/courses/{course_id}/units").json()["units"] == []  # 门不物化行
+    # 门过≠勾选：判分不写 kp 行（kp 行只承载人工落笔的终态位与质性判定）
+    assert client.app.state.learn_store.kp_rows() == {}
+    assert all(u["learner"] is None for u in _sequence(client, course_id)["units"])
 
 
 def test_single_correct_answer_does_not_clear_the_gate(monkeypatch):
@@ -1529,13 +1320,16 @@ def test_single_correct_answer_does_not_clear_the_gate(monkeypatch):
     chapter = _outline_row(rows, "第一章 实数")
     kp_id = _confirm_point(client, "极值判别法", parent=chapter["kp_id"], point_type="procedure")
     question_id = _attach_point_questions(client, kp_id, kp_type="procedure")[0]
+
+    before = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()["items"][0]
+    assert before["due_reviews"] == 1  # D3：未作答的题按入库时刻即到期（流水重放）
     _answer_correctly(client, question_id, times=1)
 
     item = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()["items"][0]
     assert item["attempt_count"] == 1 and item["mastery"] == 0.5
     assert item["provenance"] == "" and item["status"] == "learning"
     assert "mastered" not in item  # 响应只出冻结字段清单，掌握位由 status 承载
-    assert item["due_reviews"] >= 1  # 裁决 ⑧：首次作答即建 kp 粒度节律行，当日到期
+    assert item["due_reviews"] == 0  # procedure 序列答对进档（+3→+7 天），当日不再到期
 
 
 def test_due_review_pulls_next_step_before_the_cursor(monkeypatch):
@@ -1544,32 +1338,33 @@ def test_due_review_pulls_next_step_before_the_cursor(monkeypatch):
     chapter = _outline_row(rows, "第一章 实数")
     drilled = _confirm_point(client, "极值判别法", parent=chapter["kp_id"], point_type="procedure")
     later = _confirm_point(client, "确界原理", parent=chapter["kp_id"])
-    question_id = _attach_point_questions(client, drilled, kp_type="procedure")[0]
-    _answer_correctly(client, question_id, times=1)
+    drilled_q, still_due = _attach_point_questions(client, drilled, kp_type="procedure", count=2)
+    _answer_correctly(client, drilled_q, times=1)
     assert client.post(
-        f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": f"kp:{drilled}", "status": "done"}
+        f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": drilled, "status": "done"}
     ).status_code == 200
+    assert still_due  # 第二题未作答＝仍有到期腿
 
-    mastery = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()
-    assert mastery["items"][0]["due_reviews"] >= 1
-    assert mastery["items"][0]["provenance"] == "learner"
-    assert mastery["next_step"]["action"] == "review"
-    assert mastery["next_step"]["unit_id"] == f"kp:{drilled}"
-    assert mastery["next_step"]["kp_id"] == drilled
+    body = client.get(f"/api/v1/learn/courses/{course_id}/mastery").json()
+    assert body["items"][0]["due_reviews"] == 1
+    assert body["items"][0]["provenance"] == "learner"
+    assert body["next_step"]["action"] == "review"
+    assert body["next_step"]["unit_id"] == f"kp:{drilled}"
+    assert body["next_step"]["kp_id"] == drilled
 
     prog = client.get(f"/api/v1/learn/courses/{course_id}/progress").json()
     assert prog["current_unit_id"] == f"kp:{later}" and prog["next_unit_id"] == f"kp:{drilled}"
 
 
 def test_skipped_rows_do_not_stop_the_gate_cursor(monkeypatch):
-    """跳过＝学习者显式让位：不进门（未掌握），也不停游标（勾稽旧口径）。"""
+    """跳过＝学习者显式让位：不进门（未掌握），也不停游标。"""
     client, course_id, rows = _study_client(monkeypatch, practice_store=InMemoryPracticeStore())
     chapter = _outline_row(rows, "第一章 实数")
     skipped = _confirm_point(client, "已跳过点", parent=chapter["kp_id"])
     pending = _confirm_point(client, "待学点", parent=chapter["kp_id"])
-    for unit_id, status in ((f"kp:{skipped}", "skipped"), (f"kp:{pending}", "pending")):
+    for kp_id, status in ((skipped, "skipped"), (pending, "pending")):
         assert client.post(
-            f"/api/v1/learn/courses/{course_id}/progress", json={"unit_id": unit_id, "status": status}
+            f"/api/v1/learn/courses/{course_id}/progress", json={"kp_id": kp_id, "status": status}
         ).status_code == 200
     prog = client.get(f"/api/v1/learn/courses/{course_id}/progress").json()
     assert prog["skipped"] == 1 and prog["mastered"] == 0

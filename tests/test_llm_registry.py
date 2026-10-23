@@ -241,13 +241,19 @@ def test_resolve_local_text_llamacpp(tmp_path):
     assert text.base_url == "http://127.0.0.1:5001/v1"
 
 
-def test_resolve_local_text_docker_runtime_error(tmp_path):
-    """local 模式 + docker runtime：身份目录暂无文字 docker 引用 → 明确错误（不抛异常）。"""
+def test_resolve_local_text_docker_runtime_error_when_adapt_off(tmp_path):
+    """local 模式 + docker runtime（文字无引用）：适配开关关闭时维持严格口径＝明确错误不抛异常。
+
+    2026-10-18 A-6 改判：本例的「解析即失败」降级为 `QED_LLM_LOCAL_ADAPT=false` 的回退面，
+    开关默认开启时改走继承兜底（见下方 A-6 节）。
+    """
     results = registry.resolve(
-        _settings(qed_api_select="local", qed_local_runtime="docker"), tmp_path)
+        _settings(qed_api_select="local", qed_local_runtime="docker",
+                  qed_llm_local_adapt=False), tmp_path)
     text = results["text"]
     assert text.error != ""
     assert "docker" in text.error
+    assert text.model == ""
 
 
 def test_resolve_local_vision_mineru(tmp_path):
@@ -286,6 +292,45 @@ def test_resolve_embedding_stays_api_in_local_mode(tmp_path):
     assert embedding.channel == "api"
     assert embedding.error == ""
     assert embedding.model == "text-embedding-v4"
+
+
+# ---------- A-6：文字槽位本地继承兜底（M3，2026-10-18 用户裁决形态 A）----------
+
+
+def test_resolve_local_text_inherits_loaded_model_when_runtime_unbound(tmp_path):
+    """J-A6a：文字槽位在生效 runtime 无本地身份引用时不再判失败——model 留空（＝由调用侧
+    经 OpenAI 兼容端点发现式继承单活 runtime 已加载模型），notes 带来源标注。"""
+    results = registry.resolve(
+        _settings(qed_api_select="local", qed_local_runtime="docker",
+                  qed_model="qwen3.5-9b"), tmp_path)
+    text = results["text"]
+    assert text.error == ""
+    assert (text.channel, text.identity, text.provider) == ("local", "qwen3.5-9b", "docker")
+    assert text.model == ""
+    assert text.base_url == "http://127.0.0.1:5001/v1"
+    assert text.notes and "继承" in text.notes[0]
+
+
+def test_resolve_local_text_inheritance_also_covers_unregistered_identity(tmp_path):
+    """J-A6b：运行态选了注册表里根本没有本地引用的身份（同 runtime 无一人有引用）同样继承，
+    且不影响其他槽位解析（embedding 仍 api）。"""
+    _write_manifest(tmp_path, "qwen", {"active": "qwen3.8-27b", "source": "local",
+                                       "runtime": "docker"})
+    results = registry.resolve(_settings(qed_api_select="local"), tmp_path)
+    text = results["text"]
+    assert text.error == "" and text.model == ""
+    assert text.identity == "qwen3.8-27b"
+    assert results["embedding"].channel == "api"
+
+
+def test_resolve_local_inheritance_is_text_slot_only(tmp_path):
+    """J-A6c：继承兜底只覆盖文字槽位——MinerU 是一脚本一模型的固定部署，没有「已加载模型」
+    可继承，图像槽位仍按绑定缺失报错。"""
+    _write_manifest(tmp_path, "mineru", {"runtime": "lmstudio"})
+    results = registry.resolve(_settings(qed_api_select="local"), tmp_path)
+    vision = results["vision"]
+    assert vision.error != "" and "lmstudio" in vision.error
+    assert vision.model == ""
 
 
 # ---------- v3：槽位级来源 / 渠道运行态 ----------

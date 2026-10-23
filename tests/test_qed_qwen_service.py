@@ -216,3 +216,28 @@ def test_cmd_start_uses_gguf_ref_and_param_flags(tmp_path, monkeypatch):
     assert cmd[cmd.index("--model") + 1] == str(gguf)
     assert cmd[cmd.index("--ctx-size") + 1] == "16384"
     assert cmd[cmd.index("--flash-attn") + 1] == "on"
+
+
+# ---------- DEFECT-019：netstat 输出容错解码（GBK 表头击穿 text=True → stdout=None） ----------
+
+
+def test_qwen_stop_declares_tolerant_decode_and_survives_none_stdout(monkeypatch, capsys):
+    """DEFECT-019 S1：`netstat -ano` 调用带 errors="replace"，输出不可用时降级为「无进程」。"""
+    mod = _load_script_mod()
+    captured: dict = {}
+
+    class _R:
+        returncode = 0
+        stdout = None
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured.update(kwargs)
+        return _R()
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    args = type("A", (), {"port": 5001})()
+
+    assert mod.cmd_stop(args) == 0
+    assert captured.get("errors") == "replace", "subprocess.run 应带 errors='replace' 容忍 GBK 输出"
+    assert "no llama-server process found" in capsys.readouterr().out

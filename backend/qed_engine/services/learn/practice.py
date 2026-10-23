@@ -1,11 +1,14 @@
-"""学习域·练习与复习三表存储（M2）：qe_question + qe_attempt + qe_review_task。
+"""学习域·练习与复习两表存储（M2）：`qe_question` + `qe_attempt`。
 
-模块职责：练习域三表的幂等建表、题干规范化去重（`stem_hash`）、批量入库（重复即跳过的幂等
-语义）、间隔复习调度纯函数（`schedule_next` / `INTERVAL_SEQUENCES` / `TYPE_PRIORITY`）、
-作答同事务落库（判分 + `score_trend`/`resolved` + 调度回写，缝 6）、错题本派生查询与统计、
-到期队列构建；事实源＝M2 壳「练习域三表契约」「间隔复习调度规格」两节。
+模块职责：练习域两表的幂等建表、题干规范化去重（`stem_hash`）、批量入库（重复即跳过的幂等
+语义）、间隔复习调度纯函数（`schedule_next` / `INTERVAL_SEQUENCES` / `TYPE_PRIORITY`）与
+**到期态读时重放**（`replay_due`；调度表 `qe_review_task` 整表随 ADR 0026 D3 退出，档位与
+到期时刻都不落列）、作答同事务落库（判分 + 幂等 + `meta.issues` 残余，缝 6）、错题本派生
+查询与统计；事实源＝docs/architecture/database-design.md §五 两节。
 两段式口径：判分依据（`expected_answer`/`keywords`/`explanation`）只存服务端，任何读取面经
 `public_question()` 投影剔除（缝 2），仅作答端点在判分完成后回传。
+`score_trend` 同批退列（D9 C1）：趋势与到期都由流水读时派生，端点响应字段名不变、前端零扰动；
+`resolved` 与 `bookmarked` 是纯人工位（R6），机器判分恒不写。
 设计关联（DesignRef）：docs/architecture/database-design.md
 实现状态：Current
 关联测试：tests/test_learn_practice.py
@@ -23,7 +26,7 @@ from typing import Any
 import pymysql
 
 from qed_engine.config import Settings
-from qed_engine.services.learn.base import LearnConflict, LearnNotFound
+from qed_engine.services.learn.base import DEFAULT_OWNER, LearnConflict, LearnNotFound
 from qed_engine.services.learn.grading import ISSUE_MISSING_EXPECTED, grade
 from qed_engine.services.learn.knowledge import norm_key
 from qed_engine.services.llm.call_log import _connect
@@ -38,7 +41,6 @@ ANSWER_SOURCES = ("same_page", "solution_section", "sibling_book", "manual", "ll
 ATTEMPT_ORIGINS = ("new", "review", "manual")
 SELF_RESULTS = ("correct", "again")
 SCORE_TRENDS = ("new", "improved", "declined", "unchanged")
-REVIEW_STATUSES = ("active", "archived")
 RETIRED_FILTERS = ("active", "all", "only")
 
 # 缝 2：判分依据三列，任何题面下发响应必须剔除
@@ -60,9 +62,6 @@ CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS qe_question (
   question_id VARCHAR(64) PRIMARY KEY COMMENT '题目 ID（服务端生成 q-<hex12>）',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course，与知识点主表/星图/M6 工作台同源）',
-  course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  learn_course_id VARCHAR(64) COMMENT '所属学习课程（逻辑引用 qe_learn_course；非编译链路出题=NULL）',
-  unit_id VARCHAR(64) COMMENT '关联块（逻辑引用 qe_learn_unit；M-2 编译接线后启用，v1 可空）',
   kp_id VARCHAR(64) COMMENT '归属细知识点（逻辑引用 qed_knowledge_point 的 point 行；NULL=未归档题）',
   kind VARCHAR(16) NOT NULL DEFAULT 'quiz' COMMENT '闭集 quiz=判分题 / flashcard=记忆卡（自评，不判分；裁决 ⑨：answer_source=none 时强制本值）',
   question_type VARCHAR(16) COMMENT 'quiz 行判分闭集 choice/short/open（与 M-3 三类一一对应）；flashcard 行 NULL',
@@ -95,63 +94,40 @@ COMMENT='练习题库（根自建；一行=一道题/一张卡，expected_answer
 
 CREATE TABLE IF NOT EXISTS qe_attempt (
   attempt_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '行 ID（自增主键，时序即事实序）',
+  owner VARCHAR(64) NOT NULL DEFAULT 'admin' COMMENT '学习者标识（v1.0 恒 admin，多用户扩展位；幂等键前缀）',
   question_id VARCHAR(64) NOT NULL COMMENT '题目（逻辑引用 qe_question）',
   course_id VARCHAR(64) NOT NULL COMMENT '冗余课程坐标（错题本与统计按课程聚合）',
-  kp_id VARCHAR(64) COMMENT '冗余知识点（M-3 掌握门按 kp 取近因序列、复习错题优先级判定）',
+  kp_id VARCHAR(64) COMMENT '冗余知识点（掌握门按 kp 取近因序列、复习错题优先级判定）',
   origin VARCHAR(16) NOT NULL DEFAULT 'new' COMMENT '闭集 new=首练 / review=复习队列 / manual=人工重做',
-  review_date DATETIME COMMENT 'origin=review 时=当次 due_at（调度回写的幂等依据）',
+  review_date DATETIME COMMENT 'origin=review 时=当次到期时刻（重放幂等依据）',
   user_answer TEXT NOT NULL COMMENT '学习者作答原文（不清洗不截断，判分函数内部规范化）',
   is_correct TINYINT(1) NOT NULL DEFAULT 0 COMMENT '判分结果（**服务端确定性判分写入，不信任客户端**，缝 1；自评卡由 self_result 置位）',
   method VARCHAR(16) NOT NULL DEFAULT 'deterministic' COMMENT '闭集 deterministic/llm/self（open 题 LLM 批改与 flashcard 自评）',
   judge_note VARCHAR(1000) DEFAULT '' COMMENT '判分/批改说明（method=llm 时存模型意见；不含密钥）',
-  score_trend VARCHAR(16) NOT NULL DEFAULT 'new' COMMENT '闭集 new/improved/declined/unchanged（该题先前无行=new，同=unchanged，翻转=improved/declined）',
-  resolved TINYINT(1) NOT NULL DEFAULT 0 COMMENT '已解决位：本次对=1，历史对而过本次错=0，其余保留旧值（DeepTutor CASE 语义直译）',
+  resolved TINYINT(1) NOT NULL DEFAULT 0 COMMENT '已解决位（**纯人工位**：只由学习者在错题本工位置位，机器判分不写本列）',
   bookmarked TINYINT(1) NOT NULL DEFAULT 0 COMMENT '错题本收藏（人工位，机器不写）',
   answered_at DATETIME NOT NULL COMMENT 'UTC 作答时间（近因加权排序键）',
-  UNIQUE KEY uq_attempt_idem (question_id, review_date, origin),
-  KEY idx_attempt_question (question_id, answered_at),
-  KEY idx_attempt_kp (kp_id, answered_at),
-  KEY idx_attempt_course (course_id, answered_at),
+  UNIQUE KEY uq_attempt_idem (owner, question_id, review_date, origin),
+  KEY idx_attempt_question (owner, question_id, answered_at),
+  KEY idx_attempt_kp (owner, kp_id, answered_at),
+  KEY idx_attempt_course (owner, course_id, answered_at),
   KEY idx_attempt_open (course_id, resolved, is_correct)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='答题事实明细（M-3 掌握门的唯一数据源；全量保留逐次行不做只留终态的合并，缝 4）';
-
-CREATE TABLE IF NOT EXISTS qe_review_task (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  target_kind VARCHAR(16) NOT NULL COMMENT '闭集 question=具体题/卡（错题重练与闪卡节律）/ kp=知识点整体节律（v2 按知识点推题时用）',
-  target_id VARCHAR(64) NOT NULL COMMENT 'question_id 或 kp_id',
-  course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（到期队列按课程取）',
-  kp_type VARCHAR(16) NOT NULL COMMENT '间隔序列依据（kp 目标取主表 type，question 目标取该行 kp_type 快照；无分类回落 memory 序列并记 meta）',
-  interval_index TINYINT NOT NULL DEFAULT 0 COMMENT '当前档位（序列下标）',
-  consecutive_correct TINYINT NOT NULL DEFAULT 0 COMMENT '连对计数（≥2 跳两档后清零）',
-  consecutive_wrong TINYINT NOT NULL DEFAULT 0 COMMENT '连错计数（≥2 清零，档位已回退）',
-  due_at DATETIME NOT NULL COMMENT 'UTC 到期时间（S2「重启不丢进度」的核验点）',
-  status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT '闭集 active/archived（知识点删除/题 retired → 归档不删行）',
-  created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
-  updated_at DATETIME NOT NULL COMMENT 'UTC 更新时间',
-  UNIQUE KEY uq_review_target (target_kind, target_id),
-  KEY idx_review_due (course_id, status, due_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='间隔复习调度态（L3 的 MySQL 化：从 state_json blob 列化，双粒度，重启不丢；所有权 QED-Engine）';
+COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次行不做只留终态的合并，缝 4；趋势与到期档位读时重放不落列）';
 """
 
 _QUESTION_COLUMNS = (
-    "question_id, course_id, course_label, learn_course_id, unit_id, kp_id, kind, question_type, "
-    "stem, stem_hash, options, answer_back, expected_answer, keywords, explanation, difficulty, "
-    "kp_type, source_kind, book_ref, source_ref, answer_source, gen_batch, model_ref, meta, "
-    "retired, created_at, updated_at"
+    "question_id, course_id, kp_id, kind, question_type, stem, stem_hash, options, answer_back, "
+    "expected_answer, keywords, explanation, difficulty, kp_type, source_kind, book_ref, "
+    "source_ref, answer_source, gen_batch, model_ref, meta, retired, created_at, updated_at"
 )
 _ATTEMPT_COLUMNS = (
-    "attempt_id, question_id, course_id, kp_id, origin, review_date, user_answer, is_correct, "
-    "method, judge_note, score_trend, resolved, bookmarked, answered_at"
-)
-_TASK_COLUMNS = (
-    "id, target_kind, target_id, course_id, kp_type, interval_index, consecutive_correct, "
-    "consecutive_wrong, due_at, status, created_at, updated_at"
+    "attempt_id, owner, question_id, course_id, kp_id, origin, review_date, user_answer, "
+    "is_correct, method, judge_note, resolved, bookmarked, answered_at"
 )
 _JSON_COLUMNS = ("options", "keywords", "meta", "source_ref")
 _BOOL_COLUMNS = ("retired", "is_correct", "resolved", "bookmarked")
-_DATETIME_COLUMNS = ("created_at", "updated_at", "answered_at", "due_at", "review_date")
+_DATETIME_COLUMNS = ("created_at", "updated_at", "answered_at", "review_date")
 
 
 def _now() -> datetime:
@@ -217,16 +193,51 @@ def schedule_next(state: dict[str, Any], correct: bool, now: datetime) -> dict[s
     }
 
 
-def resolve_trend(previous: dict[str, Any] | None, correct: bool) -> tuple[str, bool]:
-    """`score_trend`/`resolved`（DeepTutor CASE 语义直译）：无历史=new，翻转=improved/declined。"""
+def seed_state(question: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """重放起点：未作答题即建题时刻到期、档位 0（与退役调度表的建行口径同值）。"""
+    return {
+        "kp_type": str(question.get("kp_type") or DEFAULT_KP_TYPE),
+        "interval_index": 0,
+        "consecutive_correct": 0,
+        "consecutive_wrong": 0,
+        "due_at": _as_naive(question.get("created_at")) or now,
+    }
+
+
+def replay_due(question: dict[str, Any], attempts: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
+    """作答流水 → 调度态的确定性重放（ADR 0026 D3：调度表退出，本函数是其唯一替代）。
+
+    `attempts` 须按事实序升序，逐次喂给 `schedule_next`、时钟取该行自己的作答时刻——
+    与旧表逐次回写的结果逐值相等（黄金样本对拍判据）。
+    """
+    state = seed_state(question, now)
+    for attempt in attempts:
+        state = {
+            **state,
+            **schedule_next(
+                state, bool(attempt["is_correct"]), _as_naive(attempt["answered_at"]) or now
+            ),
+        }
+    return state
+
+
+def resolve_trend(previous: dict[str, Any] | None, correct: bool) -> str:
+    """趋势分支（DeepTutor CASE 语义直译）：无历史=new，翻转=improved/declined，其余=unchanged。"""
     if previous is None:
-        return ("new", correct)
+        return "new"
     was_correct = bool(previous.get("is_correct"))
     if correct and not was_correct:
-        return ("improved", True)
+        return "improved"
     if was_correct and not correct:
-        return ("declined", False)
-    return ("unchanged", correct or bool(previous.get("resolved")))
+        return "declined"
+    return "unchanged"
+
+
+def derive_trend(attempts: list[dict[str, Any]]) -> str:
+    """`score_trend` 读时派生（D9 C1 退列后仍按原字段名回传）：末次相对上一次的四分支。"""
+    if not attempts:
+        return "new"
+    return resolve_trend(attempts[-2] if len(attempts) > 1 else None, bool(attempts[-1]["is_correct"]))
 
 
 def public_question(row: dict[str, Any]) -> dict[str, Any]:
@@ -240,7 +251,6 @@ def build_question_row(
     course_id: str,
     gen_batch: str = "",
     model_ref: str = "",
-    learn_course_id: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """入库项 → 题行（两实现共用的唯一规范化点；结构闭集校验在 API 面，本函数只兜空题干）。"""
@@ -251,9 +261,6 @@ def build_question_row(
     return {
         "question_id": f"q-{uuid.uuid4().hex[:12]}",
         "course_id": course_id,
-        "course_label": item.get("course_label") or "",
-        "learn_course_id": learn_course_id if learn_course_id else item.get("learn_course_id"),
-        "unit_id": item.get("unit_id"),
         "kp_id": item.get("kp_id"),
         "kind": item.get("kind") or "quiz",
         "question_type": item.get("question_type"),
@@ -293,10 +300,14 @@ def _record_issue(row: dict[str, Any], note: str) -> dict[str, Any]:
 
 
 def _serialize(row: dict[str, Any] | None) -> dict[str, Any]:
-    """对外行：JSON 列反解、布尔位转 bool、时间列转 ISO 字符串（两实现共用）。"""
+    """对外行：JSON 列反解、布尔位转 bool、时间列转 ISO 字符串（两实现共用）。
+
+    `qe_attempt.owner` 在此退掉（D7：只承载幂等键前缀与扩展位，契约面不收不回显）。
+    """
     if row is None:
         return {}
     out = dict(row)
+    out.pop("owner", None)
     for column in _JSON_COLUMNS:
         if column in out:
             out[column] = _from_json(out[column])
@@ -325,16 +336,19 @@ def _overdue_days(due_at: datetime, now: datetime) -> int:
     return max(0, int((now - due_at).total_seconds() // 86400))
 
 
-def task_view(task: dict[str, Any], now: datetime, wrong: bool) -> dict[str, Any]:
-    """到期队列行对外形状：优先级即时派生（不落列，J5），题面由调用方投影后挂 `question`。"""
-    due_at = task["due_at"]
-    kp_type = task["kp_type"]
+def task_view(
+    question: dict[str, Any], state: dict[str, Any], now: datetime, wrong: bool
+) -> dict[str, Any]:
+    """到期队列行对外形状：由重放态即时派生（不落列，J5），题面由调用方投影后挂 `question`。"""
+    due_at = state["due_at"]
+    kp_type = state["kp_type"]
     return {
-        "target_kind": task["target_kind"],
-        "target_id": task["target_id"],
-        "course_id": task["course_id"],
+        "target_kind": "question",
+        "target_id": question["question_id"],
+        "course_id": question["course_id"],
+        "kp_id": question.get("kp_id"),
         "kp_type": kp_type,
-        "interval_index": int(task["interval_index"]),
+        "interval_index": int(state["interval_index"]),
         "due_at": due_at.isoformat() if isinstance(due_at, datetime) else due_at,
         "priority": WRONG_PRIORITY if wrong else TYPE_PRIORITY.get(
             str(kp_type or ""), TYPE_PRIORITY[DEFAULT_KP_TYPE]
@@ -343,6 +357,14 @@ def task_view(task: dict[str, Any], now: datetime, wrong: bool) -> dict[str, Any
         "overdue_days": _overdue_days(due_at, now) if isinstance(due_at, datetime) else 0,
         "question": None,
     }
+
+
+def is_unresolved(attempts: list[dict[str, Any]]) -> bool:
+    """未解决错题（判例 DeepTutor `error_records` status=active）：末次判错且人工位未置。"""
+    if not attempts:
+        return False
+    latest = attempts[-1]
+    return not bool(latest["is_correct"]) and not bool(latest["resolved"])
 
 
 def filter_mistakes(
@@ -365,8 +387,42 @@ def filter_mistakes(
     return out
 
 
+def mistake_item(
+    question: dict[str, Any], attempts: list[dict[str, Any]], state: dict[str, Any], now: datetime
+) -> dict[str, Any]:
+    """错题本一行（两实现共用）：`attempts` 按事实序升序，行内取末次、计数与派生态。"""
+    latest = attempts[-1]
+    return {
+        "question": _serialize(question),
+        "last_attempt": _serialize(latest),
+        "attempt_count": len(attempts),
+        "wrong_count": sum(1 for a in attempts if not bool(a["is_correct"])),
+        "is_correct": bool(latest["is_correct"]),
+        "resolved": bool(latest["resolved"]),
+        "bookmarked": any(bool(a["bookmarked"]) for a in attempts),
+        "score_trend": derive_trend(attempts),
+        "due_today": state["due_at"] <= now,
+    }
+
+
+def replay_rows(
+    questions: list[dict[str, Any]], attempts_by_question: dict[str, list[dict[str, Any]]], now: datetime
+) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]]:
+    """题行 × 流水 → `(题行, 事实序流水, 重放态)`（两实现共用的取数装配）。"""
+    return [
+        (
+            question,
+            attempts_by_question.get(str(question["question_id"]), []),
+            replay_due(
+                question, attempts_by_question.get(str(question["question_id"]), []), now
+            ),
+        )
+        for question in questions
+    ]
+
+
 class MySQLPracticeStore:
-    """练习域三表 MySQL 存储（qed 库；判分/调度回写同事务，缝 6）。"""
+    """练习域两表 MySQL 存储（qed 库；判分同事务，缝 6；调度态读时重放，ADR 0026 D3）。"""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -383,7 +439,6 @@ class MySQLPracticeStore:
         items: list[dict[str, Any]],
         gen_batch: str = "",
         model_ref: str = "",
-        learn_course_id: str | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         """批量入库：`(course_id, stem_hash)` 命中即跳过（幂等）；整批同事务，一项非法整体回滚。"""
@@ -400,7 +455,6 @@ class MySQLPracticeStore:
                         course_id=course_id,
                         gen_batch=gen_batch,
                         model_ref=model_ref,
-                        learn_course_id=learn_course_id,
                         now=stamp,
                     )
                     cursor.execute(
@@ -418,10 +472,6 @@ class MySQLPracticeStore:
                     placeholders = ", ".join(f"%({key})s" for key in values)
                     cursor.execute(
                         f"INSERT INTO qe_question ({columns}) VALUES ({placeholders})", values
-                    )
-                    self._ensure_task(
-                        cursor, "question", row["question_id"], course_id,
-                        row["kp_type"] or DEFAULT_KP_TYPE, stamp,
                     )
                     created.append(row)
                     rows.append(self._question(cursor, row["question_id"]))
@@ -494,7 +544,10 @@ class MySQLPracticeStore:
         return [_serialize(row) for row in rows], total
 
     def patch_question(self, question_id: str, **fields: Any) -> dict[str, Any]:
-        """人工面白名单改列；`gen_batch`/`model_ref`/`stem_hash` 等产出事实不可改（API 面拦）。"""
+        """人工面白名单改列；`gen_batch`/`model_ref`/`stem_hash` 等产出事实不可改（API 面拦）。
+
+        `retired` 即软删位，队列与错题本读时按 `retired=0` 过滤，不再有调度态同步（D3）。
+        """
         stamp = _now()
         conn = self._connect()
         try:
@@ -519,13 +572,6 @@ class MySQLPracticeStore:
                 cursor.execute(
                     f"UPDATE qe_question SET {', '.join(sets)} WHERE question_id=%s", params
                 )
-                if "retired" in fields:
-                    status = "archived" if bool(fields["retired"]) else "active"
-                    cursor.execute(
-                        "UPDATE qe_review_task SET status=%s, updated_at=%s "
-                        "WHERE target_kind='question' AND target_id=%s",
-                        (status, stamp, question_id),
-                    )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -545,8 +591,12 @@ class MySQLPracticeStore:
         review_date: datetime | str | None = None,
         self_result: str | None = None,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> dict[str, Any]:
-        """同事务：判分 + 作答行 + `score_trend`/`resolved` + `schedule_next` 回写（缝 6）。"""
+        """同事务：判分 + 作答行落库（缝 6）；`review` 段与 `score_trend` 都是流水读时派生。
+
+        机器不写 `resolved`/`bookmarked`（R6 纯人工位）；到期档位不落列，重放见 `replay_due`。
+        """
         stamp = _as_naive(now) or _now()
         review_when = _as_naive(review_date)
         conn = self._connect()
@@ -560,31 +610,31 @@ class MySQLPracticeStore:
                 if question is None or bool(question["retired"]):
                     raise LearnNotFound(f"题目不存在：{question_id}")
                 question = dict(question)
-                cursor.execute(
-                    "SELECT COUNT(*) AS n FROM qe_attempt WHERE question_id=%s "
-                    "AND review_date=%s AND origin=%s",
-                    (question_id, review_when, origin),
-                )
-                if int(cursor.fetchone()["n"]):
-                    raise LearnConflict(
-                        f"同一题在同期望复习日（{origin} / {review_when}）已作答，不重复计"
+                if review_when is not None:
+                    cursor.execute(
+                        "SELECT attempt_id FROM qe_attempt "
+                        "WHERE owner=%s AND question_id=%s AND origin=%s AND review_date=%s",
+                        (owner, question_id, origin, review_when),
                     )
-                previous = self._latest_attempt(cursor, question_id)
+                    if cursor.fetchone():
+                        raise LearnConflict(
+                            f"同一题在同期望复习日（{origin} / {review_when}）已作答，不重复计"
+                        )
                 if question["kind"] == "flashcard":
                     correct = self_result == "correct"
                     verdict = {"is_correct": correct, "method": "self", "note": "自评记忆卡"}
                 else:
                     verdict = grade(question, user_answer)
                     correct = bool(verdict["is_correct"])
-                trend, resolved = resolve_trend(previous, correct)
                 cursor.execute(
                     "INSERT INTO qe_attempt "
-                    "(question_id, course_id, kp_id, origin, review_date, user_answer, is_correct, "
-                    " method, judge_note, score_trend, resolved, bookmarked, answered_at) "
-                    "VALUES (%(question_id)s, %(course_id)s, %(kp_id)s, %(origin)s, %(review_date)s, "
-                    " %(user_answer)s, %(is_correct)s, %(method)s, %(judge_note)s, %(score_trend)s, "
-                    " %(resolved)s, 0, %(answered_at)s)",
+                    "(owner, question_id, course_id, kp_id, origin, review_date, user_answer, "
+                    " is_correct, method, judge_note, resolved, bookmarked, answered_at) "
+                    "VALUES (%(owner)s, %(question_id)s, %(course_id)s, %(kp_id)s, %(origin)s, "
+                    " %(review_date)s, %(user_answer)s, %(is_correct)s, %(method)s, %(judge_note)s, "
+                    " 0, 0, %(answered_at)s)",
                     {
+                        "owner": owner,
                         "question_id": question_id,
                         "course_id": question["course_id"],
                         "kp_id": question["kp_id"],
@@ -594,138 +644,79 @@ class MySQLPracticeStore:
                         "is_correct": int(correct),
                         "method": verdict["method"],
                         "judge_note": verdict["note"][:1000],
-                        "score_trend": trend,
-                        "resolved": int(resolved),
                         "answered_at": stamp,
                     },
                 )
-                attempt_id = cursor.lastrowid
                 if verdict["note"] == ISSUE_MISSING_EXPECTED:
                     question = _record_issue(question, ISSUE_MISSING_EXPECTED)
                     cursor.execute(
                         "UPDATE qe_question SET meta=%s, updated_at=%s WHERE question_id=%s",
                         (_to_json(question["meta"]), stamp, question_id),
                     )
-                review = self._write_back(
-                    cursor, question, question["kp_type"] or DEFAULT_KP_TYPE, correct, stamp
-                )
-                if question["kp_id"]:
-                    self._ensure_task(cursor, "kp", question["kp_id"], question["course_id"],
-                                      question["kp_type"] or DEFAULT_KP_TYPE, stamp)
+                attempts = self._attempts(cursor, [question_id], owner)[question_id]
             conn.commit()
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
-        attempt = self.get_attempt(attempt_id)
+        state = replay_due(question, attempts, stamp)
         revealed = question["kind"] != "flashcard"
         return {
-            "attempt": attempt,
+            "attempt": {**_serialize(attempts[-1]), "score_trend": derive_trend(attempts)},
             "grade": verdict,
-            "review": review,
+            "review": {
+                "target_kind": "question",
+                "target_id": question_id,
+                "kp_type": state["kp_type"],
+                "interval_index": state["interval_index"],
+                "due_at": state["due_at"].isoformat(),
+                "next_due_at": state["due_at"].isoformat(),
+            },
             "expected_answer": (question.get("expected_answer") or None) if revealed else None,
             "explanation": (question.get("explanation") or None) if revealed else None,
         }
 
-    def _write_back(
-        self,
-        cursor: Any,
-        question: dict[str, Any],
-        kp_type: str,
-        correct: bool,
-        now: datetime,
-    ) -> dict[str, Any]:
-        """回写 question 粒度调度态并返回 `review` 响应块（缝 6 同事务）。"""
+    def _attempts(
+        self, cursor: Any, question_ids: list[str], owner: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        """按题归集的作答流水（事实序升序）；空集不发 SQL。"""
+        grouped: dict[str, list[dict[str, Any]]] = {qid: [] for qid in question_ids}
+        if not question_ids:
+            return grouped
+        marks = ", ".join(["%s"] * len(question_ids))
         cursor.execute(
-            f"SELECT {_TASK_COLUMNS} FROM qe_review_task "
-            "WHERE target_kind='question' AND target_id=%s",
-            (question["question_id"],),
+            f"SELECT {_ATTEMPT_COLUMNS} FROM qe_attempt "
+            f"WHERE owner=%s AND question_id IN ({marks}) "
+            "ORDER BY question_id, answered_at, attempt_id",
+            [owner, *question_ids],
         )
-        task = cursor.fetchone() or {
-            "target_kind": "question",
-            "target_id": question["question_id"],
-            "course_id": question["course_id"],
-            "kp_type": kp_type,
-            "interval_index": 0,
-            "consecutive_correct": 0,
-            "consecutive_wrong": 0,
-            "due_at": now,
-            "status": "active",
-            "created_at": now,
-            "updated_at": now,
-        }
-        state = schedule_next(task, correct, now)
-        cursor.execute(
-            "INSERT INTO qe_review_task "
-            "(target_kind, target_id, course_id, kp_type, interval_index, consecutive_correct, "
-            " consecutive_wrong, due_at, status, created_at, updated_at) "
-            "VALUES (%(target_kind)s, %(target_id)s, %(course_id)s, %(kp_type)s, "
-            " %(interval_index)s, %(consecutive_correct)s, %(consecutive_wrong)s, %(due_at)s, "
-            " 'active', %(now)s, %(now)s) "
-            "ON DUPLICATE KEY UPDATE interval_index=VALUES(interval_index), "
-            "consecutive_correct=VALUES(consecutive_correct), consecutive_wrong=VALUES(consecutive_wrong), "
-            "due_at=VALUES(due_at), status='active', updated_at=VALUES(updated_at)",
-            {
-                "target_kind": "question",
-                "target_id": question["question_id"],
-                "course_id": question["course_id"],
-                "kp_type": task.get("kp_type") or kp_type,
-                "now": now,
-                **state,
-            },
-        )
-        return {
-            "target_kind": "question",
-            "target_id": question["question_id"],
-            "kp_type": task.get("kp_type") or kp_type,
-            "interval_index": state["interval_index"],
-            "due_at": state["due_at"].isoformat(),
-            "next_due_at": state["due_at"].isoformat(),
-        }
+        for row in cursor.fetchall():
+            grouped[str(row["question_id"])].append(dict(row))
+        return grouped
 
-    def _ensure_task(
-        self, cursor: Any, target_kind: str, target_id: str, course_id: str, kp_type: str,
-        now: datetime,
-    ) -> None:
-        cursor.execute(
-            "INSERT INTO qe_review_task "
-            "(target_kind, target_id, course_id, kp_type, interval_index, consecutive_correct, "
-            " consecutive_wrong, due_at, status, created_at, updated_at) "
-            "VALUES (%s, %s, %s, %s, 0, 0, 0, %s, 'active', %s, %s) "
-            "ON DUPLICATE KEY UPDATE updated_at=VALUES(updated_at)",
-            (target_kind, target_id, course_id, kp_type, now, now, now),
-        )
-
-    def _latest_attempt(self, cursor: Any, question_id: str) -> dict[str, Any] | None:
-        cursor.execute(
-            f"SELECT {_ATTEMPT_COLUMNS} FROM qe_attempt WHERE question_id=%s "
-            "ORDER BY answered_at DESC, attempt_id DESC LIMIT 1",
-            (question_id,),
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
-
-    def get_attempt(self, attempt_id: int) -> dict[str, Any]:
+    def get_attempt(self, attempt_id: int, *, owner: str = DEFAULT_OWNER) -> dict[str, Any]:
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    f"SELECT {_ATTEMPT_COLUMNS} FROM qe_attempt WHERE attempt_id=%s",
-                    (attempt_id,),
+                    f"SELECT {_ATTEMPT_COLUMNS} FROM qe_attempt WHERE attempt_id=%s AND owner=%s",
+                    (attempt_id, owner),
                 )
                 row = cursor.fetchone()
         if row is None:
             raise LearnNotFound(f"作答记录不存在：{attempt_id}")
         return _serialize(row)
 
-    def patch_attempt(self, attempt_id: int, **fields: Any) -> dict[str, Any]:
-        """错题本人工位（bookmarked/resolved）；判分结果列不在白名单。"""
+    def patch_attempt(
+        self, attempt_id: int, *, owner: str = DEFAULT_OWNER, **fields: Any
+    ) -> dict[str, Any]:
+        """错题本人工位（bookmarked/resolved）；判分结果列不在白名单（API 面拦）。"""
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT attempt_id FROM qe_attempt WHERE attempt_id=%s FOR UPDATE",
-                    (attempt_id,),
+                    "SELECT attempt_id FROM qe_attempt WHERE attempt_id=%s AND owner=%s FOR UPDATE",
+                    (attempt_id, owner),
                 )
                 if cursor.fetchone() is None:
                     raise LearnNotFound(f"作答记录不存在：{attempt_id}")
@@ -742,9 +733,11 @@ class MySQLPracticeStore:
             raise
         finally:
             conn.close()
-        return self.get_attempt(attempt_id)
+        return self.get_attempt(attempt_id, owner=owner)
 
-    def attempts_by_kp(self, course_id: str) -> dict[str, list[bool]]:
+    def attempts_by_kp(
+        self, course_id: str, *, owner: str = DEFAULT_OWNER
+    ) -> dict[str, list[bool]]:
         """主链 M-3 门的输入面：按知识点取近因作答序列（全序，时序＝`answered_at` 升序、同刻按行 ID）。
 
         `kp_id` 为 NULL 的未归档题不进门；最近 5 次窗口与置信上限钳制归规则层
@@ -754,9 +747,9 @@ class MySQLPracticeStore:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
                     "SELECT kp_id, is_correct FROM qe_attempt "
-                    "WHERE course_id=%s AND kp_id IS NOT NULL "
+                    "WHERE owner=%s AND course_id=%s AND kp_id IS NOT NULL "
                     "ORDER BY kp_id, answered_at, attempt_id",
-                    (course_id,),
+                    (owner, course_id),
                 )
                 rows = cursor.fetchall()
         sequences: dict[str, list[bool]] = {}
@@ -764,117 +757,16 @@ class MySQLPracticeStore:
             sequences.setdefault(str(row["kp_id"]), []).append(bool(row["is_correct"]))
         return sequences
 
-    def due_counts_by_kp(self, course_id: str, now: datetime | None = None) -> dict[str, int]:
-        """门游标的复习腿：到期复习任务按知识点归集（题行归到所属知识点＋裁决 ⑧ 的 kp 粒度行）。
+    # ---------- 到期队列与错题本（流水重放，不建表） ----------
 
-        到期口径与 `review_due` 一致（`status='active'` 且 `due_at<=now`），本方法只给计数，
-        排序与题面下发仍归复习队列；未归档题（`kp_id` IS NULL）不进任何门（裁决 D-M3-4）。
-        """
-        when = _as_naive(now) or _now()
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    "SELECT IF(t.target_kind='kp', t.target_id, q.kp_id) AS kp_id, COUNT(*) AS n "
-                    "FROM qe_review_task t "
-                    "LEFT JOIN qe_question q ON q.question_id=t.target_id "
-                    "WHERE t.status='active' AND t.due_at<=%s AND t.course_id=%s "
-                    "AND (t.target_kind='kp' OR (t.target_kind='question' AND q.kp_id IS NOT NULL)) "
-                    "GROUP BY IF(t.target_kind='kp', t.target_id, q.kp_id)",
-                    (when, course_id),
-                )
-                rows = cursor.fetchall()
-        return {str(row["kp_id"]): int(row["n"]) for row in rows}
-
-    # ---------- 复习队列（纯函数调度 + 持久态） ----------
-
-    def review_due(
-        self, course_id: str | None = None, max_tasks: int = DEFAULT_MAX_TASKS,
-        now: datetime | None = None,
-    ) -> list[dict[str, Any]]:
-        when = _as_naive(now) or _now()
-        where = ["status='active'", "due_at<=%s"]
-        params: list[Any] = [when]
-        if course_id:
-            where.append("course_id=%s")
-            params.append(course_id)
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    f"SELECT {_TASK_COLUMNS} FROM qe_review_task "
-                    f"WHERE {' AND '.join(where)} ORDER BY due_at, target_id",
-                    params,
-                )
-                tasks = [dict(row) for row in cursor.fetchall()]
-                wrong = self._wrong_targets(cursor, course_id)
-                questions = self._question_map(cursor, [t["target_id"] for t in tasks
-                                                        if t["target_kind"] == "question"])
-        scored = [
-            task_view(task, when, task["target_id"] in wrong)
-            for task in tasks
-        ]
-        scored.sort(key=lambda t: (t["priority"], t["due_at"], t["target_id"]))
-        for task in scored[:max_tasks]:
-            row = questions.get(task["target_id"])
-            task["question"] = _serialize(row) if row else None
-        return scored[:max_tasks]
-
-    def _wrong_targets(self, cursor: Any, course_id: str | None) -> set[str]:
-        """未解决错题集合（判例 DeepTutor `error_records` status=active）：最近一次作答判错的题。"""
+    def _replay(
+        self, course_id: str | None, owner: str, now: datetime
+    ) -> list[tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]]:
         where = ["retired=0"]
         params: list[Any] = []
         if course_id:
             where.append("course_id=%s")
             params.append(course_id)
-        cursor.execute(
-            f"SELECT q.question_id, q.kp_id FROM qe_question q "
-            f"WHERE {' AND '.join(where)}",
-            params,
-        )
-        rows = cursor.fetchall()
-        unresolved: set[str] = set()
-        for row in rows:
-            latest = self._latest_attempt(cursor, row["question_id"])
-            if latest and not bool(latest["is_correct"]) and not bool(latest["resolved"]):
-                unresolved.add(row["question_id"])
-                if row["kp_id"]:
-                    unresolved.add(row["kp_id"])
-        return unresolved
-
-    def _question_map(self, cursor: Any, question_ids: list[str]) -> dict[str, dict[str, Any]]:
-        if not question_ids:
-            return {}
-        marks = ", ".join(["%s"] * len(question_ids))
-        cursor.execute(
-            f"SELECT {_QUESTION_COLUMNS} FROM qe_question WHERE question_id IN ({marks})",
-            question_ids,
-        )
-        return {row["question_id"]: dict(row) for row in cursor.fetchall()}
-
-    def count_review_due(self, course_id: str | None = None, now: datetime | None = None) -> int:
-        when = _as_naive(now) or _now()
-        where = ["status='active'", "due_at<=%s"]
-        params: list[Any] = [when]
-        if course_id:
-            where.append("course_id=%s")
-            params.append(course_id)
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"SELECT COUNT(*) FROM qe_review_task WHERE {' AND '.join(where)}", params
-                )
-                return int(cursor.fetchone()[0])
-
-    # ---------- 错题本（派生查询，不建表） ----------
-
-    def _mistake_rows(
-        self, *, course_id: str | None, kp_id: str | None, book_ref: str | None, now: datetime
-    ) -> list[dict[str, Any]]:
-        where = ["retired=0"]
-        params: list[Any] = []
-        for column, value in (("course_id", course_id), ("kp_id", kp_id), ("book_ref", book_ref)):
-            if value:
-                where.append(f"{column}=%s")
-                params.append(value)
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
@@ -883,37 +775,71 @@ class MySQLPracticeStore:
                     params,
                 )
                 questions = [dict(row) for row in cursor.fetchall()]
-                items: list[dict[str, Any]] = []
-                for question in questions:
-                    cursor.execute(
-                        f"SELECT {_ATTEMPT_COLUMNS} FROM qe_attempt WHERE question_id=%s "
-                        "ORDER BY answered_at DESC, attempt_id DESC",
-                        (question["question_id"],),
-                    )
-                    attempts = [dict(row) for row in cursor.fetchall()]
-                    if not attempts:
-                        continue
-                    latest = attempts[0]
-                    if all(bool(a["is_correct"]) for a in attempts):
-                        continue
-                    cursor.execute(
-                        "SELECT COUNT(*) AS n FROM qe_review_task "
-                        "WHERE status='active' AND due_at<=%s AND target_kind='question' AND target_id=%s",
-                        (now, question["question_id"]),
-                    )
-                    items.append(
-                        {
-                            "question": _serialize(question),
-                            "last_attempt": _serialize(latest),
-                            "attempt_count": len(attempts),
-                            "wrong_count": sum(1 for a in attempts if not bool(a["is_correct"])),
-                            "is_correct": bool(latest["is_correct"]),
-                            "resolved": bool(latest["resolved"]),
-                            "bookmarked": any(bool(a["bookmarked"]) for a in attempts),
-                            "score_trend": latest["score_trend"],
-                            "due_today": int(cursor.fetchone()["n"]) > 0,
-                        }
-                    )
+                grouped = self._attempts(cursor, [q["question_id"] for q in questions], owner)
+        return replay_rows(questions, grouped, now)
+
+    def review_due(
+        self,
+        course_id: str | None = None,
+        max_tasks: int = DEFAULT_MAX_TASKS,
+        now: datetime | None = None,
+        *,
+        owner: str = DEFAULT_OWNER,
+    ) -> list[dict[str, Any]]:
+        when = _as_naive(now) or _now()
+        scored = [
+            (task_view(question, state, when, is_unresolved(attempts)), question)
+            for question, attempts, state in self._replay(course_id, owner, when)
+            if state["due_at"] <= when
+        ]
+        scored.sort(key=lambda pair: (pair[0]["priority"], pair[0]["due_at"], pair[0]["target_id"]))
+        out = []
+        for task, question in scored[:max_tasks]:
+            task["question"] = _serialize(question)
+            out.append(task)
+        return out
+
+    def count_review_due(
+        self, course_id: str | None = None, now: datetime | None = None, *,
+        owner: str = DEFAULT_OWNER,
+    ) -> int:
+        """`total_due`＝截断前的全量到期数，与 `review_due` 同一次重放口径。"""
+        when = _as_naive(now) or _now()
+        return sum(1 for _q, _a, state in self._replay(course_id, owner, when) if state["due_at"] <= when)
+
+    def due_counts_by_kp(
+        self, course_id: str, now: datetime | None = None, *, owner: str = DEFAULT_OWNER
+    ) -> dict[str, int]:
+        """门游标的复习腿：到期题行按所属知识点归集（`target_kind='kp'` 腿随调度表退出）。
+
+        到期口径与 `review_due` 同源；未归档题（`kp_id` IS NULL）不进任何门（裁决 D-M3-4）。
+        """
+        when = _as_naive(now) or _now()
+        counts: dict[str, int] = {}
+        for question, _attempts, state in self._replay(course_id, owner, when):
+            if state["due_at"] > when or not question["kp_id"]:
+                continue
+            counts[str(question["kp_id"])] = counts.get(str(question["kp_id"]), 0) + 1
+        return counts
+
+    def _mistake_rows(
+        self,
+        *,
+        course_id: str | None,
+        kp_id: str | None,
+        book_ref: str | None,
+        now: datetime,
+        owner: str,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for question, attempts, state in self._replay(course_id, owner, now):
+            if kp_id and question["kp_id"] != kp_id:
+                continue
+            if book_ref and question["book_ref"] != book_ref:
+                continue
+            if not attempts or all(bool(a["is_correct"]) for a in attempts):
+                continue
+            items.append(mistake_item(question, attempts, state, now))
         return items
 
     def list_mistakes(
@@ -928,10 +854,13 @@ class MySQLPracticeStore:
         limit: int = 50,
         offset: int = 0,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> tuple[list[dict[str, Any]], int]:
         items = filter_mistakes(
-            self._mistake_rows(course_id=course_id, kp_id=kp_id, book_ref=book_ref,
-                               now=_as_naive(now) or _now()),
+            self._mistake_rows(
+                course_id=course_id, kp_id=kp_id, book_ref=book_ref,
+                now=_as_naive(now) or _now(), owner=owner,
+            ),
             resolved=resolved,
             bookmarked=bookmarked,
             trend=trend,
@@ -945,46 +874,32 @@ class MySQLPracticeStore:
         kp_id: str | None = None,
         book_ref: str | None = None,
         now: datetime | None = None,
+        owner: str = DEFAULT_OWNER,
     ) -> dict[str, Any]:
         when = _as_naive(now) or _now()
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                where = ["retired=0"]
-                params: list[Any] = []
-                for column, value in (("course_id", course_id), ("kp_id", kp_id), ("book_ref", book_ref)):
-                    if value:
-                        where.append(f"{column}=%s")
-                        params.append(value)
-                cursor.execute(
-                    f"SELECT COUNT(*) AS n FROM qe_question WHERE {' AND '.join(where)}", params
-                )
-                total = int(cursor.fetchone()["n"])
-        rows = self._mistake_rows(course_id=course_id, kp_id=kp_id, book_ref=book_ref, now=when)
-        where = ["t.status='active'", "t.due_at<=%s", "t.target_kind='question'", "q.retired=0"]
-        params: list[Any] = [when]
-        for column, value in (("q.course_id", course_id), ("q.kp_id", kp_id), ("q.book_ref", book_ref)):
-            if value:
-                where.append(f"{column}=%s")
-                params.append(value)
-        with self._connect() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    "SELECT COUNT(*) AS n FROM qe_review_task t "
-                    "JOIN qe_question q ON q.question_id=t.target_id "
-                    f"WHERE {' AND '.join(where)}",
-                    params,
-                )
-                due_today = int(cursor.fetchone()["n"])
+        replay = self._replay(course_id, owner, when)
+        scoped = [
+            (question, attempts, state)
+            for question, attempts, state in replay
+            if (not kp_id or question["kp_id"] == kp_id)
+            and (not book_ref or question["book_ref"] == book_ref)
+        ]
+        rows = [
+            mistake_item(question, attempts, state, when)
+            for question, attempts, state in scoped
+            if attempts and not all(bool(a["is_correct"]) for a in attempts)
+        ]
         return {
-            "total": total,
+            "total": len(scoped),
             "wrong": len({row["question"]["question_id"] for row in rows}),
             "unresolved": sum(1 for row in rows if not row["resolved"]),
             "bookmarked": sum(1 for row in rows if row["bookmarked"]),
-            "due_today": due_today,
+            "due_today": sum(1 for _q, _a, state in scoped if state["due_at"] <= when),
         }
 
+
 def ensure_tables(settings: Settings) -> None:
-    """幂等建三表（判例 qe_learn_*）；数据库不可达抛异常由调用方降级。"""
+    """幂等建两表（判例 qe_*）；数据库不可达抛异常由调用方降级。"""
     conn = _connect(settings)
     try:
         with conn.cursor() as cursor:
@@ -1020,14 +935,21 @@ __all__ = [
     "SOURCE_KINDS",
     "TYPE_PRIORITY",
     "WRONG_PRIORITY",
+    "build_question_row",
     "build_store",
+    "derive_trend",
     "ensure_tables",
-    "grade",
     "filter_mistakes",
+    "grade",
     "interval_sequence",
-    "task_view",
+    "is_unresolved",
+    "mistake_item",
     "public_question",
+    "replay_due",
+    "replay_rows",
     "resolve_trend",
     "schedule_next",
+    "seed_state",
     "stem_hash",
+    "task_view",
 ]

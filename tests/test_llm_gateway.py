@@ -109,6 +109,55 @@ def test_call_text_local_mode(monkeypatch):
     assert captured["record"]["model"] == "qwen3.8-27b"
 
 
+def test_call_text_local_unbound_inherits_loaded_model(monkeypatch):
+    """A-6 J-A6d：文字槽位无本地绑定时网关不再抛「文字槽位解析失败」——按发现式（model 空）
+    继承单活 runtime 已加载模型，调用记录带 runtime 渠道与空模型（继承标注在 registry notes）。"""
+    captured = {}
+
+    def fake_ensure(settings, slot, script_runner=None, log=None):
+        captured["ensure_slot"] = slot
+
+    def fake_qwen(base_url, messages, **kw):
+        captured["base_url"] = base_url
+        captured["model"] = kw.get("model")
+        return "继承已加载模型的本地回答"
+
+    def fake_record(settings, **kwargs):
+        captured["record"] = kwargs
+        return 7
+
+    monkeypatch.setattr(gateway.model_manager, "ensure_local_ready", fake_ensure)
+    monkeypatch.setattr(gateway.clients, "qwen_chat", fake_qwen)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    result = gateway.call_text(
+        _settings(qed_api_select="local", qed_local_runtime="docker"), prompt="hi",
+    )
+    assert result["success"] is True
+    assert captured["ensure_slot"] == "text"
+    assert captured["base_url"] == "http://127.0.0.1:5001/v1"
+    assert captured["model"] == ""  # 空 = 由 clients.qwen_chat 走 /v1/models 发现式取已加载模型
+    assert captured["record"]["provider"] == "docker"
+    assert captured["record"]["model"] == ""
+
+
+def test_call_text_local_unbound_fails_when_adapt_off(monkeypatch):
+    """A-6 回滚面：`QED_LLM_LOCAL_ADAPT=false` 时回到旧口径——无本地绑定即失败并记录 error。"""
+    captured = {}
+
+    def fake_record(settings, **kwargs):
+        captured["record"] = kwargs
+        return 8
+
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    result = gateway.call_text(
+        _settings(qed_api_select="local", qed_local_runtime="docker",
+                  qed_llm_local_adapt=False), prompt="hi",
+    )
+    assert result["success"] is False
+    assert "文字槽位解析失败" in result["error"]
+    assert captured["record"]["status"] == "error"
+
+
 def test_call_text_failure_recorded(monkeypatch):
     """调用失败：仍记录 status=error + error 原因，返回 reply=""。"""
     captured = {}

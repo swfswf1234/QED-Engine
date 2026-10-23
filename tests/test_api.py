@@ -23,6 +23,8 @@ def _reset_service_manager(monkeypatch):
     sm._OPS.clear()
     sm._MANAGED.clear()
     sm._LOCKED.clear()
+    sm._LAUNCHED_DB.clear()  # DEFECT-015：派发库名记录
+    sm._DB_WARNED.clear()  # DEFECT-015：告警去重集合
 
 
 @pytest.fixture(autouse=True)
@@ -823,10 +825,21 @@ def _patch_popen(monkeypatch, record=None, exit_on_signal=False):
     return created, kill_calls
 
 
-def _patch_script(monkeypatch, record=None, exit_codes=None, stdout="pid: 8123\n"):
+def _patch_script(
+    monkeypatch,
+    record=None,
+    exit_codes=None,
+    stdout="pid: 8123\n",
+    env_record=None,
+    kwargs_record=None,
+    stderr="",
+    stop_stdout="",
+):
     """注入子项目生命周期脚本调用（subprocess.run → FakeCompletedProcess，REQ-017①）。
 
-    exit_codes: dict{子命令: 退出码}（默认全部 0）；stdout 为 start 输出（首行 pid 行）。
+    exit_codes: dict{子命令: 退出码}（默认全部 0）；stdout 为 start 输出（首行 pid 行）；
+    env_record: 传入 dict 时按子命令收集本次传给脚本的 env（DEFECT-015 注入取证用）；
+    stop_stdout: stop 子命令的 stdout（OPS-001「脚本回报未纳管」形取证用）。
     """
     import subprocess
 
@@ -840,8 +853,16 @@ def _patch_script(monkeypatch, record=None, exit_codes=None, stdout="pid: 8123\n
         if record is not None:
             record.append(cmd)
         sub = cmd[-1] if cmd else ""
+        if env_record is not None:
+            env_record[sub] = dict(kwargs.get("env") or {})
+        if kwargs_record is not None:
+            kwargs_record[sub] = kwargs
         code = (exit_codes or {}).get(sub, 0)
-        return FakeCompleted(code, stdout if sub == "start" else "", "")
+        if sub == "start":
+            return FakeCompleted(code, stdout, stderr)
+        if sub == "stop":
+            return FakeCompleted(code, stop_stdout, stderr)
+        return FakeCompleted(code, "", stderr)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -906,7 +927,8 @@ def test_services_snapshot_three_units_offline(monkeypatch):
     services = response.json()["services"]
     assert [s["name"] for s in services] == ["config", "tracker", "axiom", "web"]
     for service in services:
-        for key in ("name", "label", "port", "status", "pid", "started_at", "log_path", "reason"):
+        for key in ("name", "label", "port", "status", "pid", "started_at", "log_path", "reason",
+                      "db_name", "db_source", "db_mismatch"):
             assert key in service, key
     by_name = {s["name"]: s for s in services}
     assert by_name["config"]["status"] == "online"
@@ -948,6 +970,210 @@ def test_services_start_tracker_uses_lifecycle_script(monkeypatch):
     assert body["pid"] == 8123
     assert record[0][-1] == "start"
     assert any("qed_tracker_service.py" in cmd for cmd in record[0])
+
+
+_DB_ENV_KEYS = ("QED_DB_HOST", "QED_DB_PORT", "QED_DB_NAME", "QED_DB_USER", "QED_DB_PASSWORD")
+_DB_FIELDS = ("qed_db_host", "qed_db_port", "qed_db_name", "qed_db_user", "qed_db_password")
+_DB_PROBE_VALUES = ("127.0.0.9", "3399", "qed_gate_probe", "probe_user", "probe_password")
+
+
+def _root_db_settings(monkeypatch):
+    """构造「值只在根 Settings 内、真实环境里不存在」的场景：还原缺陷现场。
+
+    根 `.env` 由 pydantic-settings 进程内读取、从不写进 `os.environ`，故这里刻意
+    `delenv` 五个键再用 init kwargs 建 Settings（init 优先级最高），使断言只能由
+    「派发时显式注入」满足，而不能靠宿主环境恰好带着同名变量蒙过。
+    """
+    from qed_engine.config import Settings
+
+    for key in _DB_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    return Settings(**dict(zip(_DB_FIELDS, _DB_PROBE_VALUES, strict=True)))
+
+
+@pytest.mark.parametrize("unit", ["tracker", "axiom"])
+def test_start_via_script_injects_root_db_env(monkeypatch, unit):
+    """DEFECT-015 S1：8900 托管 8901/8902 时把根解析的 QED_DB_* 显式注入子进程环境。"""
+    from qed_engine.services import service_manager as sm
+
+    sm.configure(_root_db_settings(monkeypatch))
+    env_record: dict = {}
+    _patch_script(monkeypatch, env_record=env_record)
+
+    assert sm._start_via_script(sm._SPECS[unit]) == 8123
+
+    child_env = env_record["start"]
+    for key, value in zip(_DB_ENV_KEYS, _DB_PROBE_VALUES, strict=True):
+        assert child_env.get(key) == value, key
+
+
+def test_start_via_script_does_not_pollute_root_process_env(monkeypatch):
+    """注入只及子进程：根 `os.environ` 不被写脏（仍是根 `.env` 单一配置、不新增环境变量）。"""
+    import os
+
+    from qed_engine.services import service_manager as sm
+
+    sm.configure(_root_db_settings(monkeypatch))
+    env_record: dict = {}
+    _patch_script(monkeypatch, env_record=env_record)
+    sm._start_via_script(sm._SPECS["axiom"])
+
+    assert env_record["start"].get("QED_DB_NAME") == "qed_gate_probe"
+    for key in _DB_ENV_KEYS:
+        assert key not in os.environ, key
+
+
+# --- DEFECT-019：生命周期脚本调用容错解码（子进程 text=True 缺 errors=，GBK 输出杀死 reader 线程）---
+
+
+def test_start_and_stop_via_script_declare_tolerant_decode(monkeypatch):
+    """DEFECT-019 S1：8900 派发 8901/8902 的启/停脚本调用带 errors="replace"。
+
+    判例：scripts/qed_engine_service.py（tasklist GBK 表头需 errors='replace'）。
+    """
+    from qed_engine.services import service_manager as sm
+
+    kwargs_record: dict = {}
+    _patch_script(monkeypatch, kwargs_record=kwargs_record)
+
+    assert sm._start_via_script(sm._SPECS["tracker"]) == 8123
+    sm._stop_via_script(sm._SPECS["tracker"])
+
+    for sub in ("start", "stop"):
+        assert kwargs_record[sub].get("errors") == "replace", sub
+
+
+def test_start_via_script_none_stdout_falls_back_to_pid_file(monkeypatch):
+    """DEFECT-019 S1：解码崩溃形态（stdout=None）改走 PID 文件兜底，不抛 AttributeError。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_script(monkeypatch, stdout=None)
+    monkeypatch.setattr(sm, "_read_pid_file", lambda path: 4321)
+
+    assert sm._start_via_script(sm._SPECS["tracker"]) == 4321
+
+
+def test_start_via_script_none_stdout_without_pid_file_raises_service_error(monkeypatch):
+    """pid 行与 PID 文件两路皆空 → 可读 ServiceError(500)，不是 reader 线程崩溃。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_script(monkeypatch, stdout=None)
+    monkeypatch.setattr(sm, "_read_pid_file", lambda path: None)
+
+    with pytest.raises(sm.ServiceError) as excinfo:
+        sm._start_via_script(sm._SPECS["tracker"])
+    assert excinfo.value.status_code == 500
+    assert "PID" in str(excinfo.value)
+
+
+def test_stop_via_script_none_stderr_still_reports_failure(monkeypatch):
+    """DEFECT-019 S1：失败分支读 stderr 同样空值兜底（退出码非 0 时不得二次崩溃）。
+
+    退出码取 7 而非 3——3 是脚本「端口未纳管、只检测不杀」的专用回报码，控制中心交端口复核
+    不报 500（DEFECT-020 S4），本用例要守卫的是真失败分支。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_script(monkeypatch, exit_codes={"stop": 7}, stderr=None)
+
+    with pytest.raises(sm.ServiceError) as excinfo:
+        sm._stop_via_script(sm._SPECS["axiom"])
+    assert excinfo.value.status_code == 500
+    assert "退出码 7" in str(excinfo.value)
+
+
+
+def _by_name(body: dict) -> dict:
+    return {s["name"]: s for s in body["services"]}
+
+
+def test_services_snapshot_exposes_db_name_without_credentials(monkeypatch):
+    """DEFECT-015 S2＋S4：/services 透出各单元生效库名，且响应文本不含口令/用户/主机。"""
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch)
+    client = _client(monkeypatch, db_password="secret-in-test")
+
+    assert client.post("/api/v1/services/tracker/start").status_code == 200
+    body = client.get("/api/v1/services").json()
+
+    assert body["db_name"] == "qed"
+    tracker = _by_name(body)["tracker"]
+    assert tracker["db_name"] == "qed"
+    assert tracker["db_source"] == "injected"
+    assert tracker["db_mismatch"] is False
+    raw = json.dumps(body)
+    assert "secret-in-test" not in raw
+    for forbidden in ("QED_DB_PASSWORD", "QED_DB_USER", "QED_DB_HOST", "db_password"):
+        assert forbidden not in raw, forbidden
+
+
+def test_services_snapshot_db_source_unknown_when_unit_not_launched_by_us(monkeypatch):
+    """单元在线但无本进程派发记录（外部启动或 8900 先重启）→ 只标 unknown，不谎报一致。"""
+    from qed_engine.services import service_manager as sm
+
+    client = _client(monkeypatch)
+    monkeypatch.setattr(sm, "_probe_http", lambda port: port == 8902)
+
+    axiom = _by_name(client.get("/api/v1/services").json())["axiom"]
+    assert axiom["db_source"] == "unknown"
+    assert axiom["db_name"] == ""
+    assert axiom["db_mismatch"] is False
+
+
+def test_services_snapshot_flags_db_mismatch_and_logs_once(monkeypatch, caplog):
+    """根库名变更后旧派发进程仍连着旧库 → 响应 db_mismatch=true，事件账告警且不随轮询刷屏。"""
+    import logging
+
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch)
+    client = _client(monkeypatch)
+    assert client.post("/api/v1/services/axiom/start").status_code == 200
+
+    sm._DB_ENV = {**sm._DB_ENV, "QED_DB_NAME": "qed_renamed"}
+    with caplog.at_level(logging.INFO, logger="qed_engine.services"):
+        body = client.get("/api/v1/services").json()
+        body_again = client.get("/api/v1/services").json()
+
+    axiom = _by_name(body)["axiom"]
+    assert axiom["db_name"] == "qed"
+    assert axiom["db_mismatch"] is True
+    assert _by_name(body_again)["axiom"]["db_mismatch"] is True
+    warnings = [r for r in caplog.records if "db_mismatch" in r.getMessage()]
+    assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+
+
+def test_db_credentials_absent_from_services_surface_and_event_log(monkeypatch, caplog):
+    """DEFECT-015 S4：口令与 `QED_DB_*` 键名不落任何服务面响应、事件账或错误文本。
+
+    覆盖成功派发、二次启动（过渡窗口错误）、库名改判后的告警轮询与停止四条路径，
+    外加 `config` 单元拒绝自启的 409 分支。
+    """
+    import logging
+
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, False)
+    _patch_script(monkeypatch)
+    client = _client(monkeypatch, db_password="s3cret-db-pw")
+    with caplog.at_level(logging.DEBUG, logger="qed_engine.services"):
+        responses = [
+            client.get("/api/v1/services"),
+            client.post("/api/v1/services/tracker/start"),
+            client.get("/api/v1/services"),
+            client.post("/api/v1/services/tracker/start"),
+            client.post("/api/v1/services/config/start"),
+        ]
+        sm._DB_ENV = {**sm._DB_ENV, "QED_DB_NAME": "qed_renamed"}
+        responses.append(client.get("/api/v1/services"))
+        responses.append(client.post("/api/v1/services/tracker/stop"))
+
+    texts = [json.dumps(r.json()) for r in responses if r.content]
+    texts += [r.getMessage() for r in caplog.records]
+    assert texts, "取证面为空"
+    for secret in ("s3cret-db-pw", "QED_DB_PASSWORD", "QED_DB_USER", "db_password"):
+        assert all(secret not in text for text in texts), secret
+    assert "secret" not in " ".join(r.getMessage() for r in caplog.records)
 
 
 def test_services_start_script_failure_returns_500(monkeypatch):
@@ -1045,6 +1271,107 @@ def test_services_stop_script_failure_returns_500(monkeypatch):
     assert response.status_code == 500
 
 
+def test_services_stop_unmanaged_reports_listening_pid(monkeypatch):
+    """OPS-001 S1/S2：脚本单元 stop 派发后按端口复核——脚本回报未纳管且端口仍监听时不返回裸
+    stopping，改如实报错（原因含端口反查到的监听 PID）且不置停止过渡标记。
+
+    修复前：非经服务域启动的实例（端口在听、脚本无 PID 文件）被 stop 时脚本幂等退出 0，
+    8900 返回裸 stopping 假成功、进程未动。根侧只检出不终止非本中心启动的进程（S3）。
+    """
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, True)
+    _patch_script(monkeypatch, stop_stdout="not running (no pid file)\n")
+    monkeypatch.setattr(sm, "_listening_pid", lambda port: 4321)
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/stop")
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "4321" in detail
+    assert "未经" in detail or "未纳管" in detail
+    assert sm._OPS.get("tracker") is None  # 未置 stop 过渡标记
+
+
+def test_services_stop_unmanaged_without_pid_lookup(monkeypatch):
+    """OPS-001 S1 兜底形：端口反查不到 PID（netstat 不可用）时仍如实报错，不返回裸 stopping。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, True)
+    _patch_script(monkeypatch, stop_stdout="not running (no pid file)\n")
+    monkeypatch.setattr(sm, "_listening_pid", lambda port: None)
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/stop")
+    assert response.status_code == 409
+    assert "未取得" in response.json()["detail"]
+
+
+def test_services_stop_script_unmanaged_exit_code_still_rechecks_port(monkeypatch):
+    """DEFECT-020 S4：脚本以「未纳管只检测」专用退出码 3 回报时，控制中心仍走端口复核出 409，
+    不得降级成 500——8900 侧 409 语义与既有断言（退出码 1 → 500）都不变。"""
+    from qed_engine.services import service_manager as sm
+
+    _patch_probe(monkeypatch, True)
+    _patch_script(
+        monkeypatch,
+        exit_codes={"stop": 3},
+        stop_stdout="port 8901 由非本脚本启动的进程监听（pid 4321）\n",
+    )
+    monkeypatch.setattr(sm, "_listening_pid", lambda port: 4321)
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/services/tracker/stop")
+    assert response.status_code == 409, "只检测形不得变成 500"
+    assert "4321" in response.json()["detail"]
+    assert sm._OPS.get("tracker") is None  # 未置停止过渡标记
+
+
+def test_services_stop_script_unit_after_port_released_returns_stopping(monkeypatch):
+    """OPS-001 S2 正常纳管停止形：脚本 stop 后端口释放 → 复核不误伤，仍返回 stopping。"""
+    from qed_engine.services import service_manager as sm
+
+    online = {"tracker": False}
+
+    monkeypatch.setattr(sm, "_probe_http", lambda port: online["tracker"])
+
+    class FakeCompleted:
+        def __init__(self, returncode, out=""):
+            self.returncode = returncode
+            self.stdout = out
+            self.stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        sub = cmd[-1] if cmd else ""
+        if sub == "start":
+            online["tracker"] = True
+            return FakeCompleted(0, "pid: 8123\n")
+        if sub == "stop":
+            online["tracker"] = False
+            return FakeCompleted(0, "stopped\n")
+        return FakeCompleted(0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    client = _client(monkeypatch)
+    assert client.post("/api/v1/services/tracker/start").status_code == 200
+    response = client.post("/api/v1/services/tracker/stop")
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopping"
+
+
+def test_listening_pid_parser_reads_listening_rows():
+    """OPS-001 端口反查解析器：只认 LISTENING 行与本地地址端口，忽略其他端口/其他状态。"""
+    from qed_engine.services import service_manager as sm
+
+    text = "\n".join(
+        [
+            "  TCP    127.0.0.1:8901         0.0.0.0:0              LISTENING       4321",
+            "  TCP    127.0.0.1:8902         0.0.0.0:0              LISTENING       5555",
+            "  TCP    127.0.0.1:8901         127.0.0.1:52113        ESTABLISHED     9999",
+            "  UDP    0.0.0.0:5353           *:*                                    7777",
+        ]
+    )
+    assert sm._parse_netstat_pid(text, 8901) == 4321
+    assert sm._parse_netstat_pid(text, 8903) is None
+
+
 def test_services_transition_window_expires_to_probe_result(monkeypatch):
     """启动后 15s 窗口内显示 starting；窗口过后回落为探测结果。"""
     from qed_engine.services import service_manager as sm
@@ -1121,13 +1448,32 @@ def test_services_restart_stops_then_starts(monkeypatch):
 
 
 def test_services_stop_externally_running_script_unit(monkeypatch):
-    """脚本单元外部运行中（探测在线、无托管记录，如手动经脚本启动）→ stop 200（REQ-017① 契约）。
+    """脚本单元外部运行中（探测在线、无 8900 托管记录，如手动经脚本启动）→ stop 200（REQ-017① 契约）。
 
-    修复：_stop 曾以 _MANAGED 为唯一放行条件，手动启动的 tracker 停止返回 409「无托管记录」。
+    修复一：_stop 曾以 _MANAGED 为唯一放行条件，手动启动的 tracker 停止返回 409「无托管记录」。
+    修复二（OPS-001）：派发后按端口复核，脚本真把该实例停下（端口释放）才返回 stopping；
+    脚本回报未纳管而端口仍监听时改判 409，见 test_services_stop_unmanaged_reports_listening_pid。
     """
-    _patch_probe(monkeypatch, True)
+    from qed_engine.services import service_manager as sm
+
+    online = {"tracker": True}
+    monkeypatch.setattr(sm, "_probe_http", lambda port: online["tracker"])
     record = []
-    _patch_script(monkeypatch, record=record)
+
+    class FakeCompleted:
+        def __init__(self, returncode, out=""):
+            self.returncode = returncode
+            self.stdout = out
+            self.stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        record.append(cmd)
+        if cmd[-1] == "stop":
+            online["tracker"] = False
+            return FakeCompleted(0, "stopped pid 8123\n")
+        return FakeCompleted(0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
     client = _client(monkeypatch)
     response = client.post("/api/v1/services/tracker/stop")
     assert response.status_code == 200
@@ -1640,7 +1986,7 @@ def test_axiom_parsing_tree_course_only_fallback(monkeypatch):
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.get("/api/v1/parsing/tree")
     assert response.status_code == 200
-    course = response.json()[0]["children"][0]
+    course = response.json()["nodes"][0]["children"][0]
     assert course["children"][0]["book"]["book_id"] == "mathanalysis-b01"
 
 
@@ -1850,7 +2196,7 @@ def test_axiom_parsing_tree_aggregates_books(monkeypatch):
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.get("/api/v1/parsing/tree")
     assert response.status_code == 200
-    tree = response.json()
+    tree = response.json()["nodes"]
     assert tree[0]["title"] == "数学"
     course = tree[0]["children"][0]
     assert course["title"] == "数学分析"
@@ -1869,8 +2215,59 @@ def test_axiom_parsing_tree_degrades_without_axiom(monkeypatch):
     client = _client(monkeypatch, axiom=_axiom_client(handler))
     response = client.get("/api/v1/parsing/tree")
     assert response.status_code == 200
-    tree = response.json()
-    assert tree[0]["children"][0]["children"] == []
+    body = response.json()
+    assert body["sources"]["axiom_flow"] == "offline"
+    assert body["nodes"][0]["children"][0]["children"] == []
+
+
+@pytest.mark.parametrize(
+    ("shared", "axiom_offline"),
+    [(True, False), (False, True), (True, True)],
+    ids=["shared-empty-online", "shared-ok-offline", "both-degraded"],
+)
+def test_parsing_tree_distinguishes_two_empty_degradations(monkeypatch, shared, axiom_offline):
+    """DEFECT-015 S3：「共享表为空」与「8902 离线」两种空态在响应中可区分。
+
+    修复前端点吞掉 AxiomError 只把书目置空，共享表为空又直接落空数组，两种降级同形，
+    排查时无从判定根因（本轮并库取证即被此带偏）。
+    """
+    import qed_engine.services.shared_tables as shared_tables
+
+    monkeypatch.setattr(
+        shared_tables, "list_domains_with_courses",
+        lambda settings: [] if shared else _fake_shared_tree(),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if axiom_offline:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, json=[])
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    body = client.get("/api/v1/parsing/tree").json()
+
+    assert body["sources"]["shared_tables"] == ("empty" if shared else "ok")
+    assert body["sources"]["axiom_flow"] == ("offline" if axiom_offline else "ok")
+    assert (body["nodes"] == []) is shared
+
+
+def test_parsing_tree_mounts_books_when_shared_tree_exists(monkeypatch):
+    """共享表有登记 → `nodes` 非空且书目挂载照常（信封不改变节点形状）。"""
+    import qed_engine.services.shared_tables as shared_tables
+
+    monkeypatch.setattr(shared_tables, "list_domains_with_courses", lambda settings: _fake_shared_tree())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[{"book_id": "b-1", "domain_id": "math", "course_id": "01_math_analysis"}],
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    body = client.get("/api/v1/parsing/tree").json()
+
+    assert body["sources"] == {"shared_tables": "ok", "axiom_flow": "ok"}
+    assert body["nodes"][0]["children"][0]["children"][0]["book"]["book_id"] == "b-1"
 
 
 # 注：旧探索透传路由测试（PLAN-021 冻结端点 §1~§7.2）已随 B1 删除——8900 改由自有
