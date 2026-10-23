@@ -325,7 +325,6 @@ export interface CourseRecord {
   description?: string;
   sort_order?: number;
   prerequisites: string[];
-  related_targets?: string[];
   note?: string;
   /** 探索状态（PLAN-022 F4：未开始/已生成/探索中/已完成） */
   exploration_stage?: string;
@@ -379,7 +378,6 @@ export interface DomainSystem {
   /** 领域层级（探索产物，domain@v2） */
   level?: string;
   classic_tracks?: Array<{ name: string; summary?: string; kind?: string }>;
-  path_results?: unknown;
   scope?: string;
   courses: CourseRecord[];
 }
@@ -518,19 +516,7 @@ export interface PaperSelectionSummary {
 export interface PaperCandidateEntry {
   rank: number;
   plan_index: number;
-  candidate: {
-    provider: string;
-    provider_id: string;
-    title: string;
-    authors: string[];
-    language: string;
-    year: string;
-    page_url: string;
-    download_url: string;
-    identifiers: Record<string, string>;
-    abstract?: string;
-    published_at?: string;
-  };
+  candidate: PaperCandidateInfo;
   assessment: {
     arxiv_id: string;
     goal_fit: number;
@@ -543,6 +529,54 @@ export interface PaperCandidateEntry {
   recommended: boolean;
 }
 
+/** 候选原始信息（`candidates[]` 与 `assessments[].candidate` 同源） */
+export interface PaperCandidateInfo {
+  provider: string;
+  provider_id: string;
+  title: string;
+  authors: string[];
+  language: string;
+  year: string;
+  page_url: string;
+  download_url: string;
+  identifiers: Record<string, string>;
+  abstract?: string;
+  published_at?: string;
+  [key: string]: unknown;
+}
+
+/** 检索计划逐条（模型计划或兜底计划；`fetched`/`kept` 任务成功后回填） */
+export interface PaperSearchPlanEntry {
+  terms: string[];
+  category: string;
+  reason: string;
+  plan_index: number;
+  fetched?: number;
+  kept?: number;
+}
+
+/** 计划执行覆盖（8901 只在 coverage 里回填 fetched/kept，不含 reason） */
+export interface PaperPlanCoverageEntry {
+  plan_index: number;
+  terms: string[];
+  category: string;
+  fetched?: number;
+  kept?: number;
+}
+
+/** 本次探索的领域画像快照（年窗只在此，顶层 years_limit 不落库） */
+export interface PaperProfileSnapshot {
+  id?: string;
+  name?: string;
+  description?: string;
+  audience?: string;
+  goals?: string[];
+  topics?: string[];
+  allowed_categories?: string[];
+  exclude?: string[];
+  years_limit?: number | null;
+}
+
 /** GET /papers/selections/{id} 报告详情（评审段数据源） */
 export interface PaperSelectionDetail {
   selection_id: string;
@@ -552,6 +586,16 @@ export interface PaperSelectionDetail {
   recipe?: string;
   assessments: PaperCandidateEntry[];
   recommendations: number[];
+  /** 以下均 8901 报告既有字段，8900 纯透传带回；老报告缺字段时整段降级 */
+  temporary_goal?: string;
+  allowed_categories?: string[];
+  profile?: PaperProfileSnapshot | null;
+  search_plan?: PaperSearchPlanEntry[];
+  plan_coverage?: PaperPlanCoverageEntry[];
+  plan_source?: string;
+  search_failures?: Array<{ category: string; terms: string[]; error: string }>;
+  excluded_existing?: string[];
+  candidates?: PaperCandidateInfo[];
 }
 
 /** POST /papers/selections/{id}/adopt 的单条落位（course_id 空=领域级；⑤′ domain_id 必填） */

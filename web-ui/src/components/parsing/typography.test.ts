@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Block } from '../../api/axiom';
+import { blockText } from './blocks';
 import {
   assignRoles, bodyFontFamily, clampLevel, DEFAULT_TYPOGRAPHY, FONT_LADDER_LABELS,
   FONT_LADDER_PT, headingLevelFor, HEADING_FONT_FAMILY, isSectionHeadingText,
-  isTocHeadingText, levelPx,
+  indentForDepth, INDENT_STEPS_PX, isSentenceClosed, headingDepthOf, isTocHeadingText, layoutUnits, levelPx,
   loadTypographyPrefs, ptToPx, roleTypography, saveTypographyPrefs, symbolLineParts,
   tocItemParts,
   TYPOGRAPHY_STORAGE_KEY,
@@ -264,5 +265,96 @@ describe('W7 符号表行式与三列拆分', () => {
     const st = roleTypography('symbolTable', mk('paragraph'), DEFAULT_TYPOGRAPHY);
     expect(st.fontFamily).toContain('SimSun');
     expect(st.fontSizePx).toBeCloseTo(levelPx(0), 5);
+  });
+});
+
+describe('W5 排版层止血（§V2.4.1~3：层级左偏移、跨页续段合并、标题重印去重）', () => {
+  it('左偏移档位＝0/16/32，三级以上封顶 32', () => {
+    expect(INDENT_STEPS_PX).toEqual([0, 16, 32]);
+    expect(indentForDepth(1)).toBe(0);
+    expect(indentForDepth(2)).toBe(16);
+    expect(indentForDepth(3)).toBe(32);
+    expect(indentForDepth(7)).toBe(32);
+  });
+
+  it('标题层级启发：题号点数定档，「第 N 章/篇」=1、「第 N 节」=2，无题号回落 level', () => {
+    expect(headingDepthOf('第 3 章 微分学', 1)).toBe(1);
+    expect(headingDepthOf('第三章 积分', undefined)).toBe(1);
+    expect(headingDepthOf('第一篇 总论', undefined)).toBe(1);
+    expect(headingDepthOf('1.2 序列的极限', undefined)).toBe(2);
+    expect(headingDepthOf('1.2.4 例题选讲', undefined)).toBe(3);
+    expect(headingDepthOf('小结与回顾', 2)).toBe(2);
+    expect(headingDepthOf('小结与回顾', undefined)).toBe(1);
+  });
+
+  it('收尾判定：句末标点/冒号视为收尾，未完句不收尾', () => {
+    expect(isSentenceClosed('极限的定义')).toBe(false);
+    expect(isSentenceClosed('定义如下：')).toBe(true);
+    expect(isSentenceClosed('收敛。')).toBe(true);
+  });
+
+  it('跨页续段：相邻两个正文块且前块未收尾 → 合并为一段并保留两块来源下标', () => {
+    const blocks = [
+      mk('paragraph', { text: '设数列' }),
+      mk('paragraph', { text: '{xn} 单调增加且有上界。' }),
+      mk('paragraph', { text: '则其极限存在。' }),
+    ];
+    const units = layoutUnits(blocks, assignRoles(blocks));
+    expect(units).toHaveLength(2);
+    expect(units[0].indices).toEqual([0, 1]);
+    expect(blockText(units[0].block)).toBe('设数列{xn} 单调增加且有上界。');
+    expect(units[1].indices).toEqual([2]);
+  });
+
+  it('已收尾的正文块不合并（保持两段）', () => {
+    const blocks = [mk('paragraph', { text: '第一段结束。' }), mk('paragraph', { text: '第二段开始' })];
+    const units = layoutUnits(blocks, assignRoles(blocks));
+    expect(units.map((u) => u.indices)).toEqual([[0], [1]]);
+  });
+
+  it('正文块与最近上级标题同档：节题 16px 下的正文同 16px，子题下 32px', () => {
+    const blocks = [
+      mk('heading', { text: '1.2 序列的极限' }),
+      mk('paragraph', { text: '数列极限是本章的核心概念。' }),
+      mk('heading', { text: '1.2.1 子列' }),
+      mk('paragraph', { text: '子列沿用收敛性。' }),
+    ];
+    expect(layoutUnits(blocks, assignRoles(blocks)).map((u) => u.indentPx)).toEqual([16, 16, 32, 32]);
+  });
+
+  it('章题档为 0：首章标题与其下正文都不缩进', () => {
+    const blocks = [mk('heading', { text: '第一章 实数' }), mk('paragraph', { text: '实数完备性。' })];
+    expect(layoutUnits(blocks, assignRoles(blocks)).map((u) => u.indentPx)).toEqual([0, 0]);
+  });
+
+  it('同一标题跨页重印只保留首个，其后正文仍归该标题档', () => {
+    const blocks = [
+      mk('heading', { text: '1.3 函数极限' }),
+      mk('paragraph', { text: '定义。' }),
+      mk('heading', { text: '1.3 函数极限' }),
+      mk('paragraph', { text: '续文。' }),
+    ];
+    const units = layoutUnits(blocks, assignRoles(blocks));
+    expect(units.filter((u) => u.role === 'heading')).toHaveLength(1);
+    expect(units).toHaveLength(3);
+  });
+
+  it('题注不缩进；家具块保留单元由渲染层决定显隐', () => {
+    const blocks = [
+      mk('heading', { text: '1.1 节题' }),
+      mk('caption', { text: '图 1 示意' }),
+      mk('header', { text: '页眉文字' }),
+    ];
+    expect(layoutUnits(blocks, assignRoles(blocks)).map((u) => [u.role, u.indentPx]))
+      .toEqual([['heading', 16], ['caption', 0], ['furniture', 0]]);
+  });
+
+  it('公式块不并入文本段（只合并纯文本 paragraph/list）', () => {
+    const blocks = [
+      mk('paragraph', { text: '由定义可得' }),
+      mk('formula', { latex: 'a_n \to a' }),
+      mk('paragraph', { text: '成立。' }),
+    ];
+    expect(layoutUnits(blocks, assignRoles(blocks)).map((u) => u.indices)).toEqual([[0], [1], [2]]);
   });
 });

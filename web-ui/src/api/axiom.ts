@@ -284,7 +284,19 @@ export interface ParsingTreeNode {
   children?: ParsingTreeNode[];
 }
 
-/** GET /api/v1/parsing/tree：左侧树聚合（8900 共享表领域课程 + 8902 书目） */
-export function getParsingTree(opts?: ApiRequestOptions): Promise<ParsingTreeNode[]> {
-  return api.get<ParsingTreeNode[]>('/parsing/tree', opts);
+/** 左树两种降级的来源标记（DEFECT-015 S3）：共享表登记为空 vs 8902 不可达 */
+export interface ParsingTreeSources {
+  shared_tables: 'ok' | 'empty';
+  axiom_flow: 'ok' | 'offline';
+}
+
+/** GET /api/v1/parsing/tree 响应信封 */
+export interface ParsingTreeEnvelope {
+  nodes: ParsingTreeNode[];
+  sources: ParsingTreeSources;
+}
+
+/** GET /api/v1/parsing/tree：左侧树聚合（8900 共享表领域课程 + 8902 书目）＋降级来源信封 */
+export function getParsingTree(opts?: ApiRequestOptions): Promise<ParsingTreeEnvelope> {
+  return api.get<ParsingTreeEnvelope>('/parsing/tree', opts);
 }

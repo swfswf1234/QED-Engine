@@ -11,7 +11,7 @@ import {
 import type { StarCourseNode, StarMapDomain, StarMapEdge, TrackCluster } from '../api/learn';
 
 function course(id: string, name: string, track: string, stage = ''): StarCourseNode {
-  return { course_id: id, name, track, stage, sort_order: null, kp_confirmed: 0, kp_candidates: 0 };
+  return { course_id: id, name, track, stage, sort_order: null, kp_confirmed: 0 };
 }
 
 function cluster(track: string, courses: StarCourseNode[], kind = 'main', summary = ''): TrackCluster {

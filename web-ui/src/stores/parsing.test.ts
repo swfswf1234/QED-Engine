@@ -9,7 +9,7 @@ vi.mock('../api/axiom', () => ({
   getBook: vi.fn(async () => ({ book_id: 'b1', page_count: 10 })),
   getBookPage: vi.fn(async () => ({ page_no: 1, image_url: '', markdown: '', blocks: { page: 1, blocks: [] } })),
   getPageEdits: vi.fn(async () => []),
-  getParsingTree: vi.fn(async () => []),
+  getParsingTree: vi.fn(async () => ({ nodes: [], sources: { shared_tables: 'ok', axiom_flow: 'ok' } })),
   getParseJob: vi.fn(async () => null),
   ingestBook: vi.fn(async () => ({})),
   listBooks: vi.fn(async () => []),
@@ -35,6 +35,9 @@ const reset = () =>
     drawMode: false,
     typography: { ...DEFAULT_TYPOGRAPHY },
     edits: {},
+    tree: [],
+    treeLoading: false,
+    treeSources: null,
   });
 
 describe('版式偏好接线（§5：store 状态 + localStorage 持久）', () => {
@@ -208,5 +211,40 @@ describe('整页确认（REQ-098 W8：confirmPageBlocks 批量落 verdict=ok）'
     const r = await useParsingStore.getState().confirmPageBlocks(2, -1);
     expect(r.confirmed).toBe(2);
     expect(r.skipped).toBe(0);
+  });
+});
+
+
+describe('fetchTree 降级来源（DEFECT-015 S3：两种空态可区分）', () => {
+  beforeEach(() => {
+    reset();
+  });
+
+  it('共享表为空：tree 为空数组，treeSources 标 empty 且 8902 在线', async () => {
+    const { getParsingTree } = await import('../api/axiom');
+    vi.mocked(getParsingTree).mockResolvedValueOnce({
+      nodes: [],
+      sources: { shared_tables: 'empty', axiom_flow: 'ok' },
+    } as never);
+
+    await useParsingStore.getState().fetchTree();
+
+    const s = useParsingStore.getState();
+    expect(s.tree).toEqual([]);
+    expect(s.treeSources).toEqual({ shared_tables: 'empty', axiom_flow: 'ok' });
+  });
+
+  it('8902 离线：领域→课程节点照常出，treeSources 标 offline', async () => {
+    const { getParsingTree } = await import('../api/axiom');
+    vi.mocked(getParsingTree).mockResolvedValueOnce({
+      nodes: [{ key: 'domain:math', type: 'domain', title: '数学', children: [] }],
+      sources: { shared_tables: 'ok', axiom_flow: 'offline' },
+    } as never);
+
+    await useParsingStore.getState().fetchTree();
+
+    const s = useParsingStore.getState();
+    expect(s.tree.map((n) => n.title)).toEqual(['数学']);
+    expect(s.treeSources?.axiom_flow).toBe('offline');
   });
 });

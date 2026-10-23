@@ -201,11 +201,23 @@
 
 .dl-summary {
   flex-shrink: 0; /* 汇总行固定 */
+  display: flex;
+  align-items: flex-start; /* 入口按钮与「当前选择」同一排，右靠齐（REQ-108 I2） */
+  gap: 12px;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 12px 16px;
   margin-top: 12px;
+}
+
+.dl-summary-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dl-summary-action {
+  flex-shrink: 0;
 }
 
 .dl-content {
@@ -529,42 +541,48 @@
   color: #666;
 }
 
-/* 论文展示行（REQ-102 W3，downloads-ui §4.4：领域卡/课程头下挂，空则组件自身隐藏） */
-.dl-paper-row {
+/* 论文栏视图（REQ-108 I6，壳 §8：左树派生节点 + 右栏卡片列，与教程列同形） */
+.dl-paper-column {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 10px 16px;
+  padding: 12px 16px;
   margin-bottom: 16px;
 }
 
-.dl-paper-row-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #374151;
-  margin-right: 12px;
-}
-
-.dl-paper-row-items {
+.dl-paper-column-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 8px;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.dl-paper-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.dl-paper-column-empty {
+  color: #8c8c8c;
   font-size: 13px;
-  color: #374151;
+  padding: 12px 0;
+}
+
+.dl-paper-card {
   cursor: pointer;
 }
 
-.dl-paper-item:hover {
-  color: #1677ff;
+.dl-paper-card:hover {
+  border-color: #1677ff;
 }
 
-.dl-paper-item-year {
-  color: #9ca3af;
+.dl-paper-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f1f1f;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dl-tree-papers .dl-tree-name {
+  font-style: normal;
+  color: #374151;
 }

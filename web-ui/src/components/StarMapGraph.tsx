@@ -1,11 +1,12 @@
 /**
- * 知识梳理星图渲染（裁决 ③/⑧：纯函数布局 + ECharts graph，不引新依赖、不用 force）
+ * 知识探索·星图渲染（裁决 ③/⑧：纯函数布局 + ECharts graph，不引新依赖、不用 force）
  * - 轨迹列框＝竖长虚线圆角框（透明填充 + 同轨色描边），名称写在框内顶部名称带；**不响应悬停**
  * - 课程＝不透明圆角框本体（不再画圆点）：连线锚在框中心，框盖在线上，视觉落点即框边；
  *   悬停高亮写在 series 级 emphasis（graph 符号不读逐项 emphasis.itemStyle），列框逐项 disabled 关掉
  * - 连线只连课程框：同轨实线、跨轨虚线、无箭头；弯曲度由布局给定（跨行长边自动绕开中间课程框）
  * - 节点点击只透传课程 id（`nebula:` 前缀的列框节点忽略）
- * - 课程提示行按 `dueCounts` 追加「今日复习 N 条」（0 条不写，星图信息面仍收窄）
+ * - 课程提示行＝课程名称（加粗）＋课程叙述（`course.description`，REQ-110 W4）；
+ *   计数段与复习段都不出现（四审裁决 / 裁决 ④）
  */
 import { useMemo } from 'react';
 import type { EChartsCoreOption } from 'echarts/core';
@@ -35,17 +36,21 @@ interface GraphNodeItem {
   itemStyle: Record<string, unknown>;
   label: Record<string, unknown>;
   emphasis?: Record<string, unknown>;
-  /** 星图语义：nebula=轨迹列框（不可点、不悬停）/ course=课程（点击进入知识点页） */
+  /** 星图语义：nebula=轨迹列框（不可点、不悬停）/ course=课程（点击就地下钻课程层级视图） */
   kind: 'nebula' | 'course';
   track: string;
+  /** 课程＝叙述（`course.description`，可空）；列框＝空串 */
   detail: string;
 }
 
 const clampFont = (size: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(size)));
 
+/** 提示框走 HTML 渲染：叙述来自书目文本，转义后再拼 */
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] as string);
+
 export function buildStarMapOption(
   layout: StarMapLayout,
-  dueCounts: Record<string, number> = {},
 ): EChartsCoreOption {
   const colorOf = (track: string) =>
     TRACK_COLORS[Math.max(0, layout.trackOrder.indexOf(track)) % TRACK_COLORS.length];
@@ -88,8 +93,7 @@ export function buildStarMapOption(
   }));
 
   const courseItems: GraphNodeItem[] = layout.nodes.map((n) => {
-    const due = dueCounts[n.id] ?? 0;
-    const detail = `已确认 ${n.kpConfirmed} · 待选 ${n.kpCandidates}`;
+    // 提示＝课程名称＋课程叙述（四审裁决：计数段删除）；叙述空值时只显课名一行
     return {
       id: n.id,
       name: n.name,
@@ -99,7 +103,7 @@ export function buildStarMapOption(
       symbolSize: [n.w, n.h],
       kind: 'course',
       track: n.track,
-      detail: due > 0 ? `${detail} · 今日复习 ${due} 条` : detail,
+      detail: n.description,
       itemStyle: {
         color: BOX_FILL,
         borderColor: colorOf(n.track),
@@ -137,7 +141,10 @@ export function buildStarMapOption(
         const data = (params as { data?: GraphNodeItem }).data;
         // 列框不给提示：只有课程才响应鼠标
         if (!data || data.kind !== 'course') return '';
-        return `${data.name}<br/>${data.detail}`;
+        const title = `<b>${escapeHtml(data.name)}</b>`;
+        if (!data.detail) return title;
+        // 叙述限宽折行、不截字符数（设计稿 A §8）
+        return `${title}<div style="max-width:360px;white-space:pre-wrap">${escapeHtml(data.detail)}</div>`;
       },
     },
     series: [
@@ -167,14 +174,12 @@ export function buildStarMapOption(
   };
 }
 
-export default function StarMapGraph({ layout, height, dueCounts, onSelectCourse }: {
+export default function StarMapGraph({ layout, height, onSelectCourse }: {
   layout: StarMapLayout;
   height?: number;
-  /** 课程 id → 今日到期复习条数（`GET /learn/review/due?course=` 聚合，复习入口口径） */
-  dueCounts?: Record<string, number>;
   onSelectCourse: (courseId: string) => void;
 }) {
-  const option = useMemo(() => buildStarMapOption(layout, dueCounts), [layout, dueCounts]);
+  const option = useMemo(() => buildStarMapOption(layout), [layout]);
   return (
     <EChart
       option={option}

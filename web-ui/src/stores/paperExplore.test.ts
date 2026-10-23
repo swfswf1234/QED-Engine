@@ -1,12 +1,14 @@
 /**
- * 论文探索 store 测试（REQ-102 W4，downloads-ui.md §4.4 / downloads-flow.md §7.2）
+ * 论文探索 store 测试（REQ-102 W4，REQ-109 I9~I10；downloads-ui.md §4.4 / downloads-flow.md §7.2）
  * - 纯派生：§7.2 五态展示徽标（探索中 > 待评审 > 失败 > 已沉淀 > 隐藏），禁读 exploration_stage
- * - 流程：start（202 task_id）→ pollOnce（completed→读报告）→ adopt（202→采纳结果）
- * - 降级：连续 3 次轮询失败转 error 并停表；已在库候选默认不勾
+ * - 流程：start（请求体由组件侧纯函数组好，store 原样透传）→ pollOnce（completed→读报告）
+ *   → adopt（202→采纳结果）
+ * - 历史探索清单：loadHistory 只列本领域、失败静默；openReport 读该份详情并进段③
+ * - 降级：连续 3 次轮询失败转 error 并停表
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  PAPER_MAX_POLL_FAILURES, PAPER_POLL_INTERVAL_MS,
+  PAPER_HISTORY_LIMIT, PAPER_MAX_POLL_FAILURES, PAPER_POLL_INTERVAL_MS,
   derivePaperRowBadge, isCandidateInStock, paperFlowPhase,
   usePaperExploreStore,
 } from './paperExplore';
@@ -118,25 +120,67 @@ describe('已在库去重标记（标题归一匹配）', () => {
 });
 
 describe('弹窗阶段派生 paperFlowPhase', () => {
-  it('无任务无报告=form；running 任务=running；失败=failed；ranked 报告=review；有采纳结果=adopted', () => {
+  it('无任务无报告=form；running 任务=running；失败=failed；有采纳结果=adopted', () => {
     expect(paperFlowPhase({ task: null, selection: null, adopted: null })).toBe('form');
     expect(paperFlowPhase({ task: task(), selection: null, adopted: null })).toBe('running');
     expect(paperFlowPhase({ task: task({ status: 'failed' }), selection: null, adopted: null })).toBe('failed');
-    expect(paperFlowPhase({ task: task({ status: 'completed' }), selection: RANKED_REPORT, adopted: null })).toBe('review');
     expect(paperFlowPhase({ task: null, selection: RANKED_REPORT, adopted: [] })).toBe('adopted');
+  });
+
+  it('I3 首屏纪律：ranked 报告在手、stage 未推进时仍是 form（段①设置）', () => {
+    const base = { task: task({ status: 'completed' }), selection: RANKED_REPORT, adopted: null };
+    expect(paperFlowPhase(base)).toBe('form');
+    expect(paperFlowPhase({ ...base, stage: 'settings' })).toBe('form');
+  });
+
+  it('I3 段③→段④：stage=plan 进检索口径；stage=review 且 ranked 才进候选评审', () => {
+    const base = { task: task({ status: 'completed' }), selection: RANKED_REPORT, adopted: null };
+    expect(paperFlowPhase({ ...base, stage: 'plan' })).toBe('plan');
+    expect(paperFlowPhase({ ...base, stage: 'review' })).toBe('review');
+  });
+
+  it('I3 段④只对 ranked / no_recommendations 开放；no_candidates 停在段③', () => {
+    const base = { task: task({ status: 'completed' }), adopted: null };
+    expect(paperFlowPhase({ ...base, selection: RANKED_REPORT, stage: 'review' })).toBe('review');
+    const none = { ...RANKED_REPORT, status: 'no_recommendations' };
+    expect(paperFlowPhase({ ...base, selection: none, stage: 'review' })).toBe('review');
+    const empty = { ...RANKED_REPORT, status: 'no_candidates', assessments: [] };
+    expect(paperFlowPhase({ ...base, selection: empty, stage: 'review' })).toBe('form');
+    expect(paperFlowPhase({ ...base, selection: empty, stage: 'plan' })).toBe('plan');
+  });
+
+  it('I3 toReview 门禁：no_candidates 报告点了不动段位', () => {
+    const empty = { ...RANKED_REPORT, status: 'no_candidates', assessments: [], recommendations: [] };
+    usePaperExploreStore.setState({ selection: empty, stage: 'plan' });
+    usePaperExploreStore.getState().toReview();
+    expect(usePaperExploreStore.getState().stage).toBe('plan');
+    usePaperExploreStore.setState({ selection: RANKED_REPORT });
+    usePaperExploreStore.getState().toReview();
+    expect(usePaperExploreStore.getState().stage).toBe('review');
+  });
+
+  it('I3「回段①调参再探」：报告留在 store，只换段位', () => {
+    usePaperExploreStore.setState({ selection: RANKED_REPORT, stage: 'review' });
+    usePaperExploreStore.getState().toSettings();
+    const st = usePaperExploreStore.getState();
+    expect(st.stage).toBe('settings');
+    expect(st.selection?.selection_id).toBe(RANKED_REPORT.selection_id);
+    expect(paperFlowPhase(st)).toBe('form');
   });
 });
 
 describe('发起与轮询流程', () => {
-  it('start 原样发出 domain_id/recipe/goal/categories 并进入 running', async () => {
+  it('start 原样透传组件组好的请求体（store 不再拼参数）并进入 running', async () => {
     route((url) => {
       if (url.includes('/papers/recommend')) return [202, { task_id: 't-9' }];
       if (url.includes('/tasks/t-9')) return [200, task({ task_id: 't-9' })];
       return [404, { detail: 'unexpected' }];
     });
-    await usePaperExploreStore.getState().start({ domainId: 'math', recipe: 'frontier', goal: '向量检索', categories: ['cs.IR'] });
+    await usePaperExploreStore.getState().start({
+      domain_id: 'math', recipe: 'frontier', top: 5, goal: '向量检索', categories: ['cs.IR'],
+    });
     const body = requestedBodies()['/papers/recommend'] as Record<string, unknown>;
-    expect(body).toEqual({ domain_id: 'math', recipe: 'frontier', goal: '向量检索', categories: ['cs.IR'] });
+    expect(body).toEqual({ domain_id: 'math', recipe: 'frontier', top: 5, goal: '向量检索', categories: ['cs.IR'] });
     expect(usePaperExploreStore.getState().task?.task_id).toBe('t-9');
     expect(paperFlowPhase(usePaperExploreStore.getState())).toBe('running');
   });
@@ -145,14 +189,14 @@ describe('发起与轮询流程', () => {
     route((url) => (url.includes('/papers/recommend')
       ? [422, { detail: { code: 'INVALID_PARAMS', message: '领域不存在：math（论文没有默认桶）' } }]
       : [404, { detail: 'unexpected' }]));
-    await usePaperExploreStore.getState().start({ domainId: 'math', recipe: 'core' });
+    await usePaperExploreStore.getState().start({ domain_id: 'math', recipe: 'core', top: 5 });
     const st = usePaperExploreStore.getState();
     expect(st.error).toContain('领域不存在');
     expect(st.task).toBeNull();
     expect(paperFlowPhase(st)).toBe('failed');
   });
 
-  it('任务完成 → 读报告详情进评审', async () => {
+  it('任务完成 → 读报告详情先进段③检索口径（I3）', async () => {
     route((url) => {
       if (url.includes('/tasks/t-9')) return [200, task({ task_id: 't-9', status: 'completed', progress: 100, result: { selection_id: 'sel-1' } })];
       if (url.includes('/papers/selections/sel-1')) return [200, RANKED_REPORT];
@@ -162,7 +206,28 @@ describe('发起与轮询流程', () => {
     await usePaperExploreStore.getState().pollOnce();
     const st = usePaperExploreStore.getState();
     expect(st.selection?.selection_id).toBe('sel-1');
-    expect(paperFlowPhase(st)).toBe('review');
+    expect(paperFlowPhase(st)).toBe('plan');
+    expect(st.stage).toBe('plan');
+  });
+
+  it('进入候选评审需显式动作（唯一前进路径）', async () => {
+    route((url) => (url.includes('/papers/selections/sel-1') ? [200, RANKED_REPORT] : [404, { detail: 'unexpected' }]));
+    usePaperExploreStore.setState({ selection: RANKED_REPORT, stage: 'plan' });
+    usePaperExploreStore.getState().toReview();
+    expect(paperFlowPhase(usePaperExploreStore.getState())).toBe('review');
+  });
+
+  it('深度方向的 years_limit／limit 覆盖随请求体原样下发（R8 参数映射不在 store 拼）', async () => {
+    route((url) => {
+      if (url.includes('/papers/recommend')) return [202, { task_id: 't-9' }];
+      if (url.includes('/tasks/t-9')) return [200, task({ task_id: 't-9' })];
+      return [404, { detail: 'unexpected' }];
+    });
+    await usePaperExploreStore.getState().start({
+      domain_id: 'math', recipe: 'core', top: 5, years_limit: 0, limit: 25,
+    });
+    expect(requestedBodies()['/papers/recommend'])
+      .toEqual({ domain_id: 'math', recipe: 'core', top: 5, years_limit: 0, limit: 25 });
   });
 
   it('连续 3 次轮询失败 → 记错并停表', async () => {
@@ -204,7 +269,7 @@ describe('采纳流程（不自动下载）', () => {
     route((url) => (url.includes('/adopt')
       ? [422, { detail: { code: 'INVALID_PARAMS', message: '课程 c1 不属于领域 math' } }]
       : [404, { detail: 'unexpected' }]));
-    usePaperExploreStore.setState({ domainId: 'math', selection: RANKED_REPORT });
+    usePaperExploreStore.setState({ domainId: 'math', selection: RANKED_REPORT, stage: 'review' });
     await usePaperExploreStore.getState().adopt([{ rank: 1, domain_id: 'math', course_id: 'c1' }]);
     const st = usePaperExploreStore.getState();
     expect(st.error).toContain('不属于领域');
@@ -217,14 +282,16 @@ describe('打开弹窗：续看活动任务，否则读最近报告', () => {
   it('同领域有在跑任务 → 不重发、直接续轮询', async () => {
     route((url) => (url.includes('/tasks/') ? [200, task()] : [404, { detail: 'unexpected' }]));
     usePaperExploreStore.setState({ domainId: 'math', task: task(), modalOpen: false });
-    await usePaperExploreStore.getState().openModal('math', '数学');
+    await usePaperExploreStore.getState().openModal('math', '数学', '数学分析');
     const st = usePaperExploreStore.getState();
     expect(st.modalOpen).toBe(true);
     expect(st.domainName).toBe('数学');
+    expect(st.courseName).toBe('数学分析');
+    expect(st.stage).toBe('settings');
     expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('/papers/recommend'))).toBe(false);
   });
 
-  it('无活动任务 → 拉最近报告摘要，ranked 则读详情进评审', async () => {
+  it('无活动任务 → 拉最近报告摘要，ranked 则读详情停段①（I3：详情挂 store，不自动跳段）', async () => {
     route((url) => {
       if (url.includes('/papers/selections?')) return [200, { selections: [{ selection_id: 'sel-1', domain_id: 'math', recipe: 'frontier', status: 'ranked', created_at: '', recommendation_count: 2 }] }];
       if (url.includes('/papers/selections/sel-1')) return [200, RANKED_REPORT];
@@ -233,7 +300,10 @@ describe('打开弹窗：续看活动任务，否则读最近报告', () => {
     await usePaperExploreStore.getState().openModal('math', '数学');
     const st = usePaperExploreStore.getState();
     expect(st.selection?.selection_id).toBe('sel-1');
-    expect(paperFlowPhase(st)).toBe('review');
+    expect(paperFlowPhase(st)).toBe('form');
+    // 「继续上次报告」是显式动作：进段③检索口径
+    st.toPlan();
+    expect(paperFlowPhase(usePaperExploreStore.getState())).toBe('plan');
   });
 
   it('报告面失败（8901 离线 503）→ 静默进发起表单，不抛错', async () => {
@@ -242,6 +312,150 @@ describe('打开弹窗：续看活动任务，否则读最近报告', () => {
     const st = usePaperExploreStore.getState();
     expect(paperFlowPhase(st)).toBe('form');
     expect(st.selection).toBeNull();
+  });
+});
+
+describe('历史探索清单 loadHistory / openReport（REQ-109 I10，I13 改判）', () => {
+  const summaries = (n: number) => Array.from({ length: n }, (_, i) => ({
+    selection_id: `sel-${i + 1}`, domain_id: 'math', recipe: 'frontier', status: 'ranked',
+    created_at: '', recommendation_count: 1,
+  }));
+
+  it('只按 domain_id 拉、上限 10 份，且不按 recipe 过滤（方向是界面概念）', async () => {
+    route((url) => {
+      expect(url).toContain('domain_id=math');
+      expect(url).toContain(`limit=${PAPER_HISTORY_LIMIT}`);
+      expect(url).not.toContain('recipe=');
+      return [200, { selections: summaries(25) }];
+    });
+    await usePaperExploreStore.getState().loadHistory('math');
+    expect(usePaperExploreStore.getState().history).toHaveLength(PAPER_HISTORY_LIMIT);
+  });
+
+  it('I13 清单只留待决定报告（ranked / no_recommendations），已消费与无候选不进', async () => {
+    route(() => [200, { selections: [
+      { ...summaries(1)[0], selection_id: 'sel-ranked', status: 'ranked' },
+      { ...summaries(1)[0], selection_id: 'sel-none', status: 'no_recommendations' },
+      { ...summaries(1)[0], selection_id: 'sel-empty', status: 'no_candidates' },
+      { ...summaries(1)[0], selection_id: 'sel-plan', status: 'planning' },
+      { ...summaries(1)[0], selection_id: 'sel-done', status: 'downloaded' },
+      { ...summaries(1)[0], selection_id: 'sel-odd', status: 'failed' },
+    ] }]);
+    await usePaperExploreStore.getState().loadHistory('math');
+    expect(usePaperExploreStore.getState().history.map((row) => row.selection_id))
+      .toEqual(['sel-ranked', 'sel-none']);
+  });
+
+  it('I13 新的在前：按 created_at 倒序，不按服务端返回顺序', async () => {
+    route(() => [200, { selections: [
+      { ...summaries(1)[0], selection_id: 'old', created_at: '2026-10-01T00:00:00Z' },
+      { ...summaries(1)[0], selection_id: 'new', created_at: '2026-10-09T03:00:00Z' },
+      { ...summaries(1)[0], selection_id: 'mid', created_at: '2026-10-05T01:00:00Z' },
+    ] }]);
+    await usePaperExploreStore.getState().loadHistory('math');
+    expect(usePaperExploreStore.getState().history.map((row) => row.selection_id))
+      .toEqual(['new', 'mid', 'old']);
+  });
+
+  it('拉取失败静默：不写 error、保留旧清单、不影响段位', async () => {
+    usePaperExploreStore.setState({ history: summaries(1) });
+    route(() => [503, { detail: 'QED-Tracker 服务不可达' }]);
+    await usePaperExploreStore.getState().loadHistory('math');
+    const st = usePaperExploreStore.getState();
+    expect(st.error).toBeNull();
+    expect(st.history).toHaveLength(1);
+    expect(paperFlowPhase(st)).toBe('form');
+  });
+
+  it('I13 点历史条目：读该 selection_id 详情并**直达段④评审**（继续确认/否定）', async () => {
+    route((url) => (url.includes('/papers/selections/sel-7')
+      ? [200, { ...RANKED_REPORT, selection_id: 'sel-7' }]
+      : [404, { detail: 'unexpected' }]));
+    usePaperExploreStore.setState({ domainId: 'math', selection: RANKED_REPORT, stage: 'settings' });
+    await usePaperExploreStore.getState().openReport('sel-7');
+    const st = usePaperExploreStore.getState();
+    expect(st.selection?.selection_id).toBe('sel-7');
+    expect(st.stage).toBe('review');
+    expect(paperFlowPhase(st)).toBe('review');
+  });
+
+  it('段④的「查看检索口径」出口仍可达段③', () => {
+    usePaperExploreStore.setState({ selection: RANKED_REPORT, stage: 'review' });
+    usePaperExploreStore.getState().toPlan();
+    expect(paperFlowPhase(usePaperExploreStore.getState())).toBe('plan');
+  });
+
+  it('详情读不到（早期报告已清理）→ 内联提示并可改参数重试，报告不被清空', async () => {
+    route(() => [404, { detail: 'not found' }]);
+    usePaperExploreStore.setState({ domainId: 'math', selection: RANKED_REPORT, stage: 'settings' });
+    await usePaperExploreStore.getState().openReport('sel-404');
+    const st = usePaperExploreStore.getState();
+    expect(st.error).toContain('该报告还没有可看的候选');
+    expect(st.selection?.selection_id).toBe(RANKED_REPORT.selection_id);
+    expect(paperFlowPhase(st)).toBe('failed');
+    usePaperExploreStore.getState().clearError();
+    expect(paperFlowPhase(usePaperExploreStore.getState())).toBe('form');
+  });
+});
+
+describe('已入库论文按需回源 tracePaperOrigin（I5 ②）', () => {
+  const summaries = (n: number) => Array.from({ length: n }, (_, i) => ({
+    selection_id: `sel-${i + 1}`, domain_id: 'math', recipe: 'frontier', status: 'ranked',
+    created_at: '', recommendation_count: 1,
+  }));
+
+  it('命中：按 arXiv ID 在报告候选里匹配，带出摘要与评审结论', async () => {
+    route((url) => {
+      if (url.includes('/papers/selections?')) return [200, { selections: summaries(2) }];
+      if (url.includes('/papers/selections/sel-2')) {
+        return [200, { ...RANKED_REPORT, selection_id: 'sel-2', assessments: [entry(1, '2401.00009', '命中的那篇')] }];
+      }
+      if (url.includes('/papers/selections/sel-1')) return [200, { ...RANKED_REPORT, selection_id: 'sel-1', assessments: [] }];
+      return [404, { detail: 'unexpected' }];
+    });
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'math-b19', domainId: 'math', arxivId: '2401.00009' });
+    const trace = usePaperExploreStore.getState().trace;
+    expect(trace?.state).toBe('hit');
+    expect(trace?.hit?.candidate.title).toBe('命中的那篇');
+    expect(trace?.hit?.assessment?.reason).toBe('对齐领域目标');
+    expect(trace?.hit?.selection_id).toBe('sel-2');
+  });
+
+  it('纪律：只扫本领域、上限 20 份，第 21 份不再请求', async () => {
+    route((url) => {
+      if (url.includes('/papers/selections?')) {
+        expect(url).toContain('domain_id=math');
+        expect(url).toContain('limit=20');
+        return [200, { selections: summaries(25) }];
+      }
+      return [200, { ...RANKED_REPORT, selection_id: 'sel-x', assessments: [] }];
+    });
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'b', domainId: 'math', arxivId: 'nope' });
+    const detailGets = mockFetch.mock.calls.filter(([u, init]) =>
+      String(u).includes('/papers/selections/sel-') && (init as RequestInit | undefined)?.method !== 'POST');
+    expect(detailGets).toHaveLength(20);
+    expect(usePaperExploreStore.getState().trace?.state).toBe('miss');
+  });
+
+  it('未命中给 miss（早期采纳/报告已清理，不编造摘要）', async () => {
+    route((url) => (url.includes('/papers/selections?') ? [200, { selections: summaries(1) }] : [200, RANKED_REPORT]));
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'b', domainId: 'math', arxivId: '9999.99999' });
+    expect(usePaperExploreStore.getState().trace).toEqual({ bookId: 'b', state: 'miss', hit: null });
+  });
+
+  it('缺 arXiv 标识或缺领域 → 不发任何请求，直接 no_source', async () => {
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'b', domainId: 'math', arxivId: '' });
+    expect(usePaperExploreStore.getState().trace).toEqual({ bookId: 'b', state: 'no_source', hit: null });
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'b2', domainId: '', arxivId: '2401.1' });
+    expect(usePaperExploreStore.getState().trace?.state).toBe('no_source');
+    expect(mockFetch.mock.calls.filter(([u]) => String(u).includes('/papers/selections'))).toHaveLength(0);
+  });
+
+  it('报告面 503 → 静默 miss，不抛错不弹错', async () => {
+    route(() => [503, { detail: 'QED-Tracker 服务不可达' }]);
+    await usePaperExploreStore.getState().tracePaperOrigin({ bookId: 'b', domainId: 'math', arxivId: '2401.1' });
+    expect(usePaperExploreStore.getState().trace?.state).toBe('miss');
+    expect(usePaperExploreStore.getState().error).toBeNull();
   });
 });
 
@@ -284,7 +498,7 @@ describe('徽标随任务就地流转（§7.2：发起即探索中，不等页�
       if (url.includes('/tasks/t-9')) return [200, task({ task_id: 't-9' })];
       return [404, { detail: 'unexpected' }];
     });
-    await usePaperExploreStore.getState().start({ domainId: 'math', recipe: 'frontier' });
+    await usePaperExploreStore.getState().start({ domain_id: 'math', recipe: 'frontier', top: 5 });
     expect(usePaperExploreStore.getState().badges.math).toEqual({ key: 'running', text: '探索中' });
   });
 

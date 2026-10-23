@@ -1,130 +1,146 @@
 /**
- * 批注登记面板（M6 三栏工作台右栏）：选区锚点 → 总结/详解 → 保留＝candidate → 确认提升主表。
- * 本轮不出 LLM 生成（裁决 ⑤，前置＝ARCH-027-M3 行 S4 真机冒烟），叙述一律人工书写。
+ * 详解段（§V2.12／C25·C27·C28 的 v1.0 形态）：本条的多角度叙述＝主表 `angles` 数组
+ * （数组序即权威排序，前端不重排、不点赞——保留位随候选池退出），长文按 `narrative_ref` 走读文件腿，
+ * 指针缺失或悬空都明说（available=false + reason），不静默显示空白。
+ * 段末给一个提问输入框占位——本批只展示，不联通。
  */
 import { useState } from 'react';
-import { Button, Empty, Input, Radio, Select, Space, Typography } from 'antd';
-import type { KnowledgePointType } from '../../api/learn';
-import { useLearnWorkbenchStore } from '../../stores/learnWorkbench';
+import { Button, Input, Space, Typography } from 'antd';
+import { getPointNarrative, type AngleKind, type KpAngle, type NarrativeResponse, type PointUnit } from '../../api/learn';
+import { describeError } from '../../api/client';
+import { renderInlineMath } from '../parsing/blocks';
+import { anglesOf, useLearnWorkbenchStore } from '../../stores/learnWorkbench';
 
 const { Text } = Typography;
-const { TextArea } = Input;
 
-const TYPE_OPTIONS: Array<{ value: KnowledgePointType; label: string }> = [
-  { value: 'concept', label: '概念' },
-  { value: 'procedure', label: '程序' },
-  { value: 'memory', label: '记忆' },
-  { value: 'design', label: '设计' },
-];
+const ANGLE_LABELS: Record<AngleKind, string> = {
+  summary: '总结',
+  explanation: '注解',
+  definition: '定义',
+  theorem: '定理',
+  proof: '证明',
+  example: '例子',
+};
 
-const INTENT_LABELS: Record<string, string> = { summary: '总结', explanation: '详解' };
-const STATUS_LABELS: Record<string, string> = { draft: '草稿', candidate: '待确认', adopted: '已入库', rejected: '已驳回' };
+const angleLabel = (angle: KpAngle['angle']): string => ANGLE_LABELS[angle as AngleKind] ?? String(angle);
 
-export default function AnnotationPane() {
-  const selectedBlock = useLearnWorkbenchStore((s) => s.selectedBlock);
-  const selectedKpId = useLearnWorkbenchStore((s) => s.selectedKpId);
-  const candidates = useLearnWorkbenchStore((s) => s.candidates);
-  const notice = useLearnWorkbenchStore((s) => s.notice);
-  const addAnnotation = useLearnWorkbenchStore((s) => s.addAnnotation);
-  const confirmCandidate = useLearnWorkbenchStore((s) => s.confirmCandidate);
-  const rejectCandidate = useLearnWorkbenchStore((s) => s.rejectCandidate);
+function AngleCard({ row }: { row: KpAngle }) {
+  return (
+    <div
+      data-testid={`annotation-${row.angle}`}
+      style={{
+        border: '1px solid #eee', borderRadius: 6, padding: '6px 8px', marginBottom: 6, fontSize: 12,
+      }}
+    >
+      <Text strong style={{ fontSize: 12 }}>{angleLabel(row.angle)}</Text>
+      <div style={{ marginTop: 4 }} dangerouslySetInnerHTML={{ __html: renderInlineMath(String(row.note ?? '')) }} />
+    </div>
+  );
+}
 
-  const [name, setName] = useState('');
-  const [narrative, setNarrative] = useState('');
-  const [intent, setIntent] = useState<'summary' | 'explanation'>('explanation');
-  const [type, setType] = useState<KnowledgePointType | undefined>(undefined);
-  const [saving, setSaving] = useState(false);
+export function NarrativePane({ point }: { point: PointUnit | null }) {
+  const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const keep = async () => {
-    setSaving(true);
-    const ok = await addAnnotation({ name, narrative, intent, type });
-    setSaving(false);
-    if (ok) {
-      setName('');
-      setNarrative('');
+  const open = async () => {
+    if (!point) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setNarrative(await getPointNarrative(point.kp_id));
+    } catch (err) {
+      setNarrative(null);
+      setError(describeError(err));
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Text strong style={{ fontSize: 13 }}>批注</Text>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        {selectedBlock
-          ? `锚点＝第 ${selectedBlock.page} 页：${selectedBlock.snippet.slice(0, 40)}`
-          : '在中栏点选一个内容块作为锚点（不选＝无锚点登记）'}
+  if (!point?.narrative_ref) {
+    return (
+      <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+        这一条还没有长文正文。
       </Text>
-
-      <Radio.Group
-        size="small"
-        value={intent}
-        onChange={(e) => setIntent(e.target.value as 'summary' | 'explanation')}
-        options={[{ value: 'summary', label: '总结' }, { value: 'explanation', label: '详解' }]}
-        optionType="button"
-      />
-      <Input
-        size="small"
-        aria-label="知识点名"
-        placeholder="知识点名"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <Select
-        size="small"
-        aria-label="四分类"
-        placeholder="四分类（可空）"
-        allowClear
-        style={{ width: '100%' }}
-        value={type}
-        onChange={(v: KnowledgePointType | undefined) => setType(v)}
-        options={TYPE_OPTIONS}
-      />
-      <TextArea
-        rows={6}
-        aria-label="批注正文"
-        placeholder="写下这一处总结或详解（本轮人工书写，不出 LLM 生成）"
-        value={narrative}
-        onChange={(e) => setNarrative(e.target.value)}
-      />
-      <Button
-        type="primary"
-        size="small"
-        loading={saving}
-        disabled={!selectedKpId || name.trim() === ''}
-        onClick={keep}
-      >
-        保留为候选
+    );
+  }
+  return (
+    <Space direction="vertical" size={6} style={{ width: '100%' }} data-testid="narrative-block">
+      <Button size="small" loading={loading} onClick={() => void open()}>
+        {narrative ? '重新读取正文' : '读这一条的正文'}
       </Button>
-      {!selectedKpId && (
-        <Text type="secondary" style={{ fontSize: 12 }}>先在左栏选中章/节，批注才有归属。</Text>
+      {error && <Text type="warning" style={{ display: 'block', fontSize: 12 }}>{error}</Text>}
+      {narrative && !narrative.available && (
+        <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>{narrative.reason}</Text>
       )}
-      {notice && <Text type="warning" style={{ fontSize: 12 }}>{notice}</Text>}
+      {narrative?.available && (
+        <>
+          <div
+            data-testid="narrative-content"
+            style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}
+            dangerouslySetInnerHTML={{ __html: renderInlineMath(narrative.content) }}
+          />
+          {narrative.truncated && (
+            <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+              {`正文较长，这里只取了前 ${Math.round((narrative.bytes ?? 0) / 1024)} KB 之内的内容。`}
+            </Text>
+          )}
+        </>
+      )}
+    </Space>
+  );
+}
 
-      <Text strong style={{ fontSize: 13 }}>本章候选（{candidates.length}）</Text>
-      {candidates.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本章暂无候选" />
-      ) : (
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-          {candidates.map((row) => (
-            <li key={row.detail_id} style={{ marginBottom: 6 }}>
-              <div>
-                {row.name}
-                <Text type="secondary" style={{ marginLeft: 6 }}>
-                  {INTENT_LABELS[row.intent] ?? row.intent}·{STATUS_LABELS[row.gen_status] ?? row.gen_status}
-                </Text>
-              </div>
-              {row.narrative && (
-                <Text type="secondary" style={{ fontSize: 12 }}>{row.narrative.slice(0, 60)}</Text>
-              )}
-              {(row.gen_status === 'draft' || row.gen_status === 'candidate') && (
-                <Space size={4}>
-                  <Button size="small" onClick={() => void confirmCandidate(row.detail_id)}>确认入库</Button>
-                  <Button size="small" onClick={() => void rejectCandidate(row.detail_id)}>驳回</Button>
-                </Space>
-              )}
-            </li>
-          ))}
-        </ul>
+export default function AnnotationPane() {
+  const selectedPoint = useLearnWorkbenchStore((s) => s.selectedPoint);
+  const selectedKpId = useLearnWorkbenchStore((s) => s.selectedKpId);
+  const generating = useLearnWorkbenchStore((s) => s.generating);
+  const generateError = useLearnWorkbenchStore((s) => s.generateError);
+  const errorTarget = useLearnWorkbenchStore((s) => s.generateTarget);
+  const generatePoint = useLearnWorkbenchStore((s) => s.generatePoint);
+
+  const angles = anglesOf(selectedPoint);
+
+  return (
+    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      <Text strong style={{ fontSize: 13 }}>详解</Text>
+      {angles.length === 0 && (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          这一条还没有注解：点「生成本条注解」先来一条。
+        </Text>
       )}
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Button
+          size="small"
+          loading={generating}
+          disabled={!selectedKpId || selectedPoint === null}
+          onClick={() => void generatePoint()}
+        >
+          生成本条注解
+        </Button>
+        {errorTarget === 'point' && generateError && (
+          <Text type="warning" style={{ fontSize: 12 }}>{generateError}</Text>
+        )}
+        {!selectedKpId && (
+          <Text type="secondary" style={{ fontSize: 12 }}>先在左栏选中一条知识点，注解才有归属。</Text>
+        )}
+      </Space>
+      <div data-testid="detail-list">
+        {angles.map((row) => <AngleCard key={row.angle} row={row} />)}
+      </div>
+      <Text strong style={{ fontSize: 12 }}>长文正文</Text>
+      <NarrativePane point={selectedPoint} />
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Input.TextArea
+          rows={2}
+          aria-label="提问"
+          placeholder="关于这一条，想问什么"
+        />
+        <Space size={6} align="center" wrap>
+          <Button size="small" disabled>发送</Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>提问功能暂未开放</Text>
+        </Space>
+      </Space>
     </Space>
   );
 }

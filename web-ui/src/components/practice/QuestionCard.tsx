@@ -1,5 +1,6 @@
 /**
- * 题卡（M2 Batch B 中栏练习面最小单元）：作答 → `POST /learn/attempts` 同事务判分 → 展开判分依据。
+ * 题卡（课后练习独立面 `#/practice` 的最小作答单元，本课题／到期项／错题重做共用）：
+ * 作答 → `POST /learn/attempts` 同事务判分 → 就地展开判分依据。
  * - 判分依据（expected_answer / explanation）只来自作答响应（缝 2：题面投影不含这两列）
  * - flashcard 面＝翻开背文 + 自评（记得/重来），不进判分路径（裁决 ⑨）
  */

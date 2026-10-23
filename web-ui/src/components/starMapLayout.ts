@@ -1,5 +1,5 @@
 /**
- * 知识梳理星图布局纯函数（设计：docs/plans/2026-09-30-knowledge-point-star-map.md 星图 UI 设计节 · 裁决 ⑧）
+ * 知识探索·星图布局纯函数（设计：docs/design/knowledge-point-exploration-ui.md §5~§7）
  * 版式＝「层＝行 × 轨迹＝列」的自上而下森林：
  * - 行＝层级 tier（max(stage 档序, 先修拓扑深度)，再沿边松弛，保证连线严格自上而下、不横向穿插）
  * - 列＝学习轨迹，主次序排列（main 优先 → 课程数降序 → 轨迹字典序）；核心列居中，次要列左右交替环绕
@@ -52,7 +52,8 @@ export interface StarNode {
   /** 先修拓扑深度 */
   depth: number;
   kpConfirmed: number;
-  kpCandidates: number;
+  /** 课程叙述（qed_course.description）：渲染层悬停用，几何无关 */
+  description: string;
 }
 
 /** 轨迹列框＝竖长圆角包围盒：x/y 为盒中心，w/h 为盒宽高 */
@@ -451,7 +452,7 @@ function placeColumns(
         tier: slot.tier,
         depth: depths.get(slot.course.course_id) ?? 0,
         kpConfirmed: slot.course.kp_confirmed,
-        kpCandidates: slot.course.kp_candidates,
+        description: slot.course.description ?? '',
       });
       top = Math.min(top, y - slot.h / 2);
       bottom = Math.max(bottom, y + slot.h / 2);

@@ -13,7 +13,7 @@ const MATH: StarMapResponse['domains'][number] = {
       kind: 'main',
       summary: '',
       courses: [
-        { course_id: 'ma', name: '数学分析', track: '分析学', stage: '', sort_order: 1, kp_confirmed: 0, kp_candidates: 0 },
+        { course_id: 'ma', name: '数学分析', track: '分析学', stage: '', sort_order: 1, kp_confirmed: 0 },
       ],
     },
   ],
@@ -29,7 +29,7 @@ const CS: StarMapResponse['domains'][number] = {
       kind: 'main',
       summary: '',
       courses: [
-        { course_id: 'ml', name: '机器学习', track: 'AI', stage: '', sort_order: 1, kp_confirmed: 3, kp_candidates: 1 },
+        { course_id: 'ml', name: '机器学习', track: 'AI', stage: '', sort_order: 1, kp_confirmed: 3 },
       ],
     },
   ],

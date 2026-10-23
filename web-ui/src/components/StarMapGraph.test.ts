@@ -3,8 +3,8 @@ import { buildStarMapOption } from './StarMapGraph';
 import { starMapLayout } from './starMapLayout';
 import type { StarCourseNode, StarMapDomain, StarMapEdge, TrackCluster } from '../api/learn';
 
-function course(id: string, name: string, track: string, stage = ''): StarCourseNode {
-  return { course_id: id, name, track, stage, sort_order: null, kp_confirmed: 0, kp_candidates: 0 };
+function course(id: string, name: string, track: string, stage = '', description = ''): StarCourseNode {
+  return { course_id: id, name, track, stage, sort_order: null, description, kp_confirmed: 0 };
 }
 
 function cluster(track: string, courses: StarCourseNode[], kind = 'main', summary = ''): TrackCluster {
@@ -80,9 +80,9 @@ interface OptionShape {
   }>;
 }
 
-function build(dueCounts: Record<string, number> = {}) {
+function build() {
   const layout = starMapLayout(DOMAIN, EDGES, { width: 1200, height: 700 });
-  const option = buildStarMapOption(layout, dueCounts) as unknown as OptionShape;
+  const option = buildStarMapOption(layout) as unknown as OptionShape;
   return { layout, option, series: option.series[0] };
 }
 
@@ -156,23 +156,34 @@ describe('星图渲染 buildStarMapOption（课程＝框本体、连线只连框
     expect(series.emphasis.label.color).toBe('#ffffff');
   });
 
-  it('悬停提示只给课程：列框返回空串，课程给出知识点计数', () => {
+  it('课程悬停提示＝课名（加粗）＋课程叙述两行，计数段与复习段都不出现（REQ-110 四审裁决）', () => {
+    const layout = starMapLayout(
+      { ...DOMAIN, tracks: [cluster(ANALYSIS, [course('math_analysis', '数学分析', ANALYSIS, '基础', '极限、连续与一元微积分')], 'main')] },
+      [],
+      { width: 1200, height: 700 },
+    );
+    const option = buildStarMapOption(layout) as unknown as OptionShape;
+    const item = option.series[0].data.find((d) => d.kind === 'course')!;
+    const html = option.tooltip.formatter({ data: item });
+    expect(html).toContain('<b>数学分析</b>');
+    expect(html).toContain('极限、连续与一元微积分');
+    // 叙述限宽折行、不截字符
+    expect(html).toContain('white-space:pre-wrap');
+    expect(html).not.toContain('已确认');
+    expect(html).not.toContain('待选');
+    expect(html).not.toContain('复习');
+  });
+
+  it('叙述为空只显课名一行；列框与空数据不给提示', () => {
     const { option, series } = build();
     const nebula = series.data.find((d) => d.kind === 'nebula')!;
     const course = series.data.find((d) => d.kind === 'course')!;
     expect(option.tooltip.formatter({ data: nebula })).toBe('');
-    expect(option.tooltip.formatter({ data: course })).toContain(course.name);
     expect(option.tooltip.formatter({})).toBe('');
-  });
-
-  it('复习条数只进悬停提示行：>0 追加「今日复习 N 条」，0 条不写该段', () => {
-    const { option, series } = build({ math_analysis: 3 });
-    const due = series.data.find((d) => d.id === 'math_analysis')!;
-    const plain = series.data.find((d) => d.id === 'ode')!;
-    expect(due.detail).toContain('今日复习 3 条');
-    expect(due.detail).toContain('已确认');
-    expect(option.tooltip.formatter({ data: due })).toContain('今日复习 3 条');
-    expect(plain.detail).not.toContain('今日复习');
+    // 布局夹具无 description → 提示只有课名一行，不留空行占位
+    const html = option.tooltip.formatter({ data: course });
+    expect(html).toBe(`<b>${course.name}</b>`);
+    expect(html).not.toContain('<br/>');
   });
 
   it('series 四边留白与布局系数配对（渲染套满系数为 1），列框画在课程框之下', () => {

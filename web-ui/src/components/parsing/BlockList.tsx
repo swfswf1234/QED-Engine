@@ -12,7 +12,7 @@ import 'katex/dist/katex.min.css';
 import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { editKey } from '../../stores/parsing';
 import { blockText, confirmInput, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
-import { assignRoles, roleTypography, symbolLineParts, tocItemParts, type TypographyPrefs } from './typography';
+import { assignRoles, layoutUnits, roleTypography, symbolLineParts, tocItemParts, type TypographyPrefs } from './typography';
 import BlockEditor from './BlockEditor';
 
 const { Text } = Typography;
@@ -230,11 +230,14 @@ export default function BlockList(props: BlockListProps) {
   };
 
   if (renderMode === 'layout') {
-    const roles = assignRoles(blocks);
+    // 排版单元序列（§V2.4.1~3）：层级左偏移随最近上级标题定档、跨页断句合并、标题重印去重
+    const units = layoutUnits(blocks, assignRoles(blocks));
     return (
       <div data-testid="layout-flow" style={{ color: '#222' }}>
-        {blocks.map((b, idx) => {
-          const role = roles[idx];
+        {units.map((unit) => {
+          const b = unit.block;
+          const idx = unit.indices[0];
+          const role = unit.role;
           if (role === 'furniture' && !typography.showFurniture) return null;
           // 空文本块（解析侧取字丢失等）不渲染，避免版式面出空行
           if (b.type !== 'image' && blockText(b).trim() === '') return null;
@@ -246,13 +249,15 @@ export default function BlockList(props: BlockListProps) {
             fontWeight: st.fontWeight,
             lineHeight: 1.6,
             padding: '4px 8px',
+            marginLeft: unit.indentPx,
             borderRadius: 4,
             border: `1px solid ${selected ? '#1677ff' : 'transparent'}`,
             background: selected ? '#e6f4ff' : 'transparent',
             cursor: 'pointer',
-            margin: role === 'heading' ? '0.8em 0 0.3em' : '0 0 0.2em',
+            marginTop: role === 'heading' ? '0.8em' : 0,
+            marginBottom: role === 'heading' ? '0.3em' : '0.2em',
             wordBreak: 'break-word',
-            textAlign: role === 'furniture' ? 'center' : undefined,
+            textAlign: role === 'furniture' ? 'center' : 'left',
           };
           return withEditor(idx, (
             <div

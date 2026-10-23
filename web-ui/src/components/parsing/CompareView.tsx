@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { Block, BlockEditInput, BookMeta, PageData } from '../../api/axiom';
-import { bookFileUrl } from '../../api/axiom';
+import { bookFileUrl, bookPageImageUrl } from '../../api/axiom';
 import { useParsingStore, type PageEntry, type ScrollMode } from '../../stores/parsing';
 import { describeError } from '../../api/client';
 import BlockList, { type RenderMode } from './BlockList';
@@ -160,6 +160,7 @@ function PagePair(props: PagePairProps) {
               renderMode={renderMode}
               imageSize={imageSize}
               typography={typography}
+              pageImageUrl={bookPageImageUrl(book.book_id, pageNo)}
               selectedIndex={selected}
               editMode={contentEdit}
               submitting={editSubmitting}

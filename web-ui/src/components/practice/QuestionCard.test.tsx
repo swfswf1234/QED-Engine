@@ -25,7 +25,7 @@ const RESULT: AttemptResponse = {
   attempt_id: 7, question_id: 'q-1', is_correct: false, method: 'rule', judge_note: '选项不符',
   score_trend: 'new', resolved: false, answered_at: '',
   expected_answer: 'B', explanation: '用夹逼准则', review: {
-    target_kind: 'question', target_id: 'q-1', course_id: 'ma', kp_type: 'concept',
+    target_kind: 'question', target_id: 'q-1', kp_type: 'concept',
     interval_index: 0, due_at: '', next_due_at: '',
   },
 };

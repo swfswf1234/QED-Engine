@@ -1,22 +1,25 @@
 /**
- * 学习域·知识梳理星图端点封装（8900 唯一入口，ADR 0007）
- * 契约来源：backend/qed_engine/api/learn.py（M5 知识点族 + M6 层级化端点）
- * 契约正文：docs/architecture/api-contracts.md §⑥
- * - /learn/star-map：领域 → track 星云 → 课程节点（含知识点计数）+ 先修边
- * - /learn/courses/{id}/knowledge-points：已确认知识点 + 同 norm_key 待选叙述
- * - /learn/kp-details*：候选池登记 / 人工确认提升 / 驳回
+ * 学习域契约层（8900 唯一入口，ADR 0007）
+ * 契约来源：backend/qed_engine/api/learn.py；正文：docs/architecture/api-contracts.md §⑥
+ * v1.0 三张化（ADR 0026）后的读源改道：
+ * - `qe_unit` 退出 → 推进序列改读 `GET …/knowledge-points` 的 `sequence`（主表 point 行 × 章 outline × kp 行）
+ * - `qe_kp_detail` 退出 → 条级注解写主表 `angles`，长文按 `narrative_ref` 走文件读腿
+ * - `qe_review_task` 退出 → 到期队列由 `qe_attempt` 流水重放派生（`/review/due` 字段名不变）
+ * - `owner` 不收不回显（D7）：前端不传、不显、不据此分支；学习课程 ID 即共享课程 ID（D4）
  */
 import { api, type ApiRequestOptions } from './client';
 
-/** 星图课程节点（后端已按 sort_order 排序） */
+/* ---------- 知识探索·星图与知识点主表 ---------- */
+
+/** 星图课程节点（后端已按 sort_order 排序；description＝qed_course 叙述，悬停提示用） */
 export interface StarCourseNode {
   course_id: string;
   name: string;
   track: string;
   stage: string;
   sort_order: number | null;
+  description?: string;
   kp_confirmed: number;
-  kp_candidates: number;
 }
 
 /** track 星云（kind：main=主轨 / 其余=支轨） */
@@ -49,65 +52,68 @@ export interface StarMapResponse {
 
 export type KnowledgePointType = 'memory' | 'procedure' | 'concept' | 'design';
 
-/** 已确认知识点（qed_knowledge_point 行） */
-export interface KnowledgePoint {
-  kp_id: string;
-  domain_id: string;
-  domain_label: string;
-  course_id: string;
-  course_label: string;
-  name: string;
-  norm_key: string;
-  type: KnowledgePointType | null;
-  order_hint: number | null;
-  summary: string;
-  anchors: Array<Record<string, unknown>>;
-  from_detail_id: string | null;
-  confirmed: boolean;
-  /** 同 norm_key 的待选叙述（多版本并存，仅课程总览下发） */
-  candidates?: KpCandidate[];
+/** 主表节点形态：outline＝目录节点（大知识点），point＝细知识点 */
+export type NodeKind = 'outline' | 'point';
+
+/** 多角度叙述闭集（主表 `angles` 元素；数组序＝权威排序） */
+export type AngleKind = 'summary' | 'explanation' | 'definition' | 'theorem' | 'proof' | 'example';
+
+export interface KpAngle {
+  angle: AngleKind;
+  note?: string;
   [key: string]: unknown;
 }
 
-/** 候选明细状态（qed_learn_kp_detail.gen_status 闭集） */
-export type KpDetailStatus = 'draft' | 'candidate' | 'adopted' | 'rejected';
+/** 来源锚（anchors JSON 元素） */
+export interface KpAnchor {
+  kind: string;
+  ref_id: string;
+  page?: number;
+  /** 页内块序（页码＋块序精确命中某一块；旧行缺位时按页回落） */
+  block_index?: number;
+  snippet?: string;
+  [key: string]: unknown;
+}
 
-/** 候选叙述（qed_learn_kp_detail 待选态投影） */
-export interface KpCandidate {
-  detail_id: string;
+/** 正文位置（outline 行承载章/节页窗；point 行可空） */
+export interface KpSourceRef {
+  kind?: string;
+  ref_id?: string;
+  page_start?: number;
+  page_end?: number;
+}
+
+/**
+ * 知识点主表行的**前端投影**：只声明界面上真读的列（25 列全口径见
+ * docs/architecture/database-design.md 与 api-contracts.md §⑥，其余列经索引签名原样透传，不认领）。
+ */
+export interface KnowledgePoint {
+  kp_id: string;
   name: string;
-  type: KnowledgePointType | null;
-  narrative: string;
-  payload: Record<string, unknown>;
-  anchors: Array<Record<string, unknown>>;
-  gen_batch: string;
-  model_ref: string;
-  gen_status: KpDetailStatus;
+  node_kind: NodeKind;
+  parent_kp_id?: string | null;
+  depth?: number | null;
+  book_ref?: string | null;
+  domain_id?: string;
+  course_id?: string;
+  type?: KnowledgePointType | null;
+  order_hint?: number | null;
+  summary?: string;
+  /** 同物异名（权威名恒为 `name`，本列不表权威） */
+  aliases?: string[];
+  /** 长文正文的数据根相对指针（空／缺＝无正文；正文不落库） */
+  narrative_ref?: string;
+  angles?: KpAngle[];
+  source_ref?: KpSourceRef | null;
+  anchors?: KpAnchor[] | null;
+  meta?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
-export interface CourseKnowledgeResponse {
-  course: { course_id: string; name: string; track: string; domain_id: string };
-  points: KnowledgePoint[];
-  total: number;
-  candidate_total: number;
-}
-
-/** 候选明细全量行（GET /kp-details：含 adopted/rejected，供待选池与状态核对） */
-export interface KpDetailRow extends KpCandidate {
-  domain_id: string;
-  domain_label: string;
-  course_id: string;
-  course_label: string;
-  norm_key: string;
-  kp_id: string | null;
-  map_seed: string | null;
-  dedup_of: string | null;
-  parent_kp_id: string | null;
-  intent: KpIntent;
-  book_ref: string;
-  confirmed: number | boolean;
-  created_at: string;
-  updated_at: string;
+/** outline 行（目录节点）：课程总览与章树里带每节点知识点计数 */
+export interface OutlineRow extends KnowledgePoint {
+  node_kind: 'outline';
+  point_count?: number;
 }
 
 /** GET /api/v1/learn/star-map：星图一次取全 */
@@ -115,81 +121,75 @@ export function getStarMap(domain?: string, opts?: ApiRequestOptions): Promise<S
   return api.get<StarMapResponse>('/learn/star-map', { ...opts, params: { domain } });
 }
 
-/** GET /api/v1/learn/courses/{course_id}/knowledge-points：课程知识点总览 */
-export function getCourseKnowledge(courseId: string, opts?: ApiRequestOptions): Promise<CourseKnowledgeResponse> {
-  return api.get<CourseKnowledgeResponse>(`/learn/courses/${courseId}/knowledge-points`, opts);
+/** 学习序列里的一条知识点（投影行＝主表 point 行 + 归属/取材/落笔态） */
+export interface PointUnit extends KnowledgePoint {
+  node_kind: 'point';
+  /** 派生键 `kp:{kp_id}`（门游标与进度游标同形） */
+  unit_id: string;
+  parent_id: string;
+  chapter_kp_id: string;
+  title: string;
+  sort_order: number;
+  source_ref: KpSourceRef | null;
+  /** 这一条的正文范围来自哪里（point／anchor／chapter／空＝还没定位到） */
+  window_source?: 'point' | 'anchor' | 'chapter' | '';
+  /** 学习者落笔态；没落笔过＝null */
+  learner?: KpLearnerRow | null;
 }
 
-/** GET /api/v1/learn/kp-details?course=X&parent=Y：候选明细池（待选/已采纳/已驳回，可按章过滤） */
-export function listKpDetails(
+/** 学习序列里的章行（outline 根节点 + 章级注解成品位） */
+export interface PointChapter extends KnowledgePoint {
+  node_kind: 'outline';
+  unit_id: string;
+  point_count: number;
+  /** 章级注解成品位：进场随目录直读，缺失由右栏出「生成」入口 */
+  key_points: string[];
+}
+
+/** 课程在工作台里的推进序列（未加入学习面＝enrolled false 且序列空） */
+export interface CourseSequence {
+  enrolled: boolean;
+  units: PointUnit[];
+  chapters: PointChapter[];
+  kp_path: string[];
+}
+
+export interface CourseKnowledgeResponse {
+  course: { course_id: string; name: string; track: string; domain_id: string; description: string };
+  points: KnowledgePoint[];
+  total: number;
+  sequence: CourseSequence;
+}
+
+/** GET /api/v1/learn/courses/{course_id}/knowledge-points：知识点总览 + 学习序列 */
+export function getCourseKnowledge(
   courseId: string,
-  parentKpId?: string | null,
+  includeOutline = false,
   opts?: ApiRequestOptions,
-): Promise<{ details: KpDetailRow[]; total: number }> {
-  return api.get<{ details: KpDetailRow[]; total: number }>('/learn/kp-details', {
+): Promise<CourseKnowledgeResponse> {
+  return api.get<CourseKnowledgeResponse>(`/learn/courses/${courseId}/knowledge-points`, {
     ...opts,
-    params: { course: courseId, parent: parentKpId ?? undefined, limit: '500' },
+    params: { include_outline: includeOutline ? 'true' : undefined },
   });
 }
 
-/** POST /api/v1/learn/kp-details：候选明细登记（demo 手工写面） */
-export function addKpDetail(
-  body: {
-    course_id: string;
-    name: string;
-    type?: KnowledgePointType;
-    narrative?: string;
-    gen_batch?: string;
-    anchors?: KpAnchor[];
-    gen_status?: 'draft' | 'candidate';
-    parent_kp_id?: string | null;
-    intent?: KpIntent;
-    book_ref?: string;
-  },
-  opts?: ApiRequestOptions,
-): Promise<Record<string, unknown>> {
-  return api.post<Record<string, unknown>>('/learn/kp-details', body, opts);
+/** 长文正文读腿响应：指针缺失/悬空都明示（available=false + 中文 reason），不静默回落空串 */
+export interface NarrativeResponse {
+  kp_id: string;
+  narrative_ref: string;
+  available: boolean;
+  content: string;
+  reason: string;
+  bytes?: number;
+  truncated?: boolean;
 }
 
-/** POST /api/v1/learn/kp-details/{detail_id}/confirm：确认并提升到共享主表 */
-export function confirmKpDetail(detailId: string, opts?: ApiRequestOptions): Promise<{ point: KnowledgePoint }> {
-  return api.post<{ point: KnowledgePoint }>(`/learn/kp-details/${detailId}/confirm`, undefined, opts);
+/** GET /api/v1/learn/knowledge-points/{kp_id}/narrative：按 `narrative_ref` 取长文正文 */
+export function getPointNarrative(kpId: string, opts?: ApiRequestOptions): Promise<NarrativeResponse> {
+  return api.get<NarrativeResponse>(`/learn/knowledge-points/${kpId}/narrative`, opts);
 }
 
-/** POST /api/v1/learn/kp-details/{detail_id}/reject：驳回（不落主表） */
-export function rejectKpDetail(detailId: string, opts?: ApiRequestOptions): Promise<{ detail: Record<string, unknown> }> {
-  return api.post<{ detail: Record<string, unknown> }>(`/learn/kp-details/${detailId}/reject`, undefined, opts);
-}
-
-/** 批注用途（qed_learn_kp_detail.intent 闭集，与四分类 type 正交） */
-export type KpIntent = 'summary' | 'explanation';
-
-/** 来源锚（anchors JSON 元素，契约见 api-contracts §⑥） */
-export interface KpAnchor {
-  kind: string;
-  ref_id: string;
-  page?: number;
-  snippet?: string;
-  [key: string]: unknown;
-}
-
-/** outline 行（书籍目录节点＝大知识点）：页范围承载位在 source_ref */
-export interface OutlineRow extends KnowledgePoint {
-  node_kind: 'outline' | 'point';
-  parent_kp_id: string | null;
-  depth: number | null;
-  book_ref: string;
-  source_ref: { kind?: string; ref_id?: string; page_start?: number; page_end?: number } | null;
-  point_count?: number;
-}
-
-export interface OutlineResponse {
-  course_id: string;
-  book_ref: string;
-  outline: OutlineRow[];
-}
-
-/** GET /api/v1/learn/courses/{id}/outline：章节树一次取全（前序平铺 + 每章知识点计数） */
+/** GET /api/v1/learn/courses/{id}/outline：章节树一次取全（前序平铺 + 每节点知识点计数） */
 export function getOutline(
   courseId: string,
   bookRef?: string,
@@ -201,6 +201,12 @@ export function getOutline(
   });
 }
 
+export interface OutlineResponse {
+  course_id: string;
+  book_ref: string;
+  outline: OutlineRow[];
+}
+
 /** PUT /api/v1/learn/courses/{id}/outline：目录确认后整树幂等替换（页范围＝PDF 页序） */
 export function putOutline(
   courseId: string,
@@ -210,16 +216,46 @@ export function putOutline(
   return api.put<OutlineResponse & { reused?: number }>(`/learn/courses/${courseId}/outline`, body, opts);
 }
 
-/** PATCH /api/v1/learn/knowledge-points/{kp_id}：人工移动归属 / 改名 / 顺序 */
-export function patchKnowledgePoint(
-  kpId: string,
-  body: { parent_kp_id?: string | null; name?: string; order_hint?: number },
-  opts?: ApiRequestOptions,
-): Promise<KnowledgePoint> {
-  return api.patch<KnowledgePoint>(`/learn/knowledge-points/${kpId}`, body, opts);
+/* ---------- 注解按需生成（章＝写章行，条＝追加主表 angles） ---------- */
+
+/** 注解用途：章＝章节总结／学习要点，条＝总结与注解（part 与目标层不匹配＝422） */
+export type AnnotationPart = 'summary' | 'key_points' | 'annotation';
+
+/** 按需生成一次的同步等待上限（一次一条，慢生成不透默认 8s） */
+export const ANNOTATION_TIMEOUT_MS = 180000;
+
+export interface AnnotationGenerateBody {
+  course_id: string;
+  target_kind: 'chapter' | 'point';
+  kp_id: string;
+  part: AnnotationPart;
 }
 
-/* ---------- M2 练习与复习（docs/architecture/api-contracts.md §⑥，8 端点） ---------- */
+export interface AnnotationGenerateResult {
+  ok: boolean;
+  target: { kind: string; kp_id: string; name: string };
+  /** target_kind=chapter：写回章行后的成品位 */
+  chapter?: { kp_id: string; summary: string; key_points: string[] };
+  /** target_kind=point：追加 angles 后的主表整行 */
+  point?: KnowledgePoint;
+}
+
+/**
+ * POST /api/v1/learn/annotations/generate：按需生成注解。
+ * 章级覆写章行 `summary`／`meta.chapter_key_points` 并服务端节流；条级追加主表 `angles` 一元素
+ * （同角不堆叠，只更新 note），长文仍只由 `narrative_ref` 指。
+ */
+export function generateAnnotation(
+  body: AnnotationGenerateBody,
+  opts?: ApiRequestOptions,
+): Promise<AnnotationGenerateResult> {
+  return api.post<AnnotationGenerateResult>('/learn/annotations/generate', body, {
+    timeoutMs: ANNOTATION_TIMEOUT_MS,
+    ...opts,
+  });
+}
+
+/* ---------- M2 练习与复习 ---------- */
 
 /** 题源书目行（`qt_books.roles` 过滤 + 8902 解析态联查；课程归属空则回退解析表） */
 export interface QuestionBook {
@@ -237,6 +273,7 @@ export interface QuestionBook {
 export interface QuestionRow {
   question_id: string;
   course_id: string;
+  kp_id: string | null;
   kind: 'quiz' | 'flashcard';
   question_type: 'choice' | 'short' | 'open' | null;
   stem: string;
@@ -244,7 +281,6 @@ export interface QuestionRow {
   answer_back: string;
   difficulty: string;
   kp_type: KnowledgePointType | null;
-  kp_id: string | null;
   source_kind: string;
   book_ref: string;
   source_ref: Record<string, unknown> | null;
@@ -258,15 +294,19 @@ export interface QuestionRow {
   [key: string]: unknown;
 }
 
-/** 作答行（错题本人工位与判分结果） */
+/** 判分趋势（D9 C1 退列后仍按原字段名回传；只出现在响应，不在作答行上） */
+export type ScoreTrend = 'new' | 'improved' | 'declined' | 'unchanged';
+
+/** 作答行（`qe_attempt` 投影；趋势/调度态一律读时派生，不落列） */
 export interface AttemptRow {
   attempt_id: number;
   question_id: string;
+  course_id: string;
+  kp_id: string | null;
   user_answer: string;
   is_correct: boolean;
   method: string;
   judge_note: string;
-  score_trend: 'new' | 'improved' | 'declined' | 'unchanged';
   resolved: boolean;
   bookmarked: boolean;
   origin: 'new' | 'review' | 'manual';
@@ -275,11 +315,10 @@ export interface AttemptRow {
   [key: string]: unknown;
 }
 
-/** 判分响应里的复习回写位 */
+/** 判分响应里的复习回写位（重放派生的下一到期） */
 export interface ReviewWriteBack {
   target_kind: string;
   target_id: string;
-  course_id: string;
   kp_type: KnowledgePointType | null;
   interval_index: number;
   due_at: string;
@@ -292,7 +331,7 @@ export interface AttemptResponse {
   is_correct: boolean;
   method: string;
   judge_note: string;
-  score_trend: AttemptRow['score_trend'];
+  score_trend: ScoreTrend;
   resolved: boolean;
   answered_at: string;
   expected_answer: string | null;
@@ -300,11 +339,12 @@ export interface AttemptResponse {
   review: ReviewWriteBack;
 }
 
-/** 到期队列行（题粒度与知识点粒度双形态） */
+/** 到期队列行（D3 重放派生，只有题粒度一种形态） */
 export interface ReviewDueTask {
-  target_kind: 'question' | 'kp';
+  target_kind: 'question';
   target_id: string;
   course_id: string;
+  kp_id: string | null;
   kp_type: KnowledgePointType | null;
   interval_index: number;
   due_at: string;
@@ -323,7 +363,7 @@ export interface MistakeItem {
   is_correct: boolean;
   resolved: boolean;
   bookmarked: boolean;
-  score_trend: AttemptRow['score_trend'];
+  score_trend: ScoreTrend;
   due_today: boolean;
 }
 
@@ -353,7 +393,6 @@ export function addQuestions(
     course_id: string;
     gen_batch?: string;
     model_ref?: string;
-    learn_course_id?: string | null;
     questions: Array<Record<string, unknown>>;
   },
   opts?: ApiRequestOptions,
@@ -375,7 +414,7 @@ export function listQuestions(
   return api.get<{ questions: QuestionRow[]; total: number }>('/learn/questions', { ...opts, params });
 }
 
-/** PATCH /api/v1/learn/questions/{id}：人工面白名单（裁决 ⑨ 的升级路径） */
+/** PATCH /api/v1/learn/questions/{id}：人工面白名单 */
 export function patchQuestion(
   questionId: string,
   body: Record<string, unknown>,
@@ -398,7 +437,7 @@ export function addAttempt(
   return api.post<AttemptResponse>('/learn/attempts', body, opts);
 }
 
-/** GET /api/v1/learn/review/due：到期复习队列 */
+/** GET /api/v1/learn/review/due：到期复习队列（`qe_attempt` 流水重放派生） */
 export function getReviewDue(
   courseId?: string,
   maxTasks?: number,
@@ -421,7 +460,7 @@ export function listMistakes(
   });
 }
 
-/** PATCH /api/v1/learn/attempts/{id}：错题本人工位（收藏 / 已解决） */
+/** PATCH /api/v1/learn/attempts/{id}：错题本人工位（收藏 / 已解决，R6 纯人工） */
 export function patchAttempt(
   attemptId: number,
   body: { bookmarked?: boolean; resolved?: boolean },
@@ -430,103 +469,105 @@ export function patchAttempt(
   return api.patch<AttemptRow>(`/learn/attempts/${attemptId}`, body, opts);
 }
 
-/* ---------- M1 学习链路面（主链 M-1 契约：课程注册 / 单元树 / 编译作业 / 派生进度） ---------- */
+/* ---------- M1 学习面（qe_learning：course 行 + kp 行，单表继承） ---------- */
 
-/** 课程态（后端 `derived.status` 闭集，读时派生非落列） */
-export type LearnCourseStatus = 'draft' | 'compiling' | 'learning' | 'completed';
+/** 派生课程态（`derived.status` 闭集；编译态随链路退役） */
+export type LearnCourseStatus = 'draft' | 'learning' | 'completed';
 
-/** 块类型闭集（`PUT …/syllabus` 节点 `type`，与后端 UNIT_TYPES 同集） */
-export type LearnUnitType = 'text' | 'formula' | 'figure' | 'quiz' | 'flashcard';
+/** 选课态（course 行 `status` 列闭集，与派生态两口径） */
+export type LearnEnrollStatus = 'active' | 'paused' | 'done';
 
-export interface CourseRefBody {
-  ref_id: string;
-  label?: string;
-}
+/** 知识点落笔态（kp 行 `status` 闭集） */
+export type LearnerKpStatus = 'done' | 'skipped' | 'pending';
 
 export interface CourseResource {
   kind: 'book' | 'af_version' | 'knowledge';
   ref_id: string;
   label: string;
+  /** 书架清单的教材级忽略位（落 resources JSON 键，零 DDL；缺省＝未忽略） */
+  dismissed?: boolean;
 }
 
-export interface PageWindow {
-  start: number;
-  end: number;
+/** 教材级进度（`derived.books`）：计数单位行按取材 `source_ref.ref_id` 归集 */
+export interface LearnBookProgress {
+  ref_id: string;
+  label: string;
+  total: number;
+  done: number;
+  skipped?: number;
+  percent: number;
 }
 
-/** 派生进度（`GET …/progress` 与课程行 `derived` 同形状） */
-export interface LearnDerived {
-  status: LearnCourseStatus;
+/** 进度响应（`GET …/progress` 与 `derived` 的共同底座；游标＝门游标） */
+export interface LearnProgress {
   total: number;
   done: number;
   skipped: number;
   percent: number;
+  /** 门游标：第一个未掌握且未被显式让位的知识点行派生键 */
   current_unit_id: string | null;
   completed: boolean;
+  mastered: number;
+  /** 下一步建议（三态优先：到期复习 → 第一个未掌握 → 结课） */
+  next_unit_id: string | null;
+  provenance: { system: number; learner: number };
 }
 
+export interface LearnDerived extends LearnProgress {
+  status: LearnCourseStatus;
+  books: LearnBookProgress[];
+}
+
+/** 学习课程行＝qe_learning course 行 + 共享目录名称（R5 引用不复制：名称/领域/track 只来自 qed_course） */
 export interface LearnCourse {
+  /** ＝共享 `qed_course.course_id`（D4：不再有两套课程 ID） */
   learn_course_id: string;
+  status: LearnEnrollStatus;
   name: string;
-  domain_ref: CourseRefBody | null;
-  course_ref: CourseRefBody | null;
-  direction: string;
+  domain_id: string;
+  track: string;
+  description: string;
   resources: CourseResource[];
-  compile_status: 'proposed' | 'running' | 'completed' | 'failed' | null;
-  compile_done: number;
-  compile_total: number;
-  failure_count: number;
-  page_windows: PageWindow[] | null;
-  compile_fingerprint: string | null;
-  instructions: string;
-  agent_notes: string;
+  /** 学习者给定的推进顺序（空＝按默认序） */
+  kp_path: string[];
+  learner_note: string;
   created_at: string;
   updated_at: string;
-  derived: LearnDerived;
+  /** 序列里的知识点条数（＝门与游标的计数单位） */
   unit_count?: number;
+  derived: LearnDerived;
 }
 
-/** 单元树节点（section＝章节大纲、unit＝最小学习块）；source_ref 承载块页窗 */
-export interface LearnUnit {
-  unit_id: string;
-  learn_course_id: string;
-  parent_id: string | null;
-  level: 'section' | 'unit';
-  title: string;
-  sort_order: number;
-  confirmed: boolean;
-  covered: boolean;
-  type: LearnUnitType | null;
-  payload: { text?: string; [key: string]: unknown } | null;
-  source_ref: {
-    ref_id?: string;
-    page?: number | null;
-    page_start?: number;
-    page_end?: number;
-    block_index?: number | null;
-  } | null;
-  gen_status: 'pending' | 'generated' | 'failed';
-  active: boolean;
-  drift?: boolean;
-  [key: string]: unknown;
+/** kp 行投影（学习者对某条知识点的独立记录，跨课程共享，不随退课删除） */
+export interface KpLearnerRow {
+  kp_id: string;
+  status: LearnerKpStatus;
+  /** 质性门判定（未判定＝null） */
+  qualitative_passed: boolean | null;
+  qualitative_note: string;
+  assessed_by: string;
+  assessed_at: string | null;
+  learner_note: string;
+  updated_at: string;
+  /** 撤销终态位且无质性痕迹时整行删除 */
+  removed?: boolean;
 }
 
 export interface CreateLearnCourseBody {
-  name: string;
+  course_id: string;
   resources: CourseResource[];
-  domain_ref?: CourseRefBody | null;
-  course_ref?: CourseRefBody | null;
-  direction?: string;
-  instructions?: string;
-  agent_notes?: string;
+  kp_path?: string[];
+  learner_note?: string;
 }
+
+export type PatchLearnCourseBody = Partial<CreateLearnCourseBody> & { status?: LearnEnrollStatus };
 
 /** GET /api/v1/learn/courses：学习课程列表（含派生进度） */
 export function listLearnCourses(opts?: ApiRequestOptions): Promise<{ courses: LearnCourse[] }> {
   return api.get<{ courses: LearnCourse[] }>('/learn/courses', opts);
 }
 
-/** POST /api/v1/learn/courses：引用式注册（resources 只存 ref_id + label 快照） */
+/** POST /api/v1/learn/courses：把一门共享课程加入学习面（已在学习面 409、素材为空 409） */
 export function createLearnCourse(
   body: CreateLearnCourseBody,
   opts?: ApiRequestOptions,
@@ -539,86 +580,105 @@ export function getLearnCourse(courseId: string, opts?: ApiRequestOptions): Prom
   return api.get<LearnCourse>(`/learn/courses/${courseId}`, opts);
 }
 
-/** DELETE /api/v1/learn/courses/{id}：删除（编译在跑＝409） */
+/** 同步回的教材展示元数据：简介/面向对象由 8902 书行 knowledge_id 联接 8901 教程套得出 */
+export interface SyncBookMeta {
+  ref_id: string;
+  label: string;
+  course_id: string;
+  knowledge_id: string;
+  intro: string;
+  position: string;
+  position_label: string;
+  page_count: number;
+}
+
+export interface SyncLearnCoursesResult {
+  synced: number;
+  created: string[];
+  updated: string[];
+  courses: LearnCourse[];
+  books: SyncBookMeta[];
+}
+
+/**
+ * POST /api/v1/learn/courses/sync：解析好即同步（书架清单的「刷新」）。
+ * 服务端只读物化 `af_books.active_job_id` 非空且课程归属可回查的书；未达者 PASS。
+ * 解析侧（8902）不可达＝503，调用方降级为只读既有课程。
+ */
+export function syncLearnCourses(opts?: ApiRequestOptions): Promise<SyncLearnCoursesResult> {
+  return api.post<SyncLearnCoursesResult>('/learn/courses/sync', {}, opts);
+}
+
+/** PATCH /api/v1/learn/courses/{id}：改选课态/备注/顺序或整列提交 resources（教材忽略位走此通道） */
+export function patchLearnCourse(
+  courseId: string,
+  body: PatchLearnCourseBody,
+  opts?: ApiRequestOptions,
+): Promise<LearnCourse> {
+  return api.patch<LearnCourse>(`/learn/courses/${courseId}`, body, opts);
+}
+
+/** DELETE /api/v1/learn/courses/{id}：退课只删 course 行，kp 行不随课程删除（D4） */
 export function deleteLearnCourse(courseId: string, opts?: ApiRequestOptions): Promise<{ deleted: string }> {
   return api.del<{ deleted: string }>(`/learn/courses/${courseId}`, opts);
 }
 
-/** PUT /api/v1/learn/courses/{id}/syllabus：整树草稿覆写（节点可带 type/payload/source_ref 页窗） */
-export function putSyllabus(
-  courseId: string,
-  tree: unknown[],
-  opts?: ApiRequestOptions,
-): Promise<{ tree: unknown[]; unit_count: number }> {
-  return api.put<{ tree: unknown[]; unit_count: number }>(`/learn/courses/${courseId}/syllabus`, { tree }, opts);
-}
-
-/** GET /api/v1/learn/courses/{id}/units：单元树（level 过滤＝章节视图 or 块序列） */
-export function listLearnUnits(
-  courseId: string,
-  level?: 'section' | 'unit',
-  opts?: ApiRequestOptions,
-): Promise<{ units: LearnUnit[] }> {
-  return api.get<{ units: LearnUnit[] }>(`/learn/courses/${courseId}/units`, {
-    ...opts,
-    params: { level: level ?? undefined },
-  });
-}
-
-/** PATCH /api/v1/learn/units/{id}：人工面白名单（title/order/confirmed/covered） */
-export function patchLearnUnit(
-  unitId: string,
-  body: { title?: string; order?: number; confirmed?: boolean; covered?: boolean },
-  opts?: ApiRequestOptions,
-): Promise<LearnUnit> {
-  return api.patch<LearnUnit>(`/learn/units/${unitId}`, body, opts);
-}
-
-/** POST …/compile/propose：登记人工页窗（编译输入面，drift 判定基线） */
-export function proposeCompile(
-  courseId: string,
-  pageWindows: PageWindow[],
-  opts?: ApiRequestOptions,
-): Promise<{ compile_status: 'proposed'; page_windows: PageWindow[] }> {
-  return api.post(`/learn/courses/${courseId}/compile/propose`, { page_windows: pageWindows }, opts);
-}
-
-/** POST …/compile/start：两级确认齐备后受理（202，轮询 compile 状态） */
-export function startCompile(courseId: string, opts?: ApiRequestOptions): Promise<{ compile_status: 'running' }> {
-  return api.post(`/learn/courses/${courseId}/compile/start`, undefined, opts);
-}
-
-export interface CompileStatus {
-  compile_status: 'proposed' | 'running' | 'completed' | 'failed' | null;
-  done: number;
-  total: number;
-  failure_count: number;
-}
-
-/** GET …/compile：编译作业态与断点位（读课程行自 carry） */
-export function getCompileStatus(courseId: string, opts?: ApiRequestOptions): Promise<CompileStatus> {
-  return api.get<CompileStatus>(`/learn/courses/${courseId}/compile`, opts);
-}
-
-/** GET …/progress：派生进度 + 结课位（只读，看板数据源） */
-export function getLearnProgress(courseId: string, opts?: ApiRequestOptions): Promise<LearnDerived> {
-  return api.get<LearnDerived>(`/learn/courses/${courseId}/progress`, opts);
-}
-
-/** POST …/progress：学习事件写入（done/skipped/pending，派生重算的输入事实） */
-export function setLearnProgress(
-  courseId: string,
-  unitId: string,
-  status: 'done' | 'skipped' | 'pending',
-  opts?: ApiRequestOptions,
-): Promise<{ unit_id: string; status: string; derived: LearnDerived }> {
-  return api.post(`/learn/courses/${courseId}/progress`, { unit_id: unitId, status }, opts);
+/** GET /api/v1/learn/courses/{id}/progress：派生进度 + 门态（只读，看板数据源） */
+export function getLearnProgress(courseId: string, opts?: ApiRequestOptions): Promise<LearnProgress> {
+  return api.get<LearnProgress>(`/learn/courses/${courseId}/progress`, opts);
 }
 
 /**
- * 共享课程 id → 学习课程行：以 `course_ref.ref_id` 桥接（一个共享课程一门学习课）。
- * 未登记＝null（界面给「去书架创建学习课程」空态，不静默造课）。
+ * POST /api/v1/learn/courses/{id}/progress：勾选落笔（done/skipped/pending）。
+ * `note` 走同一请求：kp 行不存在时备注不生效（整行被撤销删除时随行作废）。
  */
-export function findLearnCourseFor(courses: LearnCourse[], courseId: string): LearnCourse | null {
-  return courses.find((course) => course.course_ref?.ref_id === courseId) ?? null;
+export function setLearnProgress(
+  courseId: string,
+  body: { kp_id: string; status: LearnerKpStatus; note?: string },
+  opts?: ApiRequestOptions,
+): Promise<KpLearnerRow & { derived: LearnProgress }> {
+  return api.post(`/learn/courses/${courseId}/progress`, body, opts);
+}
+
+/** 逐知识点门态行（分数与结论一律读时派生） */
+export interface MasteryItem {
+  unit_id: string;
+  kp_id: string;
+  kp_type: string;
+  gate: 'qualitative' | 'quantitative';
+  mastery: number;
+  threshold: number;
+  attempt_count: number;
+  /** 过门来源：system=判分算出来的，learner=自己勾的/质性自评过的，''=还没过 */
+  provenance: '' | 'system' | 'learner';
+  status: 'mastered' | 'learning' | 'new';
+  qualitative_passed: boolean | null;
+  due_reviews: number;
+}
+
+export interface MasteryNextStep {
+  action: 'review' | 'probe' | 'assess' | 'practice' | 'complete';
+  unit_id: string;
+  kp_id: string;
+  reason: string;
+}
+
+export interface CourseMasteryResponse {
+  items: MasteryItem[];
+  next_step: MasteryNextStep;
+  summary: { total: number; mastered: number; learning: number; new: number };
+}
+
+/** GET /api/v1/learn/courses/{id}/mastery：逐知识点门态（主链 M-3） */
+export function getCourseMastery(courseId: string, opts?: ApiRequestOptions): Promise<CourseMasteryResponse> {
+  return api.get<CourseMasteryResponse>(`/learn/courses/${courseId}/mastery`, opts);
+}
+
+/** POST /api/v1/learn/courses/{id}/mastery/assess：质性门判定（量化型 409 拒绝） */
+export function assessCourseMastery(
+  courseId: string,
+  body: { kp_id: string; passed: boolean; note?: string; by?: 'learner' },
+  opts?: ApiRequestOptions,
+): Promise<{ item: MasteryItem; kp_row: KpLearnerRow; next_step: MasteryNextStep }> {
+  return api.post(`/learn/courses/${courseId}/mastery/assess`, body, opts);
 }

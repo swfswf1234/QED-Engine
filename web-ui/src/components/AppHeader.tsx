@@ -6,7 +6,7 @@ const { Header } = Layout;
 const { Text } = Typography;
 
 interface AppHeaderProps {
-  /** 右侧动作区（按钮组），如「后台管理」「返回主界面」 */
+  /** 右侧动作区（按钮组），如「后台管理」「返回主界面」；返回类按钮放本区末位（全站同位同序，REQ-117 C29） */
   actions?: React.ReactNode;
 }
 

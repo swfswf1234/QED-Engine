@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  estimateTocOffset, parseTocLines, toOutlinePayload, tocLinesFromBlockTexts,
-  type TocNode, type TocUnrecognizedLine,
+  autoLocateToc, estimateTocOffset, parseTocLines, toOutlinePayload, tocLinesFromBlockTexts,
+  type BodyPageText, type TocNode, type TocUnrecognizedLine,
 } from './tocParse';
 
 /**
@@ -220,5 +220,78 @@ describe('块文本 → 目录行（规格 1：多行块按行拆开，供导入
   it('拆出的行可直接进解析：与逐行夹具得到同一棵树', () => {
     const fromBlocks = tocLinesFromBlockTexts([B05_P7.join('\n'), B05_P8_COL_A.join('\n')]);
     expect(parseTocLines(fromBlocks).tree.map((n) => n.name)).toEqual(parseTocLines([...B05_P7, ...B05_P8_COL_A]).tree.map((n) => n.name));
+  });
+});
+
+describe('目录进场自动定位（REQ-105 §7 步 0：只读已解析块文本，置信不足即不写）', () => {
+  const AUTO_PAGES: BodyPageText[] = [
+    { page: 6, text: '前言\n本书面向初学者。\n作者' },
+    { page: 7, text: B05_P7.join('\n') },
+    { page: 8, text: `${B05_P8_COL_A.join('\n')}\n${B05_P8_COL_B.join('\n')}` },
+    { page: 9, text: '' },
+    { page: 10, text: '第1章 实数系和复数系\n导引\n实数系的完备性公理……' },
+    { page: 11, text: '有序集\n上界与下界' },
+  ];
+
+  it('命中时给出目录段与正文起页，偏移＝首章正文出现页 − 印刷页', () => {
+    const result = autoLocateToc(AUTO_PAGES);
+    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ tocStart: 7, tocEnd: 8, bodyStart: 10, offset: 9 });
+    expect(result.tree?.map((node) => node.name)).toEqual([
+      '第1章 实数系和复数系', '第2章 基础拓扑', '第8章 一些特殊函数',
+    ]);
+  });
+
+  it('目录段在第一个非目录形态页前终止（空白页不续），且不越过正文起页', () => {
+    const result = autoLocateToc(AUTO_PAGES);
+    expect(result.tocEnd).toBe(8);
+    expect((result.bodyStart ?? 0)).toBeGreaterThan(result.tocEnd ?? 0);
+  });
+
+  it('首章 PDF 起始页＝自动试算的正文起页（写入形状与偏移自洽）', () => {
+    const result = autoLocateToc(AUTO_PAGES);
+    const payload = toOutlinePayload(result.tree ?? [], result.offset ?? 0, 317);
+    expect(payload[0].page_start).toBe(10);
+    expect(payload[0].page_end).toBeLessThan(payload[1].page_start);
+  });
+
+  it('未识别行随结果返回（附录/习题类剔除不静默丢弃）', () => {
+    const result = autoLocateToc(AUTO_PAGES);
+    expect(result.unrecognized?.some((line) => line.reason === 'excluded')).toBe(true);
+  });
+
+  it('无目录页 → no-toc-page，不写入任何猜测值', () => {
+    const result = autoLocateToc([
+      { page: 1, text: '封面\n书名' },
+      { page: 2, text: '版权页\nISBN' },
+      { page: 3, text: '第1章 开端\n正文' },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe('no-toc-page');
+    expect(result.tree ?? []).toHaveLength(0);
+  });
+
+  it('有目录页但拆不出章题 → no-chapter-lines', () => {
+    const result = autoLocateToc([
+      { page: 5, text: '目录\n导引 …… 1\n有序集 …… 2\n域 …… 4' },
+      { page: 6, text: '导引\n正文开始' },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe('no-chapter-lines');
+  });
+
+  it('目录段之后正文侧找不到章题 → no-body-start', () => {
+    const result = autoLocateToc([
+      { page: 5, text: '目录\n第1章 实数系和复数系…… 1\n第2章 基础拓扑…… 21' },
+      { page: 6, text: '导引\n实数系的完备性公理' },
+      { page: 7, text: '有序集\n上界与下界' },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe('no-body-start');
+  });
+
+  it('页序乱序输入不影响定位结果（按页号升序消费）', () => {
+    const shuffled = [...AUTO_PAGES].reverse();
+    expect(autoLocateToc(shuffled)).toMatchObject({ tocStart: 7, tocEnd: 8, bodyStart: 10, offset: 9 });
   });
 });

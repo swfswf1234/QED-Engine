@@ -25,7 +25,7 @@ import {
   startCourseExplore,
 } from '../api/explore-helpers';
 import type { CourseNode, DomainNode, TutorialNode } from '../stores/downloads';
-import { buildTreeNodes, useDownloadsStore, TREE_WIDTH_MIN, TREE_WIDTH_MAX } from '../stores/downloads';
+import { buildTreeNodes, listDomainPapers, useDownloadsStore, TREE_WIDTH_MIN, TREE_WIDTH_MAX } from '../stores/downloads';
 import { exploreStatusOf } from '../stores/explore';
 import { usePaperExploreStore } from '../stores/paperExplore';
 import type { CourseRecord, DomainSystem } from '../stores';
@@ -467,6 +467,7 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
   const systemError = useDownloadsStore((s) => s.systemError);
   const knowledgeError = useDownloadsStore((s) => s.knowledgeError);
   const fetchAll = useDownloadsStore((s) => s.fetchAll);
+  const paperBooks = useDownloadsStore((s) => s.paperBooks);
   const { message, modal } = App.useApp();
   // 论文探索入口（REQ-102 W4）：领域右键菜单打开管理弹窗，禁用只看是否在跑论文任务
   const paperBadges = usePaperExploreStore((s) => s.badges);
@@ -727,6 +728,18 @@ export default function DownloadsTree({ onEditCourse }: { onEditCourse?: (course
                           <CourseBranch key={c.id} course={c} onImportKnowledge={handleCourseImportKnowledge} onEditCourse={onEditCourse ?? (() => {})} />
                         ))
                       )}
+                      {/* 论文派生视图节点（REQ-108 I6）：固定追加在课程之后，计数取领域全量；
+                          不是课程、不落课程记录，不读也不写 exploration_stage */}
+                      <div
+                        className={`dl-tree-node dl-tree-papers${selected?.kind === 'papers' && selected.id === domain.domainId ? ' selected' : ''}`}
+                        data-testid="tree-papers-node"
+                        role="treeitem"
+                        onClick={() => selectNode({ kind: 'papers', id: domain.domainId })}
+                      >
+                        <span className="dl-tree-caret dl-tree-caret-disabled" />
+                        <span className="dl-tree-name">论文</span>
+                        <span className="dl-tree-count">{listDomainPapers(paperBooks, domain.domainId).length} 篇</span>
+                      </div>
                     </div>
                   )}
                 </div>

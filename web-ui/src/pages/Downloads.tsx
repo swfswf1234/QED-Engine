@@ -8,8 +8,9 @@ import ExploreFlowModal from '../components/ExploreFlowModal';
 import DomainConfirmModal from '../components/DomainConfirmModal';
 import CourseConfirmModal from '../components/CourseConfirmModal';
 import CourseKnowledgeConfirmModal from '../components/CourseKnowledgeConfirmModal';
-import PaperBooksRow from '../components/PaperBooksRow';
+import PaperColumn from '../components/PaperColumn';
 import PaperExploreModal from '../components/PaperExploreModal';
+import PaperOriginSection from '../components/PaperOriginSection';
 import { describeError } from '../api/client';
 import DomainCard from '../components/DomainCard';
 import { startDomainExplore } from '../api/explore-helpers';
@@ -19,9 +20,9 @@ import {
   exploreCourseKnowledge, verifyBook,
   updateCourse,
 } from '../api/tracker';
-import { STAGE_OPTIONS, bookInStage, sortBooks, tutorialLabel, groupPaperBooks, useDownloadsStore } from '../stores/downloads';
+import { STAGE_OPTIONS, bookInStage, sortBooks, tutorialLabel, groupPaperBooks, listDomainPapers, useDownloadsStore } from '../stores/downloads';
 import { useExploreUiStore } from '../stores/explore';
-import { usePaperExploreStore } from '../stores/paperExplore';
+import { paperBadgeShowsInSummary, usePaperExploreStore } from '../stores/paperExplore';
 import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord, SourceRecord } from '../stores';
 import '../downloads.css';
 
@@ -591,6 +592,11 @@ function TutorialDetailModal({ knowledge, detail, run, onClose }: {
 // --- 书目详情弹窗（PLAN-039 重设计：信息网格 + 下载信息精简 + 上传/验证/自动下载） ---
 
 /** 下载状态派生：是否下载成功（holding × status） */
+/** 论文身份：qt_books 无 arXiv 列，arXiv ID 只来自渠道尝试记录 channel==='arxiv' 的 provider_id */
+function arxivIdOf(sources: SourceRecord[]): string {
+  return sources.find((s) => s.channel === 'arxiv')?.provider_id ?? '';
+}
+
 function bookDownloadState(b: BookRecord): { label: string; color: string } {
   if (b.holding === 'owned' && ['downloaded', 'verified'].includes(b.status)) {
     return { label: '下载成功', color: 'green' };
@@ -751,6 +757,14 @@ function BookDetailModal({ book, onClose, onMutated }: {
             <div>文件地址：<span title={address}>{address}</span></div>
           </div>
         </div>
+
+        {current.kind === 'paper' && (
+          <PaperOriginSection
+            bookId={current.book_id}
+            domainId={current.domain_id}
+            arxivId={arxivIdOf(sources)}
+          />
+        )}
 
         <div>
           <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setShowSources((v) => !v)}>
@@ -929,7 +943,7 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
 
   const flowTarget = useExploreUiStore((s) => s.flowTarget);
   const selectedDomain = useMemo(() => {
-    if (selected?.kind === 'domain') {
+    if (selected?.kind === 'domain' || selected?.kind === 'papers') {
       return domains.find((d) => d.domain_id === selected.id) ?? null;
     }
     // 选择课程时，通过 byId 获取对应的领域
@@ -1003,7 +1017,9 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
   const selectedLabel =
     selected?.kind === 'domain'
       ? `领域：${domains.find((d) => d.domain_id === selected.id)?.name ?? selected.id}`
-      : selected?.kind === 'course'
+      : selected?.kind === 'papers'
+        ? `论文：${domains.find((d) => d.domain_id === selected.id)?.name ?? selected.id}`
+        : selected?.kind === 'course'
         ? `课程：${byId.get(selected.id)?.name ?? selected.id}`
         : selected?.kind === 'tutorial'
           ? `教程：${knowledge.find((k) => selected.key.endsWith(`kn:${k.knowledge_id}`))?.name ?? selected.key}`
@@ -1018,8 +1034,21 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
       message.warning('请先选择领域：论文探索仅由领域发起');
       return;
     }
-    void usePaperExploreStore.getState().openModal(domain.domain_id, domain.name);
-  }, [message]);
+    // 课程语境只带标题括号里的课程名，探索仍走所属领域（R2 不变，壳 §11.1）
+    void usePaperExploreStore.getState().openModal(domain.domain_id, domain.name, selectedCourse?.name ?? '');
+  }, [message, selectedCourse]);
+
+  // 论文栏视图（REQ-108 I6，壳 §8）：左树「论文」派生节点选中 → 该领域全量卡片列（含课程落位）
+  const isPapersView = selected?.kind === 'papers';
+  const papersInView = useMemo(
+    () => (selected?.kind === 'papers' ? listDomainPapers(paperBooks, selected.id) : []),
+    [selected, paperBooks],
+  );
+  const courseNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    domains.forEach((d) => d.courses.forEach((c) => { map[c.course_id] = c.name; }));
+    return map;
+  }, [domains]);
 
   // 场景1：无领域或未选中（必须先选领域）
   const isEmptyState = domains.length === 0 || (selected === null && !selectedDomain);
@@ -1030,24 +1059,37 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
   // 场景3/4：有数据且选中了领域
   const hasDataWithDomain = !isEmptyState && !hasDomainNoCourses && selectedDomain;
 
+  // I14：领域活动态徽标（§7.2）随旧展示行迁入汇总行，只渲染探索中/待评审/失败
+  const summaryPaperBadge = selectedDomain ? paperBadges[selectedDomain.domain_id] : undefined;
+  const summaryPaperBadgeColor = summaryPaperBadge?.key === 'running'
+    ? 'processing' : summaryPaperBadge?.key === 'review' ? 'warning' : 'error';
+
   return (
     <div className="dl-right">
       <div className="dl-filter-bar">
         <FilterBar />
       </div>
       <div className="dl-summary">
-        <Space direction="vertical" size={4}>
-          <Text strong>当前选择：{selectedLabel}</Text>
-          <Text type="secondary">筛选结果：{filtered.length} 个教程（已排除否定/过时项）</Text>
+        <div className="dl-summary-main">
+          <Space direction="vertical" size={4}>
+            <Text strong>当前选择：{selectedLabel}</Text>
+            <Text type="secondary">筛选结果：{filtered.length} 个教程（已排除否定/过时项）</Text>
+          </Space>
+        </div>
+        {/* 论文探索入口②（§4.4 + REQ-108 I2）：汇总行内右靠齐，与领域名称同一排；课程选中取其所属领域；未选择置灰 */}
+        {/* I14：领域活动态徽标（§7.2）渲染在按钮左侧，替代已删除的行内展示行 */}
+        <Space size={6} align="center" className="dl-summary-action">
+          {paperBadgeShowsInSummary(summaryPaperBadge?.key) && (
+            <Tag data-testid="paper-row-badge" color={summaryPaperBadgeColor}>{summaryPaperBadge?.text}</Tag>
+          )}
+          <Button
+            size="small"
+            disabled={selectedDomain === null}
+            onClick={() => openPaperExplore(selectedDomain)}
+          >
+            论文探索
+          </Button>
         </Space>
-        {/* 论文探索入口②（§4.4）：当前所选领域，课程选中取其所属领域；未选择置灰 */}
-        <Button
-          size="small"
-          disabled={selectedDomain === null}
-          onClick={() => openPaperExplore(selectedDomain)}
-        >
-          论文探索
-        </Button>
       </div>
       <div className="dl-content">
         {/* 场景1：无领域或未选中 */}
@@ -1062,8 +1104,26 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
           </div>
         )}
 
+        {/* 论文栏视图（REQ-108 I6，壳 §8）：领域信息卡照常 + 全量卡片列；与行内展示行并存（R5） */}
+        {isPapersView && selectedDomain && (
+          <>
+            <DomainCard
+              domain={selectedDomain}
+              onExplore={startDomainExplore}
+              onConfirmDomain={() => onConfirmDomain(selectedDomain)}
+              onConfirmKnowledge={() => onConfirmCourse(selectedDomain)}
+            />
+            <PaperColumn
+              books={papersInView}
+              courseNameById={courseNameById}
+              onBookClick={setPaperBook}
+              onExplore={() => openPaperExplore(selectedDomain)}
+            />
+          </>
+        )}
+
         {/* 场景2：选中领域但无课程 */}
-        {hasDomainNoCourses && (
+        {!isPapersView && hasDomainNoCourses && (
           <>
             {/* 领域信息卡恒显（PLAN-033 §3：无论筛选/选中层级如何始终渲染） */}
             {selectedDomain && (
@@ -1072,15 +1132,6 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
                 onExplore={startDomainExplore}
                 onConfirmDomain={() => onConfirmDomain(selectedDomain)}
                 onConfirmKnowledge={() => onConfirmCourse(selectedDomain)}
-              />
-            )}
-            {selectedDomain && (
-              <PaperBooksRow
-                books={paperGroups.byDomain[selectedDomain.domain_id] ?? []}
-                stage={filters.stage}
-                onBookClick={setPaperBook}
-                status={paperBadges[selectedDomain.domain_id]}
-                onExplore={() => openPaperExplore(selectedDomain)}
               />
             )}
             <div className="dl-empty-course-hint">
@@ -1090,7 +1141,7 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
         )}
 
         {/* 场景3：选中领域有课程 / 场景4：选中课程 */}
-        {hasDataWithDomain && (
+        {!isPapersView && hasDataWithDomain && (
           <>
             {/* 领域信息卡恒显（PLAN-033 §3：无论筛选/选中层级如何始终渲染） */}
             {selectedDomain && (
@@ -1099,17 +1150,6 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
                 onExplore={startDomainExplore}
                 onConfirmDomain={() => onConfirmDomain(selectedDomain)}
                 onConfirmKnowledge={() => onConfirmCourse(selectedDomain)}
-              />
-            )}
-
-            {/* 领域级论文展示行（REQ-102 W3/W4，§4.4：DomainCard 底部，空且无活动态则隐藏） */}
-            {selectedDomain && (
-              <PaperBooksRow
-                books={paperGroups.byDomain[selectedDomain.domain_id] ?? []}
-                stage={filters.stage}
-                onBookClick={setPaperBook}
-                status={paperBadges[selectedDomain.domain_id]}
-                onExplore={() => openPaperExplore(selectedDomain)}
               />
             )}
 
@@ -1136,14 +1176,6 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
                 {selectedCourse.description && <div className="dl-course-head-note">{selectedCourse.description}</div>}
               </div>
             )}
-            {selectedCourse && (
-              <PaperBooksRow
-                books={paperGroups.byCourse[selectedCourse.course_id] ?? []}
-                stage={filters.stage}
-                onBookClick={setPaperBook}
-              />
-            )}
-
             {/* 按课程分组展示教程 */}
             {filtered.length === 0 ? (
               <div className="dl-placeholder">
@@ -1182,14 +1214,7 @@ function RightPanel({ onConfirmDomain, onConfirmCourse, detailCourse, onDetailCo
                         {course.description && <div className="dl-course-head-note">{course.description}</div>}
                       </div>
                     )}
-                    {/* 课程级论文行：选中该课程时行已在置顶课程头下渲染，组内不重复 */}
-                    {course && course.course_id !== selectedCourse?.course_id && (
-                      <PaperBooksRow
-                        books={paperGroups.byCourse[course.course_id] ?? []}
-                        stage={filters.stage}
-                        onBookClick={setPaperBook}
-                      />
-                    )}
+                    {/* 课程级论文不再行内渲染（REQ-109 I14，§11.7）：论文只在左树「论文」节点的领域全量卡片列出现 */}
                     {/* 教程列表 */}
                     {tutorials.map((k) => (
                       <KnowledgeSection key={k.knowledge_id} knowledge={k} detail={details[k.knowledge_id]} run={run} />

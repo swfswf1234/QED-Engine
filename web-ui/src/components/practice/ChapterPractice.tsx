@@ -1,6 +1,8 @@
 /**
- * 右栏「本章练习」（M2 壳裁决 R-9：错题本不独立成页，随 M6 三栏工作台）。
- * 三段＝到期复习（队列）/ 错题本（读时派生，人工位收藏·已解决）；候选仍在「批注」页签。
+ * 课后练习独立面（`#/practice`）的「今日面板」：到期复习队列 + 错题本同屏两段
+ * （REQ-106 裁决 R3＝现状形态，不独立成页、不加 Tabs；错题人工位随本面板）。
+ * 计数口径＝课级全量（R2）＋单请求 `max_tasks=100`（R5）：`今日到期 N` 取服务端截断前的 `total_due`，
+ * 超出已列条数时队列尾行交代剩余。
  */
 import { useState } from 'react';
 import { Button, Card, Empty, Space, Tag, Typography } from 'antd';
@@ -22,16 +24,16 @@ function verdictOf(result: AttemptResponse): string {
 
 export interface ChapterPracticeProps {
   courseId: string;
-  kpId: string | null;
 }
 
-export default function ChapterPractice({ courseId, kpId }: ChapterPracticeProps) {
+export default function ChapterPractice({ courseId }: ChapterPracticeProps) {
   const dueTasks = usePracticeStore((s) => s.dueTasks);
+  const totalDue = usePracticeStore((s) => s.totalDue);
   const mistakes = usePracticeStore((s) => s.mistakes);
   const stats = usePracticeStore((s) => s.mistakeStats);
   const notice = usePracticeStore((s) => s.notice);
   const lastResult = usePracticeStore((s) => s.lastResult);
-  const loadChapter = usePracticeStore((s) => s.loadChapter);
+  const loadCourse = usePracticeStore((s) => s.loadCourse);
   const submitAttempt = usePracticeStore((s) => s.submitAttempt);
   const setBookmark = usePracticeStore((s) => s.setBookmark);
   const setResolved = usePracticeStore((s) => s.setResolved);
@@ -42,7 +44,7 @@ export default function ChapterPractice({ courseId, kpId }: ChapterPracticeProps
       return (
         <Card key={`${task.target_kind}-${task.target_id}`} size="small" type="inner">
           <Text style={{ fontSize: 12 }}>
-            {`知识点复习（${task.kp_type ?? '未标型'}·档 ${task.interval_index}）`}
+            {`这一题的题面暂时取不到（档 ${task.interval_index}）：可在错题本里重做。`}
           </Text>
         </Card>
       );
@@ -123,9 +125,9 @@ export default function ChapterPractice({ courseId, kpId }: ChapterPracticeProps
   return (
     <Space direction="vertical" size={10} style={{ width: '100%' }}>
       <Space size={6} wrap>
-        <Button size="small" onClick={() => void loadChapter(courseId, kpId)}>刷新</Button>
+        <Button size="small" onClick={() => void loadCourse(courseId)}>刷新</Button>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {`到期 ${dueTasks.length}／错题 ${stats?.unresolved ?? 0} 未解决（共 ${stats?.wrong ?? 0}）`}
+          {`今日到期 ${totalDue}／错题 ${stats?.unresolved ?? 0} 未解决（共 ${stats?.wrong ?? 0}）`}
         </Text>
       </Space>
       {lastResult && (
@@ -138,10 +140,15 @@ export default function ChapterPractice({ courseId, kpId }: ChapterPracticeProps
       <div>
         <Text strong style={{ fontSize: 13 }}>{`到期复习（${dueTasks.length}）`}</Text>
         {dueTasks.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本章没有到期项" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="今天没有到期" />
         ) : (
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {dueTasks.map(renderDue)}
+            {totalDue > dueTasks.length && (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {`另有 ${totalDue - dueTasks.length} 条到期未列，做完本批再看`}
+              </Text>
+            )}
           </Space>
         )}
       </div>
@@ -149,7 +156,7 @@ export default function ChapterPractice({ courseId, kpId }: ChapterPracticeProps
       <div>
         <Text strong style={{ fontSize: 13 }}>{`错题本（${mistakes.length}）`}</Text>
         {mistakes.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本章还没有错题" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有错题" />
         ) : (
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {mistakes.map(renderMistake)}

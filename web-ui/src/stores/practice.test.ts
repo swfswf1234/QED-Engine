@@ -175,10 +175,10 @@ async function extractDefault() {
 describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → 复习/错题）', () => {
   beforeEach(() => {
     usePracticeStore.setState({
-      courseId: null, kpId: null, sourceBooks: [], sourceBookId: null, answerBookId: null,
+      courseId: null, sourceBooks: [], sourceBookId: null, answerBookId: null,
       range: null, answerRange: null, extracting: false, drafts: [], unrecognized: [],
       extractNotices: [], questions: [], dueTasks: [], mistakes: [], mistakeStats: null,
-      lastResult: null, loading: false, error: null, notice: null, courseDueCounts: {},
+      totalDue: 0, lastResult: null, loading: false, error: null, notice: null,
     });
     routes();
   });
@@ -244,17 +244,18 @@ describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → �
     expect(store().drafts.map((d) => d.number)).toEqual(['2', '3']);
   });
 
-  it('入库只提交通过校验的草稿，按 roles 决定 source_kind，写后清空草稿并重取本章题', async () => {
+  it('入库只提交通过校验的草稿，按 roles 决定 source_kind，写后清空草稿并重取本课题', async () => {
     await extractDefault();
     store().updateDraft(1, {
       kind: 'quiz', question_type: 'short', expected_answer: '非空有上界必有上确界', answer_source: 'manual',
     });
-    const ok = await store().confirmImport('kp-c1');
+    const ok = await store().confirmImport();
     expect(ok).toBe(true);
     const items = postedQuestions?.questions as Array<Record<string, unknown>>;
     expect(items).toHaveLength(3);
     expect(postedQuestions).toMatchObject({ course_id: 'ma', gen_batch: 'workbench-extract' });
-    expect(items[0]).toMatchObject({ kp_id: 'kp-c1', source_kind: 'exercise_book', book_ref: 'b07' });
+    // R2 已裁＝课级归属：本面无章/节选择器，入库 kp_id 一律留空
+    expect(items[0]).toMatchObject({ kp_id: null, source_kind: 'exercise_book', book_ref: 'b07' });
     expect(store().drafts).toHaveLength(0);
     expect(store().questions.map((q) => q.question_id)).toEqual(['q-1']);
     expect(store().notice).toContain('跳重 1');
@@ -268,7 +269,7 @@ describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → �
     store().setAnswerBook('b08', 12, 12);
     await store().extract();
     store().updateDraft(1, { kind: 'quiz', question_type: 'short' });
-    await store().confirmImport(null);
+    await store().confirmImport();
     const items = postedQuestions?.questions as Array<Record<string, unknown>>;
     const target = items.find((item) => item.answer_source === 'sibling_book');
     expect(target?.source_ref).toMatchObject({ answer_book_ref: 'b08' });
@@ -280,13 +281,13 @@ describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → �
       drafts: store().drafts.map((d) => ({ ...d, kind: 'quiz' as const, expected_answer: null })),
     });
     const before = calls.filter((c) => c === 'POST /api/v1/learn/questions').length;
-    expect(await store().confirmImport('kp-c1')).toBe(false);
+    expect(await store().confirmImport()).toBe(false);
     expect(calls.filter((c) => c === 'POST /api/v1/learn/questions').length).toBe(before);
     expect(store().notice).toContain('没有可入库');
   });
 
   it('submitAttempt 写后整体重取（题 + 到期队列 + 错题本）并保留判分依据', async () => {
-    await store().loadChapter('ma', 'kp-c1');
+    await store().loadCourse('ma');
     const before = calls.length;
     const result = await store().submitAttempt({ question_id: 'q-1', user_answer: 'C', origin: 'new' });
     expect(result?.is_correct).toBe(false);
@@ -294,8 +295,19 @@ describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → �
     expect(postedAttempt).toMatchObject({ question_id: 'q-1', user_answer: 'C', origin: 'new' });
     expect(calls.length).toBeGreaterThan(before);
     expect(calls.filter((c) => c.includes('/learn/mistakes')).length).toBeGreaterThanOrEqual(2);
-    // 本章队列只保留归属本章的题（q-9 属另一节）
-    expect(store().dueTasks.map((t) => t.target_id)).toEqual(['q-1']);
+    // R2 已裁＝课级全量：客户端「按本章过滤」整体删除，跨知识点项一并留在队列
+    expect(store().dueTasks.map((t) => t.target_id)).toEqual(['q-1', 'q-9']);
+  });
+
+  it('课级三张面的请求口径：队列单请求带 max_tasks=100，题与错题本都不带 kp，total_due 进 totalDue', async () => {
+    await store().loadCourse('ma');
+    expect(calls.filter((c) => c.includes('/learn/review/due')).length).toBe(1);
+    expect(calls.find((c) => c.includes('/learn/review/due'))).toContain('max_tasks=100');
+    expect(calls.find((c) => c.includes('/learn/review/due'))).toContain('course=ma');
+    expect(calls.filter((c) => c.includes('/learn/questions?'))
+      .every((c) => c.includes('course=ma') && !c.includes('kp='))).toBe(true);
+    expect(calls.some((c) => c.includes('/learn/mistakes?course=ma') && !c.includes('kp='))).toBe(true);
+    expect(store().totalDue).toBe(12);
   });
 
   it('闪卡自评带 self_result 与 review_date', async () => {
@@ -309,22 +321,16 @@ describe('练习域 store（M2：题源抽取 → 确认入库 → 作答 → �
   });
 
   it('错题本人工位 PATCH 后重取错题本', async () => {
-    await store().loadChapter('ma', 'kp-c1');
+    await store().loadCourse('ma');
     await store().setBookmark(7, true);
     expect(calls).toContain('PATCH /api/v1/learn/attempts/7');
     expect(store().mistakes[0].bookmarked).toBe(true);
   });
 
-  it('星图复习计数：按课程聚合 total_due', async () => {
-    await store().refreshCourseDueCounts(['ma', 'cs']);
-    expect(store().courseDueCounts).toEqual({ ma: 12, cs: 12 });
-    expect(calls.filter((c) => c.includes('/learn/review/due')).length).toBe(2);
-  });
-
   it('接口失败降级为提示，不清空已有草稿', async () => {
     await extractDefault();
     mockFetch.mockImplementation(() => Promise.reject(new TypeError('offline')));
-    await store().loadChapter('ma', 'kp-c1');
+    await store().loadCourse('ma');
     expect(store().drafts.length).toBeGreaterThan(0);
     expect(store().notice).toBeTruthy();
   });

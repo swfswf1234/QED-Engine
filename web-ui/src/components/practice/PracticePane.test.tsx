@@ -1,5 +1,6 @@
 /**
- * 中栏练习区单测（题源选择 → 抽取预览 → 确认入库 → 题卡作答，全程只走 mock fetch）。
+ * 练习面「题源工作区 + 本课题卡」单测（题源选择 → 抽取预览 → 确认入库 → 题卡作答，全程只走 mock fetch）。
+ * 归属口径＝课级全量（REQ-106 裁决 R2）：不传 kp、无章/节选择器，题行 kp_id 只作归属标签展示。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -45,15 +46,17 @@ const ROW: QuestionRow = {
 
 const calls: string[] = [];
 let posted: Record<string, unknown> | null = null;
+let questionRows: QuestionRow[] = [ROW];
 
 beforeEach(() => {
   calls.length = 0;
   posted = null;
+  questionRows = [ROW];
   usePracticeStore.setState({
-    courseId: null, kpId: null, sourceBooks: [], sourceBookId: null, answerBookId: null,
+    courseId: null, sourceBooks: [], sourceBookId: null, answerBookId: null,
     range: null, answerRange: null, extracting: false, drafts: [], unrecognized: [],
     extractNotices: [], questions: [], dueTasks: [], mistakes: [], mistakeStats: null,
-    lastResult: null, loading: false, error: null, notice: null, courseDueCounts: {},
+    totalDue: 0, lastResult: null, loading: false, error: null, notice: null,
   });
   mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => {
     calls.push(`${init?.method ?? 'GET'} ${url}`);
@@ -65,7 +68,7 @@ beforeEach(() => {
         created: 1, skipped_duplicates: 0, gen_batch: 'workbench-extract', model_ref: '', questions: [ROW],
       });
     }
-    if (url.includes('/learn/questions')) return jsonResponse({ questions: [ROW], total: 1 });
+    if (url.includes('/learn/questions')) return jsonResponse({ questions: questionRows, total: questionRows.length });
     if (url.includes('/learn/review/due')) return jsonResponse({ course_id: 'ma', tasks: [], total_due: 0 });
     if (url.includes('/learn/mistakes')) {
       return jsonResponse({ items: [], total: 0, stats: { total: 0, wrong: 0, unresolved: 0, bookmarked: 0, due_today: 0 } });
@@ -74,16 +77,17 @@ beforeEach(() => {
   });
 });
 
-describe('中栏练习区 PracticePane', () => {
-  it('进面拉题源书目并加载本章题，未填页范围时抽取按钮禁用', async () => {
-    render(<PracticePane courseId="ma" kpId="kp-c1" />);
-    expect(await screen.findByText('本章练习（1）')).toBeInTheDocument();
+describe('练习面题源工作区 PracticePane（课级全量）', () => {
+  it('进面拉题源书目并加载本课题，未填页范围时抽取按钮禁用', async () => {
+    render(<PracticePane courseId="ma" />);
+    expect(await screen.findByText('本课题（1）')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /抽取题目/ })).toBeDisabled();
     expect(screen.getByText(/v1 抽取式/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.includes('/learn/questions?'))[0]).not.toMatch(/kp=/);
   });
 
-  it('选题源书 + 页范围后抽取：出现确认面板与草稿，本章题列表随后端重取刷新', async () => {
-    render(<PracticePane courseId="ma" kpId="kp-c1" />);
+  it('选题源书 + 页范围后抽取：出现确认面板与草稿，本课题列表随后端重取刷新', async () => {
+    render(<PracticePane courseId="ma" />);
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '题源书' }));
     fireEvent.click(await screen.findByText('习题选（exercises）'));
     fireEvent.change(screen.getByLabelText('抽取起页'), { target: { value: '12' } });
@@ -93,8 +97,8 @@ describe('中栏练习区 PracticePane', () => {
     expect(screen.getByLabelText('题 1 题面')).toBeInTheDocument();
   });
 
-  it('确认入库提交 course_id / kp_id / source_kind，并按题源 roles 定型', async () => {
-    render(<PracticePane courseId="ma" kpId="kp-c1" />);
+  it('确认入库提交 course_id 与课级归属（kp_id 留空），并按题源 roles 定型', async () => {
+    render(<PracticePane courseId="ma" />);
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '题源书' }));
     fireEvent.click(await screen.findByText('习题选（exercises）'));
     fireEvent.change(screen.getByLabelText('抽取起页'), { target: { value: '12' } });
@@ -104,22 +108,23 @@ describe('中栏练习区 PracticePane', () => {
     await waitFor(() => expect(posted).not.toBeNull());
     expect(posted).toMatchObject({ course_id: 'ma', gen_batch: 'workbench-extract' });
     const items = (posted?.questions ?? []) as Array<Record<string, unknown>>;
-    expect(items[0]).toMatchObject({ kp_id: 'kp-c1', source_kind: 'exercise_book', book_ref: 'b07' });
+    expect(items[0]).toMatchObject({ kp_id: null, source_kind: 'exercise_book', book_ref: 'b07' });
     expect(await screen.findByText('入库 1 题（跳重 0）')).toBeInTheDocument();
   });
 
-  it('本章无题时给明确空态与下一步指引', async () => {
-    mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/learn/question-books')) return jsonResponse(BOOKS);
-      if (url.includes('/learn/questions')) return jsonResponse({ questions: [], total: 0 });
-      if (url.includes('/learn/review/due')) return jsonResponse({ course_id: 'ma', tasks: [], total_due: 0 });
-      if (url.includes('/learn/mistakes')) {
-        return jsonResponse({ items: [], total: 0, stats: { total: 0, wrong: 0, unresolved: 0, bookmarked: 0, due_today: 0 } });
-      }
-      return Promise.reject(new TypeError(`no route: ${url}`));
-    });
-    render(<PracticePane courseId="ma" kpId="kp-c1" />);
-    expect(await screen.findByText(/本章还没有题/)).toBeInTheDocument();
-    expect(screen.getByText('本章练习（0）')).toBeInTheDocument();
+  it('本课无题时给明确空态与下一步指引', async () => {
+    questionRows = [];
+    render(<PracticePane courseId="ma" />);
+    expect(await screen.findByText(/还没有题，先从题源书抽取并确认入库/)).toBeInTheDocument();
+    expect(screen.getByText('本课题（0）')).toBeInTheDocument();
+  });
+
+  it('题行 kp_id 只作归属标签展示，课级题（kp_id 为空）不出标签', async () => {
+    questionRows = [ROW, { ...ROW, question_id: 'q-2', kp_id: null }];
+    render(<PracticePane courseId="ma" />);
+    expect(await screen.findByText('本课题（2）')).toBeInTheDocument();
+    expect(screen.getByText('归属 kp-c1')).toBeInTheDocument();
+    // kp_id 为空的课级题不补占位标签
+    expect(screen.getAllByText(/归属/)).toHaveLength(1);
   });
 });

@@ -58,6 +58,10 @@ const treeFixture = [
   },
 ];
 
+/** DEFECT-015 S3：/parsing/tree 信封包装（nodes ＋ 降级来源标记） */
+const treeEnvelope = (nodes: unknown[], sources = { shared_tables: 'ok', axiom_flow: 'ok' }) =>
+  ({ nodes, sources });
+
 const pageFixture = {
   page_no: 1,
   image_url: '/api/v1/books/test-page.png',
@@ -79,7 +83,7 @@ const pageFixture = {
 const resetStore = () =>
   useParsingStore.setState({
     books: [], booksLoading: false,
-    tree: [], treeLoading: false, treeError: null,
+    tree: [], treeSources: null, treeLoading: false, treeError: null,
     error: null, dataError: null,
     syncing: false, syncMessage: null, syncError: null,
     compareBookId: null, compareBook: null, comparePageNo: 1,
@@ -93,7 +97,7 @@ const resetStore = () =>
 function mockBase() {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
-    if (method === 'GET' && url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+    if (method === 'GET' && url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
     if (method === 'GET' && url.includes(`/books/${BOOK_A}/pages/1/edits`)) return Promise.resolve(json([]));
     if (method === 'GET' && url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
     if (method === 'GET' && new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
@@ -144,6 +148,26 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     expect(screen.getByRole('button', { name: /刷\s*新/ })).toBeInTheDocument();
   });
 
+  it('左树空态：共享表为空的话术不提离线（DEFECT-015 S3）', async () => {
+    mockFetch.mockImplementation((url: string) =>
+      url.includes('/parsing/tree')
+        ? Promise.resolve(json(treeEnvelope([], { shared_tables: 'empty', axiom_flow: 'ok' })))
+        : Promise.reject(new TypeError(`no route: ${url}`)));
+    renderP();
+    const hint = await screen.findByText(/共享表暂无领域/);
+    expect(hint.textContent).not.toContain('离线');
+  });
+
+  it('左树空态：8902 离线的话术不提共享表（DEFECT-015 S3）', async () => {
+    mockFetch.mockImplementation((url: string) =>
+      url.includes('/parsing/tree')
+        ? Promise.resolve(json(treeEnvelope([], { shared_tables: 'ok', axiom_flow: 'offline' })))
+        : Promise.reject(new TypeError(`no route: ${url}`)));
+    renderP();
+    const hint = await screen.findByText(/8902 离线/);
+    expect(hint.textContent).not.toContain('共享表');
+  });
+
   it('同名多卷：display_title 为空时左树按 title + part 拼接区分卷标识', async () => {
     const volTitle = '微积分学教程';
     const mk = (id: string, part: string) => ({
@@ -156,7 +180,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
     }];
     mockFetch.mockImplementation((url: string) =>
       url.includes('/parsing/tree')
-        ? Promise.resolve(json(tree))
+        ? Promise.resolve(json(treeEnvelope(tree)))
         : Promise.reject(new TypeError(`no route: ${url}`)));
     renderP();
     expect(await screen.findByText('微积分学教程 Vol.1')).toBeInTheDocument();
@@ -187,7 +211,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
 
   it('已 ingest 未解析（页数据 404）→ 原页图占满 + 解析栏空态引导', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.match(/\/pages\/1(\?|$)/)) return Promise.resolve(json({ detail: '页产物不存在' }, 404));
       if (url.includes(`/books/${BOOK_A}`)) return Promise.resolve(json(bookA()));
@@ -211,7 +235,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
 
   it('未入库有 file_path → iframe 直显源 PDF + 入库引导', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.match(/\/pages\/1\/edits/)) return Promise.resolve(json([]));
       if (url.match(/\/pages\/1(\?|$)/)) return Promise.resolve(json({ detail: '页产物不存在' }, 404));
       if (new RegExp(`/books/${BOOK_B}(\\?|$)`).test(url)) return Promise.resolve(json(bookB()));
@@ -229,7 +253,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
 
   it('8902 离线（/books 503）→ 黄色降级横幅 + 树仍显示领域课程', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/books')) {
         return Promise.resolve(new Response(JSON.stringify({ detail: 'service unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
       }
@@ -255,7 +279,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
           block_type: 'paragraph', verdict: 'bad', note: '', corrected_text: null, corrected_bbox: null,
         }));
       }
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
       if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
@@ -291,7 +315,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
           block_type: 'paragraph', verdict: 'bad', note: '', corrected_text: null, corrected_bbox: null,
         }));
       }
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
       if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
@@ -322,7 +346,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
       if (method === 'GET' && url.includes('/parse-jobs/j1')) {
         return Promise.resolve(json({ id: 'j1', book_id: BOOK_A, status: 'completed', progress: { parsed: 1, total: 1 } }));
       }
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
       if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
@@ -357,7 +381,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
       if (method === 'GET' && url.includes('/parse-jobs/j1')) {
         return Promise.resolve(json({ id: 'j1', book_id: BOOK_A, status: 'running', progress: { parsed: 0, total: 20 } }));
       }
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
       if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));
@@ -398,7 +422,7 @@ describe('文档解析管理 Parsing（#/admin/parsing · 单屏左树+右对照
       if (method === 'GET' && url.includes('/parse-jobs/j9')) {
         return new Promise<Response>(() => {}); // 轮询挂起：任务保持 running
       }
-      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeFixture));
+      if (url.includes('/parsing/tree')) return Promise.resolve(json(treeEnvelope(treeFixture)));
       if (url.includes('/pages/1/edits')) return Promise.resolve(json([]));
       if (url.includes(`/books/${BOOK_A}/pages/1`)) return Promise.resolve(json(pageFixture));
       if (new RegExp(`/books/${BOOK_A}(\\?|$)`).test(url)) return Promise.resolve(json(bookA()));

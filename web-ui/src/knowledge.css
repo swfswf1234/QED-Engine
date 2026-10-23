@@ -1,4 +1,4 @@
-/* 学习中心 · 知识梳理星图（#/knowledge）与课程知识点页（#/knowledge/c/:courseId） */
+/* 学习中心·知识探索（#/knowledge 单页两级视图：领域星图 ↔ 课程关系星图，课程层＝?course={id}） */
 
 .kn-galaxy {
   position: relative;
@@ -129,41 +129,31 @@
   }
 }
 
-/* 课程知识点页：主列（已确认 + 待选池）+ 右列（候选登记） */
-.kp-layout {
+/* 关系星图容器（同页内视图）：透明画在星空层上，超出视口时滚动而不是把阶梯压扁 */
+.kn-tree-scroll {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 面包屑（两视图常驻，层级唯一事实源＝URL）：暗色星空上的次级文字，字号低于大标题 */
+.kn-breadcrumb {
+  font-size: 14px;
+}
+
+/* 课程层主体：替换星图的那一段，可滚动容器 */
+.kn-course-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  /* 虚框宽＝本容器实测宽（ResizeObserver 取 clientWidth）：滚动条槽常驻，
+     否则首帧无竖向滚动条 → 量到 1086 → 出图后出滚动条 → 只剩 1071 → 画布横向溢出 15px */
+  scrollbar-gutter: stable;
+}
+
+/* 课程层主体：课程名行＋关系星图，直接坐在星空层上（无浅色卡，五审裁决 2026-10-14） */
+.kn-course {
   display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.kp-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.kp-draft {
-  width: 320px;
-  flex-shrink: 0;
-}
-
-.kp-variant {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px dashed #e0e0e0;
-  border-radius: 6px;
-  background: #fafafa;
-}
-
-@media (max-width: 1080px) {
-  .kp-layout {
-    flex-direction: column;
-  }
-
-  .kp-draft {
-    width: 100%;
-  }
+  flex-direction: column;
+  min-height: 100%;
 }

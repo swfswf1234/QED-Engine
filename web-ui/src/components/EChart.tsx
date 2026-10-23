@@ -18,11 +18,13 @@ echarts.use([BarChart, GraphChart, PieChart, GridComponent, TooltipComponent, Le
 interface EChartProps {
   option: EChartsCoreOption;
   height?: number;
+  /** 显式像素宽度（层级图按内在尺寸铺，避免 100% 宽度下的非均匀套满压缩）；缺省 100% */
+  width?: number | string;
   /** 点击数据项（节点/扇区）时回调其 data.id；无 id 不触发 */
   onSelect?: (id: string) => void;
 }
 
-export default function EChart({ option, height = 320, onSelect }: EChartProps) {
+export default function EChart({ option, height = 320, width, onSelect }: EChartProps) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const selectRef = useRef(onSelect);
@@ -56,5 +58,5 @@ export default function EChart({ option, height = 320, onSelect }: EChartProps) 
     chartRef.current?.setOption(option, true);
   }, [option]);
 
-  return <div ref={ref} style={{ width: '100%', height }} />;
+  return <div ref={ref} style={{ width: width ?? '100%', height }} />;
 }

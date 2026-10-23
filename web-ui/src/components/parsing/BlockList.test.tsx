@@ -293,3 +293,55 @@ describe('image 块＝页图 bbox 内联裁切（S1 图片面）', () => {
     expect(screen.getByText('无框图')).toBeTruthy();
   });
 });
+
+describe('W5 版式渲染落码（§V2.4.1 层级左对齐 + §V2.4.2 跨页合并）', () => {
+  const w5blocks: Block[] = [
+    mk('heading', { text: '第一章 实数' }),
+    mk('paragraph', { text: '实数完备性是分析学的基础。' }),
+    mk('heading', { text: '1.1 有序域' }),
+    mk('paragraph', { text: '设 F 为有序' }),
+    mk('paragraph', { text: '域，则其上界性质可表述为：' }),
+  ];
+
+  function renderW5() {
+    return render(
+      <BlockList
+        bookId="b"
+        pageNo={3}
+        blocks={w5blocks}
+        edits={{}}
+        renderMode="layout"
+        imageSize={{ w: 794, h: 1123 }}
+        selectedIndex={-1}
+        editMode={false}
+        typography={DEFAULT_TYPOGRAPHY}
+        onSelect={() => {}}
+        onSubmit={vi.fn(async () => true)}
+      />,
+    );
+  }
+
+  const unit = (text: string) =>
+    [...document.querySelectorAll('[data-block-role]')].find(
+      (e) => (e.textContent ?? '').startsWith(text),
+    ) as HTMLElement;
+
+  it('章题档 0、节题档 16px，正文随其上级标题同档', () => {
+    renderW5();
+    expect(unit('第一章 实数').style.marginLeft).toBe('0px');
+    expect(unit('实数完备性').style.marginLeft).toBe('0px');
+    expect(unit('1.1 有序域').style.marginLeft).toBe('16px');
+    expect(unit('设 F 为有序').style.marginLeft).toBe('16px');
+  });
+
+  it('正文一律显式左对齐（不再依赖默认对齐造成层级错乱）', () => {
+    renderW5();
+    expect(unit('实数完备性').style.textAlign).toBe('left');
+  });
+
+  it('跨页断句合并为一段（两块文本相接，正文单元数由 3 降为 2）', () => {
+    renderW5();
+    expect(unit('设 F 为有序').textContent).toBe('设 F 为有序域，则其上界性质可表述为：');
+    expect(document.querySelectorAll('[data-block-role="body"]')).toHaveLength(2);
+  });
+});

@@ -12,7 +12,7 @@ import {
   ingestBook as apiIngestBook, listBooks, listParseJobs, putBlockEdit, syncBooks,
 } from '../api/axiom';
 import { ApiError } from '../api/client';
-import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode } from '../api/axiom';
+import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode, ParsingTreeSources } from '../api/axiom';
 import {
   loadTypographyPrefs, saveTypographyPrefs,
   type TypographyPrefs,
@@ -20,7 +20,7 @@ import {
 import { confirmInput } from '../components/parsing/blocks';
 import type { BBox } from '../components/parsing/regions';
 
-export type { ParsingTreeNode } from '../api/axiom';
+export type { ParsingTreeNode, ParsingTreeSources } from '../api/axiom';
 
 export type ScrollMode = 'single' | 'continuous';
 export type RenderMode = 'stream' | 'layout';
@@ -62,6 +62,8 @@ export interface ParsingStore {
   books: BookMeta[];
   booksLoading: boolean;
   tree: ParsingTreeNode[];
+  /** 左树降级来源（8900 信封 sources）；未取到或请求失败时为 null */
+  treeSources: ParsingTreeSources | null;
   treeLoading: boolean;
   treeError: string | null;
   // 全局降级
@@ -174,6 +176,7 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     books: [],
     booksLoading: false,
     tree: [],
+    treeSources: null,
     treeLoading: false,
     treeError: null,
     error: null,
@@ -225,9 +228,10 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
     fetchTree: async () => {
       if (get().treeLoading) return;
       set({ treeLoading: true, treeError: null });
-      const [raw, err] = await getParsingTree().then((t) => [t, null] as const).catch((e) => [null, e] as const);
+      const [env, err] = await getParsingTree().then((t) => [t, null] as const).catch((e) => [null, e] as const);
       set({
-        tree: raw ?? [],
+        tree: env?.nodes ?? [],
+        treeSources: env?.sources ?? null,
         ...(err ? { treeError: errText(err), ...classifyError(err) } : {}),
         treeLoading: false,
       });

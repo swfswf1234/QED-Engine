@@ -1,7 +1,8 @@
 /**
  * 抽取式题源纯函数（M2 裁决 ⑥：题源＝现成习题集与教材课后题，不引 LLM、不等 M-2）。
- * 规格正本：docs/history/plans/2026-10/2026-09-23-practice-review.md「抽取式题源管线规格」（9 条规则逐条实现）。
- * 消费面：`#/learn/c/{courseId}` 中栏练习区 → 抽取预览 → 人工确认面板 → `POST /learn/questions`。
+ * 规格正本：docs/design/learning-practice-ui.md §7「抽取纯函数规格」（8 条规则逐条实现；
+ * 过程与裁决记录＝已归档壳 docs/history/plans/2026-10/2026-10-11-learn-ui-practice.md）。
+ * 消费面：`#/practice` 课后练习独立面 题源工作区 → 抽取预览 → 人工确认面板 → `POST /learn/questions`。
  * 判例同 `tocParse.ts`：解析不落库，未识别行可见可改可删，不静默丢弃。
  */
 

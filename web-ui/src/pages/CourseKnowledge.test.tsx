@@ -1,155 +1,213 @@
+/**
+ * 课程层视图单测（REQ-110 W3 由「页」降级为同页内视图；REQ-113 W4 七审改判为大知识点虚框＋框内条目）
+ * 口径：本视图只承载主体（《课程名》行＋介绍＋层级星图/空态/降级提示），
+ * 页头、大标题与面包屑归 Knowledge.tsx（同页替换层），领域下拉只属领域层，本视图零导航按钮。
+ * 图上只有两层：虚框＝大知识点、条目＝框内小知识点；无父／悬空父的 point 不进图，也不出现「未归档」。
+ * ECharts 依赖 canvas，jsdom 不可用：层级星图以框／条目名单替身透出（同 Knowledge.test 处理）。
+ */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ConfigProvider } from 'antd';
 import CourseKnowledge from './CourseKnowledge';
 import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useCourseKnowledgeStore } from '../stores/courseKnowledge';
-import { usePracticeStore } from '../stores/practice';
 
-function LocationProbe() {
-  const { pathname } = useLocation();
-  return <span data-testid="location">{pathname}</span>;
+vi.mock('../components/KpTreeGraph', () => ({
+  default: ({ layout }: {
+    layout: { width: number; boxes: Array<{ id: string; name: string }>; items: Array<{ id: string; name: string }> };
+  }) => (
+    <div aria-label="层级星图" data-width={layout.width}>
+      {layout.boxes.map((b) => (
+        <span key={b.id} className="kp-box">{b.name}</span>
+      ))}
+      {layout.items.map((n) => (
+        <span key={n.id} className="kp-item">{n.name}</span>
+      ))}
+    </div>
+  ),
+}));
+
+const OUTLINE_ROWS = [
+  { kp_id: 'k1', course_id: 'ma', name: '第1章 函数', norm_key: '第1章 函数', node_kind: 'outline', parent_kp_id: null, depth: 1, order_hint: 1, type: null, summary: '', anchors: [], book_ref: 'b05' },
+  { kp_id: 'k11', course_id: 'ma', name: '1.1 映射', norm_key: '1.1 映射', node_kind: 'outline', parent_kp_id: 'k1', depth: 2, order_hint: 1, type: null, summary: '', anchors: [], book_ref: 'b05' },
+  { kp_id: 'p1', course_id: 'ma', name: '确界原理', norm_key: '确界原理', node_kind: 'point', parent_kp_id: 'k11', depth: null, order_hint: 1, type: 'concept', summary: '有上界数集必有上确界', anchors: [{ kind: 'page', page: 5 }], book_ref: null },
+  { kp_id: 'p2', course_id: 'ma', name: '散落的知识点', norm_key: '散落的知识点', node_kind: 'point', parent_kp_id: null, depth: null, order_hint: null, type: null, summary: '', anchors: [], book_ref: null },
+];
+
+function overviewOf(courseExtra: Record<string, unknown>, points: unknown[]) {
+  return {
+    course: { course_id: 'ma', name: '数学分析', track: '分析学', domain_id: 'math', description: '极限、连续与一元微积分', ...courseExtra },
+    points,
+    total: points.length,
+    candidate_total: 0,
+  };
 }
-
-const POINTS = {
-  course: { course_id: 'ma', name: '数学分析', track: '分析学', domain_id: 'math' },
-  points: [
-    {
-      kp_id: 'kp-1', course_id: 'ma', name: '确界的极限唯一性', norm_key: '确界的极限唯一性',
-      type: 'concept', summary: '闭区间上连续函数必取到最值', confirmed: true, anchors: [],
-      candidates: [{ detail_id: 'd1', name: '确界的极限唯一性', type: 'concept', narrative: '确界原理的另一种叙述', payload: {}, anchors: [], gen_batch: 'b1', model_ref: '', gen_status: 'candidate' }],
-    },
-  ],
-  total: 1,
-  candidate_total: 2,
-};
-
-const POOL = {
-  details: [
-    { detail_id: 'd1', course_id: 'ma', name: '确界的极限唯一性', norm_key: '确界的极限唯一性', type: 'concept', narrative: '确界原理的另一种叙述', payload: {}, anchors: [], gen_batch: 'b1', model_ref: '', gen_status: 'candidate', kp_id: null, dedup_of: null, map_seed: null, domain_id: 'math', domain_label: '数学', course_label: '数学分析', confirmed: 0, created_at: '', updated_at: '' },
-    { detail_id: 'd2', course_id: 'ma', name: '闭区间套定理', norm_key: '闭区间套定理', type: 'procedure', narrative: '一列嵌套闭区间的交非空', payload: {}, anchors: [], gen_batch: 'b1', model_ref: '', gen_status: 'candidate', kp_id: null, dedup_of: null, map_seed: null, domain_id: 'math', domain_label: '数学', course_label: '数学分析', confirmed: 0, created_at: '', updated_at: '' },
-  ],
-  total: 2,
-};
 
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
 }
 
-function routeReads() {
-  mockFetch.mockImplementation((url: string) => {
-    if (url.includes('/knowledge-points')) return jsonResponse(POINTS);
-    if (url.includes('/kp-details')) return jsonResponse(POOL);
-    if (url.includes('/learn/review/due')) return jsonResponse({ course_id: 'ma', tasks: [], total_due: 5 });
-    return Promise.reject(new TypeError(`no route: ${url}`));
-  });
+function routeReads(body: unknown = overviewOf({}, OUTLINE_ROWS)) {
+  mockFetch.mockImplementation(() => jsonResponse(body));
 }
 
-function renderPage() {
+function renderView(courseId = 'ma', contentWidth?: number) {
   return render(
-    <MemoryRouter initialEntries={['/knowledge/c/ma']}>
-      <ConfigProvider theme={theme}>
-        <Routes>
-          <Route path="/knowledge/c/:courseId" element={<CourseKnowledge />} />
-        </Routes>
-        <LocationProbe />
-      </ConfigProvider>
-    </MemoryRouter>,
+    <ConfigProvider theme={theme}>
+      <CourseKnowledge courseId={courseId} contentWidth={contentWidth} />
+    </ConfigProvider>,
   );
 }
 
-describe('课程知识点掌握详情 CourseKnowledge（M5 demo）', { timeout: 15000 }, () => {
+describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + REQ-113 七审形态）', { timeout: 15000 }, () => {
   beforeEach(() => {
-    useCourseKnowledgeStore.setState({
-      courseId: null, course: null, points: [], loose: [], candidateTotal: 0, loading: false, error: null, notice: null,
-    });
+    useCourseKnowledgeStore.setState({ courseId: null, course: null, rows: [], loading: false, error: null, notFound: false });
     mockFetch.mockReset();
-    usePracticeStore.setState({ courseDueCounts: {} });
   });
 
-  it('已确认知识点与待选池分列，多版本候选挂在同名词下', async () => {
+  it('《课程名》＋介绍 + 层级星图（虚框＝大知识点，条目＝框内小知识点）', async () => {
     routeReads();
-    renderPage();
-    expect(await screen.findByText('《数学分析》知识点梳理')).toBeInTheDocument();
-    expect(screen.getByText('轨迹：分析学')).toBeInTheDocument();
-    expect(screen.getByText('已确认 1 · 待选 1')).toBeInTheDocument();
-    expect(screen.getByText('确界的极限唯一性')).toBeInTheDocument();
-    expect(screen.getByText('概念性')).toBeInTheDocument();
-    expect(screen.getByText('同名词另一版：确界原理的另一种叙述')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /改用此版/ })).toBeInTheDocument();
-    // 未归入已确认的开放叙述才进待选池
-    expect(screen.getByRole('button', { name: /确\s*认/ })).toBeInTheDocument();
-    expect(screen.getByText('一列嵌套闭区间的交非空')).toBeInTheDocument();
+    renderView();
+    expect(await screen.findByText('《数学分析》')).toBeInTheDocument();
+    expect(screen.getByText('极限、连续与一元微积分')).toBeInTheDocument();
+    expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
+    expect(document.querySelectorAll('.kp-box')).toHaveLength(1);
+    expect(screen.getByText('第1章 函数')).toBeInTheDocument();
+    for (const name of ['1.1 映射', '确界原理']) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    // 无父的 point 不进学习面，也不画「未归档」；归属由虚框承载，图上没有边图元
+    expect(screen.queryByText('散落的知识点')).not.toBeInTheDocument();
+    expect(screen.queryByText('未归档')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.tree-link')).toHaveLength(0);
   });
 
-  it('确认候选 → 调 confirm 端点并展示回执', async () => {
+  it('画布宽＝内容区实测宽（由 Knowledge.tsx 的 ResizeObserver 传入，扣掉两侧留白）', async () => {
     routeReads();
-    renderPage();
-    await screen.findByRole('button', { name: /确\s*认/ });
-    mockFetch.mockImplementation((url: string, init?: { method?: string }) => {
-      if (init?.method === 'POST') return jsonResponse({ point: { kp_id: 'kp-9', name: '闭区间套定理' } });
-      if (url.includes('/knowledge-points')) return jsonResponse(POINTS);
-      return jsonResponse(POOL);
-    });
-    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
-    expect(await screen.findByText('已确认并提升：闭区间套定理')).toBeInTheDocument();
-    expect(mockFetch.mock.calls.some((c) => String(c[0]).endsWith('/learn/kp-details/d2/confirm'))).toBe(true);
+    renderView('ma', 1400);
+    expect(await screen.findByLabelText('层级星图')).toHaveAttribute('data-width', '1360');
   });
 
-  it('手工登记候选 → POST 带课程 id 与名称', async () => {
+  it('只有大知识点（outline 行，无 point）也出图；全是无父 point → 走空态', async () => {
+    routeReads(overviewOf({}, [OUTLINE_ROWS[0], OUTLINE_ROWS[1]]));
+    const first = renderView();
+    expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
+    first.unmount();
+
+    routeReads(overviewOf({}, [OUTLINE_ROWS[3]]));
+    renderView('complex_analysis');
+    expect(await screen.findByText('该课程暂无已确认知识点')).toBeInTheDocument();
+    expect(screen.queryByLabelText('层级星图')).not.toBeInTheDocument();
+  });
+
+  it('七审形态：无浅色卡容器、视图内不挂领域下拉（回领域层只经面包屑）', async () => {
     routeReads();
-    renderPage();
-    await screen.findByText('《数学分析》知识点梳理');
-    let posted: Record<string, unknown> = {};
-    mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => {
-      if (init?.method === 'POST') {
-        posted = JSON.parse(String(init.body));
-        return jsonResponse({ detail_id: 'd9', gen_status: 'candidate' });
-      }
-      if (url.includes('/knowledge-points')) return jsonResponse(POINTS);
-      return jsonResponse(POOL);
-    });
-    fireEvent.change(screen.getByLabelText('候选名称'), { target: { value: '致密性定理' } });
-    fireEvent.click(screen.getByRole('button', { name: /登记候选/ }));
-    await waitFor(() => expect(posted.course_id).toBe('ma'));
-    expect(posted).toMatchObject({ name: '致密性定理', gen_batch: 'manual-demo' });
-    expect(await screen.findByText('候选已登记：致密性定理')).toBeInTheDocument();
+    const { container } = renderView();
+    await screen.findByLabelText('层级星图');
+    expect(container.querySelector('.kn-course-card')).toBeNull();
+    expect(container.querySelector('.kn-course')).not.toBeNull();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
-  it('未登记名称时登记按钮禁用；返回按钮回星图', async () => {
+  it('只留知识点结构：无统计行/轨迹 Tag/待选池/手工登记/候选抽屉，且不请求候选池', async () => {
     routeReads();
-    renderPage();
-    await screen.findByText('《数学分析》知识点梳理');
-    expect(screen.getByRole('button', { name: /登记候选/ })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /返回知识星图/ }));
-    await vi.waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/knowledge'));
+    renderView();
+    await screen.findByLabelText('层级星图');
+    expect(screen.queryByText(/已确认 \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/待选/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/轨迹/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/待选池/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/手工登记/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /登记候选|确认|驳回|改用此版/ })).not.toBeInTheDocument();
+    expect(mockFetch.mock.calls.every((c) => !String(c[0]).includes('/kp-details'))).toBe(true);
   });
 
-  it('知识点存储未接入（503）→ 明确提示 + 重试，不白屏', async () => {
-    mockFetch.mockImplementation(() =>
-      jsonResponse({ detail: '知识点存储未接入（数据库不可达或未配置）' }, 503));
-    renderPage();
+  it('单次取数：只发一次 knowledge-points?include_outline=true（虚框与条目同响应）', async () => {
+    routeReads();
+    renderView();
+    await screen.findByLabelText('层级星图');
+    expect(mockFetch.mock.calls).toHaveLength(1);
+    expect(String(mockFetch.mock.calls[0][0])).toContain('include_outline=true');
+  });
+
+  it('无已确认知识点 → 空态「该课程暂无已确认知识点」，课程名与介绍照常显示，不画图', async () => {
+    routeReads(overviewOf({}, []));
+    renderView('complex_analysis');
+    expect(await screen.findByText('该课程暂无已确认知识点')).toBeInTheDocument();
+    expect(screen.getByText('《数学分析》')).toBeInTheDocument();
+    expect(screen.getByText('极限、连续与一元微积分')).toBeInTheDocument();
+    expect(screen.queryByLabelText('层级星图')).not.toBeInTheDocument();
+  });
+
+  it('介绍缺失 → 只显示《课程名》，不留占位', async () => {
+    routeReads(overviewOf({ description: '' }, OUTLINE_ROWS));
+    renderView();
+    expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
+    expect(screen.getByText('《数学分析》')).toBeInTheDocument();
+    expect(screen.queryByText('极限、连续与一元微积分')).not.toBeInTheDocument();
+  });
+
+  it('视图内零导航按钮（回退归面包屑）、无跨界出口、不发复习聚合', async () => {
+    routeReads();
+    renderView();
+    await screen.findByLabelText('层级星图');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText('学习中心·知识探索')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /进入学习工作台|今日复习|返回/ })).not.toBeInTheDocument();
+    expect(mockFetch.mock.calls.every((c) => !String(c[0]).includes('/learn/review/due'))).toBe(true);
+  });
+
+  it('知识点存储未接入（503）→ 明确提示 + 重试，不白屏也不误报空态', async () => {
+    mockFetch.mockImplementation(() => jsonResponse({ detail: '知识点存储未接入（数据库不可达或未配置）' }, 503));
+    renderView();
     expect(await screen.findByText('知识点数据不可达')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /重\s*试/ })).toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
   });
 
-  it('复习入口：今日到期条数按课程聚合显示，点击进入学习工作台', async () => {
-    routeReads();
-    renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: '今日复习 5 条' }));
-    await vi.waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/learn/c/ma'));
+  it('课程不存在（404）→ 「课程不存在或已下线」，不显示重试也不误报空态', async () => {
+    mockFetch.mockImplementation(() =>
+      jsonResponse({ detail: { code: 'COURSE_NOT_FOUND', message: '课程不存在：ghost' } }, 404),
+    );
+    renderView('ghost');
+    expect(await screen.findByText('课程不存在或已下线')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重\s*试/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
   });
 
-  it('复习入口：无到期项时不显示按钮（due 聚合失败也按 0 条处理）', async () => {
+  it('切换 courseId 只重取该课数据：旧课程名不残留', async () => {
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes('/knowledge-points')) return jsonResponse(POINTS);
-      if (url.includes('/kp-details')) return jsonResponse(POOL);
-      return Promise.reject(new TypeError(`no route: ${url}`));
+      const matched = /courses\/([^/]+)\/knowledge-points/.exec(String(url));
+      return jsonResponse(overviewOf({ course_id: matched?.[1], name: matched?.[1] === 'ra' ? '实变函数' : '数学分析' }, OUTLINE_ROWS));
     });
-    renderPage();
-    await screen.findByText('《数学分析》知识点梳理');
-    expect(screen.queryByRole('button', { name: /今日复习/ })).not.toBeInTheDocument();
+    const { rerender } = renderView('ma');
+    expect(await screen.findByText('《数学分析》')).toBeInTheDocument();
+    rerender(
+      <ConfigProvider theme={theme}>
+        <CourseKnowledge courseId="ra" />
+      </ConfigProvider>,
+    );
+    expect(await screen.findByText('《实变函数》')).toBeInTheDocument();
+    expect(screen.queryByText('《数学分析》')).not.toBeInTheDocument();
+  });
+
+  it('数据不可达后点「重试」＝只重取该课数据并出图', async () => {
+    let failed = true;
+    mockFetch.mockImplementation(() => {
+      const status = failed ? 503 : 200;
+      const body = failed ? { detail: '知识点存储未接入' } : overviewOf({}, OUTLINE_ROWS);
+      failed = false;
+      return jsonResponse(body, status);
+    });
+    renderView();
+    await screen.findByText('知识点数据不可达');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /重\s*试/ }));
+    expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
+    expect(mockFetch.mock.calls.every((c) => String(c[0]).includes('/knowledge-points'))).toBe(true);
   });
 });

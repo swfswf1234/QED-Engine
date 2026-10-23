@@ -1,0 +1,33 @@
+/**
+ * 使用手册弹层样式（HelpModal）
+ * 只管两件事：编号步骤的行距，与总册入口卡的卡面（白底＋蓝细边＋悬停浅蓝底）。
+ * 版面栅格（箭头列定宽＋文本列）与配色令牌在 HelpModal.tsx 内联，此处不重复声明 display。
+ * 口径见 docs/design/frontend/frontend-overview.md §2 使用手册弹窗承载（2026-10-16 用户改判）。
+ */
+.help-steps {
+  margin: 0;
+  padding-left: 24px;
+}
+
+.help-steps li {
+  margin-bottom: 6px;
+}
+
+.help-entry {
+  padding: 10px 14px;
+  font: inherit;
+  background: #ffffff;
+  border: 1px solid #b9ccf5;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.help-entry:hover {
+  background: #f2f6ff;
+  border-color: #0b2472;
+}
+
+.help-entry:focus-visible {
+  outline: 2px solid #0b2472;
+  outline-offset: 1px;
+}

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildTreeNodes, tutorialLabel,
-  sortBooks, bookInStage, STAGE_OPTIONS, groupPaperBooks,
+  sortBooks, bookInStage, STAGE_OPTIONS, groupPaperBooks, listDomainPapers, useDownloadsStore,
 } from './downloads';
 import type { BookRecord, CourseRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
 
 function course(partial: Partial<CourseRecord> & { course_id: string; name: string }): CourseRecord {
   return {
-    aliases: [], stage: '', prerequisites: [], related_targets: [],
+    aliases: [], stage: '', prerequisites: [],
     ...partial,
   };
 }
@@ -241,5 +241,56 @@ describe('发现论文分组 groupPaperBooks（REQ-102 W3，downloads-ui §4.4�
 
   it('空输入返回空对象（不虚构键）', () => {
     expect(groupPaperBooks([])).toEqual({ byDomain: {}, byCourse: {} });
+  });
+});
+
+describe('领域论文全量视图 listDomainPapers（REQ-108 I6，壳 §8）', () => {
+  const paper = (id: string, overrides?: Partial<BookRecord>) =>
+    book({ book_id: id, kind: 'paper', domain_id: 'math', status: 'verified', year: 2024, ...overrides });
+
+  it('栏＝领域全量：落位到该领域课程的论文照常计入，其他领域/教程附属/retired 排除', () => {
+    const list = listDomainPapers([
+      paper('p1'),
+      paper('p2', { course_id: '01_analysis' }),
+      paper('p3', { domain_id: 'cs', course_id: 'c_cs' }),
+      paper('p4', { knowledge_id: 'k1' }),
+      paper('p5', { status: 'retired' }),
+      book({ book_id: 't1', kind: 'textbook', domain_id: 'math' }),
+    ], 'math');
+    expect(list.map((b) => b.book_id)).toEqual(['p1', 'p2']);
+  });
+
+  it('出版年倒序、同年按 book_id 稳定序；空年排尾', () => {
+    const list = listDomainPapers([
+      paper('a', { year: 2023 }),
+      paper('b', { year: 2025 }),
+      paper('c', { year: 2023 }),
+      paper('d', { year: null }),
+    ], 'math');
+    expect(list.map((b) => b.book_id)).toEqual(['b', 'a', 'c', 'd']);
+  });
+});
+
+describe('左树「论文」节点选择（REQ-108 I6）', () => {
+  it('papers 节点选中 → selected 落 papers，领域筛选取该领域、课程筛选清空', () => {
+    useDownloadsStore.setState({
+      domains: [domain({ domain_id: 'dm1', name: '高等数学', courses: [course({ course_id: 'c1', name: '数学分析' })] })],
+      selected: { kind: 'course', id: 'c1' },
+      filters: { domain: 'dm1', course: 'c1', stage: 'to_download' },
+    });
+    useDownloadsStore.getState().selectNode({ kind: 'papers', id: 'dm1' });
+    const { selected, filters } = useDownloadsStore.getState();
+    expect(selected).toEqual({ kind: 'papers', id: 'dm1' });
+    expect(filters).toEqual({ domain: 'dm1', course: '', stage: 'to_download' });
+  });
+
+  it('papers 节点不读 exploration_stage：课程态与领域态都不影响选中', () => {
+    useDownloadsStore.setState({
+      domains: [domain({ domain_id: 'dm1', name: '高等数学', exploration_stage: '探索中', courses: [] })],
+      selected: null,
+      filters: { domain: '', course: '', stage: '' },
+    });
+    useDownloadsStore.getState().selectNode({ kind: 'papers', id: 'dm1' });
+    expect(useDownloadsStore.getState().selected).toEqual({ kind: 'papers', id: 'dm1' });
   });
 });

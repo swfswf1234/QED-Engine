@@ -154,8 +154,18 @@ export function groupPaperBooks(books: BookRecord[]): PaperBookGroups {
   return { byDomain, byCourse };
 }
 
-/** 论文展示行徽标：书籍五档口径 + 平行读物（§4.4 五档映射照用） */
-export function paperStatusBadge(status: string): string {
+/**
+ * 左树「论文」栏＝领域全量视图（REQ-108 I6，壳 §8，R5 已裁与行内展示行并存）：
+ * 含落位到该领域课程的论文，口径与 groupPaperBooks 同源（同一 paperBooks，不双写）。
+ */
+export function listDomainPapers(books: BookRecord[], domainId: string): BookRecord[] {
+  const yearOf = (b: BookRecord): number => (typeof b.year === 'number' ? b.year : -1);
+  return books
+    .filter((b) => b.kind === 'paper' && !b.knowledge_id && b.status !== 'retired' && b.domain_id === domainId)
+    .sort((a, b) => yearOf(b) - yearOf(a) || String(a.book_id).localeCompare(String(b.book_id), 'en'));
+}
+
+/** 论文展示行徽标：书籍五档口径 + 平行读物（§4.4 五档映射照用） */export function paperStatusBadge(status: string): string {
   switch (status) {
     case 'candidate':
     case 'decided':
@@ -272,7 +282,12 @@ export function buildTreeNodes(
 
 // --- store ---
 
-export type NodeSelection = { kind: 'domain'; id: string } | { kind: 'course'; id: string } | { kind: 'tutorial'; key: string };
+export type NodeSelection =
+  | { kind: 'domain'; id: string }
+  | { kind: 'course'; id: string }
+  | { kind: 'tutorial'; key: string }
+  /** 左树「论文」派生视图节点（REQ-108 I6）：id＝领域，不落课程记录、不读 exploration_stage */
+  | { kind: 'papers'; id: string };
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -362,6 +377,9 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     } else if (sel.kind === 'course') {
       const dom = get().domains.find((d) => d.courses.some((c) => c.course_id === sel.id));
       set({ filters: { domain: dom?.domain_id ?? '', course: sel.id, stage } });
+    } else if (sel.kind === 'papers') {
+      // 论文栏（派生视图节点）：领域筛选取该领域并清课程筛选；不触碰 exploration_stage
+      set({ filters: { domain: sel.id, course: '', stage } });
     }
     // 教程选中：只高亮，不联动筛选
   },

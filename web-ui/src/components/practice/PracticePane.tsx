@@ -1,11 +1,13 @@
 /**
- * 中栏练习区（M2 裁决 ⑥／壳「8903 练习面」）：题源选择 → 抽取预览 → 人工确认入库 → 题卡作答。
+ * 课后练习独立面（`#/practice`）的题源工作区与本课题卡（M2 裁决 ⑥／REQ-106 课级全量 R2）：
+ * 题源选择 → 抽取预览 → 人工确认入库 → 题卡作答。
  * - 题源＝已解析书（`GET /learn/question-books`）＋页范围；可选题解配对书同页范围（R-11）
- * - 抽取＝纯函数 `exerciseParse`，草稿一律人工确认后才 `POST /learn/questions`
+ * - 抽取＝纯函数 `exerciseParse`，草稿一律人工确认后才 `POST /learn/questions`（入库 `kp_id` 留空＝课级归属）
  * - 作答＝`POST /learn/attempts` 同事务判分，判分依据只在响应里展开（缝 2）
+ * - 本课题列表＝课级全量，不传 `kp`、不过滤；题行 `kp_id` 只作归属标签展示
  */
 import { useEffect, useState } from 'react';
-import { Button, Card, Empty, InputNumber, Select, Space, Typography } from 'antd';
+import { Button, Card, Empty, InputNumber, Select, Space, Tag, Typography } from 'antd';
 import ExerciseConfirmPanel from './ExerciseConfirmPanel';
 import QuestionCard from './QuestionCard';
 import { EXTRACT_MAX_PAGES, usePracticeStore } from '../../stores/practice';
@@ -14,11 +16,9 @@ const { Text } = Typography;
 
 export interface PracticePaneProps {
   courseId: string;
-  /** 当前章/节（入库归属 + 题列表过滤） */
-  kpId: string | null;
 }
 
-export default function PracticePane({ courseId, kpId }: PracticePaneProps) {
+export default function PracticePane({ courseId }: PracticePaneProps) {
   const sourceBooks = usePracticeStore((s) => s.sourceBooks);
   const sourceBookId = usePracticeStore((s) => s.sourceBookId);
   const answerBookId = usePracticeStore((s) => s.answerBookId);
@@ -30,7 +30,7 @@ export default function PracticePane({ courseId, kpId }: PracticePaneProps) {
   const questions = usePracticeStore((s) => s.questions);
   const notice = usePracticeStore((s) => s.notice);
   const openCourse = usePracticeStore((s) => s.openCourse);
-  const loadChapter = usePracticeStore((s) => s.loadChapter);
+  const loadCourse = usePracticeStore((s) => s.loadCourse);
   const setSourceBook = usePracticeStore((s) => s.setSourceBook);
   const setAnswerBook = usePracticeStore((s) => s.setAnswerBook);
   const setRange = usePracticeStore((s) => s.setRange);
@@ -53,8 +53,8 @@ export default function PracticePane({ courseId, kpId }: PracticePaneProps) {
   }, [courseId, openCourse]);
 
   useEffect(() => {
-    if (courseId) void loadChapter(courseId, kpId);
-  }, [courseId, kpId, loadChapter]);
+    if (courseId) void loadCourse(courseId);
+  }, [courseId, loadCourse]);
 
   const bookOptions = sourceBooks.map((book) => ({
     value: book.book_id,
@@ -64,7 +64,7 @@ export default function PracticePane({ courseId, kpId }: PracticePaneProps) {
 
   const confirm = async () => {
     setImporting(true);
-    await confirmImport(kpId);
+    await confirmImport();
     setImporting(false);
   };
 
@@ -175,13 +175,18 @@ export default function PracticePane({ courseId, kpId }: PracticePaneProps) {
         </Card>
       )}
 
-      <Card size="small" title={`本章练习（${questions.length}）`}>
+      <Card size="small" title={`本课题（${questions.length}）`}>
         {questions.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本章还没有题，先从题源书抽取并确认入库" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有题，先从题源书抽取并确认入库" />
         ) : (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {questions.map((question) => (
-              <Card key={question.question_id} size="small" type="inner">
+              <Card
+                key={question.question_id}
+                size="small"
+                type="inner"
+                title={question.kp_id ? <Tag>归属 {question.kp_id}</Tag> : null}
+              >
                 <QuestionCard question={question} onSubmit={submitAttempt} />
               </Card>
             ))}

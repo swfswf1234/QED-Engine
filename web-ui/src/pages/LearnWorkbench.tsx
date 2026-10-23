@@ -1,56 +1,169 @@
 /**
- * 学习中心 · 三栏学习工作台（`#/learn/c/:courseId`，M6 裁决 ①／R7 ＋ M1 裁决 D1 双模式）
- * - 模式「阅读」＝书（active_job_id 非空者）→ 章节目录树 → 该章/节正文只读排版渲染 ＋ 批注登记（M6 原形态）
- * - 模式「链路」＝学习链路（章→节块序列，块带原书页窗）→ 块正文 → 勾选式推进与派生进度（M1 UI-2~UI-4）
- * - 左＝书 + 目录/链路树 → 导入目录 / 生成链路
- * - 中＝该章/节正文只读排版渲染（复用 parsing-ui §9/§9.1 组件，按 8 页/批懒取，不带判定与编辑 affordance）＋正文下方练习区（题源抽取 → 人工确认入库 → 作答）
- * - 右＝Tabs「批注与候选」（选区锚点 → 总结/详解 → candidate → 人工确认提升主表）/「本章练习」（到期复习 + 错题本）；链路模式下第一项换「进度与推进」
- * - 数据一律经 8900（ADR 0007）；8900 或存储不可达时逐栏降级，不白屏
+ * 学习中心 · 课程学习单屏（`#/learn/c/:courseId`，REQ-117 v2）
+ * 设计关联：docs/design/frontend/learning-course-ui.md §4~§7（课程学习面形态正本；总纲见 frontend-overview.md §5）
+ * - 左＝章 → 知识点两级（节层不显形，C15）：点知识点读那一条，点零知识点的章行走整章阅读；
+ *   栏内只列名称与自己的「已学」标记，不显示处理进度类说明（C23），行左缘两档对齐（C24）
+ * - 中＝选中那一条的连续正文流（无页码口径、无续取按钮，滚动即续）；标题下先直排该条摘要
+ * - 右＝学习交流三段：本章总结／学习要点 → 本条详解（主表 angles）与长文（narrative_ref 读文件腿）→ 备注（kp 行 learner_note）
+ * - 推进在正文末尾三枚（上一条／下一条／已掌握并下一条），右栏不再单独成段
+ * - 返回两级（C22＋C29 改判）＝导航右上角「返回」回根页面（与书架／知识探索／练习三面同位同序）、课程正式名称右侧「返回书架」
+ * - 标题只写课程正式名称，不显示进度；窄屏按断点收栏：≥1400 三栏／1000~1400 右栏改侧滑／<1000 左右两栏都改侧滑，正文始终优先
+ * - 数据一律经 8900；服务离线时逐栏降级，不白屏
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Button, Card, Empty, InputNumber, Layout, Modal, Segmented, Select, Space, Spin, Tabs, Typography,
+  Alert, Button, Card, Drawer, Layout, Space, Spin, Typography,
 } from 'antd';
-import { LeftOutlined } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router-dom';
+import { LeftOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import AppHeader from '../components/AppHeader';
+import HelpModal from '../components/HelpModal';
 import BlockList from '../components/parsing/BlockList';
 import { blocksOf } from '../components/parsing/CompareView';
 import { loadTypographyPrefs } from '../components/parsing/typography';
-import { blockText } from '../components/parsing/blocks';
-import { getBookPage } from '../api/axiom';
-import { describeError } from '../api/client';
+import { blockText, renderInlineMath } from '../components/parsing/blocks';
+import ChapterNotePane from '../components/learning/ChapterNotePane';
 import AnnotationPane from '../components/learning/AnnotationPane';
-import TocConfirmPanel from '../components/learning/TocConfirmPanel';
-import { ChainBodyPane, ChainProgressPane, ChainTreePane } from '../components/learning/ChainPanes';
-import ChapterPractice from '../components/practice/ChapterPractice';
-import PracticePane from '../components/practice/PracticePane';
-import { tocLinesFromBlockTexts, type BodyPageText } from '../tocParse';
-import { PAGE_BATCH, useLearnWorkbenchStore } from '../stores/learnWorkbench';
-import { useLearnChainStore } from '../stores/learnChain';
+import AdvancePane from '../components/learning/AdvancePane';
+import AnnotationForm from '../components/learning/AnnotationForm';
+import type { LearnCourse, OutlineRow, PointChapter, PointUnit } from '../api/learn';
+import {
+  POINT_KEY_PREFIX, flowPages, isCovered, pointsOfChapter, useLearnWorkbenchStore,
+} from '../stores/learnWorkbench';
 
 const { Title, Text } = Typography;
+
+/** 按钮组白字描边（蓝底页头上的统一样式，与书架／知识探索两面同款） */
+const headerButtonStyle = { color: '#ffffff', borderColor: '#ffffff', background: 'transparent' };
+
+/** 滚动续取判定：距底不足这些像素就取下一批 */
+const SCROLL_AHEAD_PX = 80;
+
+/** 目录知识点行相对章行的缩进量（DEFECT-016：两档左缘的单一常量来源） */
+export const OUTLINE_INDENT_PX = 14;
+
+/** 目录行左缘基准（章行） */
+const OUTLINE_EDGE_PX = 8;
+
+/**
+ * 目录行的左对齐出口：antd `Button` 内容容器是 `inline-flex; justify-content:center`，
+ * 只写 `textAlign:'left'` 对 flex 主轴无效（真机实测同档章行文本左缘随名称长度漂移），
+ * 故必须同时给 `justifyContent:'flex-start'`；缩进改由本函数的左内边距表达，不再靠外层容器 margin。
+ */
+export function outlineRowStyle(level: 'chapter' | 'point'): React.CSSProperties {
+  return {
+    textAlign: 'left',
+    justifyContent: 'flex-start',
+    paddingLeft: OUTLINE_EDGE_PX + (level === 'point' ? OUTLINE_INDENT_PX : 0),
+    fontWeight: level === 'chapter' ? 600 : undefined,
+  };
+}
 
 const paneStyle = (width: number | string): React.CSSProperties => ({
   width,
   flex: typeof width === 'string' ? 1 : undefined,
-  height: 'calc(100vh - 56px)',
+  minWidth: typeof width === 'string' ? 560 : undefined,
+  height: 'calc(100dvh - 56px)',
   overflowY: 'auto',
   padding: 12,
 });
 
-/** 试算偏移用的正文页样本数 */
-const BODY_SAMPLE_PAGES = 6;
+const canvasStyle: React.CSSProperties = { width: '100%', padding: 0 };
+
+export type WorkbenchMode = 'three' | 'side' | 'single';
+
+/** 版式断点：窄屏让目录／学习交流走侧滑，正文始终独占可用宽度 */
+export function workbenchModeFor(width: number): WorkbenchMode {
+  if (width >= 1400) return 'three';
+  return width >= 1000 ? 'side' : 'single';
+}
+
+/** 页头标题＝课程正式名称（名称只在共享 `qed_course`，R5 引用不复制；读不到课程行为空串） */
+export function workbenchTitleOf(course: LearnCourse | null): string {
+  return course?.name ?? '';
+}
+
+/** 左栏两级行：一章 + 章下已整理好的知识点 */
+interface TreeChapter {
+  kpId: string;
+  name: string;
+  unitId: string;
+  points: PointUnit[];
+}
+
+/**
+ * 章行优先取推进投影（服务端按目录深度 1 给出，带章级注解成品位）；
+ * 学习课程没登记时回落目录行，保证章节名与整章阅读仍可读。
+ */
+export function treeOf(
+  chapters: readonly PointChapter[],
+  outline: readonly OutlineRow[],
+  units: readonly PointUnit[],
+): TreeChapter[] {
+  const rows = chapters.length > 0
+    ? chapters.map((row) => ({ kpId: row.kp_id, name: row.name, unitId: row.unit_id }))
+    : outline
+      .filter((row) => (row.depth ?? 1) === 1)
+      .map((row) => ({ kpId: row.kp_id, name: row.name, unitId: `${POINT_KEY_PREFIX}${row.kp_id}` }));
+  return rows.map((row) => ({ ...row, points: pointsOfChapter(units, row.unitId) }));
+}
+
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
+interface PaneProps {
+  inline: boolean;
+  open: boolean;
+  onClose: () => void;
+  placement: 'left' | 'right';
+  title: string;
+  width: number | string;
+  children: React.ReactNode;
+}
+
+/** 一栏的两种形态：宽屏＝页面内定宽卡片，窄屏＝点标题栏按钮唤出的侧滑面板 */
+function Pane({
+  inline, open, onClose, placement, title, width, children,
+}: PaneProps) {
+  if (inline) {
+    return (
+      <Card size="small" title={title} style={paneStyle(width)}>
+        {children}
+      </Card>
+    );
+  }
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      placement={placement}
+      title={title}
+      width={Math.min(420, Math.max(300, window.innerWidth * 0.82))}
+      styles={{ body: { padding: 12, overflowY: 'auto' } }}
+    >
+      <Card size="small" style={canvasStyle}>{children}</Card>
+    </Drawer>
+  );
+}
 
 export default function LearnWorkbench() {
   const { courseId = '' } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const course = useLearnWorkbenchStore((s) => s.course);
-  const books = useLearnWorkbenchStore((s) => s.books);
-  const book = useLearnWorkbenchStore((s) => s.book);
-  const bookId = useLearnWorkbenchStore((s) => s.bookId);
+  const learnCourse = useLearnWorkbenchStore((s) => s.learnCourse);
   const outline = useLearnWorkbenchStore((s) => s.outline);
-  const selectedKpId = useLearnWorkbenchStore((s) => s.selectedKpId);
+  const bookId = useLearnWorkbenchStore((s) => s.bookId);
+  const pointUnits = useLearnWorkbenchStore((s) => s.pointUnits);
+  const chapters = useLearnWorkbenchStore((s) => s.chapters);
+  const selected = useLearnWorkbenchStore((s) => s.selected);
+  const selectedPoint = useLearnWorkbenchStore((s) => s.selectedPoint);
   const range = useLearnWorkbenchStore((s) => s.range);
   const loadedThrough = useLearnWorkbenchStore((s) => s.loadedThrough);
   const pages = useLearnWorkbenchStore((s) => s.pages);
@@ -58,74 +171,50 @@ export default function LearnWorkbench() {
   const loading = useLearnWorkbenchStore((s) => s.loading);
   const error = useLearnWorkbenchStore((s) => s.error);
   const fetchCourse = useLearnWorkbenchStore((s) => s.fetchCourse);
-  const selectBook = useLearnWorkbenchStore((s) => s.selectBook);
-  const selectNode = useLearnWorkbenchStore((s) => s.selectNode);
-  const selectBlock = useLearnWorkbenchStore((s) => s.selectBlock);
+  const refresh = useLearnWorkbenchStore((s) => s.refresh);
+  const selectPoint = useLearnWorkbenchStore((s) => s.selectPoint);
+  const selectChapter = useLearnWorkbenchStore((s) => s.selectChapter);
   const loadMorePages = useLearnWorkbenchStore((s) => s.loadMorePages);
-  const reloadOutline = useLearnWorkbenchStore((s) => s.reloadOutline);
+  const selectBlock = useLearnWorkbenchStore((s) => s.selectBlock);
 
   const typography = useMemo(() => loadTypographyPrefs(), []);
-  const [mode, setMode] = useState<'read' | 'chain'>('read');
-  const [rightTab, setRightTab] = useState('annotation');
-  const loadChain = useLearnChainStore((s) => s.load);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
-  const [tocTofStart, setTocStart] = useState<number | null>(null);
-  const [tocTofEnd, setTocEnd] = useState<number | null>(null);
-  const [bodyStart, setBodyStart] = useState<number | null>(null);
-  const [draft, setDraft] = useState<{ lines: string[]; bodyPages: BodyPageText[] } | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [annotationOpen, setAnnotationOpen] = useState(false);
+  const mode = workbenchModeFor(useViewportWidth());
+  const inlineOutline = mode !== 'single';
+  const inlineAnnotation = mode === 'three';
 
   useEffect(() => {
-    if (courseId) void fetchCourse(courseId);
-  }, [courseId, fetchCourse]);
+    // ?book= 由书架清单的教材卡带入（REQ-117 W8）：进场直接落在那一本，无参则取首本可读
+    if (courseId) void fetchCourse(courseId, searchParams.get('book') ?? undefined);
+  }, [courseId, searchParams, fetchCourse]);
 
-  /** 链路模式进场：取学习课程与单元树；未选书时自动选第一本已激活解析版本的书（生成链路需要目录页窗） */
-  useEffect(() => {
-    if (mode !== 'chain' || !courseId) return;
-    void loadChain(courseId);
-    if (!bookId && books.length > 0) void selectBook(books[0].book_id);
-  }, [mode, courseId, loadChain, bookId, books, selectBook]);
+  const title = workbenchTitleOf(learnCourse) || courseId;
+  const tree = useMemo(() => treeOf(chapters, outline, pointUnits), [chapters, outline, pointUnits]);
 
   const pageNumbers = useMemo(
     () => Object.keys(pages).map(Number).sort((a, b) => a - b),
     [pages],
   );
 
-  /** 读目录页文本 + 正文样本页 → 交目录确认面板（裁决 ②：纯函数解析后人工确认） */
-  const readTocPages = async () => {
-    if (!bookId || !tocTofStart || !tocTofEnd || tocTofEnd < tocTofStart) {
-      setImportError('请填写目录起页与止页（止页不早于起页）');
-      return;
-    }
-    setImportBusy(true);
-    setImportError(null);
-    try {
-      const tocPages = [];
-      for (let pageNo = tocTofStart; pageNo <= tocTofEnd; pageNo += 1) {
-        tocPages.push(await getBookPage(bookId, pageNo));
-      }
-      const lines = tocLinesFromBlockTexts(
-        tocPages.flatMap((data) => blocksOf(data).map((block) => blockText(block))),
-      );
-      const from = bodyStart ?? tocTofEnd + 1;
-      const bodyPages: BodyPageText[] = [];
-      for (let i = 0; i < BODY_SAMPLE_PAGES; i += 1) {
-        const pageNo = from + i;
-        try {
-          const data = await getBookPage(bookId, pageNo);
-          bodyPages.push({ page: pageNo, text: blocksOf(data).map((b) => blockText(b)).join('\n') });
-        } catch {
-          break;
-        }
-      }
-      if (lines.length === 0) setImportError('目录页没有可用文本块（确认页码或先完成解析）');
-      setDraft({ lines, bodyPages });
-    } catch (err) {
-      setImportError(describeError(err));
-    } finally {
-      setImportBusy(false);
-    }
+  /** 跨页缝合后的逐页渲染单元（页只作归属，不作界面上的口径） */
+  const flowByPage = useMemo(() => {
+    const parsed = pageNumbers
+      .map((pageNo) => ({ pageNo, entry: pages[pageNo] }))
+      .filter((item) => item.entry?.parsed && item.entry.data)
+      .map((item) => ({ page: item.pageNo, blocks: blocksOf(item.entry?.data ?? null) }));
+    return new Map(flowPages(parsed).map((group) => [group.page, group.blocks]));
+  }, [pages, pageNumbers]);
+
+  const bodyLabel = selected?.kind === 'chapter'
+    ? tree.find((row) => row.kpId === selected.kpId)?.name ?? ''
+    : selectedPoint?.title ?? '';
+
+  const onBodyScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    if (!range || loadedThrough >= range.end) return;
+    if (el.scrollHeight - el.clientHeight - el.scrollTop < SCROLL_AHEAD_PX) void loadMorePages();
   };
 
   return (
@@ -133,121 +222,139 @@ export default function LearnWorkbench() {
       <AppHeader
         actions={
           <Space>
-            <Button icon={<LeftOutlined />} onClick={() => navigate('/learn')}>返回书架</Button>
-            <Button onClick={() => navigate('/knowledge')}>返回星图</Button>
+            <Button icon={<QuestionCircleOutlined />} style={headerButtonStyle} onClick={() => setHelpOpen(true)}>
+              使用手册
+            </Button>
+            <Button icon={<ReloadOutlined />} style={headerButtonStyle} loading={loading} onClick={() => void refresh()}>
+              刷新
+            </Button>
+            <Button icon={<LeftOutlined />} style={headerButtonStyle} onClick={() => navigate('/')}>
+              返回
+            </Button>
           </Space>
         }
       />
       <Layout.Content style={{ background: '#f5f7fa' }}>
-        <div style={{ padding: '12px 16px 0' }}>
-          <Title level={4} style={{ margin: 0 }}>
-            {course?.name || courseId} · 学习工作台
-          </Title>
-          <Space size={10} align="center" style={{ marginTop: 8 }}>
-            <Segmented
-              value={mode}
-              onChange={(value) => {
-                const next = value as 'read' | 'chain';
-                setMode(next);
-                setRightTab(next === 'chain' ? 'progress' : 'annotation');
-              }}
-              options={[
-                { label: '阅读（章节目录＋批注）', value: 'read' },
-                { label: '链路（块序列＋推进）', value: 'chain' },
-              ]}
-            />
-            {course?.track && <Text type="secondary">{course.track}</Text>}
+        <div data-testid="workbench-heading" style={{ padding: '12px 16px 0' }}>
+          <Space align="center" size={10}>
+            <Title level={4} style={{ margin: 0 }}>
+              <span data-testid="workbench-title">{title}</span>
+            </Title>
+            <Button icon={<LeftOutlined />} onClick={() => navigate('/learn')}>
+              返回书架
+            </Button>
           </Space>
         </div>
+        {(!inlineOutline || !inlineAnnotation) && (
+          <Space size={8} style={{ padding: '8px 16px 0' }}>
+            {!inlineOutline && <Button size="small" onClick={() => setOutlineOpen(true)}>打开目录</Button>}
+            {!inlineAnnotation && <Button size="small" onClick={() => setAnnotationOpen(true)}>打开学习交流</Button>}
+          </Space>
+        )}
         {error && (
           <Alert
             style={{ margin: '12px 16px' }}
             type="warning"
             showIcon
             message="工作台数据不可达"
-            description={`${describeError(error)}。8900 / 解析服务离线时逐栏降级，其他界面不受影响。`}
-            action={<Button size="small" onClick={() => void fetchCourse(courseId)}>重试</Button>}
+            description={`暂未能读到本课的学习数据（${error}）。其他界面不受影响，稍后点右上「刷新」即可。`}
           />
         )}
-
         <div style={{ display: 'flex', gap: 12, padding: 16, alignItems: 'flex-start' }}>
-          <Card size="small" title={mode === 'chain' ? '学习链路' : '目录'} style={paneStyle(280)}>
-            {mode === 'chain' ? (
-              <ChainTreePane courseId={courseId} outline={outline} bookId={bookId} typography={typography} />
-            ) : (
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Select
-                size="small"
-                aria-label="书籍"
-                style={{ width: '100%' }}
-                placeholder={books.length === 0 ? '本课暂无已激活解析版本的书' : '选择书籍'}
-                value={bookId ?? undefined}
-                onChange={(v: string) => void selectBook(v)}
-                options={books.map((b) => ({ value: b.book_id, label: b.display_title || b.title || b.book_id }))}
-              />
-              <Button size="small" icon={<LeftOutlined rotate={180} />} disabled={!bookId} onClick={() => setImportOpen(true)}>
-                导入目录
-              </Button>
-              {outline.length === 0 ? (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  这本书还没有章节目录：点「导入目录」从目录页解析后人工确认。
-                </Text>
-              ) : (
-                <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
-                  {outline.map((node) => (
-                    <li key={node.kp_id} style={{ marginLeft: (node.depth ?? 1) === 2 ? 14 : 0 }}>
-                      <Button
-                        type={node.kp_id === selectedKpId ? 'primary' : 'text'}
-                        size="small"
-                        block
-                        style={{ textAlign: 'left' }}
-                        onClick={() => void selectNode(node.kp_id)}
-                      >
-                        {node.name}
-                        <Text type="secondary" style={{ marginLeft: 6, fontSize: 12 }}>
-                          {node.point_count ?? 0}
-                        </Text>
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          <Pane
+            inline={inlineOutline}
+            open={outlineOpen}
+            onClose={() => setOutlineOpen(false)}
+            placement="left"
+            title="目录"
+            width={300}
+          >
+            <div data-testid="outline-tree">
               {loading && <Spin size="small" />}
-            </Space>
-            )}
-          </Card>
+              {tree.map((chapter) => (
+                <div key={chapter.kpId} style={{ marginBottom: 6 }}>
+                  <Button
+                    type={selected?.kind === 'chapter' && selected.kpId === chapter.kpId ? 'primary' : 'text'}
+                    size="small"
+                    block
+                    data-outline-name={chapter.name}
+                    data-outline-level="chapter"
+                    style={outlineRowStyle('chapter')}
+                    onClick={() => {
+                      void selectChapter(chapter.kpId);
+                      if (!inlineOutline) setOutlineOpen(false);
+                    }}
+                  >
+                    {chapter.name}
+                  </Button>
+                  {chapter.points.map((point) => (
+                    <Button
+                      key={point.unit_id}
+                      type={selected?.kind === 'point' && selected.kpId === point.kp_id ? 'primary' : 'text'}
+                      size="small"
+                      block
+                      data-outline-name={point.title}
+                      data-outline-level="point"
+                      style={outlineRowStyle('point')}
+                      onClick={() => {
+                        void selectPoint(point.kp_id);
+                        if (!inlineOutline) setOutlineOpen(false);
+                      }}
+                    >
+                      {point.title}
+                      {isCovered(point) && (
+                        <Text type="success" style={{ marginLeft: 6, fontSize: 12 }}>已学</Text>
+                      )}
+                    </Button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </Pane>
 
           <Card
             size="small"
-            title={mode === 'chain' ? '链路正文' : (range ? `正文 · 第 ${range.start}–${range.end} 页` : '正文')}
+            data-testid="body-pane"
+            title={<span data-testid="body-title">{bodyLabel}</span>}
             style={paneStyle('1px')}
           >
-            {mode === 'chain' ? (
-              <ChainBodyPane courseId={courseId} outline={outline} bookId={bookId} typography={typography} />
-            ) : (
-            <>
-            {!bookId || !selectedKpId ? (
-              <Empty description="先在左栏选书并选中一章/一节" />
-            ) : !range ? (
-              <Empty description="该章节没有页范围（source_ref 缺失），请在管理面补录" />
-            ) : (
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {pageNumbers.map((pageNo) => {
-                  const entry = pages[pageNo];
-                  if (!entry || entry.loading) return <Spin key={pageNo} size="small" />;
-                  if (!entry.parsed) {
+            <div data-testid="body-scroll" onScroll={onBodyScroll} style={{ maxHeight: 'calc(100dvh - 150px)', overflowY: 'auto', paddingRight: 4 }}>
+              {!selected ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>在左栏选中一条知识点，正文就排在这里。</Text>
+              ) : (
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  {selected.kind === 'chapter' && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>正文按整章呈现</Text>
+                  )}
+                  {selectedPoint?.summary && (
+                    <div
+                      data-testid="body-summary"
+                      style={{ fontSize: 13, lineHeight: 1.7, color: '#333' }}
+                      dangerouslySetInnerHTML={{ __html: renderInlineMath(selectedPoint.summary) }}
+                    />
+                  )}
+                  {!range && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      这一条还没有定位到书页：等这一章的知识点整理好就能读正文，也可以先在右栏记一条备注。
+                    </Text>
+                  )}
+                  {pageNumbers.map((pageNo) => {
+                    const entry = pages[pageNo];
+                    if (!entry) return null;
+                    if (entry.loading) return <Spin key={pageNo} size="small" />;
+                    if (!entry.parsed) {
+                      return (
+                        <Text key={pageNo} type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                          {`第 ${pageNo} 页：${entry.error ?? '正文还没准备好'}`}
+                        </Text>
+                      );
+                    }
+                    const blocks = flowByPage.get(pageNo);
+                    if (!blocks || blocks.length === 0) return null;
                     return (
-                      <Text key={pageNo} type="secondary">
-                        第 {pageNo} 页：{entry.error ?? '无解析产物'}
-                      </Text>
-                    );
-                  }
-                  const blocks = blocksOf(entry.data);
-                  return (
-                    <div key={pageNo}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>第 {pageNo} 页</Text>
                       <BlockList
-                        bookId={bookId}
+                        key={pageNo}
+                        bookId={bookId ?? ''}
                         pageNo={pageNo}
                         blocks={blocks}
                         edits={{}}
@@ -257,92 +364,48 @@ export default function LearnWorkbench() {
                         typography={typography}
                         selectedIndex={selectedBlock?.page === pageNo ? selectedBlock.index : -1}
                         editMode={false}
-                        onSelect={(index) => selectBlock({
+                        onSelect={(index) => selectBlock(index < 0 ? null : {
                           page: pageNo,
                           index,
                           snippet: blockText(blocks[index] ?? { type: 'paragraph', bbox: [0, 0, 0, 0] }),
                         })}
                         onSubmit={async () => false}
                       />
-                    </div>
-                  );
-                })}
-                {loadedThrough < range.end && (
-                  <Button size="small" onClick={() => void loadMorePages()}>
-                    继续加载 {Math.min(PAGE_BATCH, range.end - loadedThrough)} 页
-                  </Button>
-                )}
-              </Space>
-            )}
-            {selectedKpId && (
-              <div style={{ marginTop: 16 }}>
-                <Text strong style={{ fontSize: 13 }}>练习</Text>
-                <PracticePane courseId={courseId} kpId={selectedKpId} />
+                    );
+                  })}
+                  {range && loadedThrough >= range.end && (
+                    <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                      这一条读完了：点「下一条」接着学。
+                    </Text>
+                  )}
+                </Space>
+              )}
+              <div style={{ marginTop: 12 }}>
+                <AdvancePane />
               </div>
-            )}
-            </>
-            )}
+            </div>
           </Card>
 
-          <Card size="small" style={paneStyle(320)}>
-            <Tabs
-              size="small"
-              activeKey={rightTab}
-              onChange={setRightTab}
-              items={[
-                ...(mode === 'chain'
-                  ? [{ key: 'progress', label: '进度与推进', children: <ChainProgressPane /> }]
-                  : []),
-                { key: 'annotation', label: '批注与候选', children: <AnnotationPane /> },
-                {
-                  key: 'practice',
-                  label: '本章练习',
-                  children: <ChapterPractice courseId={courseId} kpId={selectedKpId} />,
-                },
-              ]}
-            />
-          </Card>
+          <Pane
+            inline={inlineAnnotation}
+            open={annotationOpen}
+            onClose={() => setAnnotationOpen(false)}
+            placement="right"
+            title="学习交流"
+            width={340}
+          >
+            <div data-testid="annotation-pane">
+              <Space direction="vertical" size={14} style={{ width: '100%' }}>
+                <ChapterNotePane />
+                <AnnotationPane />
+                <AnnotationForm />
+              </Space>
+            </div>
+          </Pane>
         </div>
       </Layout.Content>
 
-      <Modal
-        open={importOpen}
-        title="从目录页导入章节"
-        width={720}
-        footer={null}
-        onCancel={() => setImportOpen(false)}
-      >
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Space size={6} wrap>
-            <Text type="secondary" style={{ fontSize: 12 }}>目录起页</Text>
-            <InputNumber size="small" aria-label="目录起页" min={1} value={tocTofStart} onChange={(v) => setTocStart(typeof v === 'number' ? v : null)} />
-            <Text type="secondary" style={{ fontSize: 12 }}>目录止页</Text>
-            <InputNumber size="small" aria-label="目录止页" min={1} value={tocTofEnd} onChange={(v) => setTocEnd(typeof v === 'number' ? v : null)} />
-            <Text type="secondary" style={{ fontSize: 12 }}>正文起页（留空＝目录止页后一页，用于试算偏移）</Text>
-            <InputNumber size="small" aria-label="正文起页" min={1} value={bodyStart} onChange={(v) => setBodyStart(typeof v === 'number' ? v : null)} />
-          </Space>
-          <Space size={6}>
-            <Button size="small" type="primary" loading={importBusy} onClick={() => void readTocPages()}>
-              读取目录页
-            </Button>
-            <Text type="secondary" style={{ fontSize: 12 }}>全书 {book?.page_count ?? '?'} 页</Text>
-          </Space>
-          {importError && <Text type="warning" style={{ fontSize: 12 }}>{importError}</Text>}
-          {draft && book && (
-            <TocConfirmPanel
-              courseId={courseId}
-              bookRef={bookId ?? ''}
-              initialLines={draft.lines}
-              pageCount={book.page_count ?? draft.lines.length}
-              bodyPages={draft.bodyPages}
-              onSaved={() => {
-                setImportOpen(false);
-                void reloadOutline();
-              }}
-            />
-          )}
-        </Space>
-      </Modal>
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} page="course" />
     </Layout>
   );
 }

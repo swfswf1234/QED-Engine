@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { CaretRightFilled } from '@ant-design/icons';
+import { treeEmptyHint } from './treeEmptyHint';
 import { useParsingStore, type ParsingTreeNode } from '../../stores/parsing';
 import '../../downloads.css';
 
@@ -60,6 +61,7 @@ export default function BookTree() {
   const tree = useParsingStore((s) => s.tree);
   const treeLoading = useParsingStore((s) => s.treeLoading);
   const treeError = useParsingStore((s) => s.treeError);
+  const treeSources = useParsingStore((s) => s.treeSources);
   const dataError = useParsingStore((s) => s.dataError);
   const compareBookId = useParsingStore((s) => s.compareBookId);
   const openWorkbench = useParsingStore((s) => s.openWorkbench);
@@ -78,7 +80,7 @@ export default function BookTree() {
       <div className="dl-tree" role="tree" aria-label="书目目录树">
         {tree.length === 0 && !treeLoading ? (
           <div className="dl-tree-empty">
-            {treeError ? '加载失败，请点「刷新」重试' : dataError ? '8902 离线，暂无书目数据（领域和课程已加载）' : '暂无课程数据'}
+            {treeEmptyHint({ treeError, sources: treeSources, dataError })}
           </div>
         ) : (
           tree.map((domain) => {

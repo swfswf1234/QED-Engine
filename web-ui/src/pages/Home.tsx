@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  App, Button, Card, Col, Layout, Row, Space, Typography,
+  Button, Card, Col, Layout, Row, Space, Typography,
 } from 'antd';
 import {
   BookOutlined, ReadOutlined, SolutionOutlined,
@@ -8,56 +8,33 @@ import {
 import { useNavigate } from 'react-router-dom';
 import AppHeader, { AdminEntryButton } from '../components/AppHeader';
 import HelpModal from '../components/HelpModal';
+import { HELP_PAGES } from '../help/sections';
 import { heroGradient } from '../theme';
 
 const { Title, Paragraph, Text } = Typography;
 
-/** 三大学习入口（知识探索已开放 → #/knowledge；其余占位卡：入口可见、点击提示建设中） */
-const ENTRANCES = [
-  {
-    key: 'explore',
-    icon: <BookOutlined style={{ fontSize: 32, color: '#1677ff' }} />,
-    title: '知识探索',
-    desc: '学习路线图：领域 → 课程依赖 → 知识点路径，建立完整认知链路。',
-    href: '/knowledge',
-  },
-  {
-    key: 'course',
-    icon: <ReadOutlined style={{ fontSize: 32, color: '#1677ff' }} />,
-    title: '课程学习',
-    desc: '书籍顺序学习与聊天答疑，按知识节点逐步推进。',
-  },
-  {
-    key: 'quiz',
-    icon: <SolutionOutlined style={{ fontSize: 32, color: '#1677ff' }} />,
-    title: '课后练习',
-    desc: '习题训练与自测，检验理解程度。',
-  },
-];
-
-const ENTRANCE_NAMES: Record<string, string> = Object.fromEntries(
-  ENTRANCES.map((e) => [e.key, e.title]),
-);
+/**
+ * 三大学习入口（三卡各指独立面：知识探索 → #/knowledge，课程学习 → #/learn，课后练习 → #/practice）
+ * 一句话文案取总册三条入口（`help/sections.ts` 单一事实源，卡片与手册不漂移）。
+ */
+const ENTRANCES = ([
+  { key: 'explore', page: 'knowledge', title: '知识探索', href: '/knowledge', icon: <BookOutlined style={{ fontSize: 32, color: '#1677ff' }} /> },
+  { key: 'course', page: 'course', title: '课程学习', href: '/learn', icon: <ReadOutlined style={{ fontSize: 32, color: '#1677ff' }} /> },
+  { key: 'quiz', page: 'practice', title: '课后练习', href: '/practice', icon: <SolutionOutlined style={{ fontSize: 32, color: '#1677ff' }} /> },
+] as const).map((entry) => ({
+  ...entry,
+  desc: HELP_PAGES.center.entries?.find((e) => e.page === entry.page)?.desc ?? '',
+}));
 
 /**
  * 主界面（QED-Engine 学习中心，`#/`）
- * - Hero 欢迎区 + QED 简介 + 三大入口占位卡（点击提示建设中）
- * - 右上角：使用手册（HELP_SECTIONS 五阶段内容迁移）+ 后台管理
+ * - Hero 欢迎区 + QED 简介 + 三大入口卡（各指一面，REQ-106 起三面齐备）
+ * - 右上角：使用手册（学习中心总册）+ 后台管理
  * - 零后台痕迹：不展示任何服务状态
  */
 export default function Home() {
   const [helpOpen, setHelpOpen] = useState(false);
   const navigate = useNavigate();
-  const { message } = App.useApp();
-
-  const onEntranceClick = (key: string) => {
-    const entrance = ENTRANCES.find((e) => e.key === key);
-    if (entrance?.href) {
-      navigate(entrance.href);
-      return;
-    }
-    message.info(`「${ENTRANCE_NAMES[key]}」建设中，将在后续轮次开放`);
-  };
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#eef3fb' }}>
@@ -77,12 +54,9 @@ export default function Home() {
           <Title level={1} style={{ marginBottom: 12 }}>
             QED-Engine 学习中心
           </Title>
-          <Paragraph style={{ fontSize: 15, marginBottom: 8 }}>
+          <Paragraph style={{ fontSize: 15, marginBottom: 0 }}>
             从公理到证明，重构数学认知边界。以高等数学起步，逐步构建你的
             <Text strong>个人图书馆</Text>。
-          </Paragraph>
-          <Paragraph style={{ marginBottom: 0, color: '#333333' }}>
-            学习中心仍在建设中：功能随数据管线逐步开放，入口已就位。
           </Paragraph>
         </Card>
 
@@ -92,7 +66,7 @@ export default function Home() {
             <Col xs={24} sm={8} key={e.key}>
               <Card
                 hoverable
-                onClick={() => onEntranceClick(e.key)}
+                onClick={() => navigate(e.href)}
                 style={{ height: '100%' }}
                 styles={{ body: { textAlign: 'center', padding: 32 } }}
               >
@@ -111,7 +85,7 @@ export default function Home() {
         </Row>
       </Layout.Content>
 
-      {/* 使用手册弹窗（HELP_SECTIONS 正本，与星图页共用组件） */}
+      {/* 使用手册弹窗（四页册，此处落学习中心总册） */}
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </Layout>
   );

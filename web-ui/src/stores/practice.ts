@@ -1,5 +1,9 @@
 /**
- * 练习域 store（M2 Batch B：题源抽取 → 人工确认入库 → 题卡作答 → 复习队列与错题本）
+ * 练习域 store（课后练习独立面 `#/practice`：题源抽取 → 人工确认入库 → 题卡作答 → 今日到期队列与错题本）
+ * - 归属口径＝**课级全量**（REQ-106 裁决 R2）：题列表/到期队列/错题本都不传 `kp`，也不做客户端过滤；
+ *   入库 `kp_id` 一律留空（本面无章/节选择器），题行 `kp_id` 只在列表上作归属标签展示
+ * - 到期队列＝**单请求** `max_tasks=`{@link REVIEW_QUEUE_MAX_TASKS}（裁决 R5）：同一响应给
+ *   `total_due`（截断前全量，进 `totalDue`）与队列 `tasks`
  * - 题源＝现成书（`GET /learn/question-books`，roles 与课程归属过滤在 8900）**且已解析出页产物**
  *   （`parsed_pages>0`，否则逐页必然 404）＋ 页范围，抽取走 `exerciseParse` 纯函数
  * - 入库＝人工确认面板提交通过校验的草稿（`POST /learn/questions`，`(course_id, stem_hash)` 幂等跳重）
@@ -24,6 +28,9 @@ import {
 
 /** 单次抽取的页数上限（页范围过大时拒绝，避免整本扫描） */
 export const EXTRACT_MAX_PAGES = 40;
+
+/** 到期队列单请求条数＝服务端 `max_tasks` 上限（裁决 R5：一次请求同给计数与队列） */
+export const REVIEW_QUEUE_MAX_TASKS = 100;
 
 /** 练习区草稿批的 gen_batch 常量（题面溯源用，不随用户输入变化） */
 export const PRACTICE_GEN_BATCH = 'workbench-extract';
@@ -68,8 +75,6 @@ export function normalizeRange(range: PageRange | null): PageRange | null {
 
 export interface PracticeStore {
   courseId: string | null;
-  /** 当前章/节（练习面三张列表都按它过滤） */
-  kpId: string | null;
   sourceBooks: QuestionBook[];
   sourceBookId: string | null;
   answerBookId: string | null;
@@ -83,11 +88,12 @@ export interface PracticeStore {
   dueTasks: ReviewDueTask[];
   mistakes: MistakeItem[];
   mistakeStats: MistakeStats | null;
+  /** 服务端截断前的全量到期数（`total_due`），今日面板计数取它而非 `dueTasks.length` */
+  totalDue: number;
   lastResult: AttemptResponse | null;
   loading: boolean;
   error: string | null;
   notice: string | null;
-  courseDueCounts: Record<string, number>;
 
   openCourse: (courseId: string) => Promise<void>;
   setSourceBook: (bookId: string | null) => void;
@@ -96,12 +102,11 @@ export interface PracticeStore {
   extract: () => Promise<void>;
   updateDraft: (index: number, patch: Partial<QuestionDraft>) => void;
   removeDraft: (index: number) => void;
-  confirmImport: (kpId: string | null) => Promise<boolean>;
-  loadChapter: (courseId: string, kpId: string | null) => Promise<void>;
+  confirmImport: () => Promise<boolean>;
+  loadCourse: (courseId: string) => Promise<void>;
   submitAttempt: (input: AttemptInput) => Promise<AttemptResponse | null>;
   setBookmark: (attemptId: number, bookmarked: boolean) => Promise<void>;
   setResolved: (attemptId: number, resolved: boolean) => Promise<void>;
-  refreshCourseDueCounts: (courseIds: readonly string[]) => Promise<void>;
   clearResult: () => void;
   clearNotice: () => void;
 }
@@ -131,25 +136,23 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
     return blocks;
   };
 
-  /** 本章三张面（题 / 到期队列 / 错题本）整体重取 */
-  const reloadChapter = async () => {
-    const { courseId, kpId } = get();
+  /** 本课三张面（题 / 到期队列 / 错题本）整体重取——一律课级全量，不传 `kp`（裁决 R2） */
+  const reloadCourse = async () => {
+    const { courseId } = get();
     if (!courseId) return;
     try {
       const [questionPool, due, mistakePool] = await Promise.all([
-        listQuestions({ course: courseId, ...(kpId ? { kp: kpId } : {}) }),
-        getReviewDue(courseId),
-        listMistakes({ course: courseId, ...(kpId ? { kp: kpId } : {}) }),
+        listQuestions({ course: courseId }),
+        getReviewDue(courseId, REVIEW_QUEUE_MAX_TASKS),
+        listMistakes({ course: courseId }),
       ]);
-      set((state) => ({
+      set({
         questions: questionPool.questions,
-        dueTasks: due.tasks.filter(
-          (task) => kpId === null || task.target_id === kpId || task.question?.kp_id === kpId,
-        ),
+        dueTasks: due.tasks,
         mistakes: mistakePool.items,
         mistakeStats: mistakePool.stats,
-        courseDueCounts: { ...state.courseDueCounts, [courseId]: due.total_due },
-      }));
+        totalDue: due.total_due,
+      });
     } catch (err) {
       set({ notice: describeError(err) });
     }
@@ -157,7 +160,6 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
 
   return {
     courseId: null,
-    kpId: null,
     sourceBooks: [],
     sourceBookId: null,
     answerBookId: null,
@@ -171,11 +173,11 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
     dueTasks: [],
     mistakes: [],
     mistakeStats: null,
+    totalDue: 0,
     lastResult: null,
     loading: false,
     error: null,
     notice: null,
-    courseDueCounts: {},
 
     openCourse: async (courseId) => {
       set({ courseId, loading: true, error: null });
@@ -245,7 +247,7 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
 
     removeDraft: (index) => set((state) => ({ drafts: state.drafts.filter((_, i) => i !== index) })),
 
-    confirmImport: async (chapterKpId) => {
+    confirmImport: async () => {
       const { courseId, sourceBookId, drafts } = get();
       const book = get().sourceBooks.find((item) => item.book_id === sourceBookId) ?? null;
       if (!courseId || !book) {
@@ -264,19 +266,18 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
         toQuestionPayload(draft, {
           book_ref: book.book_id,
           source_kind: sourceKindOfRoles(book.roles),
-          kp_id: chapterKpId,
+          // 课级归属（裁决 R2）：本面无章/节选择器，入库 kp_id 一律留空
+          kp_id: null,
           answer_book_ref: answerBook?.book_id ?? null,
         }),
       );
       try {
         const result = await addQuestions({ course_id: courseId, gen_batch: PRACTICE_GEN_BATCH, questions });
-        set((state) => ({
-          kpId: chapterKpId,
+        set({
           drafts: drafts.filter((draft) => !accepted.includes(draft)),
-          courseDueCounts: { ...state.courseDueCounts },
           notice: `入库 ${result.created} 题（跳重 ${result.skipped_duplicates}）`,
-        }));
-        await reloadChapter();
+        });
+        await reloadCourse();
         return true;
       } catch (err) {
         set({ notice: describeError(err) });
@@ -284,22 +285,20 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
       }
     },
 
-    loadChapter: async (courseId, kpId) => {
-      set({ courseId, kpId });
+    loadCourse: async (courseId) => {
+      set({ courseId });
       try {
         const [questionPool, due, mistakePool] = await Promise.all([
-          listQuestions({ course: courseId, ...(kpId ? { kp: kpId } : {}) }),
-          getReviewDue(courseId),
-          listMistakes({ course: courseId, ...(kpId ? { kp: kpId } : {}) }),
+          listQuestions({ course: courseId }),
+          getReviewDue(courseId, REVIEW_QUEUE_MAX_TASKS),
+          listMistakes({ course: courseId }),
         ]);
         set({
           questions: questionPool.questions,
-          dueTasks: due.tasks.filter(
-            (task) => kpId === null || task.target_id === kpId || task.question?.kp_id === kpId,
-          ),
+          dueTasks: due.tasks,
           mistakes: mistakePool.items,
           mistakeStats: mistakePool.stats,
-          courseDueCounts: { ...get().courseDueCounts, [courseId]: due.total_due },
+          totalDue: due.total_due,
         });
       } catch (err) {
         set({ notice: describeError(err) });
@@ -310,7 +309,7 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
       try {
         const result = await addAttempt(input);
         set({ lastResult: result });
-        await reloadChapter();
+        await reloadCourse();
         return result;
       } catch (err) {
         set({ notice: describeError(err) });
@@ -321,7 +320,7 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
     setBookmark: async (attemptId, bookmarked) => {
       try {
         await patchAttempt(attemptId, { bookmarked });
-        await reloadChapter();
+        await reloadCourse();
       } catch (err) {
         set({ notice: describeError(err) });
       }
@@ -330,24 +329,10 @@ export const usePracticeStore = create<PracticeStore>((set, get) => {
     setResolved: async (attemptId, resolved) => {
       try {
         await patchAttempt(attemptId, { resolved });
-        await reloadChapter();
+        await reloadCourse();
       } catch (err) {
         set({ notice: describeError(err) });
       }
-    },
-
-    refreshCourseDueCounts: async (courseIds) => {
-      const entries = await Promise.all(
-        courseIds.map(async (courseId) => {
-          try {
-            const due = await getReviewDue(courseId, 1);
-            return [courseId, due.total_due] as const;
-          } catch {
-            return [courseId, 0] as const;
-          }
-        }),
-      );
-      set((state) => ({ courseDueCounts: { ...state.courseDueCounts, ...Object.fromEntries(entries) } }));
     },
 
     clearResult: () => set({ lastResult: null }),

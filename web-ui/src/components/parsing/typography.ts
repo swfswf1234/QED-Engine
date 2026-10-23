@@ -155,6 +155,89 @@ export function roleTypography(role: BlockRole, block: Block, prefs: TypographyP
   }
 }
 
+/** 层级左偏移档位（§V2.4.1）：章题 0 / 节题 16px / 子题及以下 32px，正文随最近上级标题同档 */
+export const INDENT_STEPS_PX = [0, 16, 32];
+
+export function indentForDepth(depth: number): number {
+  const index = Math.min(INDENT_STEPS_PX.length - 1, Math.max(0, (depth || 1) - 1));
+  return INDENT_STEPS_PX[index];
+}
+
+/**
+ * 标题层级启发：解析侧 `level` 常缺省，题号形态是现网唯一可用信号。
+ * 「第 3 章 / 第一篇」=1、「1.2」=2、「1.2.4」=3；无题号时回落 `level`，再回落 1。
+ */
+export function headingDepthOf(text: string, level?: number): number {
+  const t = (text ?? '').trim();
+  const numbered = /^(\d+(?:[.．]\d+)*)(?:[\s、．.）)]|$)/u.exec(t);
+  if (numbered) return Math.min(INDENT_STEPS_PX.length, numbered[1].split(/[.．]/).length);
+  const cn = /^第\s*[\d一二三四五六七八九十百零]+\s*(部分|章|篇|节|部)/u.exec(t);
+  if (cn) return cn[1] === '章' || cn[1] === '篇' ? 1 : 2;
+  return level && level > 0 ? Math.min(INDENT_STEPS_PX.length, level) : 1;
+}
+
+/** 段落收尾判定（§V2.4.2 跨页续段合并前提）：句末标点或冒号结尾视为已收尾 */
+const SENTENCE_END_RE = /[。！？?!：;；]$/u;
+
+export function isSentenceClosed(text: string): boolean {
+  return SENTENCE_END_RE.test((text ?? '').trim());
+}
+
+export interface LayoutUnit {
+  /** 渲染用块（合并段为首块文本覆写后的合成块） */
+  block: Block;
+  role: BlockRole;
+  /** 组成该展示单元的原块下标（选中/编辑按首下标定位） */
+  indices: number[];
+  indentPx: number;
+}
+
+const MERGEABLE_TYPES = new Set(['paragraph', 'list']);
+
+function mergeable(block: Block): boolean {
+  return MERGEABLE_TYPES.has(block.type) && !block.path && !block.latex && !block.html;
+}
+
+/**
+ * 版式排版单元序列（§V2.4.1~3 一次前置处理，学习工作台与解析面共用）：
+ * 标题按题号形态定档左偏移、正文/公式/图表与最近上级标题同档；
+ * 相邻两个纯文本块且前块未收尾 → 合并为一段（消除「一页一块、句子从中间断开」）；
+ * 同一标题跨页/页眉重印只保留首个。
+ */
+export function layoutUnits(blocks: Block[], roles: BlockRole[]): LayoutUnit[] {
+  const units: LayoutUnit[] = [];
+  let depth = 1;
+  let lastHeadingKey = '';
+  blocks.forEach((block, index) => {
+    const role = roles[index];
+    const text = blockText(block);
+    if (role === 'heading') {
+      const key = text.trim().replace(/\s+/g, '').toLowerCase();
+      if (key !== '' && key === lastHeadingKey) return;
+      depth = headingDepthOf(text, block.level);
+      lastHeadingKey = key;
+      units.push({ block, role, indices: [index], indentPx: indentForDepth(depth) });
+      return;
+    }
+    const indentPx = role !== 'body' ? 0 : indentForDepth(depth);
+    const prev = units[units.length - 1];
+    if (
+      role === 'body'
+      && prev
+      && prev.role === 'body'
+      && mergeable(prev.block)
+      && mergeable(block)
+      && !isSentenceClosed(blockText(prev.block))
+    ) {
+      const merged: Block = { ...prev.block, text: `${blockText(prev.block)}${text}` };
+      units[units.length - 1] = { ...prev, block: merged, indices: [...prev.indices, index] };
+      return;
+    }
+    units.push({ block, role, indices: [index], indentPx });
+  });
+  return units;
+}
+
 /** 目录条目拆分：标题 + 页码（点线/空白引导后的尾数；无分隔符的尾数不误拆） */
 export function tocItemParts(text: string): { title: string; page: string } {
   const raw = (text ?? '').trim();

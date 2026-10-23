@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, ConfigProvider, Layout, Select, Space, Typography, theme as antdTheme } from 'antd';
+import { Alert, Breadcrumb, Button, ConfigProvider, Layout, Select, Space, Typography, theme as antdTheme } from 'antd';
 import { ReloadOutlined, LeftOutlined, QuestionCircleOutlined, StarOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AppHeader from '../components/AppHeader';
 import HelpModal from '../components/HelpModal';
 import StarMapGraph from '../components/StarMapGraph';
+import CourseKnowledge from './CourseKnowledge';
 import { STARMAP_VIEW, starMapLayout } from '../components/starMapLayout';
 import { useStarMapStore } from '../stores/starMap';
-import { usePracticeStore } from '../stores/practice';
+import { useCourseKnowledgeStore } from '../stores/courseKnowledge';
 import { describeError } from '../api/client';
 import '../knowledge.css';
 
@@ -17,14 +18,16 @@ const { Title } = Typography;
 const headerButtonStyle = { color: '#ffffff', borderColor: '#ffffff', background: 'transparent' };
 
 /**
- * 学习中心 · 知识梳理星图（`#/knowledge`，M5）
- * - 信息面收窄：大标题 + 领域下拉，统计数与图例不进画面（图例归使用手册）
- * - 坐标系＝容器实测宽高（ResizeObserver）：星图套满画布，轨迹列框才持续套住课程卡
+ * 学习中心·知识探索（`#/knowledge`，REQ-110 起为单页两级视图）
+ * - 一个页面承载「领域星图」与「课程层级星图」两级：点课程卡就地下钻（`?course={id}`），
+ *   回退只走面包屑；层级状态的唯一事实源＝URL，组件内不存私有层级态
+ * - 信息面收窄：大标题 + 面包屑 + 领域下拉（**只属领域层**，五审裁决 2026-10-14），统计数与图例不进画面
+ * - 面包屑两级「知识探索 / {课程名}」，不含领域名；课程层左上角只显课程名行（归 CourseKnowledge 视图）
+ * - 坐标系＝容器实测尺寸（ResizeObserver，两视图都罩）：星图套满画布，课程层虚框宽＝内容区实测宽
  * - 星图＝纯函数布局（starMapLayout）+ ECharts graph（裁决③：不引新依赖、不用 force）
- * - 数据＝GET /learn/star-map（qed_domain/qed_course；知识点计数来自 M5 两表，未接入时为 0）
- * - 复习入口＝按本课课程列表聚合 GET /learn/review/due?course=，条数写进课程节点提示行（0 条不写）
- * - 点击课程卡 → `#/knowledge/c/{course_id}` 知识点掌握详情
- * - 降级：8900 或课程目录不可达 → 提示 + 重试，不白屏
+ * - 数据＝GET /learn/star-map（qed_domain/qed_course）；课程层＝GET /learn/courses/{id}/knowledge-points
+ * - 独立面（裁决 ④）：无通往学习/练习的出口，不消费复习域（/learn/review/due 聚合已移除）
+ * - 降级：8900 或课程目录不可达 → 提示 + 重试，不白屏；刷新只重取当前视图数据
  */
 export default function Knowledge() {
   const domains = useStarMapStore((s) => s.domains);
@@ -34,12 +37,17 @@ export default function Knowledge() {
   const error = useStarMapStore((s) => s.error);
   const fetchStarMap = useStarMapStore((s) => s.fetchStarMap);
   const selectDomain = useStarMapStore((s) => s.selectDomain);
-  const courseDueCounts = usePracticeStore((s) => s.courseDueCounts);
-  const refreshCourseDueCounts = usePracticeStore((s) => s.refreshCourseDueCounts);
+  const course = useCourseKnowledgeStore((s) => s.course);
+  const courseLoading = useCourseKnowledgeStore((s) => s.loading);
+  const fetchCourse = useCourseKnowledgeStore((s) => s.fetchCourse);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const courseId = searchParams.get('course') ?? '';
   const [helpOpen, setHelpOpen] = useState(false);
   const [view, setView] = useState(STARMAP_VIEW);
+  const [courseWidth, setCourseWidth] = useState(0);
   const fieldRef = useRef<HTMLDivElement>(null);
+  const courseBodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void fetchStarMap();
@@ -47,6 +55,7 @@ export default function Knowledge() {
 
   // 容器尺寸 → 布局坐标系（尺寸未测得时留缺省视口兜底）
   useEffect(() => {
+    if (courseId) return undefined;
     const el = fieldRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(() => {
@@ -57,7 +66,21 @@ export default function Knowledge() {
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [courseId]);
+
+  // 课程层取景（REQ-113 W4）：虚框宽＝内容区实测宽，故画布宽度同样取自容器观测
+  // （clientWidth 不含滚动条，避免滚动条出现→宽度重算→重画的往复）
+  useEffect(() => {
+    if (!courseId) return undefined;
+    const el = courseBodyRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      const width = el.clientWidth;
+      if (width >= 480) setCourseWidth(Math.round(width));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [courseId]);
 
   const domain = useMemo(
     () => domains.find((d) => d.domain_id === domainId) ?? domains[0] ?? null,
@@ -65,13 +88,22 @@ export default function Knowledge() {
   );
   const layout = useMemo(() => starMapLayout(domain, edges, view), [domain, edges, view]);
 
-  const courseIds = useMemo(
-    () => (domain?.tracks ?? []).flatMap((t) => t.courses.map((c) => c.course_id)),
-    [domain],
-  );
-  useEffect(() => {
-    if (courseIds.length > 0) void refreshCourseDueCounts(courseIds);
-  }, [courseIds, refreshCourseDueCounts]);
+  /** 层级只由查询参数承载：进课程层写 ?course=，回领域层清该参数 */
+  const setCourseParam = (id: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('course', id);
+    else next.delete('course');
+    setSearchParams(next);
+  };
+
+  const refresh = () => {
+    if (courseId) void fetchCourse(courseId);
+    else void fetchStarMap();
+  };
+
+  const breadcrumbItems = courseId
+    ? [{ title: <Link to="/knowledge">知识探索</Link> }, { title: course?.name ?? courseId }]
+    : [{ title: '知识探索' }];
 
   return (
     <Layout style={{ height: '100vh', background: '#070b1c', overflow: 'hidden' }}>
@@ -81,7 +113,7 @@ export default function Knowledge() {
             <Button icon={<QuestionCircleOutlined />} style={headerButtonStyle} onClick={() => setHelpOpen(true)}>
               使用手册
             </Button>
-            <Button icon={<ReloadOutlined />} style={headerButtonStyle} loading={loading} onClick={() => void fetchStarMap()}>
+            <Button icon={<ReloadOutlined />} style={headerButtonStyle} loading={courseId ? courseLoading : loading} onClick={refresh}>
               刷新
             </Button>
             <Button icon={<LeftOutlined />} style={headerButtonStyle} onClick={() => navigate('/')}>
@@ -96,19 +128,23 @@ export default function Knowledge() {
             <div className="kn-star-body">
               <div className="kn-star-head">
                 <Title level={2} style={{ margin: 0, color: '#f2f6ff' }}>
-                  <StarOutlined /> 学习中心 · 知识梳理星图
+                  <StarOutlined /> 学习中心·知识探索
                 </Title>
-                <Select
-                  aria-label="领域"
-                  className="kn-domain-select"
-                  value={domain?.domain_id}
-                  placeholder="暂无领域"
-                  onChange={(id: string) => selectDomain(id)}
-                  options={domains.map((d) => ({ value: d.domain_id, label: d.name }))}
-                />
+                <Breadcrumb aria-label="面包屑" className="kn-breadcrumb" items={breadcrumbItems} />
+                {/* 领域下拉只属领域层（五审裁决 2026-10-14）：课程层左上角只显课程名，换领域先经面包屑回退 */}
+                {!courseId && (
+                  <Select
+                    aria-label="领域"
+                    className="kn-domain-select"
+                    value={domain?.domain_id}
+                    placeholder="暂无领域"
+                    onChange={selectDomain}
+                    options={domains.map((d) => ({ value: d.domain_id, label: d.name }))}
+                  />
+                )}
               </div>
 
-              {error && (
+              {!courseId && error && (
                 <Alert
                   type="warning" showIcon
                   message="星图数据不可达"
@@ -117,29 +153,30 @@ export default function Knowledge() {
                 />
               )}
 
-              <div ref={fieldRef} className="kn-star-field">
-                {layout.nodes.length > 0 ? (
-                  <StarMapGraph
-                    layout={layout}
-                    height={view.height}
-                    dueCounts={courseDueCounts}
-                    onSelectCourse={(cid) => navigate(`/knowledge/c/${cid}`)}
-                  />
-                ) : (
-                  !loading && (
-                    <div className="kn-empty kn-empty-dark">
-                      <Title level={5} style={{ color: '#a9bde3', fontWeight: 400 }}>
-                        {error ? '课程目录暂不可达，星图无课程可展示' : '课程体系为空：请先在文档下载管理中登记领域与课程'}
-                      </Title>
-                    </div>
-                  )
-                )}
-              </div>
+              {courseId ? (
+                <div ref={courseBodyRef} className="kn-course-body">
+                  <CourseKnowledge courseId={courseId} contentWidth={courseWidth} />
+                </div>
+              ) : (
+                <div ref={fieldRef} className="kn-star-field">
+                  {layout.nodes.length > 0 ? (
+                    <StarMapGraph layout={layout} height={view.height} onSelectCourse={setCourseParam} />
+                  ) : (
+                    !loading && (
+                      <div className="kn-empty kn-empty-dark">
+                        <Title level={5} style={{ color: '#a9bde3', fontWeight: 400 }}>
+                          {error ? '课程目录暂不可达，星图无课程可展示' : '课程体系为空：请先在文档下载管理中登记领域与课程'}
+                        </Title>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
             </div>
           </ConfigProvider>
         </div>
       </Layout.Content>
-      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} page="knowledge" />
     </Layout>
   );
 }

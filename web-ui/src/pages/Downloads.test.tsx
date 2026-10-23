@@ -664,6 +664,72 @@ describe('文档下载管理 Downloads v2（真实领域课程体系，2026-08-2
       fireEvent.click(within(dialog).getByRole('button', { name: /查看渠道尝试/ }));
       expect(within(dialog).getByText('暂无渠道尝试记录')).toBeInTheDocument();
     });
+
+    it('kind=paper 的书目详情出现「探索记录」小节', async () => {
+      usePaperExploreStore.getState().reset();
+      const paperBook = book({ book_id: 'math-b19', title: '论文书行', status: 'candidate', kind: 'paper', domain_id: 'math' });
+      const dialog = await openBookDetailModal(paperBook, [
+        { source_id: 's1', channel: 'arxiv', ok: true, note: '采纳建表', provider_id: '2401.00009' },
+      ]);
+      const section = await within(dialog).findByTestId('paper-origin-section');
+      expect(within(section).getByRole('button', { name: /查看探索记录/ })).toBeInTheDocument();
+    });
+
+    it('教程书不出现「探索记录」小节', async () => {
+      usePaperExploreStore.getState().reset();
+      const normalBook = book({ book_id: 'b_norm', title: '普通教材', status: 'verified' });
+      const dialog = await openBookDetailModal(normalBook, []);
+      expect(within(dialog).queryByTestId('paper-origin-section')).not.toBeInTheDocument();
+    });
+
+    it('论文详情点「查看探索记录」才回源：命中显示摘要与评审小结', async () => {
+      usePaperExploreStore.getState().reset();
+      mockApi({
+        '/courses': domainsFixture,
+        '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+        '/knowledge': knowledgeFixture,
+        '/papers/books': [
+          book({ book_id: 'dm1-p1', title: '回源论文', kind: 'paper', domain_id: 'dm1', status: 'downloaded', holding: 'owned' }),
+        ],
+        '/tasks': [],
+        '/books/dm1-p1/sources': [{ source_id: 's1', channel: 'arxiv', ok: true, note: '采纳建表', provider_id: '2401.00009' }],
+        '/papers/selections/sel-9': {
+          selection_id: 'sel-9', status: 'ranked', created_at: '', domain_id: 'dm1', recipe: 'frontier',
+          assessments: [{
+            rank: 1, plan_index: 1,
+            candidate: {
+              provider: 'arxiv', provider_id: '2401.00009', title: '回源论文', authors: ['A. Author'],
+              language: 'en', year: '2024', page_url: '', download_url: '',
+              identifiers: { arxiv: '2401.00009' }, abstract: '回源命中的摘要原文。',
+            },
+            assessment: { arxiv_id: '2401.00009', goal_fit: 5, foundational_value: 5, readability: 5, reason: '命中理由', risks: [] },
+            score: 132, recommended: true,
+          }],
+          recommendations: [1],
+        },
+        '/papers/selections?': {
+          selections: [{ selection_id: 'sel-9', domain_id: 'dm1', recipe: 'frontier', status: 'ranked', created_at: '', recommendation_count: 1 }],
+        },
+      });
+      renderDownloads();
+      // I14：论文只在领域全量卡片列出现（旧行内展示行已删）
+      fireEvent.click(await screen.findByTestId('tree-papers-node'));
+      const column = await screen.findByTestId('paper-column');
+      fireEvent.click(within(column).getByText('回源论文'));
+      const dialog = await screen.findByRole('dialog');
+      const section = within(dialog).getByTestId('paper-origin-section');
+      // 回源请求（本领域 limit=20 列表 + 逐份详情）只在点击后出现；徽标用的无参列表不计
+      const traceCalls = () => mockFetch.mock.calls.filter(([u]) => {
+        const url = String(u);
+        return url.includes('limit=20') || url.includes('/papers/selections/sel-');
+      });
+      expect(traceCalls()).toHaveLength(0);
+      fireEvent.click(within(section).getByRole('button', { name: /查看探索记录/ }));
+      const detail = await within(section).findByTestId('paper-origin-detail');
+      expect(within(detail).getByText('回源命中的摘要原文。')).toBeInTheDocument();
+      expect(within(detail).getByText('命中理由')).toBeInTheDocument();
+      expect(traceCalls().length).toBeGreaterThan(0);
+    });
   });
 });
 
@@ -711,7 +777,7 @@ describe('论文探索入口与领域徽标（REQ-102 W4，downloads-ui.md §4.4
     expect(await screen.findByText(/论文探索 · 高等数学/)).toBeInTheDocument();
   });
 
-  it('课程选中取其所属领域；课程论文行不带探索入口（课程不独立发起）', async () => {
+  it('I14 旧展示行整行删除：领域视图与课程头下都不出现 paper-books-row，课程选中仍可经汇总行发起', async () => {
     mockApi({
       '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
@@ -724,15 +790,19 @@ describe('论文探索入口与领域徽标（REQ-102 W4，downloads-ui.md §4.4
     });
     renderDownloads();
     const tree = await screen.findByRole('tree');
+    await waitFor(() => expect(screen.getByText(/筛选结果/)).toBeInTheDocument());
+    expect(document.querySelector('.dl-paper-row')).toBeNull();
     fireEvent.click(within(tree).getByText('数学分析'));
-    const row = await screen.findByTestId('paper-books-row');
-    expect(within(row).getByText('落位到课程的论文')).toBeInTheDocument();
-    expect(within(row).queryByRole('button', { name: '论文探索' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '论文探索' }));
+    await waitFor(() => expect(document.querySelector('.dl-paper-row')).toBeNull());
+    expect(screen.queryByTestId('paper-books-row')).toBeNull();
+    expect(screen.queryByText('落位到课程的论文')).not.toBeInTheDocument();   // 教程视图不再重复渲染书行
+    const summaryButton = screen.getByRole('button', { name: '论文探索' });
+    expect(summaryButton).not.toBeDisabled();
+    fireEvent.click(summaryButton);
     await waitFor(() => expect(usePaperExploreStore.getState().domainId).toBe('dm1'));
   });
 
-  it('领域级论文行按 §7.2 出徽标：探索中无书行也成行', async () => {
+  it('I14 领域活动态徽标迁入汇总行：探索中在「论文探索」左侧渲染，无纸行也在', async () => {
     mockApi({
       '/courses': domainsFixture,
       '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
@@ -749,7 +819,68 @@ describe('论文探索入口与领域徽标（REQ-102 W4，downloads-ui.md §4.4
     renderDownloads();
     const tree = await screen.findByRole('tree');
     fireEvent.click(within(tree).getByText('高等数学'));
-    const row = await screen.findByTestId('paper-books-row');
-    expect(within(row).getByText('探索中')).toBeInTheDocument();
+    const badge = await screen.findByTestId('paper-row-badge');
+    expect(badge).toHaveTextContent('探索中');
+    expect(badge.closest('.dl-summary')).not.toBeNull();
+    expect(document.querySelector('.dl-paper-row')).toBeNull();
+  });
+});
+
+describe('论文栏视图（REQ-108 I6，壳 §8：左树「论文」节点 + 右栏卡片列，与行内展示行并存）', () => {
+  beforeEach(() => {
+    usePaperExploreStore.getState().reset();
+    useDownloadsStore.setState({
+      domains: [], knowledge: [], details: {}, loading: false, error: null,
+      systemError: null, knowledgeError: null, paperBooks: [],
+      filters: { domain: '', course: '', stage: '' }, selected: null, treeWidth: 400,
+    });
+  });
+
+  const baseRoutes = (books: unknown[]) => ({
+    '/courses': domainsFixture,
+    '/knowledge/': (url: string) => detailsFixture[url.split('/').pop() ?? ''],
+    '/knowledge': knowledgeFixture,
+    '/papers/books': books,
+    '/tasks': [],
+    '/papers/selections': { selections: [] },
+  });
+
+  it('点左树「论文」节点 → 领域信息卡 + 卡片列（全量含课程落位，带归属标签），教程列不进该视图', async () => {
+    mockApi(baseRoutes([
+      book({ book_id: 'dm1-p1', title: '领域级论文', kind: 'paper', domain_id: 'dm1', status: 'verified', year: 2024, page_count: 22 }),
+      book({ book_id: 'dm1-p2', title: '落位到课程的论文', kind: 'paper', domain_id: 'dm1', course_id: '01_math_analysis', status: 'candidate' }),
+    ]));
+    renderDownloads();
+    fireEvent.click(await screen.findByTestId('tree-papers-node'));
+    const column = await screen.findByTestId('paper-column');
+    expect(screen.getByTestId('paper-column-title')).toHaveTextContent('论文（2）');
+    expect(within(column).getByText('落位到课程的论文')).toBeInTheDocument();
+    expect(within(column).getByText('数学分析')).toBeInTheDocument();
+    expect(screen.queryByText('Rudin 中译')).not.toBeInTheDocument();
+    // R5 并存：论文栏是领域全量视图，行内展示行仍在自己的语境（此处选中论文节点，不渲染课程语境行）
+    expect(useDownloadsStore.getState().selected).toEqual({ kind: 'papers', id: 'dm1' });
+  });
+
+  it('论文栏空态：该行文案 + 「发起论文探索」直达弹窗段①', async () => {
+    mockApi(baseRoutes([]));
+    renderDownloads();
+    fireEvent.click(await screen.findByTestId('tree-papers-node'));
+    expect(await screen.findByTestId('paper-column-empty')).toHaveTextContent('该领域还没有已采纳论文');
+    fireEvent.click(screen.getByRole('button', { name: /发起论文探索/ }));
+    await waitFor(() => expect(usePaperExploreStore.getState().modalOpen).toBe(true));
+    expect(usePaperExploreStore.getState().stage).toBe('settings');
+    expect(usePaperExploreStore.getState().domainId).toBe('dm1');
+  });
+
+  it('点论文卡 → 书目详情弹窗出现按需回源小节', async () => {
+    mockApi(baseRoutes([
+      book({ book_id: 'dm1-p1', title: '领域级论文', kind: 'paper', domain_id: 'dm1', status: 'verified' }),
+    ]));
+    renderDownloads();
+    fireEvent.click(await screen.findByTestId('tree-papers-node'));
+    fireEvent.click(await screen.findByTestId('paper-card'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('领域级论文')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('paper-origin-section')).toBeInTheDocument();
   });
 });

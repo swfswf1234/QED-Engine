@@ -1,6 +1,6 @@
 /**
  * 书籍目录页文本 → 章/节树纯函数（M6 裁决 ②：目录页文本解析 + 人工确认，不引 LLM）。
- * 规格正本：docs/design/learning-workbench-ui.md §6（过程与裁决记录＝已归档壳 docs/history/plans/2026-10/2026-10-01-toc-knowledge-tree-and-learn-workbench.md）。
+ * 规格正本：docs/plans/2026-10-11-learn-ui-course-study.md §7（原 design/learning-workbench-ui.md §6 随 2026-10-11 拆分轮迁稿；过程与裁决记录＝已归档壳 docs/history/plans/2026-10/2026-10-01-toc-knowledge-tree-and-learn-workbench.md）。
  * 消费面：#/learn/c/{courseId} 左栏「导入目录」确认面板（W4/W5）。
  */
 import { isTocHeadingText, tocItemParts } from './components/parsing/typography';
@@ -177,4 +177,83 @@ export function tocLinesFromBlockTexts(texts: readonly string[]): string[] {
     }
   }
   return lines;
+}
+
+/* ---------- 进场自动定位（REQ-105 §7 步 0：只读已解析块文本，不触发重新解析） ---------- */
+
+export type TocAutoFailure = 'no-toc-page' | 'no-chapter-lines' | 'no-body-start' | 'offset-invalid';
+
+export interface TocAutoResult {
+  ok: boolean;
+  failure?: TocAutoFailure;
+  tocStart: number | null;
+  tocEnd: number | null;
+  bodyStart: number | null;
+  offset: number | null;
+  lines: string[];
+  tree: TocNode[];
+  unrecognized: TocUnrecognizedLine[];
+}
+
+/** 目录段续页门槛：该页「行＋尾页码」形态行占比（正文页≈0） */
+const TOC_LIKE_RATIO = 0.5;
+/** 偏移试算的正文窗口页数 */
+const BODY_SCAN_LIMIT = 40;
+
+const EMPTY_AUTO: TocAutoResult = {
+  ok: false, tocStart: null, tocEnd: null, bodyStart: null, offset: null,
+  lines: [], tree: [], unrecognized: [],
+};
+
+const pageLines = (text: string): string[] => tocLinesFromBlockTexts([text]);
+
+const isNoiseLine = (line: string): boolean => isTocHeadingText(line) || ROMAN_PAGE_RE.test(line);
+
+const isTocLikeLine = (line: string): boolean => !isNoiseLine(line) && tocItemParts(line).page !== '';
+
+function tocLikeRatio(lines: readonly string[]): number {
+  const candidates = lines.filter((line) => !isNoiseLine(line));
+  if (candidates.length === 0) return 0;
+  return candidates.filter(isTocLikeLine).length / candidates.length;
+}
+
+/**
+ * 自动定位目录页段与正文起页并试算偏移：命中即返回可写入的章/节树，
+ * 任一步置信不足即返回 ok=false（调用方降级人工，绝不写猜测值）。
+ */
+export function autoLocateToc(pages: readonly BodyPageText[]): TocAutoResult {
+  const sorted = [...pages].sort((a, b) => a.page - b.page);
+  const starts = sorted.filter((item) => pageLines(item.text).some(isTocHeadingText));
+  if (starts.length === 0) return { ...EMPTY_AUTO, failure: 'no-toc-page' };
+
+  for (const start of starts) {
+    const from = sorted.findIndex((item) => item.page === start.page);
+    const lines: string[] = [];
+    let end = start.page;
+    for (let index = from; index < sorted.length; index += 1) {
+      const rowLines = pageLines(sorted[index].text);
+      if (index !== from && tocLikeRatio(rowLines) < TOC_LIKE_RATIO) break;
+      lines.push(...rowLines);
+      end = sorted[index].page;
+    }
+
+    const parsed = parseTocLines(lines);
+    if (parsed.tree.length === 0) continue;
+
+    const after = sorted.filter((item) => item.page > end);
+    const body = after.find((item) => pageLines(item.text).some((line) => CHAPTER_RE.test(line)));
+    const partial: TocAutoResult = {
+      ...EMPTY_AUTO, tocStart: start.page, tocEnd: end, lines,
+      tree: parsed.tree, unrecognized: parsed.unrecognized,
+    };
+    if (!body) return { ...partial, failure: 'no-body-start' };
+
+    const offset = estimateTocOffset(parsed.tree, after.slice(0, BODY_SCAN_LIMIT));
+    if (offset === null) return { ...partial, failure: 'offset-invalid' };
+    if (parsed.tree[0].printPage + offset < 1) return { ...partial, failure: 'offset-invalid' };
+    return {
+      ...partial, ok: true, bodyStart: body.page, offset,
+    };
+  }
+  return { ...EMPTY_AUTO, failure: 'no-chapter-lines' };
 }

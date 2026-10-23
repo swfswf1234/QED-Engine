@@ -1,7 +1,8 @@
 /**
- * 抽取确认面板（M2 裁决 ⑥：抽取结果必须人工确认才入库，判例 TocConfirmPanel）。
+ * 抽取确认面板（M2 裁决 ⑥：抽取结果必须人工确认才入库，判例同 exerciseParse.ts）。
  * 草稿可改可删、未识别行可见；不合格草稿（draftIssues 非空）不进提交批次。
- * 规格正本：docs/history/plans/2026-10/2026-09-23-practice-review.md「抽取式题源管线规格」。
+ * 规格正本：docs/design/learning-practice-ui.md §4／§7（抽取规格唯一正本在 §7，面板口径在 §4）。
+ * 消费面：`#/practice` 题源工作区的抽取预览卡。
  */
 import { Button, Card, Input, Select, Space, Tag, Typography } from 'antd';
 import {
