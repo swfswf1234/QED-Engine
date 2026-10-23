@@ -205,8 +205,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
         result = subprocess.run(
             ["netstat", "-ano"],
             capture_output=True, text=True, timeout=5,
+            errors="replace",  # DEFECT-019: netstat GBK header must not kill reader thread
         )
-        for line in result.stdout.splitlines():
+        for line in (result.stdout or "").splitlines():
             if f":{port}" in line and "LISTENING" in line:
                 parts = line.split()
                 pid = int(parts[-1])
