@@ -1,7 +1,7 @@
 # 设计类小修与 bug 修复台账（design-bugfix-log）
 
 状态：Current（长期滚动台账）
-最后更新：2026-10-18
+最后更新：2026-10-25
 关联任务：REQ-069（见 [todo.md](../trackers/todo.md)）
 
 > **定位声明**：本文档是**长期滚动台账**，不是一次性计划——**不随任务完成归档**
@@ -646,3 +646,19 @@
   （根侧 `REQ-136` 壳关联设计行／目标段／过程与证据条，与 [项目状态快照](../trackers/project-status.md) 当前主线同批随步）。
   `REQ-136` 行 `成功标准` 列与 R1~R5 状态列一字未改（ADR 0023；改判归该行会话）。
 - **状态**：已修复（2026-10-21）
+
+### BUGFIX-038：`REQ-121` 出站请求登记把对方事实源文件写成不存在的 `docs/design/database-schema.md`，且「存量 17 行」读数已被 2026-10-23 现网超越
+
+- **发现日期**：2026-10-23（REQ-121 发函前的逐条复核中实读对方仓库文件清单与 `qed_test` 现网发现）
+- **设计文档**：`docs/design/cross-project-contracts.md` §4 跨项目请求登记（`REQ-121` 条）；同错在其承载壳 [REQ-121 请求稿](../history/plans/2026-10/2026-10-16-book-intro-audience-tracker-request.md) 的「关联设计」行与 R4 条
+- **问题与根因**：① 请求稿 R4 与壳「关联设计」行把 `qt_books` 的结构事实源写作对方 `docs/design/database-schema.md`——**该文件在对方仓库不存在**（其实有 `docs/design/` 七份与 `docs/architecture/database-design.md`，`qt_books` 详细设计在后者 §5.2，对方 `system-overview.md:18` 亦如此指认），根侧按错路径发函会让对方承接位落空；根因＝立项时按「共享库表结构文档」的**概念名猜文件路径**，未 `ls` 对方 docs 实盘，属 ADR 0017 事实源指认未落到真实文件。② §4 与 R3 记「存量 17 行」＝2026-10-16 立项时 `af_books` 生效本数读数，2026-10-23 只读探针实读 `qed_test`＝`qt_books` **26 行**（17 本已进 `af_books`、9 本尚未进解析侧），回填口径的覆盖面因此被写小；根因＝请求稿写就后未随库内增长复验，存量行数是**易变读数**却被当成定档事实。
+- **修复与验证**：§4 `REQ-121` 条改按实有路径指认对方事实源，并随 2026-10-23 发函一并写入行数更正、套级派生现网误陈述取证（`kt-mathanalysis-3` 4 本与 `kt-mathanalysis-4` 5 本共 9 本共用两句简介）与并函口径；壳侧同批改「关联设计」行、R3／R4 条、「前置条件」新增第 4 条复验取证。对方承接位同步更正（其 `QED-082` 行与其 v1-task-chain「承载根仓库 REQ-121」节 R4 行均指 `docs/architecture/database-design.md` §5.2）。验证＝`tests/contract/test_markdown_links.py`（§4 新增指针可解析）＋ `tests/contract/test_design_documents.py`（design 元数据与骨架）＋ 对方 `tests/test_documentation.py`（其入站链接可解析）。
+- **状态**：已修复（2026-10-23）
+
+### BUGFIX-039：downloads-ui §3.1 只定字段口径、未定领域级字段的读面来源，致「编辑领域知识」保存把库内 `scope` 正文覆写成空串（缺陷行 DEFECT-024）
+
+- **发现日期**：2026-10-25（REQ-103 S5 取证轮的浏览器实测中定位；缺陷已在 ARCH-024 壳线 3 登记为 DEFECT-024，本条只承接设计文档侧的缺漏）
+- **设计文档**：`docs/design/frontend/downloads-ui.md` §3.1 领域维护表单、§6 状态与降级矩阵
+- **问题与根因**：§3.1 把五字段的标签、顺序、默认值与非必填口径写死，却没有一处规定**编辑/确认表单的初值从哪个端点取**。实现按「左树数据源即唯一源」把领域对象取自 `GET /courses`，而 8901 的 `/courses` 领域层**结构性不返回 `scope`**，弹窗 `scope` 初值因此落空串 → 提交体带 `scope: ''` → 8900 `backend/qed_engine/clients/tracker_client.py:310-324`「非 None 才入 body」对空串照放行 → 对方 `knowledge_repository.py:300` 以 `if scope is not None` 判定「用户改了」并写入 ⇒ 用户正文被覆写。取证＝只读探针 `tmp/d024_sync_check.py`：`qed_test.qed_domain` 中 `math-advanced` 的 `scope_len=185`（**库数据完好**），`GET /domains`（经 8900 与直连 8901）均带 `scope` 185，`GET /courses`（两处）均**无 `scope` 键**——属**读面不全**，不是数据丢失，同时否证了「反复刷新 `/courses` 即可同步」的直觉。次生缺漏＝两条腿形状漂移：8900 离线降级读共享表的 `shared_tables.list_domains_with_courses`（`backend/qed_engine/shared_tables.py:228-264`）**带 `scope`** 且注释自称与 8901 `/courses` 一致 ⇒ 8901 在线时弹窗空、离线降级时弹窗有值，缺陷表现随服务状态翻转，更难从界面反推。
+- **修复与验证**：口径补进 §3.1 两条要点（**领域级字段的读面**＝`scope` 由 `GET /domains` 同步补齐、只填缺键行、已有值不覆盖、对方补齐 `/courses` 时补齐腿自动让位；**取不到不等于空值**＝`undefined` 不进提交体、空串照常发送），§6 补一行降级矩阵（`GET /domains` 失败＝初值留空且不发该键，不新增错误横幅）。代码侧同步落地四枚源文件：`web-ui/src/api/tracker.ts`（新增 `listDomains`）、`web-ui/src/stores/downloads.ts`（store 状态 `domainFields` ＋纯函数 `withDomainScopeFields`／`mergeDomainScopeFields`，`fetchAll` 增同步腿，5s 轮询只换树不清补齐值）、`DownloadsTree.tsx` 与 `DomainConfirmModal.tsx`（初值取 `domain.scope`、提交体按 `undefined` 省略 `scope` 键）。因库数据完好、`/domains` 已返回全字段，**修复收在根侧前端，不向 QED-Tracker 发函**；原倾向的乙案（请对方补 `/courses` 载荷）当日曾降级为可选上游改进，**同日用户复裁「乙案要做」⇒ 已于 2026-10-25 发函 QED-Tracker**（函落其 todo `QED-083` 行＋其 `docs/plans/2026-09-24-v1-task-chain.md`「承载根仓库 DEFECT-024」节，根侧只代登其文档面、零改其码，代登后其 `tests/test_documentation.py` 9 passed；取证补强＝`_domain_view` 的复用面含 `GET /domains/{domain_id}` 的数据库回退分支，同一端点两分支一有一无，故按「一处补齐覆盖三枚读面」表述；去处登记见 [cross-project-contracts.md §4](../design/cross-project-contracts.md)，登记全貌见 [普通任务轮壳 W31](2026-09-29-ordinary-tasks-round.md)）。验证＝新增 8 例定向用例（41 passed）＋变异验证两条守护各自判红后精确回退＋前端三门禁（`tsc -b` exit 0、vitest 串行 67 files／855 tests passed、`vite build` exit 0）＋真机浏览器取证（8903 服务 `assets/index-W77EQg5i.js`、请求主机仅 8903＋8900、`GET /api/v1/domains` 200、控制台零消息、无弹窗报错、「编辑领域知识」的「学科知识」回填 185 字正文——**初值非空已由真机证实**；写侧另于 2026-10-25 用户发令后真机保存一次并通过（提交体含 `scope` 全文 837 B、保存前后九字段指纹逐字段相同），见[普通任务轮壳](2026-09-29-ordinary-tasks-round.md)同批过程证据条；防御腿（`undefined` 不进提交体）由单测与变异验证覆盖，真机未走到该分支）。
+- **状态**：已修复（2026-10-25）

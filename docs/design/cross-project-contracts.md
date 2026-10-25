@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-10-21
+最后更新：2026-10-24
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -100,26 +100,42 @@ R5 其文档自陈 Alembic 位置与生产库实存不符请更正），承载�
 （挂 ARCH-025 轮线 2，一次谈定 `af_*` 专用表族重构）：R1 两库现状读数与迁移链自陈更正、R2 档 B 整族重建采否与四件必答、
 R3 逐列形状与净新增两枚知识点表准入（并入原 `REQ-133` R2／R3／R5／R6、`REQ-135` R3／R4）、R4 书级三列自洽与两库分叉归一
 （原 `REQ-123` R1／R2）、R5 `af_parse_jobs` 保留窗与生效指针不可裁剪不变量（原 `REQ-129`）；承载壳见
-[2026-10-21-af-family-rebuild-consolidated-request.md](../plans/2026-10-21-af-family-rebuild-consolidated-request.md)
-（**登记口径 2026-10-21 复核**：对方台账已自成承接——其 `docs/trackers/todo.md` 的 PLAN-024 行自陈「**请求接收（QED-Engine 根仓库 REQ-136，并入 REQ-123／REQ-129）**」，其 `todo.md:33` 的 `REQ-123` 与 `todo.md:45` 的 `REQ-129` 两枚入站行已改指 `REQ-136`，故本段原「待发函、对方台账尚无承接行」与下句「待发函窗改指」两处口径**已被对方台账现状超越**；本会话只登记这一观察，`REQ-136` 的关闭判据仍以其逐条回执为准，其 R1~R5 状态列一字未改，改判归该行会话），**逐列形状正本已移交对方** [AF PLAN-024](../../Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md)（`af_*` 四张：`af_books` 零改列／`af_operations` 事件明细／`af_pages` 结果索引／`af_kp` 知识点单表 21 列），其上游设计稿 [REQ-134](../plans/2026-10-21-af-table-architecture-design.md) 于 **2026-10-21 退为指针**（R-1~R-7 七枚裁决点全部有答案，根侧承接面＝只读导出端点 + 共享主表提升腿）；
+[2026-10-21-af-family-rebuild-consolidated-request.md](../history/plans/2026-10/2026-10-21-af-family-rebuild-consolidated-request.md)
+（**登记口径 2026-10-21 复核**：对方台账已自成承接——其 `docs/trackers/todo.md` 的 PLAN-024 行自陈「**请求接收（QED-Engine 根仓库 REQ-136，并入 REQ-123／REQ-129）**」，其 `todo.md:33` 的 `REQ-123` 与 `todo.md:45` 的 `REQ-129` 两枚入站行已改指 `REQ-136`，故本段原「待发函、对方台账尚无承接行」与下句「待发函窗改指」两处口径**已被对方台账现状超越**；本会话只登记这一观察，`REQ-136` 的关闭判据仍以其逐条回执为准，其 R1~R5 状态列一字未改，改判归该行会话；**2026-10-24 该枚综合请求以 `Achieved` 收口**＝对方 2026-10-23 自关其 PLAN-024（采**档 B 整族重建并已执行**，2026-10-22 落库，`af_*` 定档四张、head `20261022_0001`、旧三表两库零存活），R3 净新增形状**经对方改判**为 `af_operations`＋`af_kp`（非本案原提的两枚窄表）、R4 的「ingest 复位归零」经其裁决⑳ **裁撤不跟踪**，根侧六处总纲随步＋两库只读探针复算，S1「六项对接信息」经用户裁为**等价达成**，逐条对照见归档壳「关闭与归档」节与 [completed.md](../trackers/completed.md) 的 REQ-136 行），**逐列形状正本已移交对方** [AF PLAN-024](../../Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md)（`af_*` 四张：`af_books` 零改列／`af_operations` 事件明细／`af_pages` 结果索引／`af_kp` 知识点单表 23 列（**原记 21 列＝事实错**，2026-10-24 两库只读探针复算更正，归 [REQ-138 壳](../plans/2026-10-23-admin-render-and-kp-review-workspace.md) 第 7 条在案观察），其上游设计稿 [REQ-134](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md) 于 **2026-10-21 退为指针**（R-1~R-7 七枚裁决点全部有答案，根侧承接面＝只读导出端点 + 共享主表提升腿）；
 `REQ-123`／`REQ-133`／`REQ-135` 三枚原请求稿壳按 ADR 0021 第 5 条**归并不删壳**移
 [`history/plans/2026-10/`](../history/plans/2026-10/2026-10-17-af-books-parse-status-request.md) 并置 `状态：Superseded`
 （`REQ-129` 原无独立壳，承载在 [普通任务轮壳 W5](../plans/2026-09-29-ordinary-tasks-round.md)），逐条映射写在
 [completed.md](../trackers/completed.md) 四行；对方台账的两枚入站承接行（其 `todo.md:33` 的 `REQ-123`、其 `todo.md:45` 的
-`REQ-129`）**已改指 `REQ-136`**（2026-10-21 实读其行文，见上条登记口径）；`REQ-121` → QED-Tracker，`qt_books` 书级两列（`intro`／`audience`）＋ 8901 `GET /books` 透传＋存量 17 行回填口径（R1~R5），承载壳见 [2026-10-16-book-intro-audience-tracker-request.md](../plans/2026-10-16-book-intro-audience-tracker-request.md)（**待用户转达**，对方台账尚无承接行）；`REQ-128` → QED-Tracker 的两张作业表**保留期口径自定**请求于 **2026-10-21 取消**（**Not Applicable**，需求失效依据两条：
+`REQ-129`）**已改指 `REQ-136`**（2026-10-21 实读其行文，见上条登记口径）；`REQ-121` → QED-Tracker，`qt_books` 书级两列（`intro`／`audience`，或按其 meta 守则改判为 `qt_books.meta` 键位）＋ 8901 `GET /books` 透传＋存量回填口径（R1~R5；**行数更正**＝原写「17 行」系 2026-10-16 立项读数，2026-10-23 只读探针复算 `qed_test`＝`qt_books` **26 行**，其中 17 本已进 `af_books`（17/17 命中 10 枚教程套）、9 本尚未进解析侧），承载壳见 [2026-10-16-book-intro-audience-tracker-request.md](../history/plans/2026-10/2026-10-16-book-intro-audience-tracker-request.md)；**2026-10-23 发函**（用户授权原文＝「我确认授权根侧代登对方文档面；与REQ-119 并成一枚发函」）＝与上条 `REQ-119` 残余并成**一枚三事**落对方同一承接窗口（其 todo `QED-082` 行＋其 `docs/plans/2026-09-24-v1-task-chain.md`「承载根仓库 REQ-121」节，只改其两份既有文档、零新建 md），携带＝本请求 R1~R5 ＋ `REQ-119` 两未做项（R5 双仓同批改面清单、逐条回执催办）＋ `REQ-128` 取消告知（其 `QED-078` 行失去需求方）；并函只并**发函与承接窗口**、不并根侧台账行（`REQ-119` 已收口且四项达成，另立综合 ID 会作废既有证据并要对方重新承接，与 `REQ-136` 四枚未承接请求的并法不同）；根侧消费动因随步＝教材卡两列现由套级派生，`kt-mathanalysis-3`（4 本）与 `kt-mathanalysis-4`（5 本）两枚套吃掉 9 本共用两句简介，判定已由「已知妥协」升级为**现网误陈述**，而书级事实源在对方、根侧不可自行修正；「R1 是否收窄为只要 `intro`、`audience` 推后」在同批裁决中用户未答曾**保持待定**，**2026-10-23 用户复裁＝收窄落地**（原文＝「确认只要只要 intro，audience 推后，继续执行，可用授权你最小化改动qed-tracker并进行两方的收尾」）⇒ R1 终态＝`qt_books.meta.intro` 单键（**零 ALTER**，走对方 meta 守则的键位替代），`audience` 推后、面向对象继续读套级 `position`；R2 取证＝对方 `to_dict()` 全列天然透传 `meta`，**现网零改码即成立**（原请求稿的 `GET /books/{id}` 单数端点在对方不存在，读位＝`GET /books`）；R3 口径回执＝**判退套级派生批量回填**（复制同一句套话零信息增量、会把误陈述固化入库），逐本登记走本批新增写面 `PATCH /api/v1/books/{id}`（按键合并），现网 26 行 `meta` 全 NULL ⇒ 卡面文案当前不变；根侧消费面随步＝`api/learn.py` 的 `books[].intro` 改**书级优先**、套级降兜底（`api-contracts.md` §⑥ 同批改定），两枚定向用例守护「书级命中」「书库腿离线回落」；**本行已于 2026-10-23 以 `Achieved` 收口**（S1~S5 逐条对照见归档壳「关闭与归档」），执行身份披露＝对方侧代码与回执由根侧 agent 依上述授权**代执行代出**、非对方会话独立出具，对方复核后可改判（表结构零改动、撤回路径逐条在归档壳「遗留与移交」）；对方门禁随步＝其 `tests/test_documentation.py` 代登前 **1 failed／8 passed**（唯一红＝其 `QED-080` 行仍指 `REQ-119` 请求稿的归档前路径，系 2026-10-23 收口批移动文件未随步入站链接，本批顺带修红）→ 代登后 **9 passed**；`REQ-128` → QED-Tracker 的两张作业表**保留期口径自定**请求于 **2026-10-21 取消**（**Not Applicable**，需求失效依据两条：
 ① 根侧总纲 §7.9 的裁剪边界与「四类行不可裁剪」已成文，根侧既不代设数值也不代执行，向对方发函无新增约束；② 代码查证推翻
 原 S2 的立论前提——`qt_selections` 不是流水表而是**数据源表**，`QED-Tracker/src/qed_tracker/db/selection_repository.py:183-190`
 以全表 `payload.downloads` 派生论文去重集，按行裁剪即误删去重记忆）；同批的 `REQ-129`（`af_parse_jobs` 保留期）**不随取消**，
 已并入上条 `REQ-136` R5；落点见 [普通任务轮壳 W5](../plans/2026-09-29-ordinary-tasks-round.md)；
 `REQ-139` → Axiom-Flow 的**知识点梳理模块三面承接请求**（甲・条文面 A1~A6／乙・写者与通路面 B1~B4＝其 PLAN-024 的 W10
-实现批／丙・端点面 C1~C8 含批量取页）于 **2026-10-23 发函**，承载壳见
+实现批、**2026-10-23 起由对方自立的 PLAN-025〔其 [2026-10-23-kp-curation-implementation.md](../../Axiom-Flow/docs/plans/2026-10-23-kp-curation-implementation.md)〕承接其 W10**／丙・端点面 C1~C8 含批量取页）于 **2026-10-23 发函**，承载壳见
 [2026-10-23-kp-review-af-request.md](../plans/2026-10-23-kp-review-af-request.md)，判据正本＝其上游核查轮
 [REQ-138 壳](../plans/2026-10-23-admin-render-and-kp-review-workspace.md) 的梳理稿三段与本函工作项表；三面**全部零 ALTER、
 零新迁移**——发函时曾按条件项 X1 登记「章→页区间加列」，根侧 Q4 已裁为**甲案**（由该节全部 point 行
 `anchors[].page` 取 min/max 读时派生，派生不出时人工补起止页落根侧 `meta` 作兜底）⇒ X1 作废，本函对 `af_*` 列面
 零请求；对方列面已为四步备齐位置，缺的全是写者与条文。
-对方文档面已按根侧合法动作代登承接（其 `docs/trackers/todo.md` 的 `REQ-139` 行＋其 PLAN-024 壳「承载 REQ-139」节，
+对方文档面已按根侧合法动作代登承接（其 `docs/trackers/todo.md` 的 `REQ-139` 行＋其 PLAN-025 壳「承载 REQ-139」节，
 未新建其任何 md 文件）；代码面、排期与逐条回执归对方会话，根侧本函零代码零 DDL。
+**2026-10-24 形状核对后的净新增三面**（同函登记、不另发新函，正文在 REQ-139 壳）＝`N1` 文本引擎适配器接入（其
+`engines/factory.py` 槽位登记表空 ⇒ 梳理提交恒 503）、`N2` 梳理面在网生效（现网 `openapi.json` 零枚 kp 路由）、
+`N3` 人工直登记知识点的创建端点（其七条 `kp` 路由无创建入口，阶段一暂走根侧 `POST /learn/knowledge-points`）；
+另 `C7` 批量取页仍未在册。**根侧消费口径**＝梳理屏的实施与透传已由 [REQ-141 壳](../plans/2026-10-24-kp-review-screen-and-kp-passthrough.md)
+承载，N1／N2 到位与否**不阻塞根侧屏的交付**（空态与拒绝态可见即算合法形态）；
+`DEFECT-024`（乙案）→ QED-Tracker，**2026-10-25 发函**：请其 `src/qed_tracker/api/main.py` 的
+`_domain_view()` 在领域层载荷补 `scope` 一键，使 `GET /courses`（含 `GET /courses/{id}`）与其早已
+含该键的 `GET /domains` 两读面同形——现网 `GET /courses` 的领域层结构性不返 `scope`，8903「编辑领域
+知识」弹窗初值因此落空串，保存即以空串经 8900 透传覆写库中用户正文（真库取证：数据未丢，
+`qed_test.qed_domain` 的 `math-advanced` `scope` 长 185 字符，属**读面不全**非数据丢失）。**零 ALTER、
+零迁移、零数据改动**（该键在对方 `_domain_view_flat()` 已成型，属补齐既有承诺而非新增形状）。
+根侧甲腿（前端由 `GET /domains` 补齐缺键行 + `undefined` 不进提交体）**已先行落地**，故本函不阻塞
+现网；对方落地后补齐腿自动让位、根侧零改码。判据正本＝根侧 todo `DEFECT-024` 行与其承载
+[普通任务轮壳 W31](../plans/2026-09-29-ordinary-tasks-round.md)；承接位＝对方 todo `QED-083` 行＋
+其 `docs/plans/2026-09-24-v1-task-chain.md`「承载根仓库 DEFECT-024」节（只改其两份既有文档、零新建 md，
+避其文档白名单门禁）；执行与逐条回执归对方会话，根侧代登范围止于其文档面。
 
 ## 5. QED-Tracker 服务接口契约（8901）
 
@@ -168,7 +184,7 @@ R3 逐列形状与净新增两枚知识点表准入（并入原 `REQ-133` R2／R
   | 入库与解析 | ingest＝渲染页图（元数据落 af_books，不调模型），**分钟级同步长请求**（超时分层见 §11）；解析任务 202 提交 + 轮询（`queued/running/completed/failed`，progress `{parsed,total,error}`）——解析本身已是后台任务范式 | Axiom-Flow `api.md`；`api-contracts.md` §④；parsing-flow.md §4 |
   | 产物与对照 | 页级 blocks/markdown/原页图读取；manifest 产物清单（路径/大小/哈希）；源 PDF 由 8900 本地端点从数据根取（不经 8902） | `api-contracts.md` §④；parsing-flow.md §5/§7 |
   | 人工编辑落库 | 块级编辑记录（EditRecord）与判定写入；8900 `/review` 门面为过渡兼容，新消费面一律走 edit 契约 | `api-contracts.md` §④ |
-  | 知识点梳理工作区（**2026-10-21 定档，尚未落地**） | 梳理段正本整体归 8902：工作区与候选池＝单表 `af_kp`（层级 `parent_id`、关系 `links` JSON、机器位 `gen_status`／人工位 `confirmed` 分列、批次 `gen_batch`、长文只留 `narrative_ref` 指针）。根侧消费面**只有两件事**＝经 8900 透传读其**只读导出端点**（命名与形状归对方）＋把 `confirmed=1` 的行单向提升进共享 `qed_knowledge_point`（幂等锚＝主表标量列 `from_detail_id` 存 `node_id`）；**提升时的列映射（2026-10-21 v1.0 定档）**＝对方别名列表 → 主表 `aliases`、对方多角度叙述 → 主表 `angles`（`angle` 闭集复用根侧既有六词 `summary`／`explanation`／`definition`／`theorem`／`proof`／`example`，对方若给闭集外词即拒收并记偏差，不静默改写）、对方长文指针 → 主表 `narrative_ref`；**两侧指针形态刻意不同**＝对方存 `<book_dir>/kp/<node_id>.md` 的**单段文件名**（其 KA-20），根侧存**数据根相对路径全串**，提升腿负责补前缀，理由是 8900 须在 8902 离线时自行解析该指针（独立性铁律）；8902 **不直写共享表**、**不回写提升结果**，根侧**不直写 `af_*`**；AF 离线时学习与练习三链照常（独立性铁律，只梳理屏不可用） | Axiom-Flow [PLAN-024](../../Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md)（逐列与提升通路正本）；根侧承接面 [REQ-134](../plans/2026-10-21-af-table-architecture-design.md)（已退指针）与 [REQ-132 壳 W5](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) |
+  | 知识点梳理工作区（**2026-10-21 定档，尚未落地**） | 梳理段正本整体归 8902：工作区与候选池＝单表 `af_kp`（层级 `parent_id`、关系 `links` JSON、机器位 `gen_status`／人工位 `confirmed` 分列、批次 `gen_batch`、长文只留 `narrative_ref` 指针）。根侧消费面**只有两件事**＝经 8900 透传读其**只读导出端点**（命名与形状归对方）＋把 `confirmed=1` 的行单向提升进共享 `qed_knowledge_point`（幂等锚＝主表标量列 `from_detail_id` 存 `node_id`）；**提升时的列映射（2026-10-21 v1.0 定档）**＝对方别名列表 → 主表 `aliases`、对方多角度叙述 → 主表 `angles`（`angle` 闭集复用根侧既有六词 `summary`／`explanation`／`definition`／`theorem`／`proof`／`example`，对方若给闭集外词即拒收并记偏差，不静默改写）、对方长文指针 → 主表 `narrative_ref`；**两侧指针形态刻意不同**＝对方存 `<book_dir>/kp/<node_id>.md` 的**单段文件名**（其 KA-20），根侧存**数据根相对路径全串**，提升腿负责补前缀，理由是 8900 须在 8902 离线时自行解析该指针（独立性铁律）；8902 **不直写共享表**、**不回写提升结果**，根侧**不直写 `af_*`**；AF 离线时学习与练习三链照常（独立性铁律，只梳理屏不可用） | Axiom-Flow [PLAN-024](../../Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md)（逐列与提升通路正本）；根侧承接面 [REQ-134](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md)（已退指针）与 [REQ-132 壳 W5](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) |
   | 预留面 | 版本列表/回滚、chunks（RAG 切片预留）、书目 PATCH/DELETE——8902 侧已实现，8900 透传与前端消费未排期 | `api-contracts.md` §④「规划契约」 |
 
 - **上下游**：上游 8901 `axiom push` 交接（§3 对接点）；解析经引擎适配器**直连本地模型服务**，
