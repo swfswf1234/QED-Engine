@@ -11,6 +11,10 @@
 - GET  /api/v1/books/{id}/pages/{no}/edits                页级编辑记录列表
 - POST /api/v1/parse-jobs               提交解析任务（book_id、pages、engine；响应主键 id、progress 为对象）
 - GET  /api/v1/parse-jobs/{id}          任务状态与进度（queued/running/completed/failed）
+- ④ 知识点梳理（af_kp）十条腿经 kp_relay 一比一透传（kp-jobs / books/{id}/kp-jobs/{batch} /
+  books/{id}/kp / kp/nodes/{id} 的 PATCH、confirm 与 summary 重生成 / kp/nodes/{id}/narrative 的写与读 /
+  books/{id}/kp/outline / books/{id}/kp/export）：状态码与正文原样回，接口与库变更全归
+  Axiom-Flow，本层不校验形状；重生成是同步的百秒级模型调用，由调用方显式放长超时
 
 transport 可注入（测试用 MockTransport）；非 2xx 与连接失败统一抛 AxiomError。
 8902 离线时由 api/axiom.py 映射 503（独立性铁律）。
@@ -114,8 +118,12 @@ class AxiomClient:
         note: str = "",
         corrected_text: str | None = None,
         corrected_bbox: list | None = None,
+        corrected_type: str | None = None,
     ) -> dict:
-        """块编辑（upsert af_block_edits；verdict: ok/bad，重复编辑覆盖）。返回 EditRecord。"""
+        """块编辑（upsert 意图行；verdict: ok/bad，重复编辑覆盖）。返回 EditRecord。
+
+        `corrected_type`＝人工块类型改判（闭集正本在 8902 BlockType）；生效类型由 8902 读侧叠加，本仓不合并。
+        """
         body: dict = {}
         if verdict is not None:
             body["verdict"] = verdict
@@ -125,6 +133,8 @@ class AxiomClient:
             body["corrected_text"] = corrected_text
         if corrected_bbox is not None:
             body["corrected_bbox"] = corrected_bbox
+        if corrected_type is not None:
+            body["corrected_type"] = corrected_type
         return self._request(
             "PUT",
             f"{API_PREFIX}/books/{book_id}/pages/{page_no}/blocks/{block_index}/edit",
@@ -170,6 +180,33 @@ class AxiomClient:
         if book_id:
             params["book_id"] = book_id
         return self._request("GET", f"{API_PREFIX}/parse-jobs", params=params)
+
+    # --- ④ 知识点梳理（af_kp）透传原语 ---
+
+    def kp_relay(
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> tuple[int, bytes, str]:
+        """梳理面的唯一通路：把 8902 的 (状态码, 响应字节, content-type) 原样交回调用方。
+
+        与 `_request` 的分别**是刻意的**：本方法只在连接失败时抛 AxiomError，4xx／5xx 不抛——
+        梳理契约里 confirm 的 422 正文与 200 同形（`missing` 是要逐条显示的清单）、`if_rev`
+        冲突的 409 先于形状校验、槽位未接入是上游主动的 503；把上游状态码读成异常再换成
+        `{"detail": …}` 就丢了形状（REQ-141 W2）。路径由调用方按 8902 原样拼好，本层不别名。
+
+        `timeout` 缺省沿用客户端 30s；只有单点重生成这类**同步的百秒级模型调用**由调用方显式放长
+        （8902 网关自身另有 360s 上限，根侧不得超过它，否则先断的永远是本层）。
+        """
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        try:
+            response = self._client.request(method, path, json=body, **kwargs)
+        except httpx.HTTPError as exc:
+            raise AxiomError(f"8902 连接失败：{exc}") from exc
+        return response.status_code, response.content, response.headers.get("content-type") or "application/json"
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         try:

@@ -59,7 +59,7 @@ todo.md `REQ-132` 行「成功标准」列，本壳不复制判据。
 - W6 收口：全仓旧名引用清零核验 + 门禁 + 真机三链 + 总纲与 `code-map.md` 随步。
 
 **非目标**：
-- 不改共享四表前缀，不改 `qt_*`／`af_*` 任何表名（`af_*` 族另见 [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)，原 REQ-133 已并入该综合请求）。
+- 不改共享四表前缀，不改 `qt_*`／`af_*` 任何表名（`af_*` 族另见 [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)，原 REQ-133 已并入该综合请求）。
 - 不在本批（W1~W6 改名轮）动列与表的存在性：**判定已于 W5 出**（见「W5 逐表判定表」节），但执行不落在
   本壳判据内——本行 S1~S5 只覆盖改名、逐字随步与判定表成文，**废表／并层／删列的执行须另立一行承载**
   （成功标准冻结，ADR 0023；扩载须改判，故不擅自并入本行）。两枚共享表死列
@@ -119,7 +119,7 @@ P2 已消（W1）；P1 的归一批次随退表简化——`qed_learn_kp_detail`
 
 | ID | 守则 | 理由 | 落点 |
 | --- | --- | --- | --- |
-| K1 | 根侧**只读** AF 的只读导出端点取确认行，端点形状归 Axiom-Flow 定 | `af_*` 列级正本在对方文档（ADR 0025）；本文两份正文并存即漂移（REQ-134 与对方 PLAN-024 已撞过一次） | [REQ-134 壳](../../../plans/2026-10-21-af-table-architecture-design.md) 退为指针 |
+| K1 | 根侧**只读** AF 的只读导出端点取确认行，端点形状归 Axiom-Flow 定 | `af_*` 列级正本在对方文档（ADR 0025）；本文两份正文并存即漂移（REQ-134 与对方 PLAN-024 已撞过一次） | [REQ-134 壳](2026-10-21-af-table-architecture-design.md) 退为指针 |
 | K2 | 提升＝8900 单向写共享主表，`confirmed` 行按 outline→point 两层落，`summary` 原样平移 | 主表当前唯一写者是 8900、AF 明文只读不写 | 同上「提升契约」节 |
 | K3 | **幂等锚用主表标量列 `from_detail_id` 存 AF `node_id`**，不再落 `anchors` JSON | 立论不借 R7（R7 只管 `meta`，`anchors` 不在其内）＝幂等锚要**可 `WHERE`、可建唯一约束**，JSON 路径表达式反查要扫全表；主表已有这枚语义完全对口的标量列，零新列即得 | 执行批次改列注释 + 逐字 DDL 守护同批 |
 | K4 | 人工确认位**经 8902 写回**，根侧不直写 `af_*`；AF 不回写提升结果 | R6 人工位机器不写；跨仓回写即第二条写路径 | 与 REQ-136 R3 回执同批成文 |
@@ -211,7 +211,7 @@ P2 已消（W1）；P1 的归一批次随退表简化——`qed_learn_kp_detail`
   ② `qe_course` 撞名取**学习侧改名 `qe_course_state`**（共享课程目录表让位方案与「仅该表保留 `learn_`」
   方案均未采）；③ 台账形态＝另立 REQ-132（本行）与 REQ-133（`af_*` 族梳理请求稿），不挂 REQ-120 壳内条目。
   **同日随步注记**＝REQ-133 已按用户同日第三道令（范围答复「并 123+129+133+135 四枚（推荐）」）并入综合请求
-  [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)，上方裁决原文按记录不改写。
+  [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)，上方裁决原文按记录不改写。
 - **2026-10-21 定级**：按 `AGENTS.md`「变更分级与边界」表，本任务改的是 `architecture/database-design.md`
   的表名与建表语句（大修改）＋根侧代码 DDL 与库内数据（B 类实现 + D 类数据操作），故 todo 行 + 本壳 +
   门禁先行；因用户裁决只动根私有族，不动 R1 与 ADR 0025 的判据，**不立 ADR**，仅加表名随步注记。
@@ -302,7 +302,7 @@ P2 已消（W1）；P1 的归一批次随退表简化——`qed_learn_kp_detail`
   零列面、零 DDL、零表数改动——① 总纲 [database-design.md](../../../architecture/database-design.md)：§三 四行备注
   （`qe_course_state`／`qe_unit`／`qe_kp_detail`／`qe_review_task`）、§五 引言加「判定不领先执行」声明、
   `qe_kp_detail` 小节引言加定档引用块、共享主表 `from_detail_id` **备注列**记语义平移（DDL 注释原文未动）、
-  §7.6 加两条（简化批次归属＋退表形态与改名分流相反）、§7.8 新增 **T10／T11**；② [REQ-134 壳](../../../plans/2026-10-21-af-table-architecture-design.md)
+  §7.6 加两条（简化批次归属＋退表形态与改名分流相反）、§7.8 新增 **T10／T11**；② [REQ-134 壳](2026-10-21-af-table-architecture-design.md)
   退为指针（新增「逐列形状的地位」节与七行差异表、裁决点 R-1~R-7 定档、**自陈两处事实错**＝长叙述归根侧池、
   「档 B 消解裁决点＝零」）；③ [REQ-131 总纲壳](../../../plans/2026-10-20-doc-knowledge-cluster-master-outline.md) 回填 C-2／C-3
   并声明 C-1／C-4／C-5／C-6 仍未裁；④ [ARCH-027-M4 壳](../../../plans/2026-09-23-knowledge-exploration.md) 案 C
@@ -310,8 +310,8 @@ P2 已消（W1）；P1 的归一批次随退表简化——`qed_learn_kp_detail`
   §4 在途登记随步（REQ-134 退指针＋**对方台账已自成 REQ-136 承接行的观察**）与 §6 新增「知识点梳理工作区」能力组行。
   随步时新查到的对方事实＝其 `docs/trackers/todo.md` 的 PLAN-024 行自陈「请求接收（根仓库 REQ-136，并入 REQ-123／REQ-129）」，
   与根侧原登记的「待发函、尚无承接行」不符——只登记观察不改判，REQ-136 的关闭仍以其逐条回执为准。
-  **指针清扫面（同批第三条）**：全仓 `rg "逐列形状.{0,12}正本"` 复核后改了指向**当前事实**的五处＝[REQ-134 壳](../../../plans/2026-10-21-af-table-architecture-design.md)
-  「目标」段（原句仍写「交用户一次裁死」，与本壳退指针并存属自相矛盾，已补定档尾句）、[REQ-136 壳](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)
+  **指针清扫面（同批第三条）**：全仓 `rg "逐列形状.{0,12}正本"` 复核后改了指向**当前事实**的五处＝[REQ-134 壳](2026-10-21-af-table-architecture-design.md)
+  「目标」段（原句仍写「交用户一次裁死」，与本壳退指针并存属自相矛盾，已补定档尾句）、[REQ-136 壳](2026-10-21-af-family-rebuild-consolidated-request.md)
   的关联设计行／目标段／过程与证据条、[项目状态快照](../../../trackers/project-status.md) 当前主线、
   [design-bugfix-log.md](../../../plans/design-bugfix-log.md) BUGFIX-037（追加「同日第二批随步」条，原「修复与验证」记录不改写）。
   按治理豁免、**留作当时叙事**的三处＝ARCH-025 壳「线 2 收拢为一枚综合请求」过程行、普通任务轮壳 W5 行、
@@ -373,7 +373,7 @@ P2 已消（W1）；P1 的归一批次随退表简化——`qed_learn_kp_detail`
    （REQ-120 壳定档表、REQ-130 壳「过程与证据」行的三枚练习表旧代码名、`2026-09-22-learning-design-mainline.md`、
    `2026-09-23-knowledge-exploration.md` 与 `2026-10-20-doc-knowledge-cluster-master-outline.md` 的提案表
    `qe_learn_kp_source`、`2026-10-15-doc-analysis-processing.md`、普通任务轮壳 W-行、**本壳「过程与证据」同日第二批条
-   与 [REQ-134 壳](../../../plans/2026-10-21-af-table-architecture-design.md)（其「交叠划清」表与本壳 2026-10-21 随步在其
+   与 [REQ-134 壳](2026-10-21-af-table-architecture-design.md)（其「交叠划清」表与本壳 2026-10-21 随步在其
    「过程与证据」「裁决点」两处新增的引用）对旧族名与作废草案名的陈述**）、`docs/trackers/completed.md`
    历史行、本壳定档表的「改名前代码名」列、库内现名与禁串字面量（总纲 §三 备注列、§7.6、7.8 T2、§八 守护行，
    及 `tests/contract/test_architecture_documents.py` 的 `stale` 判据）；`docs/history/` 14 枚按治理规则豁免。

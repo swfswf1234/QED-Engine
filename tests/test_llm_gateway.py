@@ -52,6 +52,54 @@ def test_call_text_api_mode(monkeypatch):
     assert captured["record"]["endpoint"] == "text"
 
 
+def test_call_text_forwards_attribution_to_ledger(monkeypatch):
+    """归因三键（`service`／`task`／`step`）与 `meta` 由调用方上送并原样落账（R8 甲：账只由 8900 落一行）。"""
+    captured = {}
+
+    def fake_chat(api_key, model, messages, **kw):
+        return "回答"
+
+    def fake_record(settings, **kwargs):
+        captured["record"] = kwargs
+        return 1
+
+    monkeypatch.setattr(gateway.clients, "provider_text_chat", fake_chat)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    gateway.call_text(
+        _settings(qed_api_select="api", api_key="sk-x"),
+        prompt="请出目录", service="axiom_flow", task="kp-curation", step="outline",
+        meta={"book_id": "b05", "gen_batch": "kb-1"},
+    )
+    assert captured["record"]["service"] == "axiom_flow"
+    assert captured["record"]["task"] == "kp-curation"
+    assert captured["record"]["step"] == "outline"
+    assert captured["record"]["meta"] == {"book_id": "b05", "gen_batch": "kb-1"}
+
+
+def test_call_text_error_row_keeps_attribution(monkeypatch):
+    """失败行同样带归因三键：8900 侧「按来源筛失败」要能筛得出这一条。"""
+    captured = {}
+
+    def fake_chat(api_key, model, messages, **kw):
+        raise RuntimeError("模型不可达")
+
+    def fake_record(settings, **kwargs):
+        captured["record"] = kwargs
+        return 2
+
+    monkeypatch.setattr(gateway.clients, "provider_text_chat", fake_chat)
+    monkeypatch.setattr(gateway.call_log, "record_call", fake_record)
+    result = gateway.call_text(
+        _settings(qed_api_select="api", api_key="sk-x"),
+        prompt="p", service="axiom_flow", task="kp-curation", step="points",
+    )
+    assert result["success"] is False
+    assert captured["record"]["status"] == "error"
+    assert captured["record"]["service"] == "axiom_flow"
+    assert captured["record"]["task"] == "kp-curation"
+    assert captured["record"]["step"] == "points"
+
+
 def test_call_text_api_provider_fallback_routing(monkeypatch):
     """api 模式：身份无 api 引用（qwen3.8-27b）→ 回退 QED_API_PROVIDER 厂商默认模型。"""
     captured = {}

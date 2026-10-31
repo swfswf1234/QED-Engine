@@ -50,11 +50,10 @@ describe('版式偏好接线（§5：store 状态 + localStorage 持久）', () 
     expect(useParsingStore.getState().typography).toEqual(DEFAULT_TYPOGRAPHY);
   });
 
-  it('setTypography 合并写入并即时持久', () => {
-    useParsingStore.getState().setTypography({ bodyLevel: 3 });
-    expect(useParsingStore.getState().typography).toEqual({ bodyFont: 'SimSun', bodyLevel: 3, showFurniture: false });
+  it('偏好只从盘上读回，store 不再暴露写腿（「排版」面板与写腿一并撤除）', () => {
+    localStorage.setItem(TYPOGRAPHY_STORAGE_KEY, JSON.stringify({ ...DEFAULT_TYPOGRAPHY, bodyLevel: 3 }));
     expect(loadTypographyPrefs().bodyLevel).toBe(3);
-    expect(JSON.parse(localStorage.getItem(TYPOGRAPHY_STORAGE_KEY) ?? '{}').bodyLevel).toBe(3);
+    expect((useParsingStore.getState() as unknown as Record<string, unknown>).setTypography).toBeUndefined();
   });
 });
 
@@ -150,8 +149,8 @@ describe('regionDraft 本地预览态（§10：删除/合并/新框，落库禁�
   });
 
   it('切页清空多选与草稿、保留版式偏好', async () => {
+    useParsingStore.setState({ typography: { ...DEFAULT_TYPOGRAPHY, bodyFont: 'KaiTi' } });
     const st = useParsingStore.getState();
-    st.setTypography({ bodyFont: 'KaiTi' });
     st.addRegionDraft([0, 0, 50, 50]);
     st.toggleBoxSelect(1);
     await useParsingStore.getState().loadPage(2);
@@ -211,6 +210,34 @@ describe('整页确认（REQ-098 W8：confirmPageBlocks 批量落 verdict=ok）'
     const r = await useParsingStore.getState().confirmPageBlocks(2, -1);
     expect(r.confirmed).toBe(2);
     expect(r.skipped).toBe(0);
+  });
+});
+
+/** 生效类型的唯一源在 8902 读侧（PM-5 覆盖层）：改判保存后重取页数据，本地不自建类型合并腿 */
+describe('块类型改判后的页读数刷新（REQ-142 W5）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    reset();
+  });
+
+  it('带 corrected_type 的保存成功 → 重取当前页并把改判行入账', async () => {
+    const { getBookPage, putBlockEdit } = await import('../api/axiom');
+    vi.mocked(putBlockEdit).mockClear();
+    vi.mocked(getBookPage).mockClear();
+    const ok = await useParsingStore.getState().submitEdit(1, { corrected_type: 'header' });
+    expect(ok).toBe(true);
+    expect(useParsingStore.getState().edits['b1:1:1']?.corrected_type).toBe('header');
+    await new Promise((r) => { setTimeout(r, 0); });
+    expect(getBookPage).toHaveBeenCalledWith('b1', 1);
+  });
+
+  it('普通文字修正不触发整页重取（既有编辑态回显腿不变）', async () => {
+    const { getBookPage, putBlockEdit } = await import('../api/axiom');
+    vi.mocked(putBlockEdit).mockClear();
+    vi.mocked(getBookPage).mockClear();
+    await useParsingStore.getState().submitEdit(0, { corrected_text: '新文' });
+    await new Promise((r) => { setTimeout(r, 0); });
+    expect(getBookPage).not.toHaveBeenCalled();
   });
 });
 

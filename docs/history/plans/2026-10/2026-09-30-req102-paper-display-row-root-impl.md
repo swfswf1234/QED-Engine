@@ -10,7 +10,7 @@
 [downloads-ui.md](../../../design/frontend/downloads-ui.md)（W1 晋升论文展示行展示规范的宿主）、
 [dataset-conventions.md](../../../design/dataset-conventions.md)（W1 增 kind=paper 落盘豁免注）、
 [api-contracts.md](../../../architecture/api-contracts.md)（W2 透传端点登记宿主）、
-[REQ-101 请求壳](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)（对方能力面 R1～R4 事实源指针）
+[REQ-101 请求壳](2026-09-30-req101-paper-scope-books-adoption-request.md)（对方能力面 R1～R4 事实源指针）
 关联 Tracker：docs/trackers/todo.md REQ-102；登记与跟踪由
 [ARCH-024 滚动壳](../../../plans/2026-09-22-tracker-v1-continuous-optimization.md)线 2 条目承载
 关联代码：backend/qed_engine/clients/tracker_client.py、backend/qed_engine/api/tracker.py、
@@ -38,7 +38,7 @@ recommend 任务 → 5s 轮询 → 候选评审 + 逐条落位选择（领域|�
 W4 8903 探索入口（依赖 REQ-101 R1/R2 落地）→
 W5 真机回归与收口。
 
-**非目标**：8901 侧一切改动（归 [REQ-101](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)，
+**非目标**：8901 侧一切改动（归 [REQ-101](2026-09-30-req101-paper-scope-books-adoption-request.md)，
 本壳只消费其端点形状）；`exploration_stage` 状态机改动；教程附属资料（现有
 qt_books kind=paper 挂 knowledge 的语义）不动、与发现论文书行共存于同一 kind 值域，
 归属层级不同（knowledge refs vs domain/course refs）由 W1 设计节区分口径；
@@ -68,7 +68,7 @@ qt_books kind=paper 挂 knowledge 的语义）不动、与发现论文书行共�
 ## 过程与证据
 
 - **2026-09-30 立项**：随论文链路对齐裁决立项（三项裁决全文见
-  [REQ-101 壳](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)「过程与证据」节）；
+  [REQ-101 壳](2026-09-30-req101-paper-scope-books-adoption-request.md)「过程与证据」节）；
   形态判断=书本化后论文即书行，根侧消费面大量复用 books 链，
   故 W3 与 W4 拆为可独立交付的两阶段。
 - **2026-09-30 入口收敛裁决 + W1 落笔**：用户裁决论文探索**仅领域级发起**（领域右键
@@ -108,7 +108,7 @@ qt_books kind=paper 挂 knowledge 的语义）不动、与发现论文书行共�
 - **2026-09-30 对方全链复审 → W2 拆分为 W2a/W2b（归因）**：用户授权查阅并操作 QED-Tracker
   后复审其论文链，证实断点全在对方侧三环（入口/落盘/入库），并裁決其序列改精简 A~D 三步
   （正本=对方 068 壳「链路复审与执行序列精简」节，八条代码事实 F1~F8 与四条待定夺实现细节
-  同在该节；根侧摘要见 [REQ-101 壳](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)
+  同在该节；根侧摘要见 [REQ-101 壳](2026-09-30-req101-paper-scope-books-adoption-request.md)
   「过程与证据」）。据此本壳 W2 拆两项：W2a=论文枚举透传（只依赖对方 A 步：`qt_books` 加
   `kind`/落位列 + 8901 `GET /books` 枚举，落地即让已交付的 W3 展示行出数）；
   W2b=探索面透传（recommend/selections/adopt，依赖对方 B 步）。W3 交付物零改动。

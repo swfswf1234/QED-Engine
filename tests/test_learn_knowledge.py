@@ -13,10 +13,12 @@
 
 import time
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from qed_engine.api.main import create_app
-from qed_engine.services.learn import InMemoryKnowledgeStore
+from qed_engine.clients.axiom_client import AxiomClient
+from qed_engine.services.learn import InMemoryKnowledgeStore, InMemoryLearnStore
 
 DEMO_COURSES = [
     {
@@ -1124,3 +1126,370 @@ def test_mysql_patch_point_merges_meta_under_dict_cursor(monkeypatch):
     # 参数尾序＝… meta 值、WHERE kp_id
     merged = json.loads(params[-2])
     assert merged == {"chapter_key_points": ["旧要点"], "note": "补充"}
+
+
+# ---------- 提升同步腿（af_kp 在册成品 → 共享主表；REQ-144 裁乙） ----------
+
+SYNC_BOOK_A = "mathanalysis-b05"
+SYNC_BOOK_B = "mathanalysis-b12"
+_UNSET = object()
+
+
+def _af(
+    node_id, name, *, depth, parent_id=None, kind="outline", status="candidate",
+    role="knowledge", summary="", pages=(12, 14), anchors=_UNSET, narrative_ref="",
+    order_hint=1, book=SYNC_BOOK_A,
+):
+    """造一枚 `af_kp` 工作区行（形状照现网 ④ 透传读数：锚的 ref_id 是页 id 不是书 id）。"""
+    start, end = pages if pages is not None else (None, None)
+    if anchors is _UNSET:
+        anchors = (
+            []
+            if pages is None
+            else [{"kind": "page_block", "page": start, "ref_id": f"p{start:04d}", "snippet": name}]
+        )
+    row = {
+        "node_id": node_id, "book_id": book, "job_id": "job-1", "node_kind": kind,
+        "parent_id": parent_id, "depth": depth, "order_hint": order_hint, "name": name,
+        "role": "", "type": "", "summary": summary, "links": [], "anchors": list(anchors),
+        "narrative_ref": narrative_ref, "gen_status": status, "gen_batch": "afkp-batch-1",
+        "model_ref": "rule:toc", "toc_role": role, "toc_kind": "", "confirmed": 0, "rev": 1,
+        "created_at": "2026-10-29T17:10:29", "updated_at": "2026-10-29T17:31:34",
+    }
+    if pages is not None:
+        row["page_start"] = start
+        row["page_end"] = end
+    return row
+
+
+def _clean_workspace(**overrides):
+    """一本典型教材的在册成品：1 章（含导读指针）＋2 节，外加三类不进目录的行。"""
+    ws = {
+        SYNC_BOOK_A: [
+            _af("afkp-ref", "前言", depth=1, role="reference", pages=(4, 4)),
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40), summary="章总结甲",
+                narrative_ref="afkp-ch1.md"),
+            _af("afkp-p1", "确界原理", depth=2, parent_id="afkp-ch1", pages=(9, 9),
+                summary="点总结一", order_hint=1),
+            _af("afkp-p2", "单调有界原理", depth=2, parent_id="afkp-ch1", pages=(10, 12),
+                summary="", order_hint=2),
+            _af("afkp-rej", "被驳回的节", depth=2, parent_id="afkp-ch1", status="rejected"),
+            _af("afkp-det", "挂在 reference 章下的节", depth=2, parent_id="afkp-ref"),
+            _af("afkp-old", "内容批次遗留点行", kind="point", depth=None, parent_id="afkp-p1"),
+        ],
+        SYNC_BOOK_B: [],
+    }
+    ws.update(overrides)
+    return ws
+
+
+def _sync_client(monkeypatch, store, workspace=None, *, fail=None, offline=False, enroll=True,
+                 book_roles=None):
+    """学习记录＋主表＋8902 工作区三面同场（MockTransport，不触真实库与网络）。
+
+    `book_roles`＝8901 书目腿的 `qt_books` 行（只喂角色判据用）；默认空表＝角色未知、
+    提升腿不做过滤。真机 8901 在跑也不进测试（隔离铁律）。
+    """
+    from qed_engine.clients import tracker_client
+
+    monkeypatch.setenv("API_KEY", "")
+    monkeypatch.setenv("QED_API_SELECT", "api")
+    monkeypatch.setenv("QED_MODEL_SUPERVISOR", "false")
+    monkeypatch.setenv("QED_DB_PASSWORD", "")
+    monkeypatch.setattr(
+        tracker_client.TrackerClient, "list_courses_system", lambda self: DEMO_DOMAINS
+    )
+    monkeypatch.setattr(
+        tracker_client.TrackerClient, "list_books", lambda self, **kw: book_roles or []
+    )
+    rows = _clean_workspace() if workspace is None else workspace
+    errors = {} if fail is None else fail
+
+    def _handler(request):
+        if offline:
+            raise httpx.ConnectError("axiom down", request=request)
+        parts = request.url.path.split("/")
+        book_id = parts[parts.index("books") + 1]
+        if book_id in errors:
+            return httpx.Response(errors[book_id], json={"detail": "上游点名"})
+        return httpx.Response(200, json={"book_id": book_id, "nodes": rows.get(book_id, []),
+                                         "in_flight_batch": None, "review_flags": []})
+
+    learn_store = InMemoryLearnStore()
+    client = TestClient(
+        create_app(
+            learn_store=learn_store,
+            knowledge_store=store,
+            axiom_client=AxiomClient(
+                base_url="http://axiom.test", transport=httpx.MockTransport(_handler)
+            ),
+        )
+    )
+    if enroll:
+        client.post(
+            "/api/v1/learn/courses",
+            json={
+                "course_id": "math_analysis",
+                "resources": [
+                    {"kind": "book", "ref_id": SYNC_BOOK_A, "label": "数学分析（上）"},
+                    {"kind": "book", "ref_id": SYNC_BOOK_B, "label": "数学分析（下）"},
+                ],
+            },
+        )
+    return client
+
+
+def _sync(client, course_id="math_analysis"):
+    resp = client.post(f"/api/v1/learn/courses/{course_id}/knowledge-points/sync")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _sequence(client, course_id="math_analysis"):
+    resp = client.get(f"/api/v1/learn/courses/{course_id}/knowledge-points")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["sequence"]
+
+
+def _promoted_points(store, book_ref):
+    """某本教材在主表里的提升点行名（角色跳过腿的「零写入／不删存量」判据用）。"""
+    return {
+        str(row["name"]) for row in store.points.values()
+        if row.get("node_kind") == "point"
+        and str((row.get("source_ref") or {}).get("ref_id") or "") == book_ref
+    }
+
+
+def test_sync_promotes_only_clean_chapters_and_points(monkeypatch, store):
+    body = _sync(_sync_client(monkeypatch, store))
+    book = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["ok"] is True
+    assert book["chapters"]["created"] == 1 and book["chapters"]["reused"] == 0
+    assert book["points"]["created"] == 2
+    assert book["excluded"] == {"rejected": 1, "reference": 1, "point_rows": 1}
+    assert book["detached"] == 1
+
+    assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_A)] == [
+        "第1章 实数"
+    ]
+    names = sorted(row["name"] for row in store.points.values() if row["node_kind"] == "point")
+    assert names == ["单调有界原理", "确界原理"]
+
+
+def test_sync_sequence_reads_promoted_rows_with_book_scoped_window(monkeypatch, store):
+    client = _sync_client(monkeypatch, store)
+    _sync(client)
+    sequence = _sequence(client)
+    chapters = sequence["chapters"]
+    assert [chapter["name"] for chapter in chapters] == ["第1章 实数"]
+    # 段① 本章总结＝章行 summary 直读；段② 导读腿的取数键＝章行提升锚
+    assert chapters[0]["summary"] == "章总结甲"
+    assert chapters[0]["from_detail_id"] == "afkp-ch1"
+    units = sequence["units"]
+    assert [unit["title"] for unit in units] == ["确界原理", "单调有界原理"]
+    assert units[0]["source_ref"] == {
+        "kind": "book", "ref_id": SYNC_BOOK_A, "page_start": 9, "page_end": 9
+    }
+    assert units[0]["window_source"] == "point"
+    assert units[0]["book_ref"] == SYNC_BOOK_A  # 归本位随投影给出（T4 按书切的取数依据）
+    # 页两键缺失者回落锚派生，且锚的 ref_id 已归一为书 id（不是 p0009 页 id）
+    assert units[0]["anchors"][0]["ref_id"] == SYNC_BOOK_A
+    assert units[0]["summary"] == "点总结一"
+    assert units[1]["summary"] == ""
+
+
+def test_sync_sequence_rows_belong_to_their_own_book(monkeypatch, store):
+    """两本混排时每行归本＝所属章的 `book_ref`（工作台按书切 T4 的取数依据，主表 point 行本身不带）。"""
+    book_b = [
+        _af("afkp-b-ch", "第2章 极限", depth=1, pages=(41, 90), book=SYNC_BOOK_B),
+        _af("afkp-b-p1", "数列极限", depth=2, parent_id="afkp-b-ch", pages=(41, 41),
+            summary="点总结乙", book=SYNC_BOOK_B),
+    ]
+    client = _sync_client(monkeypatch, store, workspace={**_clean_workspace(), SYNC_BOOK_B: book_b})
+    _sync(client)
+    sequence = _sequence(client)
+    book_of_chapter = {row["kp_id"]: row["book_ref"] for row in sequence["chapters"]}
+    assert set(book_of_chapter.values()) == {SYNC_BOOK_A, SYNC_BOOK_B}
+    assert {unit["book_ref"] for unit in sequence["units"]} == {SYNC_BOOK_A, SYNC_BOOK_B}
+    for unit in sequence["units"]:
+        assert unit["book_ref"] == book_of_chapter[unit["chapter_kp_id"]]
+    assert [unit["title"] for unit in sequence["units"] if unit["book_ref"] == SYNC_BOOK_B] == [
+        "数列极限"
+    ]
+
+
+def test_sync_is_idempotent_and_refreshes_summaries(monkeypatch, store):
+    workspace = _clean_workspace()
+    client = _sync_client(monkeypatch, store, workspace)
+    _sync(client)
+    chapter_id = store.list_outline("math_analysis", SYNC_BOOK_A)[0]["kp_id"]
+    point_ids = {
+        row["from_detail_id"]: row["kp_id"]
+        for row in store.points.values()
+        if row["node_kind"] == "point"
+    }
+
+    second = _sync(client)
+    book = next(item for item in second["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["chapters"] == {"created": 0, "reused": 1, "dropped": 0, "orphaned_points": 0}
+    assert book["points"]["created"] == 0 and book["points"]["reused"] == 2
+    assert store.list_outline("math_analysis", SYNC_BOOK_A)[0]["kp_id"] == chapter_id
+    assert {
+        row["from_detail_id"]: row["kp_id"]
+        for row in store.points.values()
+        if row["node_kind"] == "point"
+    } == point_ids
+
+    workspace[SYNC_BOOK_A][1]["summary"] = "章总结乙"
+    workspace[SYNC_BOOK_A][2]["summary"] = "点总结二"
+    _sync(client)
+    assert store.get_point(chapter_id)["summary"] == "章总结乙"
+    assert store.get_point(point_ids["afkp-p1"])["summary"] == "点总结二"
+
+
+def test_sync_drops_chapter_removed_upstream_and_orphans_its_points(monkeypatch, store):
+    workspace = _clean_workspace()
+    client = _sync_client(monkeypatch, store, workspace)
+    _sync(client)
+    point = next(row for row in store.points.values() if row["name"] == "确界原理")
+    assert point["parent_kp_id"] is not None
+
+    workspace[SYNC_BOOK_A][1]["gen_status"] = "rejected"
+    body = _sync(client)
+    book = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["chapters"]["dropped"] == 1 and book["chapters"]["orphaned_points"] == 2
+    assert store.get_point(point["kp_id"])["parent_kp_id"] is None
+    assert _sequence(client)["units"] == []
+
+
+def test_sync_skips_cross_book_name_collision_without_failing_batch(monkeypatch, store):
+    workspace = _clean_workspace()
+    workspace[SYNC_BOOK_B] = [
+        _af("afkp-b-ch", "第2章 极限", depth=1, pages=(41, 90), book=SYNC_BOOK_B),
+        _af("afkp-b-p1", "确界原理", depth=2, parent_id="afkp-b-ch", pages=(41, 42),
+            summary="另一本的同号节", book=SYNC_BOOK_B),
+        _af("afkp-b-p2", "子列", depth=2, parent_id="afkp-b-ch", pages=(43, 44),
+            book=SYNC_BOOK_B),
+    ]
+    client = _sync_client(monkeypatch, store, workspace)
+    body = _sync(client)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["points"] == {"created": 1, "reused": 0, "skipped": 1}
+    assert book_b["detached"] == 0
+    rows = [row for row in store.points.values() if row["node_kind"] == "point"]
+    assert {row["name"] for row in rows} == {"确界原理", "单调有界原理", "子列"}
+    assert all(row["name"] != "确界原理" or row["from_detail_id"] == "afkp-p1" for row in rows)
+
+
+def test_sync_isolates_book_without_workspace_and_503_when_upstream_offline(monkeypatch, store):
+    client = _sync_client(monkeypatch, store, fail={SYNC_BOOK_B: 404})
+    body = _sync(client)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["ok"] is False and book_b["status"] == 404
+    assert store.list_outline("math_analysis", SYNC_BOOK_B) == []
+    assert len([row for row in store.points.values() if row["node_kind"] == "point"]) == 2
+
+    offline = _sync_client(monkeypatch, store, offline=True)
+    resp = offline.post("/api/v1/learn/courses/math_analysis/knowledge-points/sync")
+    assert resp.status_code == 503
+    assert "梳理侧" in resp.json()["detail"]
+
+
+def test_sync_leaves_unreviewed_book_subtree_untouched(monkeypatch, store):
+    """未梳理（零纯净章）的教材整本跳过：不动它已有的人工目录子树。"""
+    client = _sync_client(monkeypatch, store, workspace={SYNC_BOOK_A: [], SYNC_BOOK_B: []})
+    client.put(
+        "/api/v1/learn/courses/math_analysis/outline",
+        json={"book_ref": SYNC_BOOK_B, "tree": [{"name": "人工整理的章", "page_start": 1,
+                                                 "page_end": 9}]},
+    )
+    body = _sync(client)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["ok"] is True and book_b["skipped_empty"] is True
+    assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_B)] == [
+        "人工整理的章"
+    ]
+
+
+def test_sync_leaves_half_reviewed_book_subtree_untouched(monkeypatch, store):
+    """只出前置后置行的半梳理态同属「本腿还没落笔」：章层零纯净章 ⇒ 整本跳过，不抹人工子树。"""
+    half = [_af("afkp-ref", "前言", depth=1, role="reference", pages=(4, 4))]
+    client = _sync_client(
+        monkeypatch, store, workspace={SYNC_BOOK_A: [], SYNC_BOOK_B: half}
+    )
+    client.put(
+        "/api/v1/learn/courses/math_analysis/outline",
+        json={"book_ref": SYNC_BOOK_B, "tree": [{"name": "人工整理的章", "page_start": 1,
+                                                 "page_end": 9}]},
+    )
+    body = _sync(client)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["skipped_empty"] is True
+    assert book_b["excluded"] == {"rejected": 0, "reference": 1, "point_rows": 0}
+    assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_B)] == [
+        "人工整理的章"
+    ]
+
+
+def test_sync_skips_exercise_book_whole_and_writes_nothing(monkeypatch, store):
+    """习题集整本不进课程学习面（T5）：判据落服务端一处，跳过腿零写入，别本照常提升、总数不含它。"""
+    client = _sync_client(
+        monkeypatch, store, book_roles=[{"book_id": SYNC_BOOK_B, "roles": ["exercises"]}]
+    )
+    body = _sync(client)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["ok"] is True and book_b["skipped_role"] is True
+    assert book_b["skipped_empty"] is False
+    assert book_b["chapters"] == {"created": 0, "reused": 0, "dropped": 0, "orphaned_points": 0}
+    assert store.list_outline("math_analysis", SYNC_BOOK_B) == []
+    book_a = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book_a["chapters"]["created"] == 1
+    assert body["totals"]["chapters"]["created"] == 1
+    assert body["totals"]["points"]["created"] == 2
+
+
+def test_role_skip_does_not_drop_existing_promoted_rows(monkeypatch, store):
+    """角色判据只管新笔：既有提升行不随跳过删除（存量清理另案 W10，判据本身不做删除动作）。"""
+    promoted = [_af("afkp-b-ch", "第2章 极限", depth=1, pages=(41, 90), book=SYNC_BOOK_B),
+                _af("afkp-b-p1", "数列极限", depth=2, parent_id="afkp-b-ch", pages=(41, 41),
+                    book=SYNC_BOOK_B)]
+    first = _sync_client(monkeypatch, store, workspace={SYNC_BOOK_A: [], SYNC_BOOK_B: promoted})
+    _sync(first)
+    assert len(store.list_outline("math_analysis", SYNC_BOOK_B)) == 1
+    assert _promoted_points(store, SYNC_BOOK_B) == {"数列极限"}
+
+    second = _sync_client(
+        monkeypatch, store,
+        workspace={SYNC_BOOK_A: [], SYNC_BOOK_B: promoted},
+        book_roles=[{"book_id": SYNC_BOOK_B, "roles": ["exercises"]}],
+    )
+    body = _sync(second)
+    book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
+    assert book_b["skipped_role"] is True
+    assert len(store.list_outline("math_analysis", SYNC_BOOK_B)) == 1
+    assert _promoted_points(store, SYNC_BOOK_B) == {"数列极限"}
+
+
+def test_sync_404_when_course_not_enrolled(monkeypatch, store):
+    client = _sync_client(monkeypatch, store, enroll=False)
+    resp = client.post("/api/v1/learn/courses/math_analysis/knowledge-points/sync")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "学习域实体不存在：math_analysis"
+
+
+def test_machine_only_keys_stay_closed_on_human_faces(client):
+    """提升锚与页窗只由同步腿写：POST 静默忽略 source_ref、PATCH 白名单不含两枚机器键。"""
+    created = client.post(
+        "/api/v1/learn/knowledge-points",
+        json={"course_id": "math_analysis", "name": "手工登记的点", "type": "concept",
+              "source_ref": {"kind": "book", "ref_id": "b05", "page_start": 1, "page_end": 2}},
+    ).json()
+    assert created["source_ref"] is None
+
+    rejected = client.patch(
+        f"/api/v1/learn/knowledge-points/{created['kp_id']}",
+        json={"from_detail_id": "afkp-x"},
+    )
+    assert rejected.status_code == 422
+    assert "from_detail_id" in rejected.text
+

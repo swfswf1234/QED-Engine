@@ -1,10 +1,10 @@
-"""学习域路由（/api/v1/learn/*，27 端点）：v1.0 三表口径的 8900 自有域（非透传）。
+"""学习域路由（/api/v1/learn/*，28 端点）：v1.0 三表口径的 8900 自有域（非透传）。
 
 模块职责：课程引用式注册（course 行直接引用共享 `qed_course.course_id`，ADR 0026 D4）、
 知识点终态与质性门（kp 行）、派生进度与门游标只读；知识点体系（星图聚合、point 行直登记
 与跨课程检索、长文正文按 `narrative_ref` 读文件、章/条注解按需生成、outline 整树幂等替换
-与归属移动）；练习与复习（题源书目透传、批量入库幂等跳重、题面敏感列投影、作答同事务判分、
-到期队列由作答流水重放、错题本派生查询与纯人工位）。
+与归属移动、在册梳理成品→主表的提升同步腿）；练习与复习（题源书目透传、批量入库幂等跳重、
+题面敏感列投影、作答同事务判分、到期队列由作答流水重放、错题本派生查询与纯人工位）。
 单元树族与编译族、候选池族已随 ADR 0026 D1/D2 退出：知识点序列＝主表 point 行的读时投影
 （派生键 `kp:{kp_id}`，零物化），多角度叙述与长文指针改由主表 `angles`／`narrative_ref` 承载。
 错误包络：8900 自有校验=中文纯文本 detail（api-contracts 通用约定）。
@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -23,6 +24,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from qed_engine.clients.axiom_client import API_PREFIX, AxiomError
 from qed_engine.services.learn import annotations as learn_annotations
 from qed_engine.services.learn import mastery
 from qed_engine.services.learn.base import (
@@ -71,6 +73,8 @@ PART_ANGLES: dict[str, str] = {"annotation": "explanation"}
 # 长文正文双闸（D5）：只允许数据根内 `parsed/**`，正文不落库
 NARRATIVE_ALLOWED_PREFIX = "parsed"
 NARRATIVE_MAX_BYTES = 512_000
+# 教材角色判据（T5，2026-10-31 裁）：`qt_books.roles` 里的教材角色值——只有它才进课程学习面
+TEXTBOOK_ROLE = "textbook"
 
 
 class ResourceRef(BaseModel):
@@ -311,6 +315,9 @@ def _course_tree(
                     "sort_order": seq,
                     "source_ref": source_ref,
                     "window_source": window_source,
+                    # 归本位随投影给出（主表 point 行不带这列；提升行按所属章归本）——
+                    # 工作台按书切序列只读这一枚（REQ-144 T4）
+                    "book_ref": str(point.get("book_ref") or "") or default_ref,
                 }
             )
             seq += 1
@@ -332,12 +339,14 @@ def _tree_or_404(units: list[dict[str, Any]], kp_id: str) -> dict[str, Any]:
 
 
 def _books_out(
-    units: list[dict[str, Any]], rows: dict[str, dict[str, Any]], course: dict[str, Any]
+    units: list[dict[str, Any]], rows: dict[str, dict[str, Any]], course: dict[str, Any],
+    roles: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
     """教材级进度（书架清单卡片用）：book 素材逐个给出，无计数单位者 total=0。
 
     归集口径与 `derived.total/done` 同源（投影行的取材 `source_ref.ref_id`），故素材外但
-    知识点行引用了的 ref 也补入，标签回落 ref_id。
+    知识点行引用了的 ref 也补入，标签回落 ref_id。`roles`/`textbook` 是服务端一处判据的
+    投影位（T5）：前端只读 `textbook`，不自己解释角色数组。
     """
     progress = {str(row["ref_id"]): row for row in derive_books_progress(units, rows)}
     labels: dict[str, str] = {}
@@ -359,6 +368,8 @@ def _books_out(
             "total": int(progress.get(ref_id, {}).get("total") or 0),
             "done": int(progress.get(ref_id, {}).get("done") or 0),
             "percent": float(progress.get(ref_id, {}).get("percent") or 0.0),
+            "roles": roles.get(ref_id, []),
+            "textbook": _is_textbook(roles.get(ref_id, [])),
         }
         for ref_id in ordered
     ]
@@ -472,7 +483,7 @@ def _progress_out(
 
 def _derived(
     request: Request, store: Any, course: dict[str, Any], units: list[dict[str, Any]],
-    rows: dict[str, dict[str, Any]],
+    rows: dict[str, dict[str, Any]], book_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """课程派生态一律按知识点投影行计数；编译态随链路退役（只剩三态）。"""
     prog = _progress_out(request, store, course, units, rows)
@@ -482,11 +493,19 @@ def _derived(
         status = "learning"
     else:
         status = "draft"
-    return {"status": status, **prog, "books": _books_out(units, rows, course)}
+    roles = _book_roles(_tracker_book_rows(request) if book_rows is None else book_rows)
+    return {"status": status, **prog, "books": _books_out(units, rows, course, roles)}
 
 
-def _course_out(request: Request, store: Any, course: dict[str, Any]) -> dict[str, Any]:
-    """课程响应＝kp 行 + 目录正式名称（名称/领域/track 只在共享 `qed_course`，R5 引用不复制）。"""
+def _course_out(
+    request: Request, store: Any, course: dict[str, Any],
+    book_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """课程响应＝kp 行 + 目录正式名称（名称/领域/track 只在共享 `qed_course`，R5 引用不复制）。
+
+    `book_rows`＝调用方已取到的 8901 书库行（`POST /courses/sync` 一次取用传给逐门课，避免
+    每门课重打一趟书目腿）；省略即自取。
+    """
     course_id = str(course["learn_course_id"])
     catalog = _catalog_index_safe(request).get(course_id) or {}
     units, _chapters, rows = _course_tree(request, store, course)
@@ -497,7 +516,7 @@ def _course_out(request: Request, store: Any, course: dict[str, Any]) -> dict[st
         "track": str(catalog.get("track") or "").strip() or STARMAP_UNSORTED_TRACK,
         "description": str(catalog.get("description") or ""),
         "unit_count": len(units),
-        "derived": _derived(request, store, course, units, rows),
+        "derived": _derived(request, store, course, units, rows, book_rows),
     }
 
 
@@ -532,8 +551,8 @@ def _book_label(row: dict[str, Any]) -> str:
 def _knowledge_meta(request: Request) -> dict[str, dict[str, Any]]:
     """knowledge_id → 教程套行（取 `intro` 简介 + `position` 面向对象）。
 
-    书级两列现网尚不存在（跨项目请求已登记 QED-Tracker），故书架展示元数据暂由
-    `af_books.knowledge_id` 联接套级字段；8901 读不到按空值降级，不阻断同步。
+    套级是**兜底层**：书级简介走 `qt_books.meta.intro`（见 `_book_intros`），键位缺失者
+    才回落到本函数；8901 读不到按空值降级，不阻断同步。
     """
     try:
         rows = request.app.state.tracker_client.list_knowledge() or []
@@ -545,6 +564,52 @@ def _knowledge_meta(request: Request) -> dict[str, dict[str, Any]]:
         for row in rows
         if str(row.get("knowledge_id") or "")
     }
+
+
+def _tracker_book_rows(request: Request) -> list[dict[str, Any]]:
+    """8901 书库腿一次取用（`qt_books` 全列）：书级简介与教材角色判据共用同一批行。
+
+    不可达按空表降级（独立性铁律）——角色为空即「未知」，学习面不做任何过滤，同步照常执行。
+    """
+    try:
+        return list(request.app.state.tracker_client.list_books() or [])
+    except Exception as exc:  # noqa: BLE001 - 书目腿缺失只降级，不阻断学习与同步
+        logger.warning("书库不可达，书级元数据与角色判据降级为空：%s", type(exc).__name__)
+        return []
+
+
+def _book_roles(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """book_id → `qt_books.roles`（数组，取值 textbook／exercises／solutions）。"""
+    return {
+        str(row.get("book_id") or ""): [str(item) for item in (row.get("roles") or [])]
+        for row in rows
+        if str(row.get("book_id") or "")
+    }
+
+
+def _is_textbook(roles: list[str]) -> bool:
+    """教材角色判据（T5，服务端一处）：唯「`roles` 非空且不含 textbook」判 false。
+
+    空角色＝未标、取不到＝未知，两者都按教材走——判据只能在有证据时收紧，不能把缺数据
+    当成「不是教材」，否则 8901 离线会把整面教材抹掉。
+    """
+    return not (roles and TEXTBOOK_ROLE not in roles)
+
+
+def _book_intros(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """book_id → 书级简介（REQ-121 R1 收窄后的键位约定＝`qt_books.meta.intro`，零 ALTER）。
+
+    只收非空串：缺失者由调用方回落套级 `qt_knowledge.intro`。面向对象（`audience`）按
+    2026-10-23 裁决推后，本函数不涉及。
+    """
+    intros: dict[str, str] = {}
+    for row in rows:
+        book_id = str(row.get("book_id") or "")
+        meta = row.get("meta")
+        intro = str(meta.get("intro") or "").strip() if isinstance(meta, dict) else ""
+        if book_id and intro:
+            intros[book_id] = intro
+    return intros
 
 
 @router.post("/courses/sync")
@@ -602,23 +667,31 @@ def sync_courses(request: Request) -> dict[str, Any]:
             )
             updated.append(course_id)
 
-    courses = [_course_out(request, store, c) for c in store.list_courses()]
+    book_rows = _tracker_book_rows(request)
+    courses = [
+        _course_out(request, store, c, book_rows) for c in store.list_courses()
+    ]
     knowledge = _knowledge_meta(request)
+    intros = _book_intros(book_rows)
+    roles = _book_roles(book_rows)
     book_meta: list[dict[str, Any]] = []
     for course_id, rows in sorted(parsed_by_course.items()):
         for row in rows:
+            book_id = str(row.get("book_id"))
             meta_row = knowledge.get(str(row.get("knowledge_id") or "")) or {}
             position = str(meta_row.get("position") or "")
             book_meta.append(
                 {
-                    "ref_id": str(row.get("book_id")),
+                    "ref_id": book_id,
                     "label": _book_label(row),
                     "course_id": course_id,
                     "knowledge_id": str(row.get("knowledge_id") or ""),
-                    "intro": str(meta_row.get("intro") or ""),
+                    "intro": intros.get(book_id) or str(meta_row.get("intro") or ""),
                     "position": position,
                     "position_label": POSITION_LABELS.get(position, position),
                     "page_count": int(row.get("page_count") or 0),
+                    "roles": roles.get(book_id, []),
+                    "textbook": _is_textbook(roles.get(book_id, [])),
                 }
             )
     return {
@@ -1055,7 +1128,282 @@ def course_knowledge_points(
     }
 
 
-# ---------- 长文正文读文件腿（ADR 0026 D5：正文不落库，按 `narrative_ref` 取） ----------
+# ---------- 提升同步腿（REQ-144 裁乙：在册 af_kp 成品 → 共享主表） ----------
+
+# 纯净目录的两道过滤键（判据正本＝REQ-144 壳「纯净目录的过滤口径」）：
+# 在册＝gen_status 非 rejected；非前置后置＝toc_role 非 reference
+KP_REJECTED = "rejected"
+KP_REFERENCE_ROLE = "reference"
+# ④ 工作区读腿的路径段（一比一照 8902 形状，本层不别名）
+KP_WORKSPACE_PATH = f"{API_PREFIX}/books/{{book_id}}/kp"
+
+
+def _kp_page_window(node: dict[str, Any]) -> tuple[int, int]:
+    """梳理侧页区间：两键优先（KA-42）→ 锚页 min/max（KA-25）→ 无可用页归 0（读侧按缺位处理）。"""
+    start, end = node.get("page_start"), node.get("page_end")
+    if isinstance(start, int) and isinstance(end, int) and start >= 1 and end >= start:
+        return start, end
+    pages = [
+        int(anchor["page"])
+        for anchor in (node.get("anchors") or [])
+        if isinstance(anchor, dict) and isinstance(anchor.get("page"), int)
+    ]
+    return (min(pages), max(pages)) if pages else (0, 0)
+
+
+def _kp_anchors(node: dict[str, Any], book_id: str) -> list[dict[str, Any]]:
+    """锚的 `ref_id` 归一为书 id：梳理侧发的是页 id（`p0009`），根侧页窗按书寻址。"""
+    return [
+        {**anchor, "ref_id": book_id}
+        for anchor in (node.get("anchors") or [])
+        if isinstance(anchor, dict)
+    ]
+
+
+def _kp_split_workspace(nodes: list[Any]) -> dict[str, Any]:
+    """工作区行 → 纯净层：章（depth1）＋知识点（depth2 且父章在册纯净）＋三类排除计数。
+
+    depth2 落 point 行而非 outline 节行（第十令「章＝章节、节＝知识点」＋界面两级），
+    遗留 `point` 行不入目录：其页区间与父节重合，进目录即同一段正文读两遍。
+    """
+    live = [n for n in nodes if isinstance(n, dict) and str(n.get("gen_status") or "") != KP_REJECTED]
+    rejected = len(nodes) - len(live)
+    knowledge = [n for n in live if str(n.get("toc_role") or "knowledge") != KP_REFERENCE_ROLE]
+    reference = len(live) - len(knowledge)
+    point_rows = sum(1 for n in knowledge if str(n.get("node_kind") or "") == "point")
+
+    def _order(node: dict[str, Any]) -> tuple[int, str]:
+        hint = node.get("order_hint")
+        return (hint if isinstance(hint, int) else 9999, str(node.get("node_id") or ""))
+
+    chapters = sorted(
+        (n for n in knowledge if n.get("node_kind") == "outline" and n.get("depth") == 1),
+        key=_order,
+    )
+    by_chapter: dict[str, list[dict[str, Any]]] = {}
+    detached = 0
+    for node in sorted(
+        (n for n in knowledge if n.get("node_kind") == "outline" and n.get("depth") == 2),
+        key=_order,
+    ):
+        parent = str(node.get("parent_id") or "")
+        if parent not in {str(chapter["node_id"]) for chapter in chapters}:
+            detached += 1
+            continue
+        by_chapter.setdefault(parent, []).append(node)
+    return {
+        "chapters": chapters,
+        "by_chapter": by_chapter,
+        "detached": detached,
+        "excluded": {"rejected": rejected, "reference": reference, "point_rows": point_rows},
+    }
+
+
+def _kp_workspace(request: Request, book_id: str) -> tuple[int, list[dict[str, Any]]]:
+    """读一本教材的梳理工作区：连接失败 503（整次同步不执行），上游状态码原样带回由调用方逐本判定。"""
+    try:
+        status, raw, _ = request.app.state.axiom_client.kp_relay(
+            "GET", KP_WORKSPACE_PATH.format(book_id=book_id)
+        )
+    except AxiomError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"梳理侧不可达，同步未执行：{type(exc).__name__}"
+        ) from exc
+    if status != 200:
+        return status, []
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return status, []
+    nodes = body.get("nodes") if isinstance(body, dict) else None
+    return status, [node for node in (nodes or []) if isinstance(node, dict)]
+
+
+def _sync_book_knowledge(
+    request: Request, store: Any, *, course_id: str, book_ref: str, coords: dict[str, str]
+) -> dict[str, Any]:
+    """单本教材的提升落笔：章层整树幂等替换＋知识点层按锚复用登记（逐本隔离，一本失败不拖全批）。"""
+    status, nodes = _kp_workspace(request, book_ref)
+    if status != 200:
+        return {"book_ref": book_ref, "ok": False, "status": status}
+    part = _kp_split_workspace(nodes)
+    # 本腿是否已在这本书落过笔＝有没有提升锚；零纯净章且从未落笔＝还没梳理，整本跳过
+    # （判据取「本腿的笔迹」而非「工作区是否空」：只出前置后置行的半梳理态也不该抹掉人工目录子树）
+    owned = any(row.get("from_detail_id") for row in store.list_outline(course_id, book_ref))
+    if not part["chapters"] and not owned:
+        return {
+            "book_ref": book_ref, "ok": True, "skipped_empty": True,
+            "chapters": {"created": 0, "reused": 0, "dropped": 0, "orphaned_points": 0},
+            "points": {"created": 0, "reused": 0, "skipped": 0},
+            "detached": part["detached"], "excluded": part["excluded"],
+        }
+
+    tree: list[dict[str, Any]] = []
+    for chapter in part["chapters"]:
+        start, end = _kp_page_window(chapter)
+        node: dict[str, Any] = {"name": str(chapter.get("name") or ""), "page_start": start,
+                                "page_end": end}
+        summary = str(chapter.get("summary") or "")
+        if summary:
+            # 空 summary 不提交＝保持主表原值（与 REQ-114 S2 整树重写口径同形）
+            node["summary"] = summary
+        tree.append(node)
+    outline = _guard(
+        store.replace_outline, course_id, book_ref, tree, domain_id=coords["domain_id"],
+        domain_label=coords["domain_label"], course_label=coords["course_label"],
+    )
+
+    chapter_ids: dict[str, str] = {}
+    anchors: dict[str, dict[str, Any]] = {}
+    for row in store.list_outline(course_id, book_ref):
+        key = norm_key(str(row.get("name") or ""))
+        if str(row.get("depth") or "") == "1" and key not in chapter_ids:
+            chapter_ids[key] = str(row["kp_id"])
+        if row.get("from_detail_id"):
+            anchors[str(row["from_detail_id"])] = row
+    for chapter in part["chapters"]:
+        kp_id = chapter_ids.get(norm_key(str(chapter.get("name") or "")))
+        node_id = str(chapter.get("node_id") or "")
+        if kp_id is None or not node_id:
+            continue
+        if str(anchors.get(node_id, {}).get("from_detail_id") or "") != node_id:
+            # 提升锚＝章导读腿的取数键（④ /kp/nodes/{node_id}/narrative），只由本腿写
+            _guard(store.patch_point, kp_id, from_detail_id=node_id)
+        anchors[node_id] = {"kp_id": kp_id, "from_detail_id": node_id}
+
+    point_rows, _total = store.list_points(course_id=course_id, kind="point", limit=2000)
+    by_anchor = {
+        str(row["from_detail_id"]): row for row in point_rows if row.get("from_detail_id")
+    }
+    known_keys: dict[str, str] = {
+        str(row["norm_key"]): str(row["kp_id"]) for row in point_rows
+    }
+    created = reused = skipped = 0
+    for chapter in part["chapters"]:
+        parent_id = anchors.get(str(chapter.get("node_id") or ""), {}).get("kp_id")
+        if parent_id is None:
+            continue
+        for index, point in enumerate(part["by_chapter"].get(str(chapter["node_id"]), []), start=1):
+            name = str(point.get("name") or "")
+            node_id = str(point.get("node_id") or "")
+            key = norm_key(name)
+            start, end = _kp_page_window(point)
+            fields: dict[str, Any] = {
+                "parent_kp_id": parent_id,
+                "order_hint": index,
+                "source_ref": {"kind": "book", "ref_id": book_ref, "page_start": start,
+                               "page_end": end},
+                "anchors": _kp_anchors(point, book_ref),
+            }
+            summary = str(point.get("summary") or "")
+            if summary:
+                fields["summary"] = summary
+            existing = by_anchor.get(node_id)
+            if existing is not None:
+                old_key = str(existing.get("norm_key") or "")
+                if name and key != old_key:
+                    if key in known_keys and known_keys[key] != str(existing["kp_id"]):
+                        # 上游改名撞上另一枚在册点：只刷页窗与摘要，名字留原样
+                        pass
+                    else:
+                        fields["name"] = name
+                        known_keys.pop(old_key, None)
+                        known_keys[key] = str(existing["kp_id"])
+                _guard(store.patch_point, str(existing["kp_id"]), **fields)
+                reused += 1
+                continue
+            if key in known_keys:
+                # 跨教材或手工登记的同名者：跳过不覆盖（add_point 的 409 不在这里炸整批）
+                skipped += 1
+                continue
+            row = _guard(
+                store.add_point,
+                course_id=course_id,
+                name=name,
+                parent_kp_id=parent_id,
+                order_hint=index,
+                summary=summary,
+                from_detail_id=node_id,
+                anchors=fields["anchors"],
+                source_ref=fields["source_ref"],
+                **coords,
+            )
+            known_keys[key] = str(row["kp_id"])
+            by_anchor[node_id] = row
+            created += 1
+    return {
+        "book_ref": book_ref, "ok": True, "skipped_empty": False,
+        "chapters": {
+            "created": outline["created"], "reused": outline["reused"],
+            "dropped": outline["dropped"], "orphaned_points": outline["orphaned_points"],
+        },
+        "points": {"created": created, "reused": reused, "skipped": skipped},
+        "detached": part["detached"], "excluded": part["excluded"],
+    }
+
+
+@router.post("/courses/{course_id}/knowledge-points/sync")
+def sync_course_knowledge_points(request: Request, course_id: str) -> dict[str, Any]:
+    """提升同步腿：逐本教材把在册 `af_kp` 成品投影进共享主表（学习面读源，REQ-144 裁乙）。
+
+    读腿＝④ 工作区 `GET /books/{book_id}/kp`（一比一透传，本层不别名）；过滤三道＝教材角色
+    （`textbook` 判据，T5）、在册（`gen_status != rejected`）、非前置后置（`toc_role != reference`）；
+    章层（`depth=1`）走 `replace_outline` 整树幂等替换，知识点层按提升锚 `from_detail_id` 复用行、
+    无锚者按 `norm_key` 查重后 `add_point`。
+    逐本隔离：8902 连接失败 503（整次不执行）、单本上游非 200 只在该本报告 `ok=false`、
+    零纯净章且本腿未在此落过笔＝整本跳过（保护未梳理／半梳理教材的人工目录子树）。
+    角色取不到＝未知、不过滤（判据只在有证据时收紧）。
+    写入即承载确认（D10），本腿不碰确认位。
+    """
+    store = _knowledge(request)
+    course = _guard(_store(request).get_course, course_id)
+    catalog = _catalog_index_safe(request).get(course_id) or {}
+    coords = {
+        "domain_id": str(catalog.get("domain_id") or ""),
+        "domain_label": str(catalog.get("domain_label") or ""),
+        "course_label": str(catalog.get("name") or course_id),
+    }
+    book_refs = [
+        str(res.get("ref_id") or "")
+        for res in (course.get("resources") or [])
+        if str(res.get("kind") or "") == "book" and str(res.get("ref_id") or "")
+    ]
+    roles = _book_roles(_tracker_book_rows(request))
+    books_out: list[dict[str, Any]] = []
+    for book_ref in book_refs:
+        if not _is_textbook(roles.get(book_ref, [])):
+            # 非教材（习题集／答案本）整本不进学习面（T5）：不起读腿、零写入，已有提升行不动
+            # （存量清理是另一件事，判据本身不带删除动作）
+            books_out.append({
+                "book_ref": book_ref, "ok": True, "skipped_role": True, "skipped_empty": False,
+                "chapters": {"created": 0, "reused": 0, "dropped": 0, "orphaned_points": 0},
+                "points": {"created": 0, "reused": 0, "skipped": 0},
+            })
+            continue
+        books_out.append(
+            _sync_book_knowledge(
+                request, store, course_id=str(course["learn_course_id"]), book_ref=book_ref,
+                coords=coords,
+            )
+        )
+    ok_books = [item for item in books_out if item.get("ok")]
+    return {
+        "course_id": course_id,
+        "books": books_out,
+        "totals": {
+            "chapters": {
+                key: sum(item["chapters"][key] for item in ok_books)
+                for key in ("created", "reused", "dropped", "orphaned_points")
+            },
+            "points": {
+                key: sum(item["points"][key] for item in ok_books)
+                for key in ("created", "reused", "skipped")
+            },
+        },
+    }
+
+
+# ---------- 长文正文读文件腿（ADR 0026 D5：正文不落库，按 narrative_ref 取） ----------
 
 
 def _narrative_path(settings: Any, ref: str) -> Path:
@@ -1183,29 +1531,52 @@ def _annotation_target(
     return _guard(knowledge.get_point, body.kp_id), projected
 
 
+def _annotation_intros(request: Request, course_id: str, book_ref: str) -> tuple[str, str]:
+    """提示词的两段背景（REQ-143 W5）：课程介绍（目录行 description）与教材介绍（`qt_books.meta.intro`）。
+
+    两枚都走本仓既有的可降级读腿：8901 不可达时返回空串，`build_prompt` 整段不渲染，
+    生成腿不因背景缺失而失败（独立性铁律）。
+    """
+    catalog = _catalog_index_safe(request).get(course_id) or {}
+    course_intro = str(catalog.get("description") or "").strip()
+    book_intro = ""
+    if book_ref:
+        book_intro = _book_intros(_tracker_book_rows(request)).get(book_ref, "")
+    return course_intro, book_intro
+
+
 @router.post("/annotations/generate")
 def generate_annotation(request: Request, body: AnnotationGenerateBody) -> dict[str, Any]:
-    """按需生成注解（C18）：章级覆写章行 `summary`／`meta.chapter_key_points`，条级追加
-    主表 `angles` 一元素（同角不堆叠，ADR 0026 D10）；两者的正文长文都仍只由 `narrative_ref` 指。
+    """按需生成注解（C18＋REQ-143 W5）：章级覆写章行 `summary`／`meta.chapter_key_points`，
+    条级总结覆写主表 `summary`、条级注解追加 `angles` 一元素（同角不堆叠，ADR 0026 D10）；
+    两式的正文长文都仍只由 `narrative_ref` 指。
     """
-    if learn_annotations.PART_TARGETS[body.part] != body.target_kind:
+    if body.target_kind not in learn_annotations.PART_TARGETS[body.part]:
         raise HTTPException(
             status_code=422, detail="生成用途与目标层不匹配：章＝章节总结／学习要点，条＝总结与注解"
         )
     store = _store(request)
     course = _guard(store.get_course, body.course_id)
     row, projected = _annotation_target(request, store, course, body)
-    text, _first_page, _ref_id = _annotation_source(request, projected.get("source_ref"), body.part)
+    text, _first_page, ref_id = _annotation_source(request, projected.get("source_ref"), body.target_kind)
     if not text:
         label = "章" if body.target_kind == "chapter" else "条"
         raise HTTPException(status_code=503, detail=f"这一{label}的正文还没准备好，暂时生成不了")
+    course_intro, book_intro = _annotation_intros(request, body.course_id, ref_id)
     key = learn_annotations.throttle_key(body.course_id, body.target_kind, body.kp_id, body.part)
     if body.target_kind == "chapter":
         hit = learn_annotations.cached(key)
         if hit is not None:
             return hit
     outcome = learn_annotations.generate(
-        request.app.state.settings, body.part, str(row["name"]), text
+        request.app.state.settings,
+        body.part,
+        body.target_kind,
+        str(row["name"]),
+        text,
+        course_intro=course_intro,
+        book_intro=book_intro,
+        existing_intro=str(row.get("summary") or ""),
     )
     if not outcome["ok"]:
         raise HTTPException(status_code=502, detail=f"生成没能完成：{outcome['reason']}，可以再点一次")
@@ -1224,6 +1595,9 @@ def generate_annotation(request: Request, body: AnnotationGenerateBody) -> dict[
             "key_points": list((saved.get("meta") or {}).get("chapter_key_points") or []),
         }
         response = {"ok": True, "target": target, "chapter": chapter}
+    elif body.part == "summary":
+        saved = _guard(knowledge.patch_point, body.kp_id, summary=outcome["text"])
+        response = {"ok": True, "target": target, "point": _point_out(saved)}
     else:
         angle = PART_ANGLES[body.part]
         saved = _guard(

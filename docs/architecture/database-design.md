@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-10-22
+最后更新：2026-10-24
 需求方：QED-Engine（根私有 `qe_*` 三表 + `qed_knowledge_point` + `qed_llm_calls`）、QED-Tracker（受托建表的 `qed_domain`/`qed_course`、私有 `qt_*` 五表）、Axiom-Flow（私有 `af_*` 四表）
 确认状态：已确认
 关联代码：`backend/qed_engine/services/learn/base.py`、`backend/qed_engine/services/learn/knowledge.py`、`backend/qed_engine/services/learn/practice.py`（本文正本 7 张表中四张的可执行 DDL；第五张 `qed_llm_calls` 的 DDL 归属 LLM 网关模块 `services/llm/call_log.py`，见五章该表小节）、`QED-Tracker/src/qed_tracker/db/models.py`（`qed_domain`/`qed_course` 形状事实源）、`QED-Tracker/src/qed_tracker/db/schema.py`（受托建表面 `ensure_schema`）、`.env.example`（`QED_DB_*` 变量模板）
@@ -84,7 +84,7 @@
 | `qe_learning` | 根私有 | 学习记录单表（13 列）：`target_kind='course'` 行＝选课与学习路径顺序，`target_kind='kp'` 行＝知识点终态与质性门 | **课程无独立 ID**——course 行的 `target_id` 直引共享 `qed_course.course_id`；学习路径是 course 行 `config.kp_path` 的 `kp_id` 有序数组；进度百分比、结课态与掌握分一律读时重算不落列；`owner` 为多学习者扩展位（v1.0 恒 `admin`） | 本文五章 + `backend/qed_engine/services/learn/base.py` |
 | `qe_question` | 根私有 | 一道题或一张卡（24 列）：题面 + 服务端判分依据 + 题源溯源 + 产出事实 | 表名已定档（REQ-132 W1 落地）；`expected_answer` 不进题面下发响应；题源只留 `book_ref` + `source_ref`，课程名读时从共享表取；**不加 `owner`**——题库是内容、跨学习者共享，分账由作答表承担；生产 `qed` 库内尚未建表（见 7.8 T3） | `backend/qed_engine/services/learn/practice.py` |
 | `qe_attempt` | 根私有 | 一次作答事实（14 列）：作答原文 + 判分结果 + 错题本工位 | 幂等唯一键 `(owner, question_id, review_date, origin)`；趋势与到期档位都是本表全量流水的确定性重放，读时派生不落列；`resolved` 与 `bookmarked` 为纯人工位（R6） | 同上 |
-| `af_books` | AF 私有 | 一册已验证书：`qt_books` 只读快照 + 哈希/ingest/解析进度 + 生效版本指针 | 列级内容由 Axiom-Flow 承载；`af_*` 四表形状由对方 PLAN-024 定档，其库内重建窗口未执行（见 7.8 T11） | `Axiom-Flow/docs/architecture/database-design.md` |
+| `af_books` | AF 私有 | 一册已验证书：`qt_books` 只读快照 + 哈希/ingest/解析进度 + 生效版本指针 | 列级内容由 Axiom-Flow 承载；`af_*` 四表形状由对方 PLAN-024 定档，**库内重建窗口已执行**（2026-10-22 档 B 整族重建；根侧 2026-10-24 只读探针复算＝两库 `alembic_version` 均 `20261022_0001`、`af_*` 恰四张，见 7.8 T11） | `Axiom-Flow/docs/architecture/database-design.md` |
 | `af_operations` | AF 私有 | 一条事件明细：解析、人工编辑、结构意图与审阅判定全量入本表（单表事件流） | 同上 | 同上 |
 | `af_pages` | AF 私有 | 一个解析版本一页的解析状态、质量信号与产物指针 | 同上；`job_id='legacy'` 是根视图存量哨兵，非真实版本行 | 同上 |
 | `af_kp` | AF 私有 | 一个知识点节点：梳理工作区、去重谱系与长文正文文件指针 | 同上；根侧经 HTTP 单向拉取已确认行提升进共享主表 | 同上 |
@@ -937,11 +937,11 @@ COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次�
 | T5 | `qt_sources.book_id` VARCHAR(100) 与 `qt_books.book_id` 主键 VARCHAR(32) 宽度不匹配，MySQL 重建外键有 3780 风险 | 待 QED-Tracker 裁决 |
 | T6 | 课程 `exploration_stage` 写路径＝8901 `PATCH /courses` 在线优先，仅其不可达或写失败时降级直写（例外与恢复条件、越界历史行检出 SQL 见 [downloads-flow.md](../design/downloads-flow.md) §5.4）；取值按课程 5 态分档校验，`qed` 与 `qed_test` 两库只读核验 5 态外取值 0 行 | DEFECT-014 |
 | T7 | `af_*`／`qt_*` 列级内容尚未晋升为本文正本；对方两份文档的「唯一事实源」声明改为镜像的请求待承接 | 本文后续批次 |
-| T8 | Axiom-Flow 文档自陈业务库迁移停在 `20260926_0001`；根侧 2026-10-21 只读探针实测 `qed` 与 `qed_test` 两库 `alembic_version` **均为 `20260928_0001`**，且 `af_page_regions` 表与 `af_parse_jobs.parser_signature` 列在生产库实存——落后的是其文档自陈，不是库内指针 | [REQ-136 综合请求 R1](../plans/2026-10-21-af-family-rebuild-consolidated-request.md)（原 `REQ-135` R1，其请求稿壳 2026-10-21 归并后归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-af-family-rebuild-kp-tables-request.md)；读数可同机复算） |
+| T8 | Axiom-Flow 文档自陈业务库迁移停在 `20260926_0001`；根侧 2026-10-21 只读探针实测 `qed` 与 `qed_test` 两库 `alembic_version` **均为 `20260928_0001`**，且 `af_page_regions` 表与 `af_parse_jobs.parser_signature` 列在生产库实存——落后的是其文档自陈，不是库内指针。**〔2026-10-24 标注〕本行读数取 2026-10-21 当时口径，已被档 B 整族重建整体取代（新读数见 T11）＝旧链六个迁移文件退役、`af_page_regions` 与 `af_parse_jobs` 在两库零存活、`parser_signature` 迁为 `af_operations` 列；按「历史读数按当时口径保留」治理，原文不回改** | [REQ-136 综合请求 R1](../history/plans/2026-10/2026-10-21-af-family-rebuild-consolidated-request.md)（原 `REQ-135` R1，其请求稿壳 2026-10-21 归并后归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-af-family-rebuild-kp-tables-request.md)；读数可同机复算） |
 | T9 | `qed_course.related_targets`（空转）与 `qed_domain.path_results`（活列）两列**已由用户 2026-10-18 复裁为删除**，2026-10-15 的改判收回；两库实测列仍在（`qed_test` 只读核验 2026-10-18），须连 8901 响应字段与其 `api.md` 同批摘除，执行归所有权方 | REQ-119 R5 |
 | T10 | 根私有表族**简化判定**（2026-10-21 用户四裁）＝`qe_kp_detail` 整表退出（梳理工作区与候选池正本归 Axiom-Flow `af_kp`）、`qe_unit` 的 `level='section'` 层并到知识点层级、`qe_course_state` 八枚死列退出、`qe_review_task` 的 `target_kind='kp'` 粒度删除。**本行同日已被 ADR 0026 吸收并升级**：四枚判定中三枚升为整表退出、八枚死列随整表退出自然兑现，本行原写的「执行后本族六张、全库 20 张」**作废**。W5 的逐枚取证读数仍有效，正本在 [REQ-132 壳 W5 判定表](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) | REQ-132 W5 → 已并入 ADR 0026／REQ-137 |
 | T12 | **v1.0 根私有表族定档＝三张**（2026-10-21 用户裁决；2026-10-22 第六批「A 全批同改」授权本文正文、代码 DDL 与守护数值同批落地）：① `qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_review_task` 四张整表退出，前三张的有效信息合并为 `qe_learning` 单表（13 列，`target_kind` 闭集 course／kp 单表继承），第四张改作答流水读时重放；② `qe_question` 删 `unit_id`／`learn_course_id`／`course_label` 三列（27 → 24）；③ `qe_attempt` 加 `owner`、幂等唯一键改 `(owner, question_id, review_date, origin)`、三枚索引加 `owner` 前缀、`score_trend` 退列、`resolved` 改判纯人工位（14 → 14）；④ 共享主表加 `aliases`／`narrative_ref`／`angles` 三列（22 → 25），长文正文落数据根 `parsed/**`（白名单不新增条目，ADR 0018 不动），读经 `GET /learn/knowledge-points/{kp_id}/narrative`（越根双闸）；⑤ 骨架编译链路与候选池端点族整链退役（12 枚），point 行产面平移为 `POST /learn/knowledge-points`。定档后本族 **3 张**、全库 **16 张**、根侧列数 116 → **51**。**`qed_test` 已于 2026-10-22 落地**（零迁移清空重建，库内实存读数见 T2；黄金样本对拍＝`target_kind='question'` 两行与作答流水重放态**逐值相等**，取证与退役端点清单在归档壳）；**生产 `qed` 仍未建**，属人工窗口、零迁移（T3）；同批守护数值＝`ROOT_PRIVATE_TABLES` 三枚、总览断言 16、正本 7、COLLATE 计数 5 | ADR 0026 → REQ-137 W1~W7（**2026-10-22 Achieved 收口**，壳归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md)） |
-| T11 | Axiom-Flow 已定档 `af_*` 由五张收为**四张**（`af_books` 零改列 22 列／`af_operations` 事件明细 27 列／`af_pages` 结果索引 11 列／`af_kp` 知识点单表 23 列，档位＝档 B 整族重建，迁移链 head `20261022_0001` 已在对方仓库落地）；本文 §三／§4.4／§6.3 **已按四张登记**（表级登记只写表名与路由，不写其逐列形状，不领先库内），其**库内升级窗口未执行**＝对方业务库仍在旧五表（见 T8），旧表消失前根侧不直连消费新表。列级正本在 `Axiom-Flow/docs/plans/2026-10-21-af-table-family-rebuild.md`（根侧 [REQ-134 壳](../plans/2026-10-21-af-table-architecture-design.md) 同日退为指针） | REQ-134 W7 → 待对方执行批 |
+| T11 | Axiom-Flow 已定档 `af_*` 由五张收为**四张**（`af_books` 零改列 22 列／`af_operations` 事件明细 27 列／`af_pages` 结果索引 12 列（**本行原记 11 列＝事实错**，2026-10-24 按真库 `SHOW COLUMNS` 复算更正；表级登记不写逐列形状，此处只更正计数）／`af_kp` 知识点单表 23 列，档位＝档 B 整族重建，迁移链 head `20261022_0001` 已在对方仓库落地）；本文 §三／§4.4／§6.3 **已按四张登记**（表级登记只写表名与路由，不写其逐列形状，不领先库内），**库内升级窗口已执行**（根侧 2026-10-24 只读探针复算＝两库 `alembic_version` 均 `20261022_0001`、`af_*` 恰四张 22／27／12／23 列、旧三表 `af_parse_jobs`／`af_block_edits`／`af_page_regions` 在两库**零存活**），R2「根侧不直连、经 8902 透传」恒定不变。**消费可见后果**＝业务库 `qed` 的新形状**四表全空**（`af_books` 0 行；本机 `.env` 的 `QED_DB_NAME` 指 `qed_test`，对方 C-7 的 `books/sync` 回灌只落测试库）⇒ 8900／8903 走业务库透传看到的是**空态「暂无书目」而非故障**；在用演示数据在 `qed_test`（`af_books` 17／`af_pages` 2614／`af_operations` 8／`af_kp` 0 行）。业务面恢复＝对方按其 runbook 以 `QED_DB_NAME=qed` 起服回灌＋逐本重新 ingest 与解析，页行与版本**不回填**（其档 B 四件必答②）；就绪判定仍以 DB 为唯一事实源不变。列级正本在 `Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md`（2026-10-23 由对方归档移动，路径随步；根侧 [REQ-134 壳](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md) 同日退为指针） | REQ-134 W7 → 对方执行批**已完成**（其 PLAN-024 于 2026-10-23 以 Achieved 自关）→ 根侧随步落 REQ-136 收口批（2026-10-24） |
 
 ### 7.9 账本与作业表的保留期口径
 
@@ -953,7 +953,7 @@ COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次�
 
 - **不设固定天数，只设触发条件**（用户裁决 2026-10-18）。立论依据＝现网无容量压力：`qed_test` 内
   `qed_llm_calls` 116 行／1.5 MB、`qt_tasks` 31 行、`qt_selections` 0 行、`af_operations`（现名
-  `af_parse_jobs`）7 行；
+  `af_parse_jobs`）7 行（现名已随四表定档定为 `af_operations`；**2026-10-24 只读探针复算＝`qed_test` 8 行／`qed` 0 行**，本行保留当时读数以证「无容量压力」的立论未变）；
   预设天数只会让口径先于事实漂移。任一表命中下列之一即**另立任务**处置，且不得在建表或写入路径
   里挂自动清理：
   - 表体积 ≥ 1 GB，或行数 ≥ 10 万行；
@@ -978,8 +978,8 @@ COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次�
     completed.md 该行。
   - `af_operations`（Axiom-Flow 所有）＝版本化产物的事件史，删行等于抹掉一段解析版本史，按 7.3 的
     **备份确认档**走；保留窗由所有权方自定，且须声明被 `af_books.active_job_id` 引用之行永不裁剪；
-  出站口径已并入综合请求 [REQ-136](../plans/2026-10-21-af-family-rebuild-consolidated-request.md) 其工作项 R5
-  （原 REQ-129 行经用户同日裁决并入，见 completed.md 该行）。
+  出站口径已并入综合请求 [REQ-136](../history/plans/2026-10/2026-10-21-af-family-rebuild-consolidated-request.md) 其工作项 R5
+  （原 REQ-129 行经用户同日裁决并入，见 completed.md 该行）。**2026-10-24 随该请求收口＝所有权方口径已成文**（其 PLAN-024「保留与裁剪判据」表 RP-1／RP-3）＝明文**「一律不清理」、不设保留窗数值**，覆盖 `af_operations` 与 `af_kp` 两表；不可裁剪四类＝被 `af_books.active_job_id` 引用的 parse 行、全部 `lifecycle='intent'` 意图行、`status` 为 queued／running 的在飞行、已确认或被引用的人背知识点行；触发阈值与执行另批（其 RP-4 要求只读清单先行 → 用户批准 → 逐书执行）。本节的「须声明」要求自此由对方文档兑现，根侧仍不代设数值、不代执行。
 - **归档形态**：库内不建历史表、不设归档区。需要留证的批次以单表 dump 落
   `dataset/backups/YYYY-MM-DD-<任务标识>`，只为本次回滚窗口存在、验收即清（7.3 与 ADR 0019 同口径）；
   长期可追溯由台账的计数与时间范围承载，不靠物理副本。

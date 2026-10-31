@@ -142,8 +142,10 @@ export interface PointChapter extends KnowledgePoint {
   node_kind: 'outline';
   unit_id: string;
   point_count: number;
-  /** 章级注解成品位：进场随目录直读，缺失由右栏出「生成」入口 */
+  /** 章级注解成品位：进场随目录直读，缺失＝批注段①整段不渲染 */
   key_points: string[];
+  /** 提升锚（页头「刷新」的提升腿写）＝段②「本章学习导读」的门与取数键；空＝该章不是提升成品 */
+  from_detail_id?: string;
 }
 
 /** 课程在工作台里的推进序列（未加入学习面＝enrolled false 且序列空） */
@@ -173,6 +175,40 @@ export function getCourseKnowledge(
   });
 }
 
+/** 提升同步腿的逐本报告（REQ-144 裁乙；字段正本＝api-contracts.md §⑥ 同步行） */
+export interface KpSyncBook {
+  book_ref: string;
+  ok: boolean;
+  status?: number;
+  skipped_empty: boolean;
+  /** 非教材（习题集／答案本）整本跳过：不起读腿、零写入（REQ-144 T5） */
+  skipped_role?: boolean;
+  chapters: { created: number; reused: number; dropped: number; orphaned_points: number };
+  points: { created: number; reused: number; skipped: number };
+  /** 工作区读数的剔除位；整本按角色跳过者不带（没起读腿就没有这些数） */
+  detached?: number;
+  excluded?: { rejected: number; reference: number; point_rows: number };
+}
+
+export interface KpSyncResponse {
+  course_id: string;
+  books: KpSyncBook[];
+  totals: {
+    chapters: { created: number; reused: number; dropped: number; orphaned_points: number };
+    points: { created: number; reused: number; skipped: number };
+  };
+}
+
+/** 同步一步的等待上限：整课逐本取在册成品再落笔，真机 4 本／163 条实测 12s，默认 8s 会误报失败。 */
+export const KP_SYNC_TIMEOUT_MS = 120_000;
+
+/** POST …/knowledge-points/sync：把本课各教材的在册成品提升进主表（页头「刷新」的第一步，无请求体） */
+export function syncCourseKnowledge(courseId: string, opts?: ApiRequestOptions): Promise<KpSyncResponse> {
+  return api.post<KpSyncResponse>(
+    `/learn/courses/${courseId}/knowledge-points/sync`, {}, { timeoutMs: KP_SYNC_TIMEOUT_MS, ...opts },
+  );
+}
+
 /** 长文正文读腿响应：指针缺失/悬空都明示（available=false + 中文 reason），不静默回落空串 */
 export interface NarrativeResponse {
   kp_id: string;
@@ -187,6 +223,91 @@ export interface NarrativeResponse {
 /** GET /api/v1/learn/knowledge-points/{kp_id}/narrative：按 `narrative_ref` 取长文正文 */
 export function getPointNarrative(kpId: string, opts?: ApiRequestOptions): Promise<NarrativeResponse> {
   return api.get<NarrativeResponse>(`/learn/knowledge-points/${kpId}/narrative`, opts);
+}
+
+/* ---------- 知识点主表的列／登记／改（根侧自有面，梳理屏的阶段一写腿） ---------- */
+
+/**
+ * 跨课检索的过滤位。主表无书过滤参数（`GET /learn/knowledge-points` 只吃
+ * domain／course／type／q），按书列点只能在客户端沿父 outline 归组。
+ */
+export interface KnowledgePointQuery {
+  domain?: string;
+  course?: string;
+  type?: KnowledgePointType;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface KnowledgePointListResponse {
+  points: KnowledgePoint[];
+  total: number;
+}
+
+/** GET /api/v1/learn/knowledge-points：已确认知识点跨课程检索 */
+export function listKnowledgePoints(
+  query: KnowledgePointQuery = {},
+  opts?: ApiRequestOptions,
+): Promise<KnowledgePointListResponse> {
+  return api.get<KnowledgePointListResponse>('/learn/knowledge-points', {
+    ...opts,
+    params: {
+      domain: query.domain,
+      course: query.course,
+      type: query.type,
+      q: query.q,
+      limit: query.limit === undefined ? undefined : String(query.limit),
+      offset: query.offset === undefined ? undefined : String(query.offset),
+    },
+  });
+}
+
+/**
+ * 直登记入参＝主表 `PointCreateBody` 的前端镜像：缺席的键不出现，服务端按入参快照补齐坐标标签。
+ * `narrative_ref` 只接受数据根 `parsed/` 下的相对路径（服务端双闸，越界 422）。
+ */
+export interface KpCreateInput {
+  course_id: string;
+  name: string;
+  domain_id?: string;
+  domain_label?: string;
+  course_label?: string;
+  /** 显式 null／缺席＝未归档池；父级非 outline 或跨课程 409，父不存在 404 */
+  parent_kp_id?: string | null;
+  type?: KnowledgePointType | null;
+  summary?: string;
+  aliases?: string[];
+  narrative_ref?: string;
+  anchors?: KpAnchor[];
+  order_hint?: number | null;
+  /** 梳理侧节点稳定身份（提升幂等锚），一经发放不可变 */
+  from_detail_id?: string;
+}
+
+/** POST /api/v1/learn/knowledge-points：point 行直登记（写入本表这一动作即承载确认） */
+export function createKnowledgePoint(
+  body: KpCreateInput,
+  opts?: ApiRequestOptions,
+): Promise<KnowledgePoint> {
+  return api.post<KnowledgePoint>('/learn/knowledge-points', body, opts);
+}
+
+/** 改列白名单（服务端 `extra="forbid"`）：确认位与四分类不走本面 */
+export interface KpPatchInput {
+  parent_kp_id?: string | null;
+  name?: string;
+  order_hint?: number | null;
+  summary?: string;
+}
+
+/** PATCH /api/v1/learn/knowledge-points/{kp_id}：只写被点名的键（缺席与显式 null 是两件事） */
+export function patchKnowledgePoint(
+  kpId: string,
+  body: KpPatchInput,
+  opts?: ApiRequestOptions,
+): Promise<KnowledgePoint> {
+  return api.patch<KnowledgePoint>(`/learn/knowledge-points/${kpId}`, body, opts);
 }
 
 /** GET /api/v1/learn/courses/{id}/outline：章节树一次取全（前序平铺 + 每节点知识点计数） */
@@ -241,9 +362,10 @@ export interface AnnotationGenerateResult {
 }
 
 /**
- * POST /api/v1/learn/annotations/generate：按需生成注解。
- * 章级覆写章行 `summary`／`meta.chapter_key_points` 并服务端节流；条级追加主表 `angles` 一元素
- * （同角不堆叠，只更新 note），长文仍只由 `narrative_ref` 指。
+ * POST /api/v1/learn/annotations/generate：按需生成注解（`part × target` 闭集外的组合 422）。
+ * 章级覆写章行 `summary`／`meta.chapter_key_points` 并服务端 60s 节流；
+ * 条级 `summary` 覆写主表 `summary`（与人工「保存结果」同一列），条级 `annotation` 追加主表 `angles` 一元素
+ * （同角不堆叠，只更新 note）；长文仍只由 `narrative_ref` 指，本端点不写正文。
  */
 export function generateAnnotation(
   body: AnnotationGenerateBody,
@@ -496,6 +618,10 @@ export interface LearnBookProgress {
   done: number;
   skipped?: number;
   percent: number;
+  /** 8901 书目腿 `qt_books.roles` 原样数组（取不到＝空）；判据不在前端重算 */
+  roles?: string[];
+  /** 服务端单一判据的派生位：`false`＝习题集／答案本，退出课程学习面（REQ-144 T5）；缺失＝未知，按教材走 */
+  textbook?: boolean;
 }
 
 /** 进度响应（`GET …/progress` 与 `derived` 的共同底座；游标＝门游标） */
@@ -590,6 +716,9 @@ export interface SyncBookMeta {
   position: string;
   position_label: string;
   page_count: number;
+  /** 与 `derived.books` 同判据、同批给出（REQ-144 T5） */
+  roles?: string[];
+  textbook?: boolean;
 }
 
 export interface SyncLearnCoursesResult {

@@ -14,7 +14,7 @@ import {
 import { ApiError } from '../api/client';
 import type { BlockEdit, BlockEditInput, BookMeta, PageData, ParseJob, ParsingTreeNode, ParsingTreeSources } from '../api/axiom';
 import {
-  loadTypographyPrefs, saveTypographyPrefs,
+  loadTypographyPrefs,
   type TypographyPrefs,
 } from '../components/parsing/typography';
 import { confirmInput } from '../components/parsing/blocks';
@@ -119,7 +119,6 @@ export interface ParsingStore {
   restoreDeletedRegion: (blockIndex: number) => void;
   mergeSelectedBlocks: () => void;
   resetRegionDraft: () => void;
-  setTypography: (patch: Partial<TypographyPrefs>) => void;
   ingestBook: (bookId: string) => Promise<void>;
   createParseJob: (pages?: number[], bookId?: string) => Promise<void>;
   submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
@@ -336,11 +335,6 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
       }
       : {})),
     resetRegionDraft: () => set({ regionDraft: { added: [], deleted: [], merged: [] } }),
-    setTypography: (patch) => set((s) => {
-      const next = { ...s.typography, ...patch };
-      saveTypographyPrefs(next);
-      return { typography: next };
-    }),
 
     ingestBook: async (bookId) => {
       if (get().ingestBusy[bookId]) return;
@@ -395,6 +389,8 @@ export const useParsingStore = create<ParsingStore>((set, get) => {
         return false;
       }
       set((st) => ({ edits: { ...st.edits, [editKey(bookId, pageNo, blockIndex)]: record! } }));
+      // 类型改判的生效值由 8902 读侧叠加进块序列：重取本页让版式/流式两态按新类型重排
+      if (input.corrected_type !== undefined) void fetchPage(bookId, pageNo);
       return true;
     },
 

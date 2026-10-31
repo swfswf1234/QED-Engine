@@ -1,12 +1,12 @@
 # af_books 书级三列回写与跨库分叉归一跨项目请求稿（Axiom-Flow 承接）（af-books-parse-status-request）
 
 状态：Superseded
-关闭结果：Not Applicable（用户 2026-10-21 裁决把对 Axiom-Flow 的四枚在册数据库修改请求合并为单枚综合请求 [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)，本壳 R1／R2（书级三列复位与两库分叉归一）整体并入其 R4 随档 B 重建同窗裁定；归并不删壳（ADR 0021 第 5 条），本件正文保留作原请求口径与实读证据锚点，不再单独追回执）
+关闭结果：Not Applicable（用户 2026-10-21 裁决把对 Axiom-Flow 的四枚在册数据库修改请求合并为单枚综合请求 [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)，本壳 R1／R2（书级三列复位与两库分叉归一）整体并入其 R4 随档 B 重建同窗裁定；归并不删壳（ADR 0021 第 5 条），本件正文保留作原请求口径与实读证据锚点，不再单独追回执）
 任务类型：A
 最后更新：2026-10-21
 关联 ADR：[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界：`af_*` 表与解析管线归 Axiom-Flow）、[ADR 0017](../../../adr/0017-design-doc-structure-contract.md)（事实源唯一）、[ADR 0023](../../../adr/0023-todo-row-carries-scope-and-criteria.md)（成功标准正本在台账行）
 关联设计：[cross-project-contracts.md](../../../design/cross-project-contracts.md) §6（Axiom-Flow 服务接口契约 8902）、[parsing-flow.md](../../../design/parsing-flow.md)（根侧解析消费流）、Axiom-Flow [ADR 0007](../../../../Axiom-Flow/docs/adr/0007-parse-status-semantics.md)（书级进度／结局／生效版本三分语义正本，**只读**）、Axiom-Flow [ADR 0015](../../../../Axiom-Flow/docs/adr/0015-db-single-source-for-readiness.md)（就绪判据只取 DB 页行，**只读**）、Axiom-Flow [database-design.md](../../../../Axiom-Flow/docs/architecture/database-design.md)（`af_*` 结构唯一事实源，**只读**）
-关联 Tracker：docs/trackers/todo.md（REQ-123 登记，普通任务轮 ARCH-035 节）；2026-10-21 该行已原子移出 todo 并入综合请求 [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)
+关联 Tracker：docs/trackers/todo.md（REQ-123 登记，普通任务轮 ARCH-035 节）；2026-10-21 该行已原子移出 todo 并入综合请求 [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)
 归档判定：Retain（跨项目请求原文、实读证据锚点与回执口径属不可替代过程证据）
 
 ## 对接信息（跨项目协作规范·计划文档模板）

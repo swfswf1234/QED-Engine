@@ -2158,6 +2158,291 @@ def test_axiom_edit_facade_partial_and_invalid(monkeypatch):
     assert bad.status_code == 422
 
 
+def test_axiom_edit_facade_forwards_corrected_type(monkeypatch):
+    """REQ-142 类型改判：`corrected_type` 带上才发该键，EditRecord 里的改判值原样回给 8903。"""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "book_id": "01-rudin",
+                "page_no": 3,
+                "block_index": 2,
+                "block_type": "paragraph",
+                "corrected_type": "header",
+            },
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    put = client.put(
+        "/api/v1/books/01-rudin/pages/3/blocks/2/edit",
+        json={"corrected_type": "header"},
+    )
+    assert put.status_code == 200
+    assert seen[0] == {"corrected_type": "header"}
+    assert put.json()["corrected_type"] == "header"
+    client.put("/api/v1/books/01-rudin/pages/3/blocks/2/edit", json={"note": "只改备注"})
+    assert "corrected_type" not in seen[1]
+
+
+def test_axiom_edit_facade_rejects_block_type_outside_closed_set(monkeypatch):
+    """闭集外的第十一种类型在 8900 门前判 422 且不打上游（闭集正本在 8902 BlockType）。"""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    bad = client.put(
+        "/api/v1/books/01-rudin/pages/3/blocks/2/edit",
+        json={"corrected_type": "knowledge_point"},
+    )
+    assert bad.status_code == 422
+    assert seen == []
+
+
+# --- ④ 知识点梳理透传面（af_kp 一比一镜像，REQ-141 W2／第三令职责边界） ---
+
+
+def test_kp_passthrough_is_a_verbatim_mirror_of_8902(monkeypatch):
+    """十条腿一比一镜像：方法＋路径＋请求体逐字透传，回包原样交回 8903（根侧不套第二份形状校验）。"""
+    seen: list[tuple[str, dict | None]] = []
+    canned = {
+        "POST /api/v1/kp-jobs": (
+            202,
+            {"book_id": "b05", "gen_batch": "afkp-2f1c", "evidence_job_id": "job-1",
+             "page_start": 1, "page_end": 12, "status": "queued"},
+        ),
+        "GET /api/v1/books/b05/kp-jobs/afkp-2f1c": (
+            200,
+            {"book_id": "b05", "gen_batch": "afkp-2f1c", "in_flight": False,
+             "counts": {"draft": 0, "candidate": 18}, "ledger": None},
+        ),
+        "GET /api/v1/books/b05/kp": (
+            200,
+            {"book_id": "b05", "in_flight_batch": None,
+             "nodes": [{"node_id": "afkp-1", "name": "一致收敛的判别法"}], "review_flags": []},
+        ),
+        "PATCH /api/v1/kp/nodes/afkp-1": (
+            200, {"node_id": "afkp-1", "summary": "改过的摘要", "rev": 2}
+        ),
+        "POST /api/v1/kp/nodes/afkp-1/confirm": (
+            200, {"node_id": "afkp-1", "confirmed": 1, "rev": 3, "missing": []}
+        ),
+        "PUT /api/v1/kp/nodes/afkp-1/narrative": (
+            200, {"node_id": "afkp-1", "narrative_ref": "afkp-1.md", "exists": True,
+                  "content": "第一节先讲一致收敛的判别法。", "bytes": 45, "rev": 4}
+        ),
+        "GET /api/v1/kp/nodes/afkp-1/narrative": (
+            200, {"node_id": "afkp-1", "narrative_ref": "afkp-1.md", "exists": True,
+                  "content": "第一节先讲一致收敛的判别法。", "bytes": 45, "rev": 4}
+        ),
+        "PUT /api/v1/books/b05/kp/outline": (
+            200, {"book_id": "b05", "outline": [], "detached_points": 2}
+        ),
+        "GET /api/v1/books/b05/kp/export": (
+            200, {"book_id": "b05", "nodes": [], "review_flags": [], "total": 0}
+        ),
+        "POST /api/v1/kp/nodes/afkp-1/summary": (
+            200, {"node_id": "afkp-1", "summary": "重写过的总结", "rev": 5}
+        ),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        key = f"{request.method} {request.url.path}"
+        seen.append((key, body))
+        status_code, payload = canned[key]
+        return httpx.Response(status_code, json=payload)
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    accepted = client.post(
+        "/api/v1/kp-jobs",
+        json={"book_id": "b05", "page_start": 1, "page_end": 12, "review_note": "第 3 章的节标题把书眉粘进来了"},
+    )
+    progress = client.get("/api/v1/books/b05/kp-jobs/afkp-2f1c")
+    workspace = client.get("/api/v1/books/b05/kp")
+    patched = client.patch("/api/v1/kp/nodes/afkp-1", json={"summary": "改过的摘要", "if_rev": 1})
+    confirmed = client.post("/api/v1/kp/nodes/afkp-1/confirm", json={"confirmed": True, "if_rev": 2})
+    narrative_written = client.put(
+        "/api/v1/kp/nodes/afkp-1/narrative",
+        json={"content": "第一节先讲一致收敛的判别法。", "if_rev": 3},
+    )
+    narrative_read = client.get("/api/v1/kp/nodes/afkp-1/narrative")
+    outline = client.put(
+        "/api/v1/books/b05/kp/outline",
+        json={"declarations": [{"node_id": "afkp-1", "parent_id": None, "order_hint": 1}]},
+    )
+    exported = client.get("/api/v1/books/b05/kp/export")
+    regenerated = client.post("/api/v1/kp/nodes/afkp-1/summary", json={"if_rev": 4})
+
+    assert [key for key, _ in seen] == list(canned)
+    assert seen[0][1] == {
+        "book_id": "b05", "page_start": 1, "page_end": 12, "review_note": "第 3 章的节标题把书眉粘进来了",
+    }
+    assert seen[1][1] is None and seen[2][1] is None
+    assert seen[3][1] == {"summary": "改过的摘要", "if_rev": 1}
+    assert seen[4][1] == {"confirmed": True, "if_rev": 2}
+    assert seen[5][1] == {"content": "第一节先讲一致收敛的判别法。", "if_rev": 3}
+    assert seen[6][1] is None
+    assert seen[7][1] == {"declarations": [{"node_id": "afkp-1", "parent_id": None, "order_hint": 1}]}
+    assert (accepted.status_code, accepted.json()["gen_batch"]) == (202, "afkp-2f1c")
+    assert progress.json()["counts"] == {"draft": 0, "candidate": 18}
+    assert workspace.json()["nodes"][0]["name"] == "一致收敛的判别法"
+    assert patched.json()["rev"] == 2
+    assert confirmed.json()["missing"] == []
+    assert narrative_written.json()["content"] == "第一节先讲一致收敛的判别法。"
+    assert narrative_read.json()["narrative_ref"] == "afkp-1.md"
+    assert outline.json()["detached_points"] == 2
+    assert exported.json()["total"] == 0
+    assert seen[9][1] == {"if_rev": 4}
+    assert (regenerated.status_code, regenerated.json()["summary"]) == (200, "重写过的总结")
+
+
+def test_narrative_relay_moves_the_body_verbatim_and_adds_no_gate(monkeypatch):
+    """长文两条腿只做字节搬运：上限／判定序／是否落盘全判在 8902，8900 不预览正文也不设第二道闸。
+
+    三形同批钉住：409 的 detail 带着「当前 rev」原样回（这条 409 **先于磁盘写入**，界面要把
+    序号现值显示出来才谈得上重发）、超限 422 不降级成 500、缺文件是 200 带 `exists=false`。
+    """
+    seen: list[dict | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        seen.append(body)
+        if request.method == "PUT" and body and "陈旧表单的正文" in str(body.get("content")):
+            return httpx.Response(
+                409,
+                json={"detail": "af_kp 乐观并发冲突：afkp-9 当前 rev=7，请求 if_rev=3"},
+            )
+        if request.method == "PUT":
+            return httpx.Response(
+                422, json={"detail": "正文超出 NARRATIVE_MAX_CHARS=512000（不截断）"}
+            )
+        return httpx.Response(
+            200,
+            json={"node_id": "afkp-9", "narrative_ref": "afkp-9.md", "exists": False,
+                  "content": "", "bytes": 0, "rev": 7, "updated_at": None},
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    conflict = client.put(
+        "/api/v1/kp/nodes/afkp-9/narrative", json={"content": "陈旧表单的正文", "if_rev": 3}
+    )
+    assert conflict.status_code == 409
+    assert "当前 rev=7" in conflict.json()["detail"]
+    oversize = client.put(
+        "/api/v1/kp/nodes/afkp-9/narrative", json={"content": "长" * 600_000}
+    )
+    assert oversize.status_code == 422
+    assert "NARRATIVE_MAX_CHARS" in oversize.json()["detail"]
+    assert seen[1]["content"] == "长" * 600_000  # 60 万字符原样上送：8900 既不截也不拒
+    missing = client.get("/api/v1/kp/nodes/afkp-9/narrative")
+    assert missing.status_code == 200
+    assert missing.json()["exists"] is False and missing.json()["content"] == ""
+
+
+
+def test_kp_regenerate_leg_gets_a_longer_upstream_timeout(monkeypatch):
+    """单点重生成是同步腿（一次百秒级模型调用）：只有它显式放长上流超时，其余梳理腿沿用客户端缺省。
+
+    30s 缺省会在模型还没答完时就断开，而 8902 那边总结已经写进库——人看到失败、行其实变了，
+    这比慢更坏。上限取 8902 网关自身的 360s（再长也等不到）。
+    """
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"node_id": "afkp-1", "summary": "新总结", "rev": 5})
+
+    axiom = _axiom_client(handler)
+    original = axiom._client.request
+
+    def spy(method, path, **kwargs):
+        seen.append(kwargs)
+        return original(method, path, **kwargs)
+
+    monkeypatch.setattr(axiom._client, "request", spy)
+    client = _client(monkeypatch, axiom=axiom)
+    client.get("/api/v1/books/b05/kp")
+    regenerated = client.post("/api/v1/kp/nodes/afkp-1/summary", json={"if_rev": 4})
+
+    assert regenerated.status_code == 200
+    assert "timeout" not in seen[0]
+    assert seen[1]["timeout"] == 360.0
+
+
+def test_kp_passthrough_keeps_upstream_status_and_body_shape(monkeypatch):
+    """梳理面的非 2xx 也是契约：422 与 200 同形、409 先于形状校验、槽位 503 点名配置——原样回，不套 detail。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/kp/nodes/afkp-1/confirm":
+            return httpx.Response(
+                422,
+                json={"node_id": "afkp-1", "confirmed": 0, "rev": 1,
+                      "missing": ["锚点页 999 不在取证版本的页集内"]},
+            )
+        if path == "/api/v1/kp/nodes/afkp-3/summary":
+            return httpx.Response(422, json={"detail": "只有知识点可以重生成总结"})
+        if path == "/api/v1/kp/nodes/afkp-2":
+            return httpx.Response(
+                409,
+                json={"detail": "af_kp 乐观并发冲突：afkp-2 当前 rev=4，请求 if_rev=1"},
+            )
+        if path == "/api/v1/kp-jobs":
+            return httpx.Response(
+                503, json={"detail": "梳理引擎槽位未接入：请配置 AXIOM_KP_ENGINE（零写入）"}
+            )
+        return httpx.Response(404, json={"detail": f"unexpected {path}"})
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    confirm = client.post("/api/v1/kp/nodes/afkp-1/confirm", json={"confirmed": True})
+    assert confirm.status_code == 422
+    assert confirm.json() == {"node_id": "afkp-1", "confirmed": 0, "rev": 1,
+                              "missing": ["锚点页 999 不在取证版本的页集内"]}
+    conflict = client.patch("/api/v1/kp/nodes/afkp-2", json={"summary": "s", "if_rev": 1})
+    assert conflict.status_code == 409
+    assert "rev=4" in conflict.json()["detail"]
+    non_point = client.post("/api/v1/kp/nodes/afkp-3/summary", json={"if_rev": 1})
+    assert non_point.status_code == 422
+    assert "只有知识点" in non_point.json()["detail"]
+    slot = client.post("/api/v1/kp-jobs", json={"book_id": "b05"})
+    assert slot.status_code == 503
+    assert "AXIOM_KP_ENGINE" in slot.json()["detail"]
+
+
+def test_kp_relay_does_not_duplicate_upstream_shape_validation(monkeypatch):
+    """闭集与列域正本在 8902：未知键由上游 extra=forbid 点名，8900 原样上送、不预检。"""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            422, json={"detail": "字段 extra_forbidden：gen_status 不在人工背书域"}
+        )
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.patch("/api/v1/kp/nodes/afkp-1", json={"gen_status": "candidate"})
+    assert response.status_code == 422
+    assert seen == [{"gen_status": "candidate"}]
+    assert "gen_status" in response.json()["detail"]
+
+
+def test_kp_offline_maps_503_unreachable(monkeypatch):
+    """8902 离线时梳理腿同样 503＋不可达文案（独立性铁律：梳理屏降级，不牵动其他界面）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _client(monkeypatch, axiom=_axiom_client(handler))
+    response = client.get("/api/v1/books/b05/kp")
+    assert response.status_code == 503
+    assert "Axiom-Flow 服务不可达" in response.json()["detail"]
+
+
 # --- /parsing/tree 聚合（ARCH-020；后端此前零用例） ---
 
 

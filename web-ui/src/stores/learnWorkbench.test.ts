@@ -1,17 +1,20 @@
 /**
- * 学习工作台 store 用例（v1.0 三张化：章 → 知识点两级、逐条推进、注解三段）
+ * 学习工作台 store 用例（v1.0 三张化：章 → 知识点两级、逐条推进、批注只读）
  * 守护四件事：推进序列一次进面一次读（`knowledge-points` 的 `sequence`，零写入）、
  * 落笔只写 `kp_id`＋状态（covered 列随 qe_unit 退出，「已学」＝kp 行终态位）、
- * 条级注解＝主表 `angles` 追加后整行回灌序列（候选池已退役）、备注＝kp 行 `learner_note`。
+ * 批注四段零生成（本面不发一次 `/annotations/generate`，章级成品随目录直读）、
+ * 记录＝kp 行 `learner_note`（随当前终态位整笔提交，写后重取即回显）；页头「刷新」＝同步＋重取。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mockFetch } from '../test/setup';
 import {
-  PAGE_BATCH, POINT_KEY_PREFIX, anglesOf, chapterOf, chapterOfUnit, flowPages, isCovered,
+  PAGE_BATCH, POINT_KEY_PREFIX, chapterOf, chapterOfUnit, flowPages, isCovered,
   pointsOfChapter, rangeOfRef, useLearnWorkbenchStore,
 } from './learnWorkbench';
 import type { FlowPage } from './learnWorkbench';
-import type { KpAngle, LearnProgress, LearnerKpStatus, OutlineRow, PointChapter, PointUnit } from '../api/learn';
+import type {
+  LearnBookProgress, LearnProgress, LearnerKpStatus, OutlineRow, PointChapter, PointUnit,
+} from '../api/learn';
 
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(
@@ -82,18 +85,37 @@ function outlineRows(bookId: string): OutlineRow[] {
   } as OutlineRow));
 }
 
+/** b05 的章与条（现网两本混排＝服务端按 sort_order 交错给出，每行自带归本位 book_ref） */
+const CHAPTER_B05: PointChapter = {
+  node_kind: 'outline', unit_id: 'kp:c5', kp_id: 'c5', name: '第5章 级数', point_count: 1,
+  book_ref: 'b05', source_ref: { ref_id: 'b05', page_start: 101, page_end: 120 },
+  summary: '', key_points: [],
+};
+
+const UNIT_B05: PointUnit = {
+  node_kind: 'point', unit_id: 'kp:p5', parent_id: 'kp:c5', chapter_kp_id: 'c5', kp_id: 'p5',
+  name: '级数收敛', title: '级数收敛', sort_order: 3, type: 'concept', book_ref: 'b05',
+  source_ref: { ref_id: 'b05', page_start: 101, page_end: 103 }, window_source: 'point',
+  summary: '级数收敛的定义', angles: [], learner: null,
+};
+
+/** 把 b05 的两行插进混排序（章序 c1 → c5 → c2，条序 p1 → p5 → p2 → p3） */
+function interleaveB05() {
+  hub.chapters = [hub.chapters[0], CHAPTER_B05, ...hub.chapters.slice(1)];
+  hub.units = [hub.units[0], UNIT_B05, ...hub.units.slice(1)];
+}
+
 interface Hub {
   units: PointUnit[];
   chapters: PointChapter[];
-  /** kp 行（qe_learning 的知识点行）：落笔态与备注的唯一落点 */
+  /** kp 行（qe_learning 的知识点行）：落笔态与记录的唯一落点 */
   kpRows: Record<string, { status: LearnerKpStatus; learner_note: string }>;
   progress: Array<{ kp_id: string; status: string; note: string | null }>;
   putOutline: Array<{ book_ref: string; tree: unknown }>;
-  generate: Array<Record<string, unknown>>;
   pageTexts: Record<string, string>;
   registered: boolean;
-  generateStatus: number;
-  generateDetail: string;
+  /** `derived.books`（教材级进度＋服务端角色位）：默认空＝角色未知，不过滤 */
+  bookMeta: LearnBookProgress[];
 }
 
 const hub = {} as Hub;
@@ -104,11 +126,9 @@ function resetHub() {
   hub.kpRows = {};
   hub.progress = [];
   hub.putOutline = [];
-  hub.generate = [];
   hub.pageTexts = {};
   hub.registered = true;
-  hub.generateStatus = 200;
-  hub.generateDetail = '';
+  hub.bookMeta = [];
 }
 
 /** 门游标与计数一律按 kp 行现算（服务端同口径：读时派生，不落列） */
@@ -153,6 +173,21 @@ function routes() {
       // b07 有目录、b05 零目录（自动整理通路按既有口径保留）
       return jsonResponse({ course_id: 'ma', book_ref: book, outline: book === 'b07' ? outlineRows(book) : [] });
     }
+    if (url.endsWith('/learn/courses/ma/knowledge-points/sync')) {
+      return jsonResponse({
+        course_id: 'ma',
+        books: [{
+          book_ref: 'b07', ok: true, skipped_empty: false,
+          chapters: { created: 0, reused: 2, dropped: 0, orphaned_points: 0 },
+          points: { created: 0, reused: 3, skipped: 0 },
+          detached: 0, excluded: { rejected: 0, reference: 0, point_rows: 0 },
+        }],
+        totals: {
+          chapters: { created: 0, reused: 2, dropped: 0, orphaned_points: 0 },
+          points: { created: 0, reused: 3, skipped: 0 },
+        },
+      });
+    }
     if (url.includes('/learn/courses/ma/knowledge-points')) {
       return jsonResponse({
         course: { course_id: 'ma', name: '数学分析', track: '分析学', domain_id: 'math', description: '' },
@@ -184,29 +219,6 @@ function routes() {
       }
       return jsonResponse(progressOut());
     }
-    if (url.includes('/learn/annotations/generate')) {
-      hub.generate.push(body);
-      if (hub.generateStatus !== 200) return jsonResponse({ detail: hub.generateDetail }, hub.generateStatus);
-      const part = String(body.part);
-      if (part === 'annotation') {
-        const unit = hub.units.find((row) => row.kp_id === body.kp_id);
-        const angles: KpAngle[] = [...(unit?.angles ?? []), { angle: 'explanation', note: '本次生成的注解正文' }];
-        if (unit) unit.angles = angles;
-        return jsonResponse({
-          ok: true, target: { kind: 'point', kp_id: body.kp_id, name: unit?.name ?? '' },
-          point: { ...(unit ?? {}), node_kind: 'point', angles },
-        });
-      }
-      const chapter = hub.chapters.find((row) => row.kp_id === body.kp_id);
-      if (chapter) {
-        if (part === 'summary') chapter.summary = `《${chapter.name}》本章总结`;
-        else chapter.key_points = ['要点一', '要点二', '要点三'];
-      }
-      return jsonResponse({
-        ok: true, target: { kind: 'chapter', kp_id: body.kp_id, name: chapter?.name ?? '' },
-        chapter: { kp_id: body.kp_id, summary: chapter?.summary ?? '', key_points: [...(chapter?.key_points ?? [])] },
-      });
-    }
     if (url.includes('/learn/courses')) {
       if (!hub.registered) return jsonResponse({ courses: [] });
       return jsonResponse({
@@ -219,7 +231,7 @@ function routes() {
             { kind: 'book', ref_id: 'b05', label: '数学分析原理' },
             { kind: 'book', ref_id: 'b01', label: '同课未激活' },
           ],
-          derived: progressOut(), unit_count: hub.units.length,
+          derived: { ...progressOut(), books: hub.bookMeta }, unit_count: hub.units.length,
         }],
       });
     }
@@ -247,7 +259,7 @@ async function openWorkbench() {
   await store().fetchCourse('ma');
 }
 
-describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋angles 注解）', () => {
+describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋批注只读）', () => {
   beforeEach(() => {
     useLearnWorkbenchStore.setState(useLearnWorkbenchStore.getInitialState(), true);
     mockFetch.mockReset();
@@ -264,6 +276,55 @@ describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋angles
     expect(store().bookId).toBe('b07');
     expect(store().windowSource).toBe('point');
     expect(store().loadedThrough).toBe(9);
+  });
+
+  it('序列按书切（T4）：?book= 只留这本的章与条，推进与刷新都在这本内走', async () => {
+    interleaveB05();
+    await store().fetchCourse('ma', 'b05');
+    expect(store().bookId).toBe('b05');
+    expect(store().chapters.map((row) => row.kp_id)).toEqual(['c5']);
+    expect(store().pointUnits.map((unit) => unit.kp_id)).toEqual(['p5']);
+    expect(store().selected).toEqual({ kind: 'point', kpId: 'p5' });
+    expect(store().range).toEqual({ start: 101, end: 103 });
+    await store().step(1);
+    expect(store().notice).toContain('已经到这本最后一条');
+    await store().refresh();
+    expect(store().pointUnits.map((unit) => unit.kp_id)).toEqual(['p5']);
+  });
+
+  it('断点落在别本＝不用它：落这本第一条（进度计数仍课程级）', async () => {
+    interleaveB05();
+    hub.kpRows.p1 = { status: 'done', learner_note: '' };
+    hub.kpRows.p5 = { status: 'done', learner_note: '' };
+    await store().fetchCourse('ma', 'b05');
+    expect(store().progress?.current_unit_id).toBe('kp:p2'); // 课程级游标在 b07
+    expect(store().progress?.total).toBe(4);
+    expect(store().selected).toEqual({ kind: 'point', kpId: 'p5' });
+  });
+
+  it('?book= 缺席＝落首本教材，序列按那一本切', async () => {
+    interleaveB05();
+    hub.bookMeta = [
+      { ref_id: 'b07', label: '高等数学引论', total: 3, done: 0, percent: 0, textbook: true },
+      { ref_id: 'b05', label: '数学分析原理', total: 1, done: 0, percent: 0, textbook: true },
+    ];
+    await store().fetchCourse('ma');
+    expect(store().bookId).toBe('b07');
+    expect(store().pointUnits.map((unit) => unit.kp_id)).toEqual(['p1', 'p2', 'p3']);
+    expect(store().chapters.map((row) => row.kp_id)).toEqual(['c1', 'c2']);
+  });
+
+  it('习题集不做首本、也不进教材清单（T5：只读服务端 textbook 位）', async () => {
+    interleaveB05();
+    hub.bookMeta = [
+      { ref_id: 'b07', label: '数分习题集', total: 3, done: 0, percent: 0, textbook: false },
+      { ref_id: 'b05', label: '数学分析原理', total: 1, done: 0, percent: 0, textbook: true },
+      { ref_id: 'b01', label: '同课未激活', total: 0, done: 0, percent: 0 },
+    ];
+    await store().fetchCourse('ma');
+    expect(store().texts.map((text) => text.bookId)).toEqual(['b05', 'b01']);
+    expect(store().bookId).toBe('b05');
+    expect(store().pointUnits.map((unit) => unit.kp_id)).toEqual(['p5']);
   });
 
   it('章行没有章级成品位时补齐空值：旧返回不缺字段也不崩右栏', async () => {
@@ -330,7 +391,7 @@ describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋angles
     await store().step(1);
     expect(store().selectedKpId).toBe('p3');
     await store().step(1);
-    expect(store().notice).toContain('已经到本课最后一条');
+    expect(store().notice).toContain('已经到这本最后一条');
     await store().step(-1);
     expect(store().selectedKpId).toBe('p2');
   });
@@ -359,80 +420,51 @@ describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋angles
     expect(store().notice).toContain('整章阅读记不进进度');
   });
 
-  it('章级生成一次点齐两件：缺什么生成什么，成品合并回章行即可直读', async () => {
+  it('批注四段零生成：章级成品随目录直读，本面不发一次生成请求', async () => {
     await openWorkbench();
+    await store().selectPoint('p3');
+    expect(chapterOfUnit(store().chapters, store().selectedPoint)?.summary).toBe('已有本章总结');
+    expect(store().selectedPoint?.summary).toBe('非空有上界的实数集必有上确界');
     await store().selectPoint('p1');
     expect(chapterOfUnit(store().chapters, store().selectedPoint)?.summary).toBe('');
-    await store().generateChapter();
-    expect(hub.generate.map((row) => row.part)).toEqual(['summary', 'key_points']);
-    expect(hub.generate[0]).toMatchObject({ course_id: 'ma', target_kind: 'chapter', kp_id: 'c1' });
-    const chapter = chapterOfUnit(store().chapters, store().selectedPoint);
-    expect(chapter?.summary).toBe('《第1章 实数》本章总结');
-    expect(chapter?.key_points).toEqual(['要点一', '要点二', '要点三']);
+    expect(calls.filter((c) => c.includes('/annotations/generate'))).toEqual([]);
   });
 
-  it('章级两件齐全时零请求：进场直读即够，不再多烧一次生成', async () => {
-    await openWorkbench();
-    await store().selectPoint('p3');
-    await store().generateChapter();
-    expect(hub.generate).toHaveLength(0);
-  });
-
-  it('条级生成＝主表 angles 追加：整行回灌序列并按数组序展示，旧的一条不被丢弃', async () => {
-    await openWorkbench();
-    await store().selectPoint('p3');
-    expect(anglesOf(store().selectedPoint).map((item) => item.note)).toEqual(['已有的一条本条总结']);
-    await store().generatePoint();
-    expect(hub.generate[0]).toMatchObject({ target_kind: 'point', kp_id: 'p3', part: 'annotation' });
-    expect(anglesOf(store().selectedPoint).map((item) => item.angle)).toEqual(['summary', 'explanation']);
-    expect(calls.some((c) => c.includes('/kp-details'))).toBe(false);
-  });
-
-  it('生成失败话术不套运维前缀：503 直接给后端那一句', async () => {
-    await openWorkbench();
-    hub.generateStatus = 503;
-    hub.generateDetail = '这一条的正文还没准备好，暂时生成不了';
-    await store().selectPoint('p3');
-    await store().generatePoint();
-    expect(store().generateError).toBe('这一条的正文还没准备好，暂时生成不了');
-    expect(store().generateError).not.toContain('服务');
-    expect(store().generating).toBe(false);
-  });
-
-  it('生成腿遇上端点缺失（404）：给下一步话术，不把 Not Found 抛给学习者', async () => {
-    await openWorkbench();
-    mockFetch.mockImplementation((url: string) => (
-      url.includes('/annotations/generate')
-        ? jsonResponse({ detail: 'Not Found' }, 404)
-        : jsonResponse({})
-    ));
-    await store().generatePoint();
-    expect(store().generateError).not.toContain('Not Found');
-    expect(store().generateError).toContain('稍后点右上「刷新」再试');
-  });
-
-  it('刷新＝重取目录与推进序列并保留当前条，不触发任何生成', async () => {
+  it('页头「刷新」＝同步＋重取：先把在册成品提升到本课目录，再保留当前条重读三态', async () => {
     await openWorkbench();
     await store().selectPoint('p2');
-    const before = calls.filter((c) => c.includes('/annotations/generate')).length;
+    expect(calls.filter((c) => c.includes('/knowledge-points/sync'))).toEqual([]);
     await store().refresh();
     expect(store().selectedKpId).toBe('p2');
+    expect(calls.filter((c) => c.startsWith('POST') && c.includes('/knowledge-points/sync'))).toHaveLength(1);
     expect(calls.filter((c) => c.startsWith('GET') && c.includes('/knowledge-points'))).toHaveLength(2);
-    expect(calls.filter((c) => c.includes('/annotations/generate'))).toHaveLength(before);
+    expect(calls.filter((c) => c.includes('/annotations/generate'))).toEqual([]);
+    expect(store().syncError).toBeNull();
   });
 
-  it('未登记学习课程：推进区降级话术且零 progress／零生成写入', async () => {
+  it('同步腿不可达：只留一条 syncError，目录与正文仍按上一次的结果在位', async () => {
+    await openWorkbench();
+    await store().selectPoint('p2');
+    const base = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => (
+      url.endsWith('/knowledge-points/sync') ? jsonResponse({ detail: '无法连接' }, 503) : base!(url, init)
+    ));
+    await store().refresh();
+    expect(store().syncError).toContain('无法连接');
+    expect(store().pointUnits.map((unit) => unit.kp_id)).toEqual(['p1', 'p2', 'p3']);
+    expect(store().selectedKpId).toBe('p2');
+  });
+
+  it('未登记学习课程：推进区降级话术且零 progress 写入', async () => {
     hub.registered = false;
     await store().fetchCourse('ma');
     expect(store().progressError).toContain('不在您的书架上');
     expect(store().pointUnits).toEqual([]);
     await store().markSelected('done');
-    await store().generateChapter();
     expect(hub.progress).toHaveLength(0);
-    expect(hub.generate).toHaveLength(0);
   });
 
-  it('备注写 kp 行 learner_note：随当前终态位整笔提交，写后重取即回显', async () => {
+  it('记录写 kp 行 learner_note：随当前终态位整笔提交，写后重取即回显', async () => {
     await openWorkbench();
     await store().selectPoint('p3');
     await store().markSelected('done');
@@ -443,27 +475,13 @@ describe('学习工作台 store（v1.0：sequence 读源＋kp 行落笔＋angles
     expect(calls.some((c) => c.includes('/kp-details'))).toBe(false);
   });
 
-  it('备注遇不上 kp 行时拒绝并给下一步话术：零 progress 写入', async () => {
+  it('记录遇不上 kp 行时静默拒绝：零 progress 写入，也不给下一步话术（§6／§10）', async () => {
     await openWorkbench();
     await store().selectPoint('p1');
     const ok = await store().saveNote('想先记一句');
     expect(ok).toBe(false);
     expect(hub.progress).toHaveLength(0);
-    expect(store().notice).toContain('这一条还没有学习记录');
-  });
-
-  it('anglesOf 只收有正文的元素且保持数组序（数组序＝权威排序，前端不重排）', () => {
-    const point = {
-      ...UNITS[0],
-      angles: [
-        { angle: 'example', note: '例子正文' },
-        { angle: 'summary' },
-        { angle: 'definition', note: '' },
-        { angle: 'proof', note: '证明正文' },
-      ] as KpAngle[],
-    };
-    expect(anglesOf(point).map((item) => item.angle)).toEqual(['example', 'proof']);
-    expect(anglesOf(null)).toEqual([]);
+    expect(store().notice).toBeNull();
   });
 
   it('chapterOfUnit：章内按派生 parent 归组；无所属章给 null', () => {

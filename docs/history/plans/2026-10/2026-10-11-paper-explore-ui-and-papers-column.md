@@ -21,7 +21,7 @@
 | 已交付现状基线（REQ-102 归档壳 `../history/plans/2026-10/2026-09-30-req102-paper-display-row-root-impl.md`） | 只并入「不可回退面」清单（下方节），归档壳保留作过程与真机取证追溯，不搬正文、不改写历史 |
 | 稳定文档现行口径（`design/downloads-flow.md` §7、`design/downloads-ui.md` §4.4） | **指针引用**，不复制派生表与端点正文（事实源唯一，ADR 0017）；本文档只写「本轮要在其上追加什么」 |
 | 本轮设计稿（原 REQ-107 E1~E5 设计本体 + R1~R6 裁定） | 全文并入本文档「设计本体」节，已按裁定定稿 |
-| 跨项目请求壳 `2026-09-30-req101-paper-scope-books-adoption-request.md`（REQ-101） | **不并入**——对方承接与实施事实源在 QED-Tracker 台账，本壳是请求存根；只在「上游与遗留指针」节挂一行未决项 |
+| 跨项目请求壳 `2026-09-30-req101-paper-scope-books-adoption-request.md`（REQ-101） | **不并入**——对方承接与实施事实源在 QED-Tracker 台账，本壳是请求存根；只在「上游与遗留指针」节挂一行未决项（该项已于 2026-10-24 随 REQ-101 整行 `Achieved` 收口结清，该节原文随步标注） |
 
 ### 已交付现状基线（不可回退面，本文档的实施起点）
 
@@ -528,8 +528,8 @@ I13（历史清单收成一个按钮）替代 I10 的呈现与落点；I14（旧
 
 ## 上游与遗留指针（不进本文档实施范围）
 
-- **REQ-101 R4**：存量论文（`_general/papers/` 下无书目行的历史 PDF）回填口径＝对方 D 步人工窗口，
-  事实源在 QED-Tracker 台账（见 [REQ-101 请求壳](../../../plans/2026-09-30-req101-paper-scope-books-adoption-request.md)）。
+- **REQ-101 R4**：存量论文（`_general/papers/` 下无书目行的历史 PDF）回填口径**已裁定＝存量不回填、声明只读、不再展示**（对方 2026-10-15 的 D 步裁决，正本在其 068 归档计划「D 步裁决：存量不回填」节）⇒ 本条未决项已于 2026-10-24 随 REQ-101 整行 `Achieved` 收口结清；遗留 PDF 不进书库、不进五层态、不参与采纳查重（同一 arXiv ID 再次采纳会重复落盘一份，代价由用户显式接受），
+  事实源在 QED-Tracker 台账（见 [REQ-101 请求壳](2026-09-30-req101-paper-scope-books-adoption-request.md)）。
 - **8900 `POST /books/{book_id}/fetch` 返 200 而契约与 8901 为 202**：REQ-102 关闭时的归属登记，
   是否立 DEFECT 仍待用户裁（`backend/qed_engine/api/tracker.py:465-468` 通用 `_call`）。
 - 对方错误文案按渠道归因 + 另三份 advisor 容错对齐：并行线遗留，与本基准无关。

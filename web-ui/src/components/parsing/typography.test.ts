@@ -5,8 +5,9 @@ import {
   assignRoles, bodyFontFamily, clampLevel, DEFAULT_TYPOGRAPHY, FONT_LADDER_LABELS,
   FONT_LADDER_PT, headingLevelFor, HEADING_FONT_FAMILY, isSectionHeadingText,
   indentForDepth, INDENT_STEPS_PX, isSentenceClosed, headingDepthOf, isTocHeadingText, layoutUnits, levelPx,
-  loadTypographyPrefs, ptToPx, roleTypography, saveTypographyPrefs, symbolLineParts,
-  tocItemParts,
+  loadTypographyPrefs, ptToPx, roleTypography, symbolLineParts,
+  tocEntriesFromLine,
+  isChapterTocEntry, tocEntryRowStyle, isTocLikeLine, tocLikeRatio,
   TYPOGRAPHY_STORAGE_KEY,
   type BlockRole, type TypographyPrefs,
 } from './typography';
@@ -147,20 +148,126 @@ describe('目录启发式识别（R4 承接前兜底）', () => {
 
 describe('目录条目拆分（点线 + 页码右对齐数据源）', () => {
   it('中文点线 + 尾数页码', () => {
-    expect(tocItemParts('函数极限与连续性 ……… 12')).toEqual({ title: '函数极限与连续性', page: '12' });
+    expect(tocEntriesFromLine('函数极限与连续性 ……… 12')).toEqual([
+      { title: '函数极限与连续性', page: '12', segment: '函数极限与连续性 ……… 12' },
+    ]);
   });
   it('西文句点点线', () => {
-    expect(tocItemParts('Introduction..........3')).toEqual({ title: 'Introduction', page: '3' });
+    expect(tocEntriesFromLine('Introduction..........3')).toEqual([
+      { title: 'Introduction', page: '3', segment: 'Introduction..........3' },
+    ]);
   });
   it('空白分隔页码', () => {
-    expect(tocItemParts('牛顿-莱布尼茨公式 24')).toEqual({ title: '牛顿-莱布尼茨公式', page: '24' });
+    expect(tocEntriesFromLine('牛顿-莱布尼茨公式 24')).toEqual([
+      { title: '牛顿-莱布尼茨公式', page: '24', segment: '牛顿-莱布尼茨公式 24' },
+    ]);
   });
   it('无页码 → page 空串；标题尾数不误拆（无分隔符）', () => {
-    expect(tocItemParts('无页码条目')).toEqual({ title: '无页码条目', page: '' });
-    expect(tocItemParts('Vol.2')).toEqual({ title: 'Vol.2', page: '' });
+    expect(tocEntriesFromLine('无页码条目')).toEqual([{ title: '无页码条目', page: '', segment: '无页码条目' }]);
+    expect(tocEntriesFromLine('Vol.2')).toEqual([{ title: 'Vol.2', page: '', segment: 'Vol.2' }]);
   });
   it('list items 逐条拆分', () => {
-    expect(tocItemParts('第一章 绪论……7  ')).toEqual({ title: '第一章 绪论', page: '7' });
+    expect(tocEntriesFromLine('第一章 绪论……7  ')).toEqual([
+      { title: '第一章 绪论', page: '7', segment: '第一章 绪论……7' },
+    ]);
+  });
+});
+
+/**
+ * 守则一・行内引导点与页码一律剔离（DEFECT-025，2026-10-25）。
+ * 夹具原文＝8900 `GET /api/v1/books/mathanalysis-b05/pages/7` 与 `/pages/8` 的 paragraph 块行。
+ * 原实现把清理正则锚在行尾 ⇒ 黏行把中间页码留在名里（现网章名 `第4章 连续性 …… 73函数的极限` 即其产物）。
+ */
+describe('目录条目清洗・守则一（一行可出多条，行内引导点与页码一律剔离）', () => {
+  it('黏行拆成两条干净条目（b05 p7 实测原文）', () => {
+    expect(tocEntriesFromLine('第4章 连续性 …… 73函数的极限 …… 73')).toEqual([
+      { title: '第4章 连续性', page: '73', segment: '第4章 连续性 …… 73' },
+      { title: '函数的极限', page: '73', segment: '函数的极限 …… 73' },
+    ]);
+  });
+
+  it('黏行中间夹 LaTeX 只剥引导点与页码、不动正文（b05 p8 实测原文）', () => {
+    const entries = tocEntriesFromLine('复函数的积分 …… 296 $\\mathscr{L}^2$ 类的函数 …… 297');
+    expect(entries.map((item) => [item.title, item.page])).toEqual([
+      ['复函数的积分', '296'], ['$\\mathscr{L}^2$ 类的函数', '297'],
+    ]);
+  });
+
+  it('条目尾的孤立引导点不留空碎片，也不进该条目的原样片段（黏行被列边界切断）', () => {
+    expect(tocEntriesFromLine('连续函数 …… 74…')).toEqual([
+      { title: '连续函数', page: '74', segment: '连续函数 …… 74' },
+    ]);
+  });
+
+  it('下一条目以点线开头时先剥前置引导点（列边界切断的黏行）', () => {
+    expect(tocEntriesFromLine('函数的极限………73…连续函数 …… 74').map((item) => item.title))
+      .toEqual(['函数的极限', '连续函数']);
+  });
+
+  it('折行的前半截＝只出无页码碎片，单点与章号数字不误拆（b05 p7 实测原文）', () => {
+    expect(tocEntriesFromLine('第6章 RIEMANN-STIEI.')).toEqual([
+      { title: '第6章 RIEMANN-STIEI.', page: '', segment: '第6章 RIEMANN-STIEI.' },
+    ]);
+    expect(tocEntriesFromLine('Vol.2')).toEqual([{ title: 'Vol.2', page: '', segment: 'Vol.2' }]);
+    expect(tocEntriesFromLine('第 11 章 LEBESGUE 理论 …… 275')).toHaveLength(1);
+  });
+
+  it('单条目行只出一条（既有读法不回归）', () => {
+    for (const line of [
+      '函数极限与连续性 ……… 12', 'Introduction..........3',
+      '牛顿-莱布尼茨公式 24', '第1章 实数系和复数系…… 1', '无页码条目',
+    ]) {
+      expect(tocEntriesFromLine(line)).toHaveLength(1);
+    }
+  });
+
+  it('空文本与纯空白不报错', () => {
+    expect(tocEntriesFromLine('')).toEqual([]);
+    expect(tocEntriesFromLine('   ')).toEqual([]);
+  });
+});
+
+describe('章题判定单点（DEFECT-025 展示面・章加粗＋节缩进的判据源）', () => {
+  it('第 N 章（阿拉伯／中文序号／带空白）与 Chapter N 判为章', () => {
+    for (const title of ['第4章 连续性', '第 11 章 LEBESGUE 理论', '第一章 实数系', 'Chapter 3 Series']) {
+      expect(isChapterTocEntry(title)).toBe(true);
+    }
+  });
+
+  it('节题、编号题、条目内出现「章」字的普通题判为节', () => {
+    for (const title of ['函数的极限', '连续函数', '1.2 微分中值定理', '第 3 节 一致收敛', '章末总结', 'RIEMANN 积分']) {
+      expect(isChapterTocEntry(title)).toBe(false);
+    }
+  });
+
+  it('层级样式＝章加粗不缩进、节不加粗缩进一档（甲案形态）', () => {
+    expect(tocEntryRowStyle('第4章 连续性')).toEqual({ fontWeight: 600, paddingLeft: INDENT_STEPS_PX[0] });
+    expect(tocEntryRowStyle('函数的极限')).toEqual({ paddingLeft: INDENT_STEPS_PX[1] });
+  });
+});
+
+describe('目录密度判据（DEFECT-025 展示面・目录续页无标题也按目录渲染）', () => {
+  it('整页目录续页（本行内无「目录」标题）＝命中 toc 角色，不再当正文铺出残点', () => {
+    const blocks = [mk('paragraph', { text: 'VII\n习题 …… 148\n第8章 一些特殊函数 …… 155\n幂级数 …… 155\n三角函数 …… 164' })];
+    expect(assignRoles(blocks)).toEqual(['toc']);
+  });
+
+  it('正文页（带页码形态行不过半）仍为 body，不误判成目录', () => {
+    const blocks = [mk('paragraph', { text: '设 f 在闭区间上连续。\n由介值定理可知 f 取到最值。\n下面给出证明。' })];
+    expect(assignRoles(blocks)).toEqual(['body']);
+  });
+
+  it('isTocLikeLine＝拆得出带页码条目才算；目录标题与纯罗马页码是噪声', () => {
+    expect(isTocLikeLine('幂级数 …… 155')).toBe(true);
+    expect(isTocLikeLine('第4章 连续性 …… 73函数的极限 …… 73')).toBe(true);
+    expect(isTocLikeLine('目录')).toBe(false);
+    expect(isTocLikeLine('VII')).toBe(false);
+    expect(isTocLikeLine('由定义可得')).toBe(false);
+  });
+
+  it('tocLikeRatio＝分母先剔噪声行，全噪声为 0', () => {
+    expect(tocLikeRatio(['VII', '目录'])).toBe(0);
+    expect(tocLikeRatio(['幂级数 …… 155', '三角函数 …… 164', '由定义可得'])).toBeCloseTo(2 / 3, 6);
   });
 });
 
@@ -174,8 +281,8 @@ describe('版式偏好持久化（localStorage，默认正文五号宋体、页�
     expect(loadTypographyPrefs()).toEqual(DEFAULT_TYPOGRAPHY);
   });
 
-  it('保存后可读回', () => {
-    saveTypographyPrefs({ bodyFont: 'KaiTi', bodyLevel: 3, showFurniture: true });
+  it('盘上已有偏好就读回（界面写腿随「排版」面板一并撤除，读腿保留）', () => {
+    localStorage.setItem(TYPOGRAPHY_STORAGE_KEY, JSON.stringify({ bodyFont: 'KaiTi', bodyLevel: 3, showFurniture: true }));
     expect(loadTypographyPrefs()).toEqual({ bodyFont: 'KaiTi', bodyLevel: 3, showFurniture: true });
   });
 

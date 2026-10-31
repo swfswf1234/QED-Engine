@@ -56,8 +56,12 @@ class InMemoryKnowledgeStore:
         anchors: Any = None,
         order_hint: int | None = None,
         from_detail_id: str = "",
+        source_ref: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """直登记一条 point 行＝候选池退役后主表的唯一产面（与 MySQL 实现同校验口径）。"""
+        """直登记一条 point 行＝候选池退役后主表的唯一产面（与 MySQL 实现同校验口径）。
+
+        `source_ref`＝机器腿专用页窗（提升同步腿写；请求侧 `PointCreateBody` 未声明该键）。
+        """
         if not str(course_id or "").strip():
             raise LearnConflict("course_id 不可为空")
         if not str(name or "").strip():
@@ -99,7 +103,7 @@ class InMemoryKnowledgeStore:
                 "summary": summary,
                 "narrative_ref": narrative_ref or "",
                 "angles": [],
-                "source_ref": None,
+                "source_ref": source_ref,
                 "anchors": anchors or [],
                 "from_detail_id": from_detail_id or None,
                 "meta": None,
@@ -180,6 +184,10 @@ class InMemoryKnowledgeStore:
         return counts
 
     def patch_point(self, kp_id: str, **fields: Any) -> dict[str, Any]:
+        """白名单改列；三枚机器腿键（`from_detail_id`／`source_ref`／`anchors`）与 MySQL 同形。
+
+        请求侧 `PointPatchBody` 是 `extra=forbid` 且未声明这三键，故只有进程内同步腿能传到。
+        """
         with self._lock:
             row = self.get_point(kp_id)
             if "name" in fields:
@@ -191,6 +199,12 @@ class InMemoryKnowledgeStore:
                 row["parent_kp_id"] = fields["parent_kp_id"]
             if "summary" in fields:
                 row["summary"] = fields["summary"]
+            if "from_detail_id" in fields:
+                row["from_detail_id"] = fields["from_detail_id"] or None
+            if "source_ref" in fields:
+                row["source_ref"] = fields["source_ref"]
+            if "anchors" in fields:
+                row["anchors"] = fields["anchors"] or []
             if "meta" in fields:
                 merged = dict(row.get("meta") or {})
                 merged.update(fields["meta"] or {})

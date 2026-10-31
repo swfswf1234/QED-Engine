@@ -19,7 +19,7 @@ vi.mock('../api/explore-helpers', () => ({
   confirmDomainInfo: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { commitImport } from '../api/tracker';
+import { commitImport, updateDomain } from '../api/tracker';
 import { confirmDomainInfo } from '../api/explore-helpers';
 
 function renderWithProviders(ui: React.ReactNode) {
@@ -148,5 +148,35 @@ describe('领域确认弹窗表单口径（downloads-ui.md §3.1）', () => {
     renderOpen();
     const label = screen.getByText('领域描述');
     expect(label.className).not.toContain('ant-form-item-required');
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useDownloadsStore.setState({ fetchAll: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  function lastPatchBody(): Record<string, unknown> {
+    const calls = (updateDomain as unknown as { mock: { calls: [string, Record<string, unknown>][] } }).mock.calls;
+    return calls[calls.length - 1][1];
+  }
+
+  // DEFECT-024：读面取不到 scope 时不得发空串——空串会把库中用户已写的正文覆写掉
+  it('学科知识取不到（记录无 scope 键）时提交体不含 scope 键', async () => {
+    const noScope = { ...mockDomain } as Record<string, unknown>;
+    delete noScope.scope;
+    renderWithProviders(
+      <DomainConfirmModal domain={noScope as unknown as DomainSystem} open={true} onClose={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '保存并确认' }));
+    await waitFor(() => expect(updateDomain).toHaveBeenCalled());
+    expect('scope' in lastPatchBody()).toBe(false);
+    expect(lastPatchBody().description).toBe('描述');
+  });
+
+  it('取到值时提交体带 scope（回填链正常）', async () => {
+    renderOpen();
+    fireEvent.click(screen.getByRole('button', { name: '保存并确认' }));
+    await waitFor(() => expect(updateDomain).toHaveBeenCalled());
+    expect(lastPatchBody().scope).toBe('范围');
   });
 });

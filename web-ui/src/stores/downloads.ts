@@ -15,7 +15,7 @@
 import { create } from 'zustand';
 import { message } from 'antd';
 import {
-  listCourseSystem, listKnowledge, getKnowledge, listPaperBooks,
+  listCourseSystem, listDomains, listKnowledge, getKnowledge, listPaperBooks,
 } from '../api/tracker';
 import type { BookRecord, DomainSystem, KnowledgeDetail, KnowledgeRecord } from './index';
 
@@ -27,6 +27,31 @@ const _runningSince = new Map<string, number>();
 const _staleWarned = new Set<string>();
 /** 探索中超时阈值：超过视为任务可能已失效（8900/8901 重启悬挂） */
 export const RUNNING_STALE_MS = 30 * 60 * 1000;
+
+/** 领域级字段同步值（domain_id → scope）：键存在＝从 GET /domains 取到过 */
+export type DomainScopeFields = Record<string, string>;
+
+/**
+ * 领域级字段补齐（DEFECT-024）：GET /courses 的领域层不返 `scope`，用 GET /domains 的同步值补进左树记录。
+ * 体系腿自身已带 `scope` 时不覆盖（对方补齐该端点即自动让位）；同步值里没有的领域保持无 `scope` 键，
+ * 调用方据此区分「取不到」与「库里为空」——前者不得进提交体。
+ */
+export function withDomainScopeFields(rows: DomainSystem[], fields: DomainScopeFields): DomainSystem[] {
+  return rows.map((row) =>
+    row.scope === undefined && row.domain_id in fields
+      ? { ...row, scope: fields[row.domain_id] }
+      : row,
+  );
+}
+
+/** 合并 GET /domains 读到的领域级字段（只收 scope 为字符串的行；同步腿失败时调用方保留旧值） */
+export function mergeDomainScopeFields(rows: DomainSystem[], fields: DomainScopeFields): DomainScopeFields {
+  const next: DomainScopeFields = { ...fields };
+  for (const row of rows) {
+    if (typeof row.scope === 'string') next[row.domain_id] = row.scope;
+  }
+  return next;
+}
 
 /**
  * explore_pending 归一（8901 返回 dict / 共享表直读返回 JSON 字符串）。
@@ -301,6 +326,8 @@ export interface DownloadsStore {
   details: Record<string, KnowledgeDetail>;
   /** 发现论文书行（GET /papers/books；端点未实装/失败=空集，论文行隐藏） */
   paperBooks: BookRecord[];
+  /** 领域级字段同步值（GET /domains；DEFECT-024 读面补齐用，键存在＝取到过） */
+  domainFields: DomainScopeFields;
   loading: boolean;
   /** 整体错误（8900 不可达） */
   error: string | null;
@@ -344,6 +371,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
   knowledge: [],
   details: {},
   paperBooks: [],
+  domainFields: {},
   loading: false,
   error: null,
   systemError: null,
@@ -400,6 +428,11 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     const [system, sysErr] = await listCourseSystem()
       .then((s) => [s, null] as const)
       .catch((err) => [null, err] as const);
+    // 领域级字段同步腿（DEFECT-024）：GET /courses 领域层缺 scope，由 GET /domains 补齐；
+    // 独立静默降级——失败不改错误口径，取不到即留 undefined，提交侧据此不发该字段
+    const syncedFields = await listDomains()
+      .then((rows) => mergeDomainScopeFields(rows, get().domainFields))
+      .catch(() => get().domainFields);
     const [list, knErr] = await listKnowledge()
       .then((k) => [k, null] as const)
       .catch((err) => [null, err] as const);
@@ -416,7 +449,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
       });
     }
 
-    const newDomains = system ?? get().domains;
+    const newDomains = system ? withDomainScopeFields(system, syncedFields) : get().domains;
     const currentSelected = get().selected;
     const newSelected = currentSelected === null && newDomains.length > 0
       ? { kind: 'domain' as const, id: newDomains[0].domain_id }
@@ -427,6 +460,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
     
     set({
       domains: newDomains,
+      domainFields: syncedFields,
       knowledge: list ?? get().knowledge,
       details,
       paperBooks,
@@ -508,7 +542,7 @@ export const useDownloadsStore = create<DownloadsStore>((set, get) => ({
           }
         }
         // 更新 domains（含 explore_pending 字段，驱动右侧提示条）
-        set({ domains: latest });
+        set({ domains: withDomainScopeFields(latest, get().domainFields) });
       } catch {
         // 轮询失败静默忽略（fetchAll 会处理离线状态）
       }

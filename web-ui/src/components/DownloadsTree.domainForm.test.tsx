@@ -6,7 +6,7 @@
  * - 标签唯一口径：「探索范围」只用于 level，scope 一律称「学科知识」；描述三处非必填
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { ConfigProvider, App as AntApp } from 'antd';
 import DownloadsTree from './DownloadsTree';
 import { theme } from '../theme';
@@ -65,6 +65,13 @@ function assertFieldOrder(scope: HTMLElement) {
 function domainPostBodies(): Record<string, unknown>[] {
   return mockFetch.mock.calls
     .filter(([url, init]) => String(url).endsWith('/domains') && (init as RequestInit)?.method === 'POST')
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+}
+
+/** PATCH /domains/{id} 提交体（DEFECT-024：取不到的字段不得进提交体） */
+function domainPatchBodies(): Record<string, unknown>[] {
+  return mockFetch.mock.calls
+    .filter(([url, init]) => /\/domains\/[^/]+$/.test(String(url)) && (init as RequestInit)?.method === 'PATCH')
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
 }
 
@@ -137,7 +144,13 @@ describe('添加领域弹窗（§3.1 字段口径与默认值）', () => {
 
 describe('右键「编辑领域知识」弹窗（同口径）', () => {
   beforeEach(() => {
-    mockFetch.mockImplementation(() => Promise.resolve(json({ domain_id: 'dm1' })));
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      // 保存成功后组件会 fetchAll：写面（PATCH）给对象，读面一律给数组
+      if (/\/domains\/[^/]+$/.test(String(url)) && (init as RequestInit)?.method === 'PATCH') {
+        return Promise.resolve(json({ domain_id: 'dm1' }));
+      }
+      return Promise.resolve(json([]));
+    });
   });
 
   it('字段顺序与添加弹窗一致，探索范围回填 level、学科知识回填 scope', async () => {
@@ -150,5 +163,44 @@ describe('右键「编辑领域知识」弹窗（同口径）', () => {
     expect((screen.getByLabelText(/探索范围/) as HTMLInputElement).value).toBe('本科-硕士');
     expect((screen.getByLabelText(/学科知识/) as HTMLTextAreaElement).value).toBe('用户自定义边界');
     expect(dialog.textContent).not.toContain('探索范围（scope）');
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+    await waitFor(() => {
+      expect(domainPatchBodies().length).toBeGreaterThan(0);
+    });
+    expect(domainPatchBodies()[0].scope).toBe('用户自定义边界');
+  });
+
+  // DEFECT-024：读面取不到 scope 时，提交体不得带该字段——空串会把库中用户正文覆写掉
+  it('学科知识取不到（记录无 scope 键）时提交体不含 scope 键', async () => {
+    const row = { ...domainFixture({ level: '本科-硕士' }) } as Record<string, unknown>;
+    delete row.scope;
+    seed([row as unknown as DomainSystem]);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    fireEvent.click(await screen.findByText('编辑领域知识'));
+    const dialog = await screen.findByRole('dialog');
+    expect((screen.getByLabelText(/学科知识/) as HTMLTextAreaElement).value).toBe('');
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+    await waitFor(() => {
+      expect(domainPatchBodies().length).toBeGreaterThan(0);
+    });
+    const body = domainPatchBodies()[0];
+    expect('scope' in body).toBe(false);
+    expect(body.level).toBe('本科-硕士');
+  });
+
+  // 用户主动清空＝提交体里确有 scope 空串（与「取不到」是两种口径，不得混为一谈）
+  it('取到值为空串时用户可清空：提交体带 scope 空串', async () => {
+    seed([domainFixture({ scope: '库里原有正文' })]);
+    renderTree();
+    fireEvent.contextMenu(screen.getByText('高等数学'));
+    fireEvent.click(await screen.findByText('编辑领域知识'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(screen.getByLabelText(/学科知识/), { target: { value: '' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /保\s*存/ }));
+    await waitFor(() => {
+      expect(domainPatchBodies().length).toBeGreaterThan(0);
+    });
+    expect(domainPatchBodies()[0].scope).toBe('');
   });
 });

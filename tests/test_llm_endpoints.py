@@ -72,6 +72,48 @@ def test_llm_text_endpoint(monkeypatch):
     assert body["reply"] == "你好！" and body["call_id"] == 7 and body["success"] is True
 
 
+def test_llm_text_endpoint_forwards_attribution(monkeypatch):
+    """POST /llm/text 的归因四键透传给网关（R8 甲：8900 是唯一记账方，归因由调用方上送）。"""
+    from qed_engine.api import control
+
+    seen = {}
+
+    def fake(settings, **kw):
+        seen.update(kw)
+        return {"reply": "OK", "call_id": 3, "success": True, "error": ""}
+
+    monkeypatch.setattr(control, "gateway_call_text", fake)
+    client = _client(monkeypatch)
+    response = client.post(
+        "/api/v1/llm/text",
+        json={
+            "prompt": "请出目录",
+            "service": "axiom_flow",
+            "task": "kp-curation",
+            "step": "outline",
+            "meta": {"book_id": "b05", "gen_batch": "kb-1"},
+        },
+    )
+    assert response.status_code == 200
+    assert seen["service"] == "axiom_flow"
+    assert seen["task"] == "kp-curation"
+    assert seen["step"] == "outline"
+    assert seen["meta"] == {"book_id": "b05", "gen_batch": "kb-1"}
+
+
+def test_llm_text_endpoint_rejects_foreign_service_shape(monkeypatch):
+    """`service` 是共享账的筛选维：自由文本（含空格／大写／超长）一律 422，不入库。"""
+    from qed_engine.api import control
+
+    monkeypatch.setattr(
+        control, "gateway_call_text",
+        lambda settings, **kw: {"reply": "OK", "call_id": 1, "success": True, "error": ""},
+    )
+    client = _client(monkeypatch)
+    response = client.post("/api/v1/llm/text", json={"prompt": "p", "service": "Axiom Flow!"})
+    assert response.status_code == 422
+
+
 def test_llm_vision_endpoint_requires_input(monkeypatch):
     """POST /llm/vision：无任何输入 → 422（校验错误）。"""
     client = _client(monkeypatch)

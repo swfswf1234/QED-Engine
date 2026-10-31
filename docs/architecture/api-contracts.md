@@ -22,7 +22,7 @@
 数据域语义 API、服务托管与监控诊断。**密钥绝不下发**——子项目不经过中心获取 key，而是直读
 根 `.env`，中心只回答"用哪个模型、是否已配置"。
 
-8900 是 `.env` 的唯一只读语义代理。接口按类型分为**六类**（共 117 端点，清单与状态见
+8900 是 `.env` 的唯一只读语义代理。接口按类型分为**六类**（共 126 端点，清单与状态见
 「端点总表」，逐端点语义见对应分节）：
 
 | 类型 | 范围 | 端点数 |
@@ -30,7 +30,7 @@
 | ① 服务管理类 | 健康检查、服务注册表、启停托管、8900 自身重启 | 6 |
 | ② 配置语义类 | 模型路由表、供应商配置状态、统一数据库快照 | 3 |
 | ③ 数据透传·QED-Tracker | 目录/任务/教程/书籍/领域课程 + 探索会话与领域探索门面（8900 自有） | 46 |
-| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块编辑与判定/ingest/parse-jobs/parsing-tree | 16 |
+| ④ 数据透传·Axiom-Flow | 书目/单本详情/PDF 流/页/manifest/块编辑与判定/ingest/parse-jobs/parsing-tree ＋ 知识点梳理透传十条 | 26 |
 | ⑤ 监控诊断与 LLM 网关 | 日志/GPU/槽位探针与启停/选择 + LLM 调用族 + MySQL 即时探测 | 19 |
 | ⑥ 学习域（8900 自有） | 课程学习（`qe_learning` 单表继承）+ 知识点主表与星图（`qed_knowledge_point`）+ 练习与复习（`qe_question`/`qe_attempt`）——v1.0 三表口径，编译/单元树/候选池已退役 | 27 |
 
@@ -149,6 +149,16 @@
 | GET | /api/v1/parse-jobs | ④ | 在用 |
 | GET | /api/v1/parse-jobs/{job_id} | ④ | 在用 |
 | GET | /api/v1/parsing/tree | ④ | 在用 |
+| POST | /api/v1/kp-jobs | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/kp-jobs/{gen_batch} | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/kp | ④ | 在用 |
+| PATCH | /api/v1/kp/nodes/{node_id} | ④ | 在用 |
+| POST | /api/v1/kp/nodes/{node_id}/confirm | ④ | 在用 |
+| POST | /api/v1/kp/nodes/{node_id}/summary | ④ | 在用 |
+| PUT | /api/v1/kp/nodes/{node_id}/narrative | ④ | 在用 |
+| GET | /api/v1/kp/nodes/{node_id}/narrative | ④ | 在用 |
+| PUT | /api/v1/books/{book_id}/kp/outline | ④ | 在用 |
+| GET | /api/v1/books/{book_id}/kp/export | ④ | 在用 |
 | GET | /api/v1/logs/{service} | ⑤ | 在用 |
 | GET | /api/v1/monitor/gpu | ⑤ | 在用 |
 | GET | /api/v1/monitor/{slot} | ⑤ | 在用 |
@@ -182,6 +192,7 @@
 | GET | /api/v1/learn/knowledge-points | ⑥ | 在用 |
 | POST | /api/v1/learn/knowledge-points | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{course_id}/knowledge-points | ⑥ | 在用 |
+| POST | /api/v1/learn/courses/{course_id}/knowledge-points/sync | ⑥ | 在用 |
 | GET | /api/v1/learn/knowledge-points/{kp_id}/narrative | ⑥ | 在用 |
 | POST | /api/v1/learn/annotations/generate | ⑥ | 在用 |
 | GET | /api/v1/learn/courses/{course_id}/outline | ⑥ | 在用 |
@@ -744,12 +755,12 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `GET /books` | 书目列表（af_books：课程归属 domain_id/course_id/course_name + ingest/解析进度） | AxiomClient.list_books |
 | `GET /books/{book_id}` | 单本详情（8902 `BookOut` 原样透传：`file_path` 数据根相对路径 + `ingest_status`/`page_count`，前端 PDF 直显判定源） | AxiomClient.get_book |
 | `POST /books/sync` | 同步已验证书目：8900 聚合 8901 verified 书目 → 8902 upsert af_books（幂等，book_id 同源 qt_books）；payload 按 8902 `BookSyncItem`（`file_path`=8901 relative_path、`authors` 为 `{name,role}` 对象数组，不发 sha256/page_count） | AxiomClient.sync_books |
-| `GET /books/{book_id}/pages/{page_no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并）；8902 `PageData` 无 `page_no`，由 8900 用路径参数补写，并把相对 `image_url` 重写为 8900 页图代理绝对地址（serve_web 不代理 /api） | AxiomClient.get_book_page |
+| `GET /books/{book_id}/pages/{page_no}` | 单页完整数据（原页图 URL + markdown + blocks + 编辑合并 + `furniture_blocks` 家具块标记——8902 读时派生的类型维∪跨页重复线块下标，本层原样透传）；8902 `PageData` 无 `page_no`，由 8900 用路径参数补写，并把相对 `image_url` 重写为 8900 页图代理绝对地址（serve_web 不代理 /api）；`blocks[].type` 是**人工改判后的生效类型**（8902 按同生效版本的 edit 意图行读时叠加，`markdown` 与产物文件不改写） | AxiomClient.get_book_page |
 | `GET /books/{book_id}/pages/{page_no}/image` | 原页图代理（8902 image_url 为相对路径，浏览器只连 8900） | 透传流 |
 | `GET /books/{book_id}/file` | **源 PDF inline 流（8900 本地端点，不透传 8902 内容）**：经 `GET /books/{book_id}` 取 `af_books.file_path`（数据根相对路径）→ 在 `QED_DATA_ROOT` 下解析并做包含性校验（越界 400）→ FileResponse inline；`file_path` 空或文件缺失 → 404（前端降级），8902 离线 → 503 | AxiomClient.get_book + FileResponse |
 | `GET /books/{book_id}/manifest` | 产物清单（文件路径/大小/哈希） | AxiomClient.get_book_manifest |
 | `POST /books/{book_id}/ingest` | ingest 透传（8902 渲染页图，元数据落 af_books，不调模型）→ `{book_id,page_count,sha256,ingest_status}`（工作台/列表「书页入库」按钮硬依赖）；大书页图渲染分钟级 → 超时分层 8903 300s / 8900→8902 单请求 300s（通用约定的同步例外） | AxiomClient.ingest_book |
-| `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/edit` | **块编辑门面（本契约消费面一律走 `/edit`）**：`{verdict?, note?, corrected_text?, corrected_bbox?}` 字段全可选（verdict 枚举 ok/bad，非法 422），透传 8902 EditRecord 原样返回 | AxiomClient.edit_block |
+| `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/edit` | **块编辑门面（本契约消费面一律走 `/edit`）**：`{verdict?, note?, corrected_text?, corrected_bbox?, corrected_type?}` 字段全可选（verdict 枚举 ok/bad、`corrected_type` 受 8902 `BlockType` 十枚闭集，非法皆 422 且不打上游），透传 8902 EditRecord 原样返回；`corrected_type`＝人工块类型改判，由 8902 在**读侧**叠加到块序列（8900 与 8903 都不自建类型合并腿） | AxiomClient.edit_block |
 | `GET /books/{book_id}/pages/{page_no}/edits` | 页级块编辑记录列表（EditRecord[]，进入页时合并回显） | AxiomClient.get_page_edits |
 | `PUT /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | 块判定写入（verdict 枚举 ok/bad；422 校验）；**过渡门面**（状态=过渡），内部转 8902 `PUT …/edit`；替代与处置见「退役与过渡」 | AxiomClient.edit_block |
 | `GET /books/{book_id}/pages/{page_no}/blocks/{block_index}/review` | 块判定回显；**过渡门面**（状态=过渡），内部走 8902 页级 `GET …/edits` 过滤 block_index，无记录 → 8900 合成 404 | AxiomClient.get_page_edits |
@@ -757,6 +768,45 @@ create/register 缺必填字段由 8900 校验直接 422，不请求 8901。
 | `GET /parse-jobs` | 任务列表（透传 8902 列表端点：`book_id`/重复 `status` 过滤 + `active` 标记；前端打开工作台恢复在飞任务防重复建任务） | AxiomClient.list_parse_jobs |
 | `GET /parse-jobs/{job_id}` | 任务状态与进度（queued/running/completed/failed；8902 `ParseJob` 主键为 `id`，`progress` 为对象 `{parsed,total,error}`，8900 原样透传） | AxiomClient.get_parse_job |
 | `GET /parsing/tree` | 左侧树聚合信封 `{nodes, sources}`：`nodes`＝8900 共享表（领域→课程）+ 8902 af_books；`sources`＝`{shared_tables: ok\|empty, axiom_flow: ok\|offline}` 标两种降级来源（DEFECT-015 S3），8902 离线时 `nodes` 仍含领域→课程且返 200 | 见 `api/axiom.py` `_build_parsing_tree` |
+
+### 知识点梳理透传面（④·af_kp，一比一镜像）
+
+af_kp 的读写面**接口与库变更全归 Axiom-Flow**：8900 不建列、不重述形状、不给请求体套第二份
+闭集校验，路径与 8902 逐字相同——前端 [web-ui/src/api/kp.ts](../../web-ui/src/api/kp.ts) 的
+`KP_MIRROR` 与本表同序，一比一是刻意的（起别名或改形状等于把漂移藏进映射里）。形状、判定序与
+门槛的事实源仍是 Axiom-Flow `docs/architecture/api.md` §④，本表只登记消费面与本组的错误映射。
+
+| 端点 | 语义 | 内部适配 |
+| --- | --- | --- |
+| `POST /kp-jobs` | 提交梳理批次（202 受理；请求体是 `book_id`＋可选 `page_start`/`page_end`＋可选 `review_note`（人工评审备注，8902 注入该轮 prompt 并随批次流水存档＝其 `KA-31`）＋可选 `stage`（`full`／`outline`／`content`，`outline`＝只梳理目录、知识点阶段整条不发起；`content`＝拿在册目录只补知识点并同批写节级总结、**该书零在册目录行时 422 点名「先解析目录」**；三值域、缺省与域外 422 的判据正本都在 8902＝其 `KA-34`／`KA-43`），**无 `engine`**——引擎取 8902 槽位；页区间缺省＝整本、给出即单章范围，`content` 批次按「在册目录行的起点页落在区间内」筛选；本层连备注、`stage` 与区间筛选都不解释、不校验） | AxiomClient.kp_relay |
+| `GET /books/{book_id}/kp-jobs/{gen_batch}` | 单批次进度与流水账面（`in_flight` 与 404 的判据正本在 8902（其 `KA-4`／`KA-40`＝本批 `draft` 行 ∧ 8902 进程内的在途登记，都不看流水 `status`），本层只搬不解释；「刚受理、行未落」那一窗因此读 **200＋`counts` 全零**而不是 404；`ledger` 为 `null`＝流水还没写出） | AxiomClient.kp_relay |
+| `GET /books/{book_id}/kp` | 整册工作区（目录＋点＋未归档池＋复核标记，不分页；空 `nodes` 是合法现状，不是 404） | AxiomClient.kp_relay |
+| `PATCH /kp/nodes/{node_id}` | 人工背书域写入（只发被点名的键；显式 `null` 与缺席是两件事，8900 不改写请求体） | AxiomClient.kp_relay |
+| `POST /kp/nodes/{node_id}/confirm` | 确认／撤回（置位跑可回指校验，撤回永远可执行；**422 正文与 200 同形**，界面判 `missing` 而非判状态码） | AxiomClient.kp_relay |
+| `POST /kp/nodes/{node_id}/summary` | 知识点单点重生成（详情面「重新生成总结」的落点；请求体只有 `if_rev`，「只有知识点可重生成」「在飞批次 409」「模型空回复不写」全判在 8902＝其 `KA-45`）。**同步腿**＝一次百秒级模型调用：8900 显式放长上流超时到 **360s**（8902 网关自身上限），其余梳理腿沿用 30s——不回 202、不建批次 | AxiomClient.kp_relay |
+| `PUT /kp/nodes/{node_id}/narrative` | 长文写腿（收一篇**已成文**的正文 → 8902 落书目录并写指针列，回显正文；上限与判定序正本在 8902，本组只搬字节） | AxiomClient.kp_relay |
+| `GET /kp/nodes/{node_id}/narrative` | 长文读回（8902 按派生路径读文件而不读列；**缺文件是 200 带 `exists=false`**，不是 404——「节点存在但正文缺」不等于「节点不存在」） | AxiomClient.kp_relay |
+| `PUT /books/{book_id}/kp/outline` | 目录整批声明（缺席只降级、不删行、幂等） | AxiomClient.kp_relay |
+| `GET /books/{book_id}/kp/export` | 已确认视图（`confirmed=1`，目录先于点）＝根侧只读拉取面 | AxiomClient.kp_relay |
+
+**本组的错误映射与解析面不同，且是刻意的**：8902 返回什么状态码与正文，8900 就原样回什么
+（`Response(content=…, status_code=…)`），只有**连接失败**合成 503 + `Axiom-Flow 服务不可达：…`。
+理由三条：① confirm 的 422 正文与 200 同形，套一层 `{"detail": …}` 等于把界面逼成先判码再判体；
+② `if_rev` 冲突的 409 **先于**形状校验，转写成 8900 自己的 detail 串会丢掉「当前 rev」这条人要读的
+信息；③ 槽位未接入与探活失败是上游**主动**的 503（detail 点名 `AXIOM_KP_ENGINE`），与「服务不可达」
+是两件事，合成一条就把配置错误读成宕机。解析面（上方端点表）的「4xx 透传 detail、5xx → 503」
+维持原样；两组共用 §④ 但各有一套映射，判定序、闭集与零写入门槛全在 8902，本表不复述。
+
+**零新根侧列/表**：af_kp 归 8902 私有，本组不在 8900 落任何库。唯一的根侧记账面是模型调用——
+梳理批次的文本调用由 8902 组好提示词后经 `POST /api/v1/llm/text` 上送归因，`qed_llm_calls`
+只由 8900 落一行（口径见 §⑤ 与 [cross-project-contracts.md](../design/cross-project-contracts.md) §4）。
+
+**第九令起的读面增量（2026-10-29，8902 已发、本层字节转发）**：整册工作区与导出面逐行多出派生
+`page_start`／`page_end`（8902 `KA-42`：目录行＝本行起点页到下一枚目录行起点前 −1 页、末行到全书末页；
+点行＝自己锚点两端；缺 `af_books.page_count` 时折回起点页）；`content` 批次的进度账面多出
+`result.outline_summary_rows`（8902 `KA-43` 第二十三键，只计真正落笔的节级总结）。前者的消费方＝
+前端梳理屏（`stores/kpReview.ts` 的 `anchorRange` 优先读两键、缺席才回落锚点 min／max；「重新解析目录」
+两枚下拉按派生起点页升序、标签「第 X–Y 页」），后者只进账面、UI 不常驻。本层零改码、零新列。
 
 ### 规划契约（8902 已实现、8900 透传待实施）
 
@@ -974,7 +1024,7 @@ GPU 状态（nvidia-smi 解析 + Windows 性能计数器 + 系统内存）：型
 
 | 端点 | 语义 |
 | --- | --- |
-| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061）。**`response_format` 暂不对外暴露**（用户裁决 2026-09-29）：JSON 模式只是网关内部 `call_text` 参数，经 M3 适配层按能力表与运行时拉黑注入（开关 `QED_LLM_LOCAL_ADAPT`），语义见 [llm-gateway.md](../design/llm-gateway.md)「本地模型适配层」节 |
+| `POST /llm/text` | 文字模型调用：`{prompt, system?, prompt_template?, max_tokens?, service?, task?, step?, meta?}` → 注册表解析（身份 × 槽位来源/渠道）路由 api/local → `{reply, success, call_id?}`；超时经 `QED_LLM_TIMEOUT`（默认 300s）透传上游，`max_tokens` 非 None 时透传写入请求体（REQ-061）。**归因四键由调用方上送**（R8 甲）：子仓库经此调用时带 `service`（`^[a-z0-9_]{1,40}$`，如 `axiom_flow`）／`task`／`step`（各 `^[a-z0-9_-]{1,60}$`）／`meta`（任意对象，装 `book_id`/`gen_batch` 这类取证身份），8900 原样落账且**非法形状 422 不打模型**——一次调用的账只由本服务落一行，调用方不自写；四键缺席即按本服务自有调用记账（`service=qed_engine`）。**`response_format` 暂不对外暴露**（用户裁决 2026-09-29）：JSON 模式只是网关内部 `call_text` 参数，经 M3 适配层按能力表与运行时拉黑注入（开关 `QED_LLM_LOCAL_ADAPT`），语义见 [llm-gateway.md](../design/llm-gateway.md)「本地模型适配层」节 |
 | `POST /llm/vision` | 图像模型调用：`{image_base64 或 pdf_base64+pdf_filename, prompt?, prompt_template?, max_tokens?}` → 注册表解析路由 api/local → `{reply, success, call_id?}`；超时与 `max_tokens` 语义同 text（REQ-061） |
 | `POST /llm/embedding` | 向量模型调用（仅 api）：`{input: [str]}` → `{embeddings, success, call_id?}`（顺序与 input 一致）；空 input 422；调用记录 prompt 记 JSON 输入、response 记维度摘要（不存向量本体） |
 | `POST /llm/test/text` | 文字模型测试（控制台测试按钮）：小 prompt 真实调用，成功/失败 + 原因 |
@@ -1029,9 +1079,9 @@ v1 题源＝**抽取式**（现成习题集与教材课后题，`POST /learn/que
 
 | 端点 | 语义 |
 | --- | --- |
-| `GET /learn/courses` | 课程列表（course 行 × 知识点投影行的派生态）：每行＝`{learn_course_id,owner,status,resources,kp_path,learner_note,created_at,updated_at}` ＋目录直读的 `name/domain_id/track/description` ＋ `unit_count`（＝投影序列长度）＋ `derived`；`derived`＝`{status,total,done,skipped,percent,current_unit_id,mastered,next_unit_id,provenance,completed,books}`，`status` 闭集 `draft\|learning\|completed`（编译态随链路退役）；`books`＝按投影行 `source_ref.ref_id` 归集的**教材级进度** `[{ref_id,label,total,done,percent}]`，无计数单位的教材 `total=0`／`percent=0`（REQ-117 W8/C9） |
+| `GET /learn/courses` | 课程列表（course 行 × 知识点投影行的派生态）：每行＝`{learn_course_id,owner,status,resources,kp_path,learner_note,created_at,updated_at}` ＋目录直读的 `name/domain_id/track/description` ＋ `unit_count`（＝投影序列长度）＋ `derived`；`derived`＝`{status,total,done,skipped,percent,current_unit_id,mastered,next_unit_id,provenance,completed,books}`，`status` 闭集 `draft\|learning\|completed`（编译态随链路退役）；`books`＝按投影行 `source_ref.ref_id` 归集的**教材级进度** `[{ref_id,label,total,done,percent,roles,textbook}]`，无计数单位的教材 `total=0`／`percent=0`（REQ-117 W8/C9）；`roles`＝8901 书目腿的 `qt_books.roles` 原样数组（取不到＝`[]`），`textbook`＝服务端**单一判据**的派生布尔（`roles` 非空且不含 `textbook` → `false`；空数组／不在书目腿／8901 不可达 → `true`），课程学习面只列 `textbook` 非 `false` 者，习题集与答案本退出本面（REQ-144 T5）。 |
 | `POST /learn/courses` | **把一门共享课程加入学习面**（插一枚 course 行；D4 不发独立 ID、不建课程行）：`{course_id, resources:[{kind,ref_id,label,dismissed?}]≥1, kp_path?, learner_note?}`；kind 闭集 `book/af_version/knowledge`；已在学面 409、`resources` 空 409、字段非法 422；`course_id` 只作引用、不校验目录存在（目录不可达也能加入） |
-| `POST /learn/courses/sync` | **解析好即同步**：读 `af_books`（`active_job_id` 非空且 `course_id` 非空）按课程分组，回查课程目录（8901）确认归属；命中既有学习行按共享 `qed_course.course_id` **直配**（D4 后学习行 ID＝课程坐标，一课程一行、无「多门取最早」的回落）只并集补入新书（不覆盖 `dismissed`、不复制名称），未命中则加入学习面；坐标在目录查不到者 PASS 不猜归属 → `{synced,created,updated,courses,books}`；`books`＝教材卡展示元数据 `[{ref_id,label,course_id,knowledge_id,intro,position,position_label,page_count}]`，其中「简介/面向对象」由 `af_books.knowledge_id` 联接 `qt_knowledge` 套级 `intro`/`position`（五档→入门/进阶/深入/综合/选修）——书级两列现网尚不存在，已按跨项目请求登记 QED-Tracker（REQ-117 W8/C10），落地后本联接改读列；8901 教程套（`qt_knowledge`）不可达时两字段留空、不阻断同步；但课程目录回查与 8902 书目同为写侧依赖，任一不可达即 **503**（同步是批量写操作，明确报错不静默）——REQ-117 W8/C9 |
+| `POST /learn/courses/sync` | **解析好即同步**：读 `af_books`（`active_job_id` 非空且 `course_id` 非空）按课程分组，回查课程目录（8901）确认归属；命中既有学习行按共享 `qed_course.course_id` **直配**（D4 后学习行 ID＝课程坐标，一课程一行、无「多门取最早」的回落）只并集补入新书（不覆盖 `dismissed`、不复制名称），未命中则加入学习面；坐标在目录查不到者 PASS 不猜归属 → `{synced,created,updated,courses,books}`；`books`＝教材卡展示元数据 `[{ref_id,label,course_id,knowledge_id,intro,position,position_label,page_count,roles,textbook}]`（末两枚与 `GET /learn/courses` 的 `books` 同判据、同批给出——`qt_books` 书目腿在一次同步里只取一趟，简介与角色共用同一批行），其中 `intro` **书级优先**＝`qt_books.meta.intro`（REQ-121 收窄裁决的键位，经 8901 `GET /books` 的 `to_dict()` 全列透传；2026-10-23 只读探针＝现网 26 行 `meta` 全 NULL，故当前实际值仍来自套级），键位缺失者回落 `af_books.knowledge_id` 联接的 `qt_knowledge.intro` 套级（REQ-117 W8/C10 原口径）；`position`／`position_label` 仍只由套级 `qt_knowledge.position` 给出（五档→入门/进阶/深入/综合/选修），书级「面向对象」按 2026-10-23 用户裁决**推后**、不入本批；8901 教程套（`qt_knowledge`）或书库（`qt_books`）腿不可达时对应字段留空或回落套级、不阻断同步；但课程目录回查与 8902 书目同为写侧依赖，任一不可达即 **503**（同步是批量写操作，明确报错不静默）——REQ-117 W8/C9 |
 | `GET /learn/courses/{course_id}` | 详情聚合（course 行 + 目录直读列 + derived + unit_count）；404 |
 | `PATCH /learn/courses/{course_id}` | 课程行白名单 `{status:active\|paused\|done, resources, kp_path, learner_note}`（extra 422）；`resources` 整列提交，元素 `{kind,ref_id,label,dismissed?}`——`dismissed`＝书架面教材级忽略位，JSON 列内键、零 DDL（REQ-117 W8/C11）；`kp_path`＝学习者给定的推进顺序（投影序列按其排序，未列入者按默认序垫尾）；名称/领域/track **不在本面**（学习表零快照，改这些归共享 `qed_course` 写面）；`learner_note`＝学习者备注（人工位，机器不写）；404 |
 | `DELETE /learn/courses/{course_id}` | **退课只删 course 行**；kp 行是学习者对知识点的独立记录、跨课程共享，不随课程删除（D4）；404 |
@@ -1043,8 +1093,9 @@ v1 题源＝**抽取式**（现成习题集与教材课后题，`POST /learn/que
 | `GET /learn/knowledge-points` | 已确认知识点跨课程检索：`?domain=&course=&type=&q=&limit=50&offset=0`（type 闭集非法 422，limit 1..500）→ `{points,total}`；**只出 `node_kind=point` 行**（目录节点不进检索面）；`q` 按 `name`/`summary` 模糊匹配 |
 | `POST /learn/knowledge-points` | **point 行直登记＝候选池退役后主表的唯一产面**（ADR 0026 D10；「写入本表」这一动作即承载确认，主表无确认位列）`{course_id,name,domain_id?,domain_label?,course_label?,parent_kp_id?,type?,summary?,aliases?,narrative_ref?≤500,anchors?,order_hint?,from_detail_id?}`；坐标标签缺省从课程目录补齐（目录不可达按入参快照落库）；父级非 outline 行或跨课程 409、父级不存在 404、同课程重复 `norm_key` 409（**合并走 `aliases`**，不再走 `dedup_of`）；空 `course_id`/`name`、`type` 非法 422 → 主表行；存储未接入 503。`from_detail_id`＝梳理侧（Axiom-Flow `af_kp`）节点稳定身份＝提升幂等锚、一经发放不可变，**AF 同步腿复用本端点** |
 | `GET /learn/courses/{course_id}/knowledge-points` | 课程知识点总览 → `{course:{course_id,name,track,domain_id,description}（`description`＝`qed_course.description` 直读透传，无介绍时空串，REQ-104 W7）, points:[主表行], total, sequence:{enrolled,units,chapters,kp_path}}`；`sequence`＝该课程在工作台里的推进序列（知识点投影行 × kp 行），`units[]` 含派生键 `unit_id=kp:{kp_id}`、`parent_id`、取材 `source_ref`/`window_source` 与 `learner`（＝kp 行：勾选、质性门态），`chapters`＝章行 `{kp_id,name,point_count,book_ref,source_ref,summary,key_points}`（`summary`/`key_points`＝章行 `meta.chapter_key_points`＝注解段章级成品位，进场一次直读）；未加入学习面时 `enrolled=false` 且序列为空、主数据照常出；默认只出 point 行，`?include_outline=true` 时带目录节点行；课程不存在 404、主表未接入 503（候选段 `candidates`/`candidate_total` 随候选池退表删除） |
+| `POST /learn/courses/{course_id}/knowledge-points/sync` | **提升同步腿**（REQ-144 裁乙：学习面读源＝主表投影，本端点是 8900 侧把梳理成品搬进主表的唯一写腿，无请求体）：逐本教材（course 行 `kind=book` 素材中**服务端角色判据 `textbook` 非 `false`** 者，共享 `qt_books.roles` 经 8901 书目腿联查，REQ-144 T5）经 ④ 整册工作区读面 `GET /api/v1/books/{book_id}/kp` 取全量节点（**不取 `kp/export`**——那是 `confirmed=1` 视图，现网恒空）→ 两道过滤＝在册（`gen_status != rejected`）∧ 非前置后置（`toc_role != reference`），`node_kind=point` 遗留行不进目录（页窗与父节重合，进目录即同一段正文读两遍）→ **章层**＝`replace_outline` 整树幂等替换（`summary` 只在非空时提交，未提交者保持库内原值——REQ-114 S2 同形）＋章行 `from_detail_id` 落提升锚（＝④ 导读腿 `/kp/nodes/{node_id}/narrative` 的取数键）；**知识点层**＝按 `from_detail_id` 复用行并刷 `parent_kp_id`/`order_hint`/`source_ref`/`anchors`（`summary` 非空才刷、上游改名撞名则留原名），无锚者按 `norm_key` 查重后 `add_point`（同名者在册即跳过不覆盖，`add_point` 的 409 不炸整批）→ `{course_id, books:[{book_ref, ok, status?, skipped_empty, skipped_role, chapters:{created,reused,dropped,orphaned_points}, points:{created,reused,skipped}, detached, excluded:{rejected,reference,point_rows}}], totals:{chapters:{…},points:{…}}}`。写入即承载确认（D10，本腿不碰确认位）。**逐本隔离**：8902 连接失败 **503**（整次同步不执行、零写入）、单本上游非 200 只在该本报告 `ok:false`＋原状态码、该本**零纯净章且本腿从未在此落笔**（`list_outline` 无提升锚）时**整本跳过**（未梳理／只出前置后置行的半梳理态都不动它已有的人工目录子树）；该本 `roles` **非空且不含 `textbook`**（习题集／答案本，与服务端 `textbook` 位同形，REQ-144 T5）时也整本跳过并报 `skipped_role:true`、**零写入**（`roles` 空／该书不在书目腿／8901 不可达＝**不跳**——未标角色不许被当成习题集，判据失效不许把教材挤出学习面）。页窗取数＝`page_start`/`page_end` 两键优先（KA-42）→ 锚页 min/max（KA-25）→ `(0,0)` 无窗；**锚归一**＝`anchors[].ref_id` 由 8902 的页 id（`p0009`）改写为书 id，否则读侧 `_resolve_window` 寻不到书。机器腿专用三键 `from_detail_id`/`source_ref`/`anchors` 只由本腿进程内写、`PointCreateBody`/`PointPatchBody` 未声明（`extra=forbid` ⇒ 请求侧递进来 422）；404（课程未加入学习面）、503（主表未接入） |
 | `GET /learn/knowledge-points/{kp_id}/narrative` | **本域唯一读文件腿**（D5：正文不落库）：按主表 `narrative_ref` 从数据根取长文 → `{kp_id,narrative_ref,available,content,reason,bytes?,truncated?}`。双闸：拒绝绝对路径、拒绝越出数据根、**只允许 `parsed/` 前缀**（ADR 0018 既有白名单区，故不新增白名单条目）；越闸 422。指针为空或文件缺失＝**可见降级**（200 + `available:false` + 中文 `reason`，不静默改写、不回落空串）；成功读取上限 512 KiB，超出截断并置 `truncated:true`；404（知识点不存在）、503（主表未接入） |
-| `POST /learn/annotations/generate` | **按需生成注解**（REQ-117 W9／C18）：`{course_id,target_kind:point\|chapter,kp_id,part:summary\|key_points\|annotation}`，用途与目标层配对闭集（章＝`summary`/`key_points`，条＝`annotation`），不匹配 422。服务端编排＝按投影行的取材页窗（知识点 `source_ref` → 来源锚点 → 所属章三级回落）经 8900 书页读面取块文本（限页＝章 12 页／条 6 页，限字与 `max_tokens` 随 `part` 定档）→ 拼 prompt → `services/llm/gateway.call_text(service=learn_annotation)`；**前端不拼 prompt、不直调 `/llm/*`**。落库两式：章＝**覆写**章行 `summary` 或 `meta.chapter_key_points`（成品位单一，零 DDL）；条＝**追加**主表 `angles` 一元素 `{angle:"explanation", note:生成文本}`（六词闭集内既有值、数组序＝权威序、**同一 `angle` 不堆叠**＝同角重复生成覆写该项；ADR 0026 D10）。两式的长文正文都仍只由 `narrative_ref` 指，本端点不写正文。响应＝章 `{ok,target:{kind,kp_id,name},chapter:{kp_id,summary,key_points}}`／条 `{ok,target,point:<主表行>}`。章级同一 `(course_id,target_kind,kp_id,part)` 60s 内重复＝直接回上次成品（不重烧模型），条级不去重。错误口径（中文纯文本、过学习面话术净化）：取材零可用页 503、上游失败或空成品 502、目标不在投影序列 404（未归档池与别课知识点不给生成）、课程不存在 404、主表不可达 503 |
+| `POST /learn/annotations/generate` | **按需生成注解**（REQ-117 W9／C18）：`{course_id,target_kind:point\|chapter,kp_id,part:summary\|key_points\|annotation}`，用途与目标层配对闭集（章＝`summary`／`key_points`，条＝`summary`／`annotation`＝REQ-143 W5 放开点级总结），不匹配 422。服务端编排＝按投影行的取材页窗（知识点 `source_ref` → 来源锚点 → 所属章三级回落）经 8900 书页读面取块文本（限页＝章 12 页／条 6 页，限字按目标层定档＝章 6000 字／条 3000 字（REQ-143 T2 甲），`max_tokens` 随 `part` 定档）→ 拼三段背景 prompt（课程介绍＝目录行 `description`、教材介绍＝`qt_books.meta.intro`、该条既有介绍＝主表 `summary`；缺位则整段不出现不留空标题，8901 不可达只降级不阻断生成）→ `services/llm/gateway.call_text(service=learn_annotation)`；**前端不拼 prompt、不直调 `/llm/*`**。落库三式：章＝**覆写**章行 `summary` 或 `meta.chapter_key_points`（成品位单一，零 DDL）；条×`summary`＝**覆写**主表 `summary`（VARCHAR(1000)，与 8903 人工「保存结果」同一列＝REQ-143 T4 甲，零双写）；条×`annotation`＝**追加**主表 `angles` 一元素 `{angle:"explanation", note:生成文本}`（六词闭集内既有值、数组序＝权威序、**同一 `angle` 不堆叠**＝同角重复生成覆写该项；ADR 0026 D10）。各式的长文正文都仍只由 `narrative_ref` 指，本端点不写正文。响应＝章 `{ok,target:{kind,kp_id,name},chapter:{kp_id,summary,key_points}}`／条 `{ok,target,point:<主表行>}`。章级同一 `(course_id,target_kind,kp_id,part)` 60s 内重复＝直接回上次成品（不重烧模型），条级不去重。错误口径（中文纯文本、过学习面话术净化）：取材零可用页 503、上游失败或空成品 502、目标不在投影序列 404（未归档池与别课知识点不给生成）、课程不存在 404、主表不可达 503。消费面＝**基本版本改判（2026-10-30 第十令二次令文）**：梳理屏的逐条重生成改走 8902 的对等生成腿（REQ-143 W25③，写 `af_kp.summary`），本端点保留给历史数据与学习面旧路径 |
 | `GET /learn/courses/{course_id}/outline` | 章节树一次取全（M6）：`?book=` 按来源书过滤 → `{course_id,book_ref,outline:[{kp_id,name,depth,parent_kp_id,book_ref,source_ref,point_count,node_kind,type,summary,...}]}`（前序平铺，左栏按 `depth` 缩进；`point_count`＝该章节下的 point 行数；`summary`＝该节点一句话介绍，与 point 行同一列同一序列化通道）；`{course_id}`＝共享课程 ID（outline 行按 `course_id` 索引，与学习面同键——D4）；课程不存在 404、主表未接入 503 |
 | `PUT /learn/courses/{course_id}/outline` | 目录确认后**整树幂等替换**同 `book_ref` 的 outline 子树 `{book_ref,tree:[{name,page_start,page_end,summary?,children?}]}`（页范围＝**PDF 页序**；叶节点常显式带 `children:[]`，空列表不下探层级；`summary` 可选＝该节点介绍，≤1000 字符，**整树重写时未提交该键的节点保持库内原值**、显式提交空串才清空——REQ-114）；**同父级下**同名节点复用 `kp_id`（跨章同名节各自成行——主表该组合只有普通索引，DEFECT-011 裁决）、未复用旧节点删除，其下 point 行不删而归未归档池（`parent_kp_id=NULL`）；写入即视为已确认（主表无人工确认列）；坐标列按课程目录补全（REQ-118 D1） → `{reused,created,dropped,orphaned_points,book_ref,outline}`；404；422（`book_ref` 空、树空、name 空、页范围非法、层级 >2、同一父级下重名、`summary` 超 1000 字符） |
 | `PATCH /learn/knowledge-points/{kp_id}` | 人工面移动、改名与介绍：白名单 `{parent_kp_id,name,order_hint,summary}`（extra 422；`parent_kp_id=null`＝移入未归档池；`summary` ≤1000 字符，超限由 pydantic 422；outline 行同样可编辑自身介绍）→ 主表行；`node_kind`/`type` 分类列与 `narrative_ref`/`angles` 的产面**不在本面**（长文与角度归生成／梳理腿）；404；422（自挂、父非 outline 行、目录成环） |
@@ -1059,6 +1110,9 @@ v1 题源＝**抽取式**（现成习题集与教材课后题，`POST /learn/que
 
 - 投影序列的取材页窗三级回落：知识点自带 `source_ref` → 来源锚点页 → 所属章页窗，命中层级在
   `window_source ∈ point|anchor|chapter|''` 标注（整章呈现由该字段与前端区分）。
+- 投影序列每行的**归本位** `book_ref`＝点行自身值 → 所属章行 `book_ref` → 课程首本教材（读时派生、
+  零写入；提升行本身不带这列，故现网实测值来自第二章回落）。工作台按书切序列只读这一枚（REQ-144 T4），
+  `chapters[]` 的 `book_ref` 由 outline 行原样带出。
 - **`owner` 不出契约面**：`qe_learning`／`qe_attempt` 的 `owner` 列（v1.0 恒 `admin`，D7）只承载
   唯一键前缀与多用户扩展位，本域任何端点都不收、不回显；启用多用户时由服务端注入，契约零改动。
 

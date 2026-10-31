@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mockFetch } from '../test/setup';
 import {
   buildTreeNodes, tutorialLabel,
   sortBooks, bookInStage, STAGE_OPTIONS, groupPaperBooks, listDomainPapers, useDownloadsStore,
@@ -292,5 +293,89 @@ describe('左树「论文」节点选择（REQ-108 I6）', () => {
     });
     useDownloadsStore.getState().selectNode({ kind: 'papers', id: 'dm1' });
     expect(useDownloadsStore.getState().selected).toEqual({ kind: 'papers', id: 'dm1' });
+  });
+});
+
+describe('领域级字段补齐（DEFECT-024：GET /courses 领域层不返 scope，由 GET /domains 同步腿补齐）', () => {
+  const realCoursesRowWithoutScope = {
+    domain_id: 'math-advanced',
+    name: '数学（高等数学）',
+    description: '领域描述',
+    level: '本科-硕士',
+    stages: ['基础', '主干'],
+    classic_tracks: [],
+    exploration_stage: '已完成',
+    path_results: null,
+    courses: [],
+  };
+  const domainsRow = {
+    domain_id: 'math-advanced',
+    name: '数学（高等数学）',
+    description: '领域描述',
+    level: '本科-硕士',
+    stages: ['基础', '主干'],
+    classic_tracks: [],
+    exploration_stage: '已完成',
+    path_results: null,
+    scope: '以数学系本科至硕士阶段的研究水平为基准。',
+  };
+
+  function route(overrides?: (url: string) => Response | null) {
+    mockFetch.mockImplementation((url: string) => {
+      if (overrides) {
+        const handled = overrides(String(url));
+        if (handled) return Promise.resolve(handled);
+      }
+      if (String(url).endsWith('/courses')) return Promise.resolve(json([realCoursesRowWithoutScope]));
+      if (String(url).endsWith('/domains')) return Promise.resolve(json([domainsRow]));
+      return Promise.resolve(json([]));
+    });
+  }
+
+  function json(data: unknown, status = 200) {
+    return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  beforeEach(() => {
+    useDownloadsStore.setState({
+      domains: [], knowledge: [], details: {}, paperBooks: [], domainFields: {},
+      systemError: null, knowledgeError: null, error: null, selected: null, loading: false,
+    });
+  });
+
+  it('读面补齐：/courses 领域层无 scope 时取 /domains 同步行，弹窗初值拿得到正文', async () => {
+    route();
+    await useDownloadsStore.getState().fetchAll();
+    const row = useDownloadsStore.getState().domains[0];
+    expect(row.scope).toBe('以数学系本科至硕士阶段的研究水平为基准。');
+    expect('scope' in row).toBe(true);
+  });
+
+  it('不越权覆盖：/courses 领域层已带 scope（键存在）时以体系腿为准，不被同步腿改写', async () => {
+    route((url) =>
+      String(url).endsWith('/courses')
+        ? json([{ ...realCoursesRowWithoutScope, scope: '体系腿自己的值' }])
+        : null,
+    );
+    await useDownloadsStore.getState().fetchAll();
+    expect(useDownloadsStore.getState().domains[0].scope).toBe('体系腿自己的值');
+  });
+
+  it('同步腿离线：/domains 失败不阻断左树、不改错误口径，scope 保持取不到（undefined 而非空串）', async () => {
+    route((url) => (String(url).endsWith('/domains') ? json({ detail: 'boom' }, 503) : null));
+    await useDownloadsStore.getState().fetchAll();
+    const state = useDownloadsStore.getState();
+    expect(state.domains).toHaveLength(1);
+    expect(state.domains[0].scope).toBeUndefined();
+    expect(state.systemError).toBeNull();
+    expect(state.error).toBeNull();
+  });
+
+  it('同步腿只补已知领域：/domains 里没有的领域不得凭空获得 scope 键', async () => {
+    route((url) =>
+      String(url).endsWith('/domains') ? json([{ domain_id: 'other-domain', scope: '别人的' }]) : null,
+    );
+    await useDownloadsStore.getState().fetchAll();
+    expect('scope' in useDownloadsStore.getState().domains[0]).toBe(false);
   });
 });

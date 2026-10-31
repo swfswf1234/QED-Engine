@@ -42,6 +42,15 @@ export function listCourseSystem(opts?: ApiRequestOptions): Promise<DomainSystem
   return api.get<DomainSystem[]>('/courses', opts);
 }
 
+/**
+ * GET /api/v1/domains：领域级完整字段（含 `scope`）。
+ * DEFECT-024＝8901 的 GET /courses 领域层不返 `scope`，故左树的领域级字段由本端点补齐；
+ * 8901 离线时 8900 降级读共享表 `qed_domain`（列齐），读面口径与在线腿一致。
+ */
+export function listDomains(opts?: ApiRequestOptions): Promise<DomainSystem[]> {
+  return api.get<DomainSystem[]>('/domains', opts);
+}
+
 export interface CreateDomainBody {
   name: string;
   description?: string;

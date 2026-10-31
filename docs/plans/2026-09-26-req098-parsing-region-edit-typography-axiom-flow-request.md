@@ -8,7 +8,7 @@
 [ADR 0018](../adr/0018-data-root-whitelist-and-meta-json-ban.md)（对方落库方案须自行核对其存储规范）
 关联设计：[parsing-flow.md](../design/parsing-flow.md)（blocks 产物 schema 根侧快照）、
 [parsing-ui.md](../design/frontend/parsing-ui.md)（消费界面现状）
-关联 Tracker：docs/trackers/todo.md REQ-099（承接根侧 REQ-098 承载壳
+关联 Tracker：docs/trackers/todo.md REQ-099（任务行登记在普通任务轮 ARCH-035 节，分线归属＝ARCH-025-L1；承接根侧 REQ-098 承载壳
 [2026-09-26-req098-parsing-region-edit-typography.md](../history/plans/2026-09/2026-09-26-req098-parsing-region-edit-typography.md)，该壳已 2026-09-29 收口归档）
 归档判定：Retain（移交存根随 REQ-099 关闭归档；对方侧台账为实施事实源）
 

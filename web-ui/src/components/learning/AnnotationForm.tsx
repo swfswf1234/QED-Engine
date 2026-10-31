@@ -1,7 +1,7 @@
 /**
- * 备注段（§V2.12／C26 的 v1.0 形态）：学习者自由书写的一句理解＝kp 行 `learner_note`（人工位，R6），
- * 记在当前那一条知识点上，进场直读、写一次即持久。
- * 这一条还没有学习记录时服务端不起新行，故备注要先记上位置（正文末尾「已掌握并下一条」）才存得下。
+ * 记录段（§6 段④）：学习者自由书写、跨会话回看，落点＝kp 行 `learner_note` 单列（人工位，机器永不写）。
+ * 四段中唯一可写的一段；该条尚无 kp 行时**禁用保存且零请求**（服务端不起新行，§10 也不给下一步话术，
+ * 操作方法只在使用手册写）。
  */
 import { useEffect, useState } from 'react';
 import { Button, Input, Space, Typography } from 'antd';
@@ -24,26 +24,16 @@ export default function AnnotationForm() {
 
   useEffect(() => {
     setText(selectedPoint?.learner?.learner_note ?? '');
-    // 只在换条时同步，写回后的新备注随 selectedPoint 一起回来
+    // 只在换条时同步，写回后的新记录随 selectedPoint 一起回来
   }, [selectedKpId, selectedPoint?.learner?.learner_note]);
 
-  const save = async () => {
-    await saveNote(text);
-  };
-
   return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-      <Text strong style={{ fontSize: 13 }}>备注</Text>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        {selectedPoint && !selectedPoint.learner
-          ? '这一条还没有学习记录：先用正文末尾记上位置，备注就存得下了。'
-          : '备注记在当前这一条上，下次进来在这里回看。'}
-      </Text>
+    <Space direction="vertical" size={6} style={{ width: '100%' }} data-testid="record-pane">
+      <Text strong style={{ fontSize: 13 }}>记录</Text>
       <TextArea
         rows={5}
-        aria-label="备注正文"
+        aria-label="记录正文"
         maxLength={NOTE_MAX_LENGTH}
-        placeholder="写下您自己的备注，下次进来在这里回看"
         disabled={!selectedKpId}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -53,13 +43,10 @@ export default function AnnotationForm() {
         size="small"
         loading={busy}
         disabled={!selectedKpId || !selectedPoint?.learner || text.trim() === saved}
-        onClick={() => void save()}
+        onClick={() => void saveNote(text)}
       >
-        保存备注
+        保存记录
       </Button>
-      {!selectedKpId && (
-        <Text type="secondary" style={{ fontSize: 12 }}>先在左栏选中一条知识点，备注才有归属。</Text>
-      )}
       {saved && (
         <div
           data-testid="note-list"

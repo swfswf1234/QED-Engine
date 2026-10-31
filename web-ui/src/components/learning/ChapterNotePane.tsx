@@ -1,10 +1,13 @@
 /**
- * 章级注解段（§V2.5／C20）：本章总结 + 学习要点。
- * 成品位挂在章行上（`summary` 与 `meta.chapter_key_points`），进场随目录直读；
- * 缺位才出「生成」入口，生成一次即持久——同一章再进来不必重烧。
+ * 章级批注两段（§6 段①／段②）：本章总结＝章行 `summary` 直读；本章学习导读＝章的导读长文。
+ * 两段都是**只读成品位**，缺位整段不渲染（零占位句、零生成入口——本面零生成，§8）。
+ * 段②的门与取数键同为章行提升锚 `from_detail_id`：锚空即不发请求；正文不落库（ADR 0026 D5），
+ * 走 8900 的梳理透传读腿 `GET /api/v1/kp/nodes/{node_id}/narrative`，`exists=false` 或读腿失败
+ * 同样整段不渲染（§10：本面不因导读缺位而解释）。
  */
-import { useMemo } from 'react';
-import { Button, Space, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { Space, Typography } from 'antd';
+import { getKpNarrative } from '../../api/kp';
 import { renderInlineMath } from '../parsing/blocks';
 import { chapterOf, chapterOfUnit, useLearnWorkbenchStore } from '../../stores/learnWorkbench';
 
@@ -14,53 +17,50 @@ export default function ChapterNotePane() {
   const chapters = useLearnWorkbenchStore((s) => s.chapters);
   const selected = useLearnWorkbenchStore((s) => s.selected);
   const selectedPoint = useLearnWorkbenchStore((s) => s.selectedPoint);
-  const generating = useLearnWorkbenchStore((s) => s.generating);
-  const generateError = useLearnWorkbenchStore((s) => s.generateError);
-  const errorTarget = useLearnWorkbenchStore((s) => s.generateTarget);
-  const generateChapter = useLearnWorkbenchStore((s) => s.generateChapter);
+  const [intro, setIntro] = useState('');
 
-  const chapter = useMemo(() => (selected
+  const chapter = selected
     ? (selected.kind === 'point'
       ? chapterOfUnit(chapters, selectedPoint)
       : chapterOf(chapters, selected.kpId))
-    : null), [chapters, selected, selectedPoint]);
+    : null;
+  const anchor = String(chapter?.from_detail_id ?? '');
 
-  const missing = !chapter?.summary || (chapter?.key_points.length ?? 0) === 0;
+  useEffect(() => {
+    if (!anchor) {
+      setIntro('');
+      return undefined;
+    }
+    let alive = true;
+    getKpNarrative(anchor)
+      .then((res) => { if (alive) setIntro(res.exists ? String(res.content ?? '') : ''); })
+      .catch(() => { if (alive) setIntro(''); });
+    return () => { alive = false; };
+  }, [anchor]);
+
+  if (!chapter) return null;
 
   return (
-    <Space direction="vertical" size={6} style={{ width: '100%' }} data-testid="chapter-note-pane">
-      <Text strong style={{ fontSize: 13 }}>本章总结</Text>
-      {chapter?.summary ? (
-        <div
-          data-testid="chapter-summary"
-          style={{ fontSize: 12, lineHeight: 1.7 }}
-          dangerouslySetInnerHTML={{ __html: renderInlineMath(chapter.summary) }}
-        />
-      ) : (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {chapter ? '这一章还没有总结：点下面生成一次就存下来。' : '先在左栏选中一条知识点或一章，本章内容才有归属。'}
-        </Text>
+    <Space direction="vertical" size={10} style={{ width: '100%' }} data-testid="chapter-note-pane">
+      {chapter.summary && (
+        <>
+          <Text strong style={{ fontSize: 13 }}>本章总结</Text>
+          <div
+            data-testid="chapter-summary"
+            style={{ fontSize: 12, lineHeight: 1.7 }}
+            dangerouslySetInnerHTML={{ __html: renderInlineMath(chapter.summary) }}
+          />
+        </>
       )}
-      <Text strong style={{ fontSize: 13 }}>学习要点</Text>
-      {chapter && chapter.key_points.length > 0 ? (
-        <ul data-testid="chapter-key-points" style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-          {chapter.key_points.map((item) => (
-            <li
-              key={item}
-              dangerouslySetInnerHTML={{ __html: renderInlineMath(item) }}
-            />
-          ))}
-        </ul>
-      ) : (
-        <Text type="secondary" style={{ fontSize: 12 }}>这一章的要点还没有整理。</Text>
-      )}
-      {chapter && missing && (
-        <Button size="small" loading={generating} onClick={() => void generateChapter()}>
-          生成本章总结与学习要点
-        </Button>
-      )}
-      {errorTarget === 'chapter' && generateError && (
-        <Text type="warning" style={{ fontSize: 12 }}>{generateError}</Text>
+      {anchor && intro && (
+        <>
+          <Text strong style={{ fontSize: 13 }}>本章学习导读</Text>
+          <div
+            data-testid="chapter-intro"
+            style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}
+            dangerouslySetInnerHTML={{ __html: renderInlineMath(intro) }}
+          />
+        </>
       )}
     </Space>
   );

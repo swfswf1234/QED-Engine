@@ -3,7 +3,7 @@ import { Button, Layout, Menu } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChartOutlined, ControlOutlined, DownloadOutlined, FileSearchOutlined,
-  HistoryOutlined, HomeOutlined,
+  HistoryOutlined, HomeOutlined, PartitionOutlined,
 } from '@ant-design/icons';
 import AppHeader from './AppHeader';
 import { useRuntimeStore } from '../stores/runtime';
@@ -15,6 +15,7 @@ const MENU_ITEMS = [
   { key: '/admin/dashboard', icon: <BarChartOutlined />, label: '仪表盘' },
   { key: '/admin/downloads', icon: <DownloadOutlined />, label: '文档下载管理' },
   { key: '/admin/parsing', icon: <FileSearchOutlined />, label: '文档解析管理' },
+  { key: '/admin/kp-review', icon: <PartitionOutlined />, label: '知识点梳理' },
   { key: '/admin/llm-calls', icon: <HistoryOutlined />, label: '模型调用记录' },
 ];
 
@@ -40,6 +41,7 @@ export default function AdminLayout() {
     if (location.pathname.startsWith('/admin/dashboard')) return '/admin/dashboard';
     if (location.pathname.startsWith('/admin/downloads')) return '/admin/downloads';
     if (location.pathname.startsWith('/admin/parsing')) return '/admin/parsing';
+    if (location.pathname.startsWith('/admin/kp-review')) return '/admin/kp-review';
     if (location.pathname.startsWith('/admin/llm-calls')) return '/admin/llm-calls';
     return '/admin';
   }, [location.pathname]);

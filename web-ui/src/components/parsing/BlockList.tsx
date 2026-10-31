@@ -7,12 +7,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Popover, Tag, Typography } from 'antd';
-import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Block, BlockEdit, BlockEditInput } from '../../api/axiom';
 import { editKey } from '../../stores/parsing';
-import { blockText, confirmInput, hasBbox, renderInlineMath, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
-import { assignRoles, layoutUnits, roleTypography, symbolLineParts, tocItemParts, type TypographyPrefs } from './typography';
+import { blockText, confirmInput, hasBbox, renderInlineMath, renderMathInHtml, tryRenderKatex, TYPE_LABELS, unwrapMathDelimiters } from './blocks';
+import { assignRoles, layoutUnits, roleTypography, symbolLineParts, tocEntriesFromLine, isChapterTocEntry, isTocNoiseLine, tocEntryRowStyle, type TypographyPrefs } from './typography';
 import BlockEditor from './BlockEditor';
 
 const { Text } = Typography;
@@ -93,14 +92,12 @@ function blockBody(block: Block, fontSizePx?: number, pageImageUrl?: string | nu
     return <ImageCrop src={pageImageUrl} bbox={block.bbox as [number, number, number, number]} />;
   }
   if (block.type === 'formula') {
+    // 块级公式恒 display：`\tag` 一类编号式只在 display 合法，按字号猜模式会把它渲成错误节点
     const body = unwrapMathDelimiters(content);
-    const inline = fontSizePx !== undefined;
-    const html = inline
-      ? tryRenderKatex(body, false)
-      : katex.renderToString(body, { displayMode: true, throwOnError: false });
+    const html = tryRenderKatex(body, true);
     return html ? (
       <span
-        style={inline ? { fontSize: fontSizePx } : undefined}
+        style={fontSizePx !== undefined ? { fontSize: fontSizePx } : undefined}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     ) : (
@@ -108,7 +105,8 @@ function blockBody(block: Block, fontSizePx?: number, pageImageUrl?: string | nu
     );
   }
   if (block.type === 'table') {
-    return <div style={{ overflowX: 'auto', fontSize: fontSizePx }} dangerouslySetInnerHTML={{ __html: content }} />;
+    // 现网表格 html 单元格里直带 `$I^k$`（b05 符号表页 6），交给 renderMathInHtml 走 KaTeX
+    return <div style={{ overflowX: 'auto', fontSize: fontSizePx }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(content) }} />;
   }
   if (block.type === 'heading') {
     return (
@@ -132,29 +130,34 @@ function EditTags({ edit }: { edit?: BlockEdit }) {
       {edit.verdict === 'bad' && <Tag color="error" style={{ marginInlineEnd: 0 }}>不一致</Tag>}
       {edit.corrected_text ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>文字修正</Tag> : null}
       {edit.corrected_bbox ? <Tag color="purple" style={{ marginInlineEnd: 0 }}>范围修正</Tag> : null}
+      {edit.corrected_type ? <Tag color="orange" style={{ marginInlineEnd: 0 }}>类型改判</Tag> : null}
     </>
   );
 }
 
-/** 目录条目行（§9.1）：标题 + 点线引导 + 页码右对齐 */
+/** 目录条目行（§9.1）：标题 + 点线引导 + 页码右对齐；一行可出多条（守则一黏行），章加粗／节缩进（DEFECT-025 展示面甲案） */
 function TocRows({ block }: { block: Block }) {
   const raw = block.type === 'list' ? (block.items ?? []) : blockText(block).split('\n');
+  // 噪声行（目录标题／纯罗马页码）不铺条目行——与抽取腿同一枚判据
+  const entries = raw.filter((line) => !isTocNoiseLine(line)).flatMap((line) => tocEntriesFromLine(line));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingInlineStart: '1em' }}>
-      {raw.map((line, i) => {
-        const { title, page } = tocItemParts(line);
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span>{title}</span>
-            {page !== '' && (
-              <>
-                <span style={{ flex: 1, minWidth: 24, borderBottom: '1px dotted #999', transform: 'translateY(-0.25em)' }} />
-                <span data-toc-page={page} style={{ textAlign: 'right' }}>{page}</span>
-              </>
-            )}
-          </div>
-        );
-      })}
+      {entries.map((entry, i) => (
+        <div
+          key={i}
+          data-toc-row
+          data-toc-kind={isChapterTocEntry(entry.title) ? 'chapter' : 'section'}
+          style={{ display: 'flex', alignItems: 'baseline', gap: 6, ...tocEntryRowStyle(entry.title) }}
+        >
+          <span data-toc-title dangerouslySetInnerHTML={{ __html: renderInlineMath(entry.title) }} />
+          {entry.page !== '' && (
+            <>
+              <span style={{ flex: 1, minWidth: 24, borderBottom: '1px dotted #999', transform: 'translateY(-0.25em)' }} />
+              <span data-toc-page={entry.page} style={{ textAlign: 'right' }}>{entry.page}</span>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -169,8 +172,8 @@ function SymbolRows({ block }: { block: Block }) {
         const parts = symbolLineParts(line);
         return (
           <div key={i} data-testid="symbol-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', columnGap: 12, alignItems: 'baseline' }}>
-            <span data-symbol-col style={{ whiteSpace: 'pre' }}>{parts?.symbol ?? ''}</span>
-            <span style={{ whiteSpace: 'pre-wrap' }}>{parts ? parts.desc : line.trim()}</span>
+            <span data-symbol-col style={{ whiteSpace: 'pre' }} dangerouslySetInnerHTML={{ __html: renderInlineMath(parts?.symbol ?? '') }} />
+            <span style={{ whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: renderInlineMath(parts ? parts.desc : line.trim()) }} />
             <span data-symbol-page style={{ textAlign: 'right', whiteSpace: 'pre' }}>{parts?.page ?? ''}</span>
           </div>
         );

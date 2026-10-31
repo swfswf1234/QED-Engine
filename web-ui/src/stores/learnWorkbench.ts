@@ -2,11 +2,13 @@
  * 学习工作台 store（v1.0：章 → 知识点两级，逐条知识点推进）
  * - 左＝`GET …/knowledge-points` 的 `sequence`（主表 point 行 × 章 outline × kp 行读时投影，
  *   进场只读零写入）；`unit.learner` 携自己的勾选与质性门态，没有落笔过＝null
- * - 中＝`GET /api/v1/books/{id}/pages/{n}` 按选中知识点的正文范围 8 页/批懒取，滚动自动续取（只读，不写回）
- * - 右＝学习交流三段（本章总结与学习要点 → 本条详解与长文 → 备注）：
- *   按需生成走根侧 `POST /learn/annotations/generate`（章＝覆写章行，条＝追加主表 `angles`），
- *   长文按主表 `narrative_ref` 读文件腿，备注＝kp 行 `learner_note`
- * - 推进不在右栏：正文末尾三枚（上一条／下一条／已掌握并下一条，同一条再点＝撤销）
+ * - 中＝`GET /api/v1/books/{id}/pages/{n}` 按选中知识点的正文范围 8 页/批懒取，滚动自动续取（只读，不写回）；
+ *   标题之下只排书页内容，界面不写任何说明话术，缺页窗即空白
+ * - 右＝批注四段闭集（§6：本章总结／本章学习导读／知识点总结／记录）：前三段只读、缺位整段不渲染，
+ *   本面零生成入口；导读走 8900 的梳理透传读腿（取数键＝章行提升锚 `from_detail_id`），记录＝kp 行 `learner_note`
+ * - 推进不在右栏：中栏卡片底部居中三枚（上一条／下一条／已掌握并下一条，同一条再点＝撤销）
+ * - 页头「刷新」＝同步＋重取（REQ-144 裁乙的唯一同步入口，进场不触发）：先 `POST …/knowledge-points/sync`
+ *   把整理好的内容提升到本课目录，再重取目录／序列／进度；同步没跑通只出 `syncError` 一条提示，三栏形态不动
  * - 目录为空者进场自动定位目录页并整树写入（§7 步 0），置信不足即不写猜测值
  * - 数据一律经 8900（ADR 0007）；写后整体重取，不做乐观更新（判例 stores/courseKnowledge）
  */
@@ -14,9 +16,9 @@ import { create } from 'zustand';
 import { getBookPage, listBooks, type Block, type BookMeta, type PageData } from '../api/axiom';
 import { ApiError, describeError } from '../api/client';
 import {
-  getCourseKnowledge, getLearnProgress, generateAnnotation,
+  getCourseKnowledge, getLearnProgress, syncCourseKnowledge,
   getOutline, getStarMap, listLearnCourses, putOutline, setLearnProgress,
-  type AnnotationPart, type KpSourceRef, type LearnCourse, type LearnProgress,
+  type KpSourceRef, type LearnCourse, type LearnProgress,
   type OutlineRow, type PointChapter, type PointUnit,
 } from '../api/learn';
 import { assignRoles, layoutUnits } from '../components/parsing/typography';
@@ -114,11 +116,21 @@ export function isCovered(point: PointUnit | null | undefined): boolean {
 }
 
 /**
- * 多角度注解的展示序＝主表 `angles` 数组序（数组序即权威排序，前端不重排）；
- * 只有带 note 的元素才是成品，同角不堆叠（覆写由服务端承载）。
+ * 非教材的取材位（习题集／答案本）：只读服务端 `derived.books[].textbook` 一枚布尔位（T5）。
+ * 位缺失＝角色未知，不过滤（判据不在前端重算，也不把缺数据当成「不是教材」）。
  */
-export function anglesOf(point: PointUnit | null | undefined) {
-  return (point?.angles ?? []).filter((item) => typeof item?.note === 'string' && item.note !== '');
+export function nonTextbookRefs(learnCourse: LearnCourse | null): Set<string> {
+  return new Set(
+    (learnCourse?.derived.books ?? [])
+      .filter((book) => book.textbook === false)
+      .map((book) => book.ref_id),
+  );
+}
+
+/** 序列按书切（T4）：`sequence` 是课程级返回，本面只留归本位等于当前这本的行；无书可切＝整条课程级序列 */
+export function withinBook<T extends { book_ref?: string | null }>(rows: readonly T[], bookId: string | null): T[] {
+  if (!bookId) return [...rows];
+  return rows.filter((row) => (row.book_ref ?? '') === bookId);
 }
 
 export interface FlowPage {
@@ -149,14 +161,6 @@ export function flowPages(pages: readonly FlowPage[]): FlowPage[] {
   return out;
 }
 
-/** 注解生成腿的失败话术：这一手不在当前版本里（404/405）时给下一步，其余照原样显示后端那一句 */
-const ANNOTATION_UNAVAILABLE = '这一手暂时生成不了：稍后点右上「刷新」再试。';
-
-function annotationFailure(err: unknown, unavailable: string): string {
-  if (err instanceof ApiError && (err.status === 404 || err.status === 405)) return unavailable;
-  return err instanceof ApiError ? err.message : describeError(err);
-}
-
 const emptyPage: PageEntry = { loading: false, parsed: false, data: null, error: null };
 
 export interface LearnWorkbenchStore {
@@ -185,35 +189,28 @@ export interface LearnWorkbenchStore {
   /** 已发起加载的最后一页（0＝未加载） */
   loadedThrough: number;
   selectedBlock: SelectedBlock | null;
-  /** 注解按需生成中（一次一条，同步等待） */
-  generating: boolean;
-  generateError: string | null;
-  /** 上一次生成失败落在哪一段：章级／条级，另一段不重复显示这句话 */
-  generateTarget: 'chapter' | 'point' | null;
   loading: boolean;
   busy: boolean;
   error: string | null;
   notice: string | null;
+  /** 页头「刷新」的同步腿没跑通（只出一条提示，三栏仍按上一次的结果；§10） */
+  syncError: string | null;
   fetchCourse: (urlParam: string, initialBookId?: string) => Promise<void>;
   reloadOutline: () => Promise<void>;
-  /** 重取推进序列（勾选、备注、生成后的成品都随这一路回来） */
+  /** 重取推进序列（自己的勾选与记录都随这一路回来） */
   reloadPoints: () => Promise<void>;
   selectPoint: (kpId: string) => Promise<void>;
   selectChapter: (kpId: string) => Promise<void>;
   loadMorePages: () => Promise<void>;
   selectBlock: (block: SelectedBlock | null) => void;
-  /** 章级两件：缺什么生成什么，成品写回章行即可直读（§V2.5／C20） */
-  generateChapter: () => Promise<void>;
-  /** 条级注解：追加主表 `angles` 的 explanation 一元素（同角覆写不堆叠） */
-  generatePoint: () => Promise<void>;
-  /** 备注（C26）：写 kp 行 `learner_note`，随当前终态位整笔提交 */
+  /** 记录（§6 段④）：写 kp 行 `learner_note`，随当前终态位整笔提交 */
   saveNote: (text: string) => Promise<boolean>;
   markSelected: (status: 'done' | 'pending') => Promise<boolean>;
   /** 沿左栏顺序前走／后走一条（章内读完自动跨章续走；走到头给明确提示） */
   step: (delta: 1 | -1) => Promise<void>;
   /** 已掌握并下一条（C25）：记上这一条再往前走；已掌握的那条再点＝撤销且不动位置 */
   masterAndNext: () => Promise<void>;
-  /** 页头「刷新」＝重取目录＋推进序列＋进度，不触发任何生产 */
+  /** 页头「刷新」＝同步＋重取（REQ-144 裁乙的唯一同步入口，进场不触发）：先提升本课各册整理好的内容，再重取目录／序列／进度 */
   refresh: () => Promise<void>;
   clearNotice: () => void;
 }
@@ -252,8 +249,9 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
     if (!learnCourse) return;
     try {
       set({ progress: await getLearnProgress(learnCourse.learn_course_id), progressError: null });
-    } catch (err) {
-      set({ progressError: describeError(err) });
+    } catch {
+      // 可见文案只出学习者话术：裸错误串（端口与状态码）不进学习面
+      set({ progressError: '进度这次没读到，点右上「刷新」可以再取一次。' });
     }
   };
 
@@ -362,16 +360,14 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
     pages: {},
     loadedThrough: 0,
     selectedBlock: null,
-    generating: false,
-    generateError: null,
-    generateTarget: null,
     loading: false,
     busy: false,
     error: null,
     notice: null,
+    syncError: null,
 
     fetchCourse: async (urlParam, initialBookId) => {
-      set({ loading: true, error: null, progressError: null });
+      set({ loading: true, error: null, progressError: null, syncError: null });
       let learnCourse: LearnCourse | null = null;
       // 深链参数＝共享课程 ID（D4 后与学习课程 ID 同源，不再有两套坐标）
       const courseId = urlParam;
@@ -386,8 +382,10 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
           const meta = metaOf(bookId);
           return snapshot || meta?.display_title || meta?.title || bookId;
         };
-        const registered = (learnCourse?.resources ?? []).filter((r) => r.kind === 'book');
-        const texts: WorkbenchText[] = registered.length > 0
+        const hidden = nonTextbookRefs(learnCourse);
+        const bookResources = (learnCourse?.resources ?? []).filter((r) => r.kind === 'book');
+        const registered = bookResources.filter((r) => !hidden.has(r.ref_id));
+        const texts: WorkbenchText[] = bookResources.length > 0
           ? registered.map((r) => ({
             bookId: r.ref_id,
             label: labelOf(r.ref_id, r.label),
@@ -435,8 +433,8 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
         let outline: OutlineRow[] = [];
         try {
           outline = (await getOutline(courseId, text.bookId)).outline;
-        } catch (err) {
-          set({ notice: describeError(err) });
+        } catch {
+          set({ notice: '目录这次没有取到，点右上「刷新」可以再取一次。' });
         }
         if (outline.length === 0 && tocPhase[text.bookId] !== 'failed' && tocPhase[text.bookId] !== 'generating') {
           await autoGenerateToc(courseId, text);
@@ -474,13 +472,15 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
           });
           return;
         }
-        units = overview.sequence.units;
+        // 序列按书切（T4）：课程级序列先按当前这本过滤，左栏／推进／断点全在过滤后的序列内走
+        const book = get().bookId;
+        units = withinBook(overview.sequence.units, book);
         // 章级成品位是后加的字段：旧返回缺位时补齐空值，右栏按「没有」处理而不是崩
-        chapters = overview.sequence.chapters.map((row) => ({
+        chapters = withinBook(overview.sequence.chapters, book).map((row) => ({
           ...row, summary: row.summary ?? '', key_points: row.key_points ?? [],
         }));
-      } catch (err) {
-        set({ progressError: describeError(err) });
+      } catch {
+        set({ progressError: '这一条的学习情况这次没读到，点右上「刷新」可以再取一次。' });
         return;
       }
       set({ pointUnits: units, chapters, progressError: null });
@@ -506,99 +506,23 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
 
     selectBlock: (block) => set({ selectedBlock: block }),
 
-    generateChapter: async () => {
-      const { learnCourse, chapters, selected, selectedPoint, generating } = get();
-      if (!learnCourse || !selected || generating) return;
-      const chapter = selected.kind === 'point'
-        ? chapterOfUnit(chapters, selectedPoint)
-        : chapterOf(chapters, selected.kpId);
-      if (!chapter) {
-        set({ generateError: '这一条还没有归属的章：本章总结暂时生成不了。', generateTarget: 'chapter' });
-        return;
-      }
-      const parts: AnnotationPart[] = [];
-      if (!chapter.summary) parts.push('summary');
-      if (chapter.key_points.length === 0) parts.push('key_points');
-      if (parts.length === 0) return;
-      set({ generating: true, generateError: null, generateTarget: 'chapter' });
-      try {
-        for (const part of parts) {
-          const out = await generateAnnotation({
-            course_id: learnCourse.learn_course_id, target_kind: 'chapter', kp_id: chapter.kp_id, part,
-          });
-          const patch = out.chapter;
-          if (patch) {
-            set((s) => ({
-              chapters: s.chapters.map((row) => (
-                row.kp_id === patch.kp_id
-                  ? { ...row, summary: patch.summary ?? '', key_points: patch.key_points ?? [] }
-                  : row
-              )),
-            }));
-          }
-        }
-      } catch (err) {
-        set({ generateError: annotationFailure(err, ANNOTATION_UNAVAILABLE), generateTarget: 'chapter' });
-      } finally {
-        set({ generating: false });
-      }
-    },
-
-    generatePoint: async () => {
-      const { learnCourse, selected, selectedKpId, generating } = get();
-      if (!learnCourse || !selectedKpId || generating) return;
-      if (selected?.kind !== 'point') {
-        set({ generateError: '整章阅读时先写本章总结与学习要点。', generateTarget: 'point' });
-        return;
-      }
-      set({ generating: true, generateError: null, generateTarget: 'point' });
-      try {
-        const out = await generateAnnotation({
-          course_id: learnCourse.learn_course_id, target_kind: 'point', kp_id: selectedKpId, part: 'annotation',
-        });
-        const saved = out.point;
-        if (saved) {
-          set((s) => {
-            const pointUnits = s.pointUnits.map((unit) => (
-              unit.kp_id === saved.kp_id
-                ? { ...unit, ...saved, node_kind: 'point' as const }
-                : unit
-            ));
-            return {
-              pointUnits,
-              selectedPoint: s.selectedPoint?.kp_id === saved.kp_id
-                ? pointUnits.find((unit) => unit.kp_id === saved.kp_id) ?? s.selectedPoint
-                : s.selectedPoint,
-            };
-          });
-        } else await get().reloadPoints();
-      } catch (err) {
-        set({ generateError: annotationFailure(err, ANNOTATION_UNAVAILABLE), generateTarget: 'point' });
-      } finally {
-        set({ generating: false });
-      }
-    },
-
     saveNote: async (text) => {
       const { learnCourse, selected, selectedPoint } = get();
       const body = text.trim();
       if (!learnCourse || selected?.kind !== 'point' || body === '') return false;
-      // 备注写 kp 行的 learner_note：这一条还没有 kp 行时服务端不起新行，先记位置再写备注
+      // 记录写 kp 行的 learner_note：这一条还没有 kp 行时服务端不起新行（界面已禁用保存，此处兜住并发）
       const learner = selectedPoint?.learner ?? null;
-      if (!learner) {
-        set({ notice: '这一条还没有学习记录：先用正文末尾的「已掌握并下一条」记上，备注就存得下了。' });
-        return false;
-      }
+      if (!learner) return false;
       set({ busy: true });
       try {
         await setLearnProgress(learnCourse.learn_course_id, {
           kp_id: selected.kpId, status: learner.status, note: body,
         });
         await get().reloadPoints();
-        set({ notice: '已记下这条备注。' });
+        set({ notice: '记录已保存。' });
         return true;
-      } catch (err) {
-        set({ notice: describeError(err) });
+      } catch {
+        set({ notice: '记录这次没有存上，可以再保存一次。' });
         return false;
       } finally {
         set({ busy: false });
@@ -624,8 +548,8 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
         );
         await get().reloadPoints();
         return true;
-      } catch (err) {
-        set({ notice: describeError(err) });
+      } catch {
+        set({ notice: '这一条的进度这次没有记下，可以再点一次。' });
         return false;
       } finally {
         set({ busy: false });
@@ -644,7 +568,7 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
         }
         const next = pointUnits[index + delta];
         if (!next) {
-          set({ notice: delta > 0 ? '已经到本课最后一条：回书架选下一门。' : '已经到本课第一条。' });
+          set({ notice: delta > 0 ? '已经到这本最后一条：回书架选另一本。' : '已经到这本第一条。' });
           return;
         }
         await get().selectPoint(String(next.kp_id));
@@ -657,7 +581,7 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
       }
       const next = chapters[index + delta];
       if (!next) {
-        set({ notice: delta > 0 ? '已经到本课最后一章：回书架选下一门。' : '已经到本课第一章。' });
+        set({ notice: delta > 0 ? '已经到这本最后一章：回书架选另一本。' : '已经到这本第一章。' });
         return;
       }
       await get().selectChapter(next.kp_id);
@@ -678,6 +602,18 @@ export const useLearnWorkbenchStore = create<LearnWorkbenchStore>((set, get) => 
     },
 
     refresh: async () => {
+      // 页头「刷新」＝同步＋重取（REQ-144 裁乙）：先把整理好的内容提升到本课目录，再按主表重读三态。
+      // 同步失败不改三栏形态——目录与正文仍按上一次结果显示，只出一条提示（设计正本 §10 末二行）；
+      // 提示位在每次刷新开头清掉，下一次刷新成功即撤下。
+      const { courseId } = get();
+      set({ syncError: null });
+      if (courseId) {
+        try {
+          await syncCourseKnowledge(courseId);
+        } catch (err) {
+          set({ syncError: describeError(err) });
+        }
+      }
       await get().reloadOutline();
       await get().reloadPoints();
       await restoreSelection();

@@ -58,7 +58,7 @@ export default function DomainConfirmModal({
     if (domain && open) {
       form.setFieldsValue({
         description: domain.description || '',
-        scope: domain.scope || '',
+        scope: domain.scope,
         level: domain.level || DOMAIN_LEVEL_DEFAULT,
         stages: (domain.stages || []).join('、'),
         classic_tracks: (domain.classic_tracks || []).map((t) => ({
@@ -126,7 +126,7 @@ export default function DomainConfirmModal({
       // 仅保存内容字段：exploration_stage/explore_pending 写点归后端（PLAN-033 §2 前端禁写）
       await updateDomain(domain.domain_id, {
         description: values.description,
-        scope: values.scope,
+        ...(values.scope === undefined ? {} : { scope: values.scope }),
         level: values.level,
         stages,
         classic_tracks,

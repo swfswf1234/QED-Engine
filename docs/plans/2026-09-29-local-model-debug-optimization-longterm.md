@@ -2,7 +2,7 @@
 
 状态：In Progress
 任务类型：B
-最后更新：2026-10-01
+最后更新：2026-10-24
 关联 ADR：[ADR 0020](../adr/0020-task-closure-cadence-and-thin-registration.md)（长期线形态与达成即收豁免）
 关联设计：[local-model-management.md](../design/local-model-management.md)（槽位/runtime/单活互斥与已知约束节）、
 [llm-gateway.md](../design/llm-gateway.md)（调用侧观测）、[service-hosting.md](../design/service-hosting.md)（启停单元口径）
@@ -50,8 +50,8 @@
 
 | 条目 | 内容 | 归属 | 状态 |
 | --- | --- | --- | --- |
-| L1 | 图像模型掉线三类假设定谳（WSL GPU blocked / 容器被外部杀 / vLLM OOM）：实采 ≥1 次崩溃诊断包 → 裁决 → 处置回写设计已知约束节 | 根 8900（证据） | 承接 ARCH-028 W6/S3（2026-09-29 移交）；采集能力已就绪（W3 诊断包 + W10 docker inspect OOMKilled/ExitCode/RestartCount），定谳待真崩或注入杀容器——本条不设期限，长期滚动 |
-| L2 | 参数标定：显存水位门阈值（默认 12GB）、启动宽限（默认 180s）、恢复退避节拍（4 tick≈2min、上限 3 次）随现场数据回归调优 | 根 8900 + `.env` | 未开始（前置＝W9 水位门实施落地与 S6 真机演练数据回来） |
+| L1 | 图像模型掉线三类假设定谳（WSL GPU blocked / 容器被外部杀 / vLLM OOM）：实采 ≥1 次崩溃诊断包 → 裁决 → 处置回写设计已知约束节 | 根 8900（证据） | 承接 ARCH-028 W6/S3（2026-09-29 移交）；采集能力已就绪（W3 诊断包 + W10 docker inspect OOMKilled/ExitCode/RestartCount），定谳待真崩或注入杀容器——本条不设期限，长期滚动。**2026-10-24 现场线索到手**：axiom-flow 解析中图像模型超容量需重启（用户定谳形态＝内存/显存 OOM 崩溃＝「重负载 vLLM/WSL OOM」假设的首个现场线索；对方 project-status 记录 memory 已抬 24GB 后仍复现），本次现场的诊断包与 `wsl dmesg` 实采待排期，登记源＝ARCH-028 W14 ②腿 |
+| L2 | 参数标定：显存水位门阈值（默认 12GB）、启动宽限（默认 180s）、恢复退避节拍（4 tick≈2min、上限 3 次）随现场数据回归调优；**2026-10-24 起标定对象扩容量规划参数**（`.wslconfig` memory、vLLM 显存占比等，承接 ARCH-028 W14 ①预防腿；`.wslconfig` 属用户侧机器配置，只给取值与依据、不代改） | 根 8900 + `.env` | 未开始（前置＝W9 水位门实施落地与 S6 真机演练数据回来） |
 | L3 | 空闲驱逐 / keep_alive TTL：本地模型空闲释放显存的形态与阈值评估（稳定性轮 2026-09-24 裁决列为观察项，不入主线） | 根 8900 | 待评估（J1 类观察积累后再议是否立项） |
 | L4 | DEFECT-005 真机复核：WSL 恢复期双槽位并发受控恢复实况不再绕过单活守卫（进程级互斥串行化已落地并有关联回归用例，真机侧观察窗随本线滚动） | 根 8900 | 移交承接（2026-09-29，随缺陷行关闭移入本线）；观察证据落 logs/config.log 与事件账 |
 | L5 | 本地模型吞吐与延迟画像：首 token 延迟 / 生成速度随上下文长度与并发曲线，为喂量与批次上限提供数据依据 | 根 8900 + 8902 联调观测 | 待排期（不阻塞主线；需真机窗口成批采集） |
@@ -69,6 +69,7 @@
 - **2026-09-30 现状**：尚无取证条目行落地，L1 等待真崩或注入杀容器窗口（采集能力见 L1 行）。
 - **2026-10-01 上下文档位实测（L5 前置数据，供 DEFECT-008 ⑥ 定档）**：LM Studio 渠道 qwen/qwen3.5-9b，GPU 总显存 16376 MiB，空载基线 2519 MiB；逐档 `lms load -c N --gpu max -y` 后读回 `loaded_context_length` 一致——16384→占用 12095 MiB、24576→12351、32768→12615、40960→12879 MiB，40960 首载耗时 7.3 s（16k 档 14.5 s 系含 server 冷启），40960 档小 prompt（「请回复 OK」）生成 5.4~6.3 s（含约 200 reasoning tokens）。**结论**：40960 可容纳（余量 3497 MiB），加载层参数定档 16384→40960（改动落 `registry.IDENTITIES` 与设计参数档案，代码修复走 DEFECT-008 / 普通任务轮 W13，本壳不直接改码）；思考 token 开销导致的验证超时归 W13 ③④，非本线判据。
 - **2026-10-01 思考段耗时与验证限长定档（L5 前置数据）**：同一 prompt 的 reasoning 段实测 170~260+ token、解码约 13 tok/s，请求层限长 256 时 5 次有 2 次 `finish=length` 正文为空，400/512 三档均 `finish=stop` 出正文（12~17s，上限不决定耗时）；LM Studio 请求体的 `chat_template_kwargs.enable_thinking=false` / `thinking.type=disabled` / 提示词 `/no_think` / 系统提示四条路数实测**均不关闭思考**（reasoning tokens 恒等于上限）→ 思考开关只在应用侧或模型侧，不在本仓请求层。定档 `LLM_TEST_MAX_TOKENS=512` + 前端 `TEST_TIMEOUT_MS=60_000`（改动落 W13 / DEFECT-008，本壳只留数据）。
+- **2026-10-24 超容量现场线索登记（非取证行，无命令读数）**：用户现场报告＋三裁（形态＝内存/显存 OOM 崩溃；方向＝预防/检测/自愈三条全取；承载＝ARCH-028 壳内新工作项 W14，todo 行判据零改写）。既有文档证据（只读）＝Axiom-Flow `docs/guides/operations.md` 「模型容器中途自己重启＝WSL 全局 OOM，处置属环境容量、不以缩小 `AXIOM_PARSE_WINDOW_SIZE` 绕开」与 `docs/trackers/project-status.md` 「memory 已抬至 24GB」读数。**待办取证（J1/S1 口径执行）**＝下次复现时实采掉线诊断包（docker inspect OOMKilled/ExitCode/RestartCount）+ `wsl dmesg | grep -i -E "oom|killed process"` 对照，读数落本节一行（时间＋命令＋结论），定谳归 L1、容量参数标定归 L2。根 `logs/config.log` 事件账近期读数止于 2026-10-18（vision 均为人工停止/未声明告警，无 OOMKilled 实录），本次现场事件尚未入账，采集窗口待排期。
 
 ## 验证与验收
 

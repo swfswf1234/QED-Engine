@@ -46,6 +46,13 @@ describe('App 路由骨架（Phase 0 冒烟）', () => {
     expect(container.querySelector('h2')?.textContent).toBe('模型调用记录');
   });
 
+  // REQ-141 批次 F：路由表与 AdminLayout 菜单两处同改，任一处漏改本用例与 AdminLayout 用例必有一红
+  it('通过 hash 直达 #/admin/kp-review 渲染知识点梳理屏', () => {
+    window.location.hash = '#/admin/kp-review';
+    const { container } = renderApp();
+    expect(container.querySelector('h2')?.textContent).toBe('知识点梳理');
+  });
+
   it('#/knowledge 渲染知识探索', () => {
     window.location.hash = '#/knowledge';
     const { container } = renderApp();

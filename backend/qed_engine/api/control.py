@@ -435,11 +435,18 @@ def gateway_review_call(settings, **kwargs):
 
 @router.post("/llm/text", response_model=LlmCallResponse)
 def llm_text(request: Request, payload: LlmTextRequest) -> LlmCallResponse:
-    """文字模型调用（api/local 路由由网关处理，调用记录落 qed_llm_calls）。"""
+    """文字模型调用（api/local 路由由网关处理，调用记录落 qed_llm_calls）。
+
+    归因三键由调用方上送（子仓库经此调用时账只在本服务落一行）；缺席即按本服务自有调用记账。
+    """
     resolved: Settings = request.app.state.settings
     return LlmCallResponse(**gateway_call_text(
         resolved, prompt=payload.prompt, system=payload.system,
         prompt_template=payload.prompt_template, max_tokens=payload.max_tokens,
+        **{key: value for key, value in {
+            "service": payload.service, "task": payload.task,
+            "step": payload.step, "meta": payload.meta,
+        }.items() if value is not None},
     ))
 
 

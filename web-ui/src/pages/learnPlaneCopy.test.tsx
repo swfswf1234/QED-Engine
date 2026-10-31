@@ -26,6 +26,11 @@ export const BANNED_V1_WORKBENCH_TOKENS = [
   '本条学完', '跳过本条', '撤销勾选', '回到断点', '保留为候选',
   // v1.0 三张化（ADR 0026 D10）：候选池与保留位随表退出，块级分组口径一并下线，不许回来
   '点赞', '待整理', '已保留', '确认入库', '驳回', '本条通用', '这一块', '候选', '生成本条总结',
+  // REQ-144 W4 中栏净化：四句 secondary 话术下线（§5.2 第 7／8 款＋§10 空白态），回来即判红
+  '这一条读完了', '正文按整章呈现', '还没有定位到书页', '正文就排在这里',
+  // REQ-144 W5 右栏收敛为批注四段闭集（§6）：学习交流三段口径＋两枚生成钮＋提问位随段下线，
+  // 学习者看得见这些字就说明批注被改回旧的「推进＋生成＋提问」形态
+  '学习交流', '学习要点', '详解', '长文正文', '读这一条的正文', '生成本条注解', '生成本章', '暂未开放', '提问', '备注',
 ];
 
 /** 学习面在册文件（书架清单＋单屏工作台＋其右栏组件）：以源码原文参与守护断言 */
@@ -42,10 +47,10 @@ const PLANE_SOURCES: Array<[string, string]> = [
 /** 工作台一族（不含书架清单） */
 const WORKBENCH_SOURCES = PLANE_SOURCES.filter(([name]) => !name.includes('LearnShelf'));
 
-/** 右栏「学习交流」三段的必含口径词（缺一个就说明 v2 口径被改回旧话术） */
+/** 右栏「批注」四段闭集的必含口径词（缺一个就说明 §6 的批注形态被改回旧话术） */
 const RIGHT_PANE_REQUIRED = [
-  '学习交流', '本章总结', '学习要点', '详解', '备注', '生成本条注解', '长文正文',
-  '上一条', '下一条', '已掌握并下一条', '暂未开放',
+  '批注', '本章总结', '本章学习导读', '知识点总结', '记录', '保存记录',
+  '上一条', '下一条', '已掌握并下一条',
 ];
 
 /** 右栏一族（段题在工作台，段内容在三个组件） */
@@ -101,7 +106,7 @@ describe('工作台 v2.1 口径守护（REQ-117 W9）', () => {
     }
   });
 
-  it('右栏三段＝学习交流／详解／备注的口径词都在用户可见话术里：缺一句就说明改回旧话术（C25~C28）', () => {
+  it('右栏＝批注四段（本章总结／本章学习导读／知识点总结／记录）的口径词都在用户可见话术里：缺一段就说明改回旧话术（§6）', () => {
     const visible = RIGHT_PANE_SOURCES.flatMap((source) => visibleStrings(source));
     for (const word of RIGHT_PANE_REQUIRED) {
       expect(visible.join('\n'), `右栏缺口径词「${word}」`).toContain(word);
@@ -114,5 +119,24 @@ describe('工作台 v2.1 口径守护（REQ-117 W9）', () => {
       expect(text, '工作台把「注解」当成了栏题').not.toBe('注解');
       expect(text).not.toBe('打开注解');
     }
+  });
+});
+
+/**
+ * 裸错误串不进可见文案（§8「不透传裸状态码文案」＋§9 后台口径词禁现）。
+ * `describeError` 的输出带端口与 HTTP 状态码，一拼进模板字面量就把后台事实说给学习者听；
+ * REQ-144 W7 真机走查抓到过这条腿（同步横条显示过「请求超时（8000ms）：http://…8900…」）。
+ */
+const RAW_ERROR_SLOT = /\$\{[^}]*\b(?:error|syncError|syncNote|progressError|notice)\b[^}]*\}/;
+
+describe('学习面不透传裸错误串（REQ-144 W7）', () => {
+  it.each(PLANE_SOURCES)('%s 的可见文案不插值错误字段', (_name, source) => {
+    const body = source.replace(BLOCK_COMMENT, ' ').replace(LINE_COMMENT, ' ');
+    const leak = body.match(new RegExp(RAW_ERROR_SLOT.source, 'g')) ?? [];
+    expect(leak, `可见文案拼进了裸错误串：${leak.join('、')}`).toEqual([]);
+  });
+
+  it('store 里被渲染的两枚字段只装学习者话术（notice／progressError 不接 describeError）', () => {
+    expect(learnStoreSource).not.toMatch(/(?:notice|progressError):\s*describeError\(/);
   });
 });

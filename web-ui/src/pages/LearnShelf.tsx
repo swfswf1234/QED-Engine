@@ -24,6 +24,7 @@ import {
   type CourseResource, type LearnBookProgress, type LearnCourse, type SyncBookMeta,
 } from '../api/learn';
 import { getStarMap, type StarMapDomain } from '../api/learn';
+import { nonTextbookRefs } from '../stores/learnWorkbench';
 
 const { Title, Text } = Typography;
 
@@ -57,9 +58,10 @@ export function courseDisplayName(course: LearnCourse): string {
   return course.name;
 }
 
-/** 教材卡列表：按 resources 声明序，忽略位分列（dismissed 只进「已忽略」区） */
+/** 教材卡列表：按 resources 声明序，忽略位分列（dismissed 只进「已忽略」区）；非教材整本退出（T5） */
 export function splitBooks(course: LearnCourse): { shown: CourseResource[]; dismissed: CourseResource[] } {
-  const books = course.resources.filter((resource) => resource.kind === 'book');
+  const hidden = nonTextbookRefs(course);
+  const books = course.resources.filter((resource) => resource.kind === 'book' && !hidden.has(resource.ref_id));
   return {
     shown: books.filter((resource) => !resource.dismissed),
     dismissed: books.filter((resource) => resource.dismissed),
@@ -222,7 +224,7 @@ export default function LearnShelf() {
             type="warning"
             showIcon
             message="清单暂时打不开"
-            description={`暂未能读取您的书架（${error}）。其他界面不受影响，可稍后点「重试」。`}
+            description="暂未能读取您的书架。其他界面不受影响，可稍后点「重试」。"
             action={<Button size="small" onClick={() => void reload()}>重试</Button>}
           />
         )}
@@ -232,7 +234,7 @@ export default function LearnShelf() {
             type="info"
             showIcon
             message="暂时读不到新准备的教材"
-            description={`已按现有清单列出（${syncNote}）。稍后点「刷新」会自动补齐。`}
+            description="已按现有清单列出，稍后点「刷新」会自动补齐。"
           />
         )}
 

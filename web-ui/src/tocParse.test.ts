@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isChapterTocEntry } from './components/parsing/typography';
 import {
   autoLocateToc, estimateTocOffset, parseTocLines, toOutlinePayload, tocLinesFromBlockTexts,
   type BodyPageText, type TocNode, type TocUnrecognizedLine,
@@ -50,6 +51,83 @@ const B05_P8_COL_B = [
 const titles = (nodes: readonly TocNode[]): string[] => nodes.map((n) => n.name);
 const reasons = (lines: readonly TocUnrecognizedLine[]): string[] => lines.map((l) => l.reason);
 
+/**
+ * 夹具＝b05 目录页实测原文（8900 `GET /api/v1/books/mathanalysis-b05/pages/7` 的 paragraph 块整文本）。
+ * DEFECT-025 的四例失真原样在内：黏行 `第4章 连续性 …… 73函数的极限 …… 73`，
+ * 折行 `无限极限与在无穷远点的`／`极限 …… 84`、`第6章 RIEMANN-STIEI.`／`TJES积分 …… 107`、
+ * `第7章 函数序列与函数项`／`级数 …… 129`。
+ */
+const B05_P7_RAW = [
+  '第1章 实数系和复数系…… 1',
+  '导引 …… 1',
+  '有序集 …… 2',
+  '域 …… 4',
+  '实数域 …… 7',
+  '广义实数系 …… 10',
+  '复数域 …… 10',
+  '欧氏空间 …… 13',
+  '附录 …… 15',
+  '习题 …… 18',
+  '第2章 基础拓扑 …… 21',
+  '有限集、可数集和不可数集 …… 21',
+  '度量空间 …… 26',
+  '紧集 …… 31',
+  '完全集 …… 35',
+  '连通集 …… 36',
+  '习题 …… 36',
+  '第3章 数列与级数 …… 41',
+  '收敛序列 …… 41',
+  '子序列 …… 44',
+  'Cauchy 序列 …… 45',
+  '上极限和下极限 …… 47',
+  '一些特殊序列 …… 49',
+  '级数 …… 50',
+  '非负项级数 …… 52',
+  '数 e …… 54',
+  '根值验敛法与比率验敛法 …… 56',
+  '幂级数 …… 59',
+  '分部求和法 …… 60',
+  '绝对收敛 …… 61',
+  '级数的加法和乘法 …… 62',
+  '级数的重排 …… 65',
+  '习题 …… 67',
+  '第4章 连续性 …… 73函数的极限 …… 73',
+  '连续函数 …… 74',
+  '连续性与紧性 …… 77',
+  '连续性与连通性 …… 81',
+  '间断 …… 81',
+  '单调函数 …… 83',
+  '无限极限与在无穷远点的',
+  '极限 …… 84',
+  '习题 …… 85',
+  '第5章 微分法 …… 91',
+  '实函数的导数 …… 91',
+  '中值定理 …… 94',
+  '导数的连续性 …… 95',
+  "L'Hospital法则 …… 95",
+  '高阶导数 …… 97',
+  'Taylor定理 …… 97',
+  '向量值函数的微分法 …… 98',
+  '习题 …… 100',
+  '第6章 RIEMANN-STIEI.',
+  'TJES积分 …… 107',
+  '积分的定义和存在性 …… 107',
+  '积分的性质 …… 114',
+  '积分与微分 …… 119',
+  '向量值函数的积分 …… 120',
+  '可求长曲线 …… 122',
+  '习题 …… 123',
+  '第7章 函数序列与函数项',
+  '级数 …… 129',
+  '主要问题的讨论 …… 129',
+  '一致收敛性 …… 132',
+  '一致收敛性与连续性 …… 133',
+  '一致收敛性与积分 …… 136',
+  '一致收敛性与微分 …… 136',
+  '等度连续的函数族 …… 139',
+  'Stone-Weierstrass定理 …… 142',
+].join('\n');
+
 describe('章/节定级（目录解析规格 2：章题 depth=1，其余挂最近章题 depth=2）', () => {
   it('b05 p7 实测：第1章 收 7 个节题，第2章 起新章', () => {
     const { tree } = parseTocLines(B05_P7);
@@ -80,6 +158,12 @@ describe('章/节定级（目录解析规格 2：章题 depth=1，其余挂最�
       '第 11 章 微分形式的积分', '第十二章 合成样本', 'Chapter 3 Continuous Functions',
     ]);
     expect(tree.every((n) => n.depth === 1)).toBe(true);
+  });
+
+  it('展示面判据＝抽取腿判据（DEFECT-025 甲案：章加粗不造第二套正则）', () => {
+    const { tree } = parseTocLines(tocLinesFromBlockTexts([B05_P7_RAW]));
+    expect(tree.every((chapter) => isChapterTocEntry(chapter.name))).toBe(true);
+    expect(tree.flatMap((chapter) => chapter.children).every((section) => !isChapterTocEntry(section.name))).toBe(true);
   });
 
   it('最深两级：节题下的行不会再降一层', () => {
@@ -293,5 +377,85 @@ describe('目录进场自动定位（REQ-105 §7 步 0：只读已解析块文�
   it('页序乱序输入不影响定位结果（按页号升序消费）', () => {
     const shuffled = [...AUTO_PAGES].reverse();
     expect(autoLocateToc(shuffled)).toMatchObject({ tocStart: 7, tocEnd: 8, bodyStart: 10, offset: 9 });
+  });
+});
+
+/**
+ * 守则一＋守则二（DEFECT-025，2026-10-25 用户裁「先清洗再搬」）。
+ * 原判据下的实测缺陷＝第6章与第7章整章从目录正本消失、三枚折行后半降为节行并错挂上一个章。
+ */
+describe('目录清洗防线（守则一行内剔离＋守则二碎片拼回）', () => {
+  const clean = () => parseTocLines(tocLinesFromBlockTexts([B05_P7_RAW]));
+
+  it('b05 第7页整块重取＝章行 7 枚，第6章与第7章不再整章缺失', () => {
+    expect(titles(clean().tree)).toEqual([
+      '第1章 实数系和复数系', '第2章 基础拓扑', '第3章 数列与级数', '第4章 连续性',
+      '第5章 微分法', '第6章 RIEMANN-STIEI.TJES积分', '第7章 函数序列与函数项级数',
+    ]);
+  });
+
+  it('黏行的第二条与三枚折行后半各归正确父级（不再错挂上一个章）', () => {
+    const { tree } = clean();
+    expect(titles(tree[3].children)).toEqual([
+      '函数的极限', '连续函数', '连续性与紧性', '连续性与连通性', '间断', '单调函数', '无限极限与在无穷远点的极限',
+    ]);
+    expect(titles(tree[5].children)).toEqual([
+      '积分的定义和存在性', '积分的性质', '积分与微分', '向量值函数的积分', '可求长曲线',
+    ]);
+    expect(titles(tree[6].children)).toEqual([
+      '主要问题的讨论', '一致收敛性', '一致收敛性与连续性', '一致收敛性与积分', '一致收敛性与微分',
+      '等度连续的函数族', 'Stone-Weierstrass定理',
+    ]);
+  });
+
+  it('零丢弃零残点＝碎片全被拼回，且目录名内不含引导点与尾数', () => {
+    const { tree, unrecognized } = clean();
+    expect(unrecognized.filter((line) => line.reason === 'no-page')).toEqual([]);
+    const names = tree.flatMap((node) => [node.name, ...node.children.map((child) => child.name)]);
+    expect(names).toHaveLength(7 + 7 + 5 + 14 + 7 + 7 + 5 + 7);
+    // 残点＝引导点串（省略号字形或连续两枚以上点线）；`RIEMANN-STIEI.TJES` 的词内单点不算
+    expect(names.filter((name) => /[…⋯]|[.·•–—－]{2,}/.test(name) || /\d\s*$/.test(name))).toEqual([]);
+    expect(reasons(unrecognized)).toEqual(['excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded']);
+  });
+
+  it('碎片拼回按语种接缝：中日文直连、西文词尾点号直连、纯西文补一个空格', () => {
+    const hyphen = parseTocLines(['第6章 RIEMANN-STIEI.', 'TJES积分 …… 107']);
+    expect(hyphen.tree[0].name).toBe('第6章 RIEMANN-STIEI.TJES积分');
+    expect(hyphen.tree[0].printPage).toBe(107);
+    const latin = parseTocLines(['FUNCTIONS OF', 'REAL VARIABLES …… 301']);
+    expect(latin.tree.map((node) => node.name)).toEqual([]);
+    expect(reasons(latin.unrecognized)).toEqual(['no-parent']);
+    expect(latin.unrecognized[0].raw).toBe('FUNCTIONS OF REAL VARIABLES …… 301');
+  });
+
+  it('拼回后仍是章题判定＝章号不丢（第7章形态）', () => {
+    const { tree } = parseTocLines(['第7章 函数序列与函数项', '级数 …… 129', '主要问题的讨论 …… 129']);
+    expect(tree.map((node) => node.name)).toEqual(['第7章 函数序列与函数项级数']);
+    expect(titles(tree[0].children)).toEqual(['主要问题的讨论']);
+  });
+
+  it('末尾拼不出页码的碎片不静默丢弃（no-page 语义保留）', () => {
+    const { tree, unrecognized } = parseTocLines(['第1章 甲 …… 1', '导引', '有序集 …… 2', '尾行断在标题上']);
+    expect(titles(tree[0].children)).toEqual(['导引有序集']);
+    expect(unrecognized).toEqual([{ raw: '尾行断在标题上', reason: 'no-page', page: null }]);
+  });
+
+  it('黏行拆分后的两条目不共享同一 identity（父级随章题推进）', () => {
+    const { tree } = parseTocLines(['第4章 连续性 …… 73函数的极限 …… 73', '连续函数 …… 74']);
+    expect(tree).toHaveLength(1);
+    expect(titles(tree[0].children)).toEqual(['函数的极限', '连续函数']);
+    expect(tree[0].children.map((child) => child.printPage)).toEqual([73, 74]);
+  });
+
+  it('自动定位在同一条清洗腿上跑通（进场自动目录＝清洗后正本可直写）', () => {
+    const result = autoLocateToc([
+      { page: 7, text: `目录\n${B05_P7_RAW}` },
+      { page: 9, text: '第1章 实数系和复数系\n导引\n正文' },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(result.tree.map((node) => node.name)).toEqual([
+      '第1章 实数系和复数系', '第2章 基础拓扑', '第3章 数列与级数', '第4章 连续性',
+      '第5章 微分法', '第6章 RIEMANN-STIEI.TJES积分', '第7章 函数序列与函数项级数',
+    ]);
   });
 });

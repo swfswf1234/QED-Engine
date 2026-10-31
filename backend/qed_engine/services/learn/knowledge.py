@@ -189,11 +189,15 @@ class MySQLKnowledgeStore:
         anchors: Any = None,
         order_hint: int | None = None,
         from_detail_id: str = "",
+        source_ref: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """直登记一条 point 行＝候选池退役后主表的唯一产面（ADR 0026 D10）。
 
         父级只允许同课程的 outline 行或 NULL（未归档池）；同课程重复 `norm_key` 拒绝 409；
         「写入本表」这一动作即承载确认（R6：主表无确认位列）。
+
+        `source_ref`＝机器腿专用页窗（提升同步腿写，`PointCreateBody` 未声明 ⇒ 请求侧不可达）：
+        梳理侧的 `page_start`／`page_end` 两键在此落地，读侧三级回落的第一级即命中。
         """
         if not str(course_id or "").strip():
             raise LearnConflict("course_id 不可为空")
@@ -233,7 +237,7 @@ class MySQLKnowledgeStore:
                     "VALUES (%(kp_id)s, %(domain_id)s, %(domain_label)s, %(course_id)s, "
                     " %(course_label)s, 'point', %(parent_kp_id)s, NULL, NULL, %(name)s, "
                     " %(aliases)s, %(norm_key)s, %(type)s, %(order_hint)s, %(summary)s, "
-                    " %(narrative_ref)s, NULL, NULL, %(anchors)s, %(from_detail_id)s, NULL, "
+                    " %(narrative_ref)s, NULL, %(source_ref)s, %(anchors)s, %(from_detail_id)s, NULL, "
                     " %(writer)s, %(writer)s, %(now)s, %(now)s)",
                     {
                         "kp_id": kp_id,
@@ -249,6 +253,7 @@ class MySQLKnowledgeStore:
                         "order_hint": order_hint,
                         "summary": summary,
                         "narrative_ref": narrative_ref or "",
+                        "source_ref": _to_json(source_ref),
                         "anchors": _to_json(anchors or []),
                         "from_detail_id": from_detail_id or None,
                         "writer": WRITER,
@@ -467,10 +472,14 @@ class MySQLKnowledgeStore:
         }
 
     def patch_point(self, kp_id: str, **fields: Any) -> dict[str, Any]:
-        """人工面白名单改列（parent_kp_id / name / order_hint / summary），归属与改名不重开确认。
+        """白名单改列（parent_kp_id / name / order_hint / summary），归属与改名不重开确认。
 
         `meta`＝扩展槽合并写入（REQ-117 C20：章级学习要点落 `meta.chapter_key_points`，零 DDL）；
         只覆盖给出的键，不开放给人工面端点。
+
+        机器腿专用三键（REQ-144 W2 提升同步腿）＝`from_detail_id`（梳理侧节点身份锚，章行也写）、
+        `source_ref`（页窗）、`anchors`（归一后的锚）：`PointPatchBody` 未声明且 `extra=forbid`
+        ⇒ 请求侧递进来即 422，只有进程内同步腿能写。
         """
         now = _now()
         conn = self._connect()
@@ -495,6 +504,15 @@ class MySQLKnowledgeStore:
                 if "summary" in fields:
                     sets.append("summary=%s")
                     params.append(fields["summary"])
+                if "from_detail_id" in fields:
+                    sets.append("from_detail_id=%s")
+                    params.append(fields["from_detail_id"] or None)
+                if "source_ref" in fields:
+                    sets.append("source_ref=%s")
+                    params.append(_to_json(fields["source_ref"]))
+                if "anchors" in fields:
+                    sets.append("anchors=%s")
+                    params.append(_to_json(fields["anchors"] or []))
                 if "meta" in fields:
                     merged = dict(_from_json(existing["meta"]) or {})
                     merged.update(fields["meta"] or {})

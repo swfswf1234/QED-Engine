@@ -2,10 +2,10 @@
 
 状态：In Progress
 任务类型：A
-最后更新：2026-10-18
+最后更新：2026-10-24
 关联 ADR：[ADR 0024](../adr/0024-preschema-rebuild-tiers-and-demo-gate.md)（范围锁死：设计先行、未提及功能不加）；后续具体细节的实现由 Axiom-Flow 按其仓库 ADR / 门禁承接
 关联设计：[前端总设计 §4/§5](../design/frontend/frontend-overview.md)（文档分析处理在全流程 ③ 的定位与边界）；确认后晋升目标位 `design/frontend/doc-analysis.md`
-关联 Tracker：docs/trackers/todo.md（REQ-116 登记，普通任务轮节）
+关联 Tracker：docs/trackers/todo.md（REQ-116 登记在普通任务轮 ARCH-035 节，分线归属＝ARCH-025-L2（四职责设计稿上游）；2026-10-24 曾按三方向重划移入 ARCH-025 节，2026-10-25 按「一总线＋三分线、小任务归普通轮」裁决回到本节）
 归档判定：Retain（设计稿待晋升 + 跨项目移交承接证据，属不可替代过程记录）
 
 ## 目标与成功标准
@@ -82,6 +82,8 @@
 - 2026-10-18：W3（向 Axiom-Flow 发分析处理承接请求稿）与 W4（晋升 `design/frontend/doc-analysis.md`）按裁决留下轮——晋升前需先有对方承接口径回填，避免暂定形态先行冻结。门禁：`pytest tests/contract` **89 passed**、`pytest tests` **814 passed**、`ruff check backend tests` All checks passed（本轮纯文档，无代码改动）。
 
 - 2026-10-20：用户裁决把「文档知识点／后端归属」相关任务整合起来先出总纲，本壳作为**集群的命名与边界正本**纳入[文档知识生产线集群总纲](2026-10-20-doc-knowledge-cluster-master-outline.md)（成员＝REQ-116 / ARCH-027-M4 / REQ-130，另含 ARCH-027-M3 归并进 ARCH-028 的合轮裁定）。与本壳直接相关的两枚待裁点＝模块数量与命名（合一 vs 并列，C-1）、后端归属三案（C-2）；**本壳已裁事实（`#/admin/analysis`、四职责、根侧不实现分析算法与后端端点）在批复前仍是正本**，批复改判前不外发移交稿。行 S1~S4 一字未改。
+
+- 2026-10-24（归属改判，用户裁决）：本行由普通任务轮 ARCH-035 节整行移入 [ARCH-025 壳](2026-09-22-axiom-flow-v1-parsing-knowledge-optimization.md) 节·方向 2「知识点梳理后端部分开发」，与 REQ-139／REQ-141 同段——三方向重划的原话与全轮记录见该壳「2026-10-24 三向重划」条。六列内容与 S1~S4 判据一字未改，只改节归属与本壳「关联 Tracker」；本壳的设计本体四职责与 `#/admin/analysis` 定名仍是正本。
 
 ## 验证与验收
 

@@ -1,7 +1,8 @@
 /**
  * 对照区顶栏（parsing-ui §7/§8 + §4.6 四行重排，REQ-098 W8）：
  * 行1 书名独行｜行2 动作（书页入库/解析本页/全本族，**均先弹窗确认**）+ 任务进度 + 页码导航（尾部）｜
- * 行3 视图（编辑模式开关｜单页/连续｜滚动同步｜流式/版式 + 排版；不设缩放控件，§4.6 追改）｜
+ * 行3 视图（编辑模式开关｜单页/连续｜滚动同步｜流式/版式；不设缩放控件，§4.6 追改；
+ *     版式态的「排版」样式面板按 2026-10-25 用户裁甲一并撤除，偏好只走默认与 localStorage 读回）｜
  * 行4 编辑行（口径=框图修改／解析修正；框图：新增（画框模式）+ 合并，删除与修改走框右键菜单；
  *     解析修正：整页确认 + 审阅统计，单块确认在右栏块上）。
  * 动作按钮文案按状态三态选择（壳 §4.6 判定表）；「解析全部未完成页」在引擎侧 R6 承接前禁用 + tooltip。
@@ -10,12 +11,11 @@
  * 键盘 ←/→ 翻页由页面容器处理（弹层/输入聚焦时禁用）。
  */
 import { useState } from 'react';
-import { App, Button, InputNumber, Popover, Progress, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, InputNumber, Progress, Segmented, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { editKey, useParsingStore } from '../../stores/parsing';
 import type { BookMeta } from '../../api/axiom';
 import { parsingBookLabel } from './BookTree';
-import TypographyPanel from './TypographyPanel';
 
 const { Text } = Typography;
 
@@ -34,7 +34,6 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const drawMode = useParsingStore((s) => s.drawMode);
   const boxSelection = useParsingStore((s) => s.boxSelection);
   const regionDraft = useParsingStore((s) => s.regionDraft);
-  const typography = useParsingStore((s) => s.typography);
   const activeJob = useParsingStore((s) => s.activeJob);
   const jobError = useParsingStore((s) => s.jobError);
   const jobSubmitting = useParsingStore((s) => s.jobSubmitting);
@@ -48,7 +47,6 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
   const setEditMode = useParsingStore((s) => s.setEditMode);
   const setEditPane = useParsingStore((s) => s.setEditPane);
   const setDrawMode = useParsingStore((s) => s.setDrawMode);
-  const setTypography = useParsingStore((s) => s.setTypography);
   const mergeSelectedBlocks = useParsingStore((s) => s.mergeSelectedBlocks);
   const resetRegionDraft = useParsingStore((s) => s.resetRegionDraft);
   const loadPage = useParsingStore((s) => s.loadPage);
@@ -201,11 +199,6 @@ export default function ParseToolbar({ book, pageNo, blockCount }: ParseToolbarP
           value={renderMode}
           onChange={(v) => setRenderMode(v as 'stream' | 'layout')}
         />
-        {renderMode === 'layout' && (
-          <Popover trigger="click" content={<TypographyPanel prefs={typography} onChange={setTypography} />}>
-            <Button size="small" aria-label="版式样式面板">排版</Button>
-          </Popover>
-        )}
       </Space>
 
       {/* 行4：编辑口径 + 该口径的动作 */}

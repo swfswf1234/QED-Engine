@@ -159,7 +159,7 @@
 
 - **2026-10-16 W8 立项：书架清单 v2 五项裁决（C9~C13，用户裁决，先行于 W4）**：
   - **C9 同步落点＝8900 服务端**：新增 `POST /api/v1/learn/courses/sync`——读 8902 透传书目，取 `active_job_id` 非空且 `course_id` 非空的书，按 `course_id` 分组，回查共享表 `qed_course` 取领域与正式名称；已存在学习课程（`course_ref.ref_id` 命中，多门时取 `created_at` 最早一门）只**并集补入**新书并保留人工 `dismissed` 位，不存在则建行（`name`＝正式名称）。查不到课程坐标的书即 PASS（不猜归属）。8902 离线 → 503，书架降级为列既有课程。「新建学习课程」表单与课程删除入口从学面摘除（写面迁出，与 C1 同口径），端点保留归后台。
-  - **C10 简介与面向对象＝教程套派生**：教材级两列在 `qt_books`/`af_books` 均不存在，但 `af_books.knowledge_id` → `qt_knowledge` 的关联真机 17/17 一致（且每本只命中一套），套级带 `intro`（165~331 字散文，正文即写明适用对象）与 `position` 五档 → 卡片简介取所依套 `intro`（同套多本共用，口径登记），徽章＝`position` 中文档位（beginner=入门 / intermediate=进阶 / advanced=深入 / comprehensive=综合 / elective=选修）。**跨项目登记**：书级「简介」「面向对象」两列属 QED-Tracker 面，按用户裁决「没有就去对应项目下登记」出请求稿 → [REQ-121 请求稿](../../../plans/2026-10-16-book-intro-audience-tracker-request.md)（R1~R5；回执落地后由本行 W5 批次改读书级列，套级降兜底）。
+  - **C10 简介与面向对象＝教程套派生**：教材级两列在 `qt_books`/`af_books` 均不存在，但 `af_books.knowledge_id` → `qt_knowledge` 的关联真机 17/17 一致（且每本只命中一套），套级带 `intro`（165~331 字散文，正文即写明适用对象）与 `position` 五档 → 卡片简介取所依套 `intro`（同套多本共用，口径登记），徽章＝`position` 中文档位（beginner=入门 / intermediate=进阶 / advanced=深入 / comprehensive=综合 / elective=选修）。**跨项目登记**：书级「简介」「面向对象」两列属 QED-Tracker 面，按用户裁决「没有就去对应项目下登记」出请求稿 → [REQ-121 请求稿](2026-10-16-book-intro-audience-tracker-request.md)（R1~R5；回执落地后由本行 W5 批次改读书级列，套级降兜底）。
   - **C11 忽略＝教材级**：位落 `resources` 元素内 `dismissed` 键（**零 DDL**，JSON 列内键位），`PATCH …/courses/{id}` 白名单扩 `resources` 承载写入；sync 并集补入时不覆盖该位，忽略后卡置灰、按钮改「按回来」。
   - **C12 使用手册弹窗＝深蓝底白字**（用户明确选择）：总设计 §2「暗色承载例外只此一处」按裁决扩面——页面本体的暗色承载仍只星图一处，例外新增「使用手册弹窗」全站统一深蓝底白字；§2 与弹窗组件同批改写。
   - **C13 领域框默认第一个领域**：不再默认「全部领域」（「全部领域」仍作可选项）；标题改「书架清单」。
@@ -182,7 +182,7 @@
     （删「新建学习课程／注册」「课程卡删除」与「未激活解析版本」措辞，加「刷新即列出／领域下拉／教材卡进入学习／忽略与按回来」），
     `helpPages.test.ts` 增一条守护：旧流程词与过程性术语禁入且必含「刷新」「忽略」「领域」。
   - **门禁**：全量 pytest 765 · 契约 83 · ruff exit 0 · `tsc -b` exit 0 · vitest 串行 65 files / 774 tests · `npm run build` 通过（同批含并行线在树改动，红绿归因按本行自跑输出）。
-  - **跨项目登记**：书级「简介」「面向对象」两列请求稿已出 → [REQ-121 壳](../../../plans/2026-10-16-book-intro-audience-tracker-request.md)，todo `REQ-121` 行同批落位（学习设计轮，状态 Accepted，转达由用户执行）。
+  - **跨项目登记**：书级「简介」「面向对象」两列请求稿已出 → [REQ-121 壳](2026-10-16-book-intro-audience-tracker-request.md)，todo `REQ-121` 行同批落位（学习设计轮，状态 Accepted，转达由用户执行）。
   - **真机（8903 构建产物，`#/learn`）**：sync 首跑 `created=[linear_algebra, math_analysis]`、二次幂等
     （`created`/`updated` 均空、`qed_learn_course` 行数恒 2）；`mathanalysis-b09`（无激活版本）与 `quantum-b01`（无课程坐标）
     PASS 未入库；领域框默认「数学（高等数学）」；课程行标题只有「数学分析」「高等代数」两枚正式名称；

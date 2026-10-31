@@ -46,6 +46,31 @@ export function isTocHeadingText(text: string): boolean {
   return TOC_HEADING_RE.test((text ?? '').trim().replace(/\s+/g, ''));
 }
 
+/** 目录页自身的页码：b05 p8 实测以 paragraph 块出现「VII」 */
+const ROMAN_PAGE_LINE_RE = /^[IVXLCDMivxlcdm]+$/;
+
+/** 噪声行＝空行／目录标题／纯罗马页码：既不算目录形态，也不进密度分母 */
+export function isTocNoiseLine(line: string): boolean {
+  const text = (line ?? '').trim();
+  return text === '' || isTocHeadingText(text) || ROMAN_PAGE_LINE_RE.test(text);
+}
+
+/** 目录形态行＝拆得出「引导点＋页码」条目（黏行拆出的多条也算，共用守则一那条拆分腿） */
+export function isTocLikeLine(line: string): boolean {
+  if (isTocNoiseLine(line)) return false;
+  return tocEntriesFromLine(line).some((entry) => entry.page !== '');
+}
+
+/** 目录密度＝非噪声行中目录形态行的占比（正文页≈0） */
+export function tocLikeRatio(lines: readonly string[]): number {
+  const candidates = (lines ?? []).filter((line) => !isTocNoiseLine(line));
+  if (candidates.length === 0) return 0;
+  return candidates.filter(isTocLikeLine).length / candidates.length;
+}
+
+/** 成组门槛（同一枚判据供展示面的目录角色与抽取腿的自动定位续页判定共用） */
+export const TOC_LIKE_RATIO = 0.5;
+
 /** 节题白名单（§9.1 类标题，归一化全文匹配：去空白、小写） */
 const SECTION_TITLE_SET = new Set([
   '目录', '目次', 'contents', '重要符号表', '符号表',
@@ -86,6 +111,7 @@ export function isSymbolTableBlock(block: Block): boolean {
 /**
  * 块角色序列（版式渲染的字号/字族/显隐判据）：
  * 目录 heading **或白名单类标题 paragraph** 后连续 list/paragraph 记为 toc，遇其他类型或下一 heading 终止；
+ * 无「目录」标题的目录续页＝该块自身目录密度 ≥ TOC_LIKE_RATIO 也记 toc（DEFECT-025 展示面，b05 第 8 页实测）；
  * 符号表类节题后连续 list/paragraph 中行式命中块记为 symbolTable（引言行保持 body 不断组）；
  * header/footer/page_number 恒为 furniture（版式态默认隐藏）。
  */
@@ -125,6 +151,13 @@ export function assignRoles(blocks: Block[]): BlockRole[] {
     if (b.type !== 'list' && b.type !== 'paragraph') {
       inToc = false;
       inSymbol = false;
+      roles.push('body');
+      continue;
+    }
+    // 目录续页不带「目录」标题（b05 第 8 页实测）＝整块目录密度过半也记 toc，交 TocRows 拆行并标章／节
+    if (tocLikeRatio(blockText(b).split('\n')) >= TOC_LIKE_RATIO) {
+      roles.push('toc');
+      continue;
     }
     roles.push('body');
   }
@@ -238,12 +271,72 @@ export function layoutUnits(blocks: Block[], roles: BlockRole[]): LayoutUnit[] {
   return units;
 }
 
-/** 目录条目拆分：标题 + 页码（点线/空白引导后的尾数；无分隔符的尾数不误拆） */
-export function tocItemParts(text: string): { title: string; page: string } {
+/** 引导点串：省略号字形一枚即算，句点/间隔号/破折号需连续两枚以上（`Vol.2` 的单点不算） */
+const LEADER_RUN = /(?:[…⋯]{1,}|[.·•–—－]{2,})/;
+/** 行内「引导点串＋页码」＝一条目录条目的收尾（DEFECT-025 守则一：不锚在行尾） */
+const LEADER_PAGE_RE = new RegExp(`${LEADER_RUN.source}[ \\t]*(\\d{1,5})`, 'g');
+/** 行尾页码：引导点可选，西文目录常用空白分隔 */
+const TRAILING_PAGE_RE = /^(.*?)\s*(?:[.…·•⋯–—]{2,}|\s+[.…·•⋯–—]*)\s*(\d+)\s*$/;
+
+/** 一条目录条目：清洗后的标题、印刷页码（拆不出为空串）、该行原样片段（供复核面板回显） */
+export interface TocEntry {
+  title: string;
+  page: string;
+  segment: string;
+}
+
+/** 剔离条目名起始处的引导点串（黏行被列边界切断时，下一条目以点线开头） */
+function stripLeadingLeaders(text: string): string {
+  const leading = new RegExp(`^${LEADER_RUN.source}`);
+  let out = text.trim();
+  for (let m = leading.exec(out); m !== null; m = leading.exec(out)) out = out.slice(m[0].length).trim();
+  return out;
+}
+
+/**
+ * 一行目录文本 → 条目数组（守则一・行内引导点与页码一律剔离）。
+ * 解析产物把整页目录出成单个 paragraph 块，条目靠换行分隔，而换行有两种失真：
+ * 两条目黏成一行（`第4章 连续性 …… 73函数的极限 …… 73`）与一条目折成两行（前半截无页码）。
+ * 前者在此拆成两条，后者以 `page === ''` 的碎片交回调用方拼回（守则二见 `tocParse.ts`）。
+ */
+export function tocEntriesFromLine(text: string): TocEntry[] {
   const raw = (text ?? '').trim();
-  const m = /^(.*?)\s*(?:[.…·•⋯–—]{2,}|\s+[.…·•⋯–—]*)\s*(\d+)\s*$/.exec(raw);
-  if (!m || m[1].trim() === '') return { title: raw, page: '' };
-  return { title: m[1].trim(), page: m[2] };
+  if (raw === '') return [];
+  const entries: TocEntry[] = [];
+  let cursor = 0;
+  for (const match of raw.matchAll(LEADER_PAGE_RE)) {
+    const start = match.index ?? 0;
+    const title = stripLeadingLeaders(raw.slice(cursor, start));
+    if (title !== '') entries.push({ title, page: match[1], segment: raw.slice(cursor, start + match[0].length).trim() });
+    cursor = start + match[0].length;
+  }
+  const tail = raw.slice(cursor);
+  if (tail.trim() === '') return entries;
+  const trailing = TRAILING_PAGE_RE.exec(tail);
+  if (trailing && trailing[1].trim() !== '') {
+    entries.push({ title: trailing[1].trim(), page: trailing[2], segment: tail.trim() });
+    return entries;
+  }
+  const title = stripLeadingLeaders(tail);
+  if (title !== '') entries.push({ title, page: '', segment: tail.trim() });
+  return entries;
+}
+
+/**
+ * 章题判据（DEFECT-025 展示面・用户 2026-10-25 裁「甲・章加粗＋节缩进」）。
+ * 正本＝目录抽取腿 `tocParse.ts` 的那条章题正则，上提到此单点复用，展示面不造第二套。
+ */
+const CHAPTER_TOC_RE = /^(第\s*[0-9一二三四五六七八九十百千]+\s*章|chapter\s+\d+)/i;
+
+export function isChapterTocEntry(title: string): boolean {
+  return CHAPTER_TOC_RE.test((title ?? '').trim());
+}
+
+/** 目录行的层级形态：章＝加粗＋顶格，节＝不加粗＋缩进一档（缩进阶位沿用 INDENT_STEPS_PX） */
+export function tocEntryRowStyle(title: string): { fontWeight?: number; paddingLeft: number } {
+  return isChapterTocEntry(title)
+    ? { fontWeight: 600, paddingLeft: INDENT_STEPS_PX[0] }
+    : { paddingLeft: INDENT_STEPS_PX[1] };
 }
 
 export interface TypographyPrefs {
@@ -277,13 +370,5 @@ export function loadTypographyPrefs(): TypographyPrefs {
     };
   } catch {
     return { ...DEFAULT_TYPOGRAPHY };
-  }
-}
-
-export function saveTypographyPrefs(prefs: TypographyPrefs): void {
-  try {
-    localStorage.setItem(TYPOGRAPHY_STORAGE_KEY, JSON.stringify(prefs));
-  } catch {
-    // localStorage 不可用（隐私模式等）时静默，偏好仅存活于本次会话
   }
 }

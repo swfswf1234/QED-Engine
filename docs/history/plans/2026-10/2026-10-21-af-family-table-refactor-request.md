@@ -1,12 +1,12 @@
 # af_ 表族结构梳理与迁移指针对齐跨项目请求稿（Axiom-Flow 承接）（af-family-table-refactor-request）
 
 状态：Superseded
-关闭结果：Not Applicable（用户 2026-10-21 裁决合并入单枚综合请求 [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)：本壳 R1（迁移指针与库内实存）并入其 R1，R2／R3／R5／R6（逐列形状、双列权威、跨族列宽、命名与键风格）并入其 R3，R4（`af_books` 三列）并入其 R4；归并不删壳（ADR 0021 第 5 条），本件保留作原请求六项判据原文，不再单独追回执）
+关闭结果：Not Applicable（用户 2026-10-21 裁决合并入单枚综合请求 [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)：本壳 R1（迁移指针与库内实存）并入其 R1，R2／R3／R5／R6（逐列形状、双列权威、跨族列宽、命名与键风格）并入其 R3，R4（`af_books` 三列）并入其 R4；归并不删壳（ADR 0021 第 5 条），本件保留作原请求六项判据原文，不再单独追回执）
 任务类型：A
 最后更新：2026-10-21
 关联 ADR：[ADR 0014](../../../adr/0014-parsing-ownership-and-model-boundary.md)（解析能力归属与模型边界：`af_*` 表与解析管线归 Axiom-Flow）、[ADR 0017](../../../adr/0017-design-doc-structure-contract.md)（事实源唯一）、[ADR 0023](../../../adr/0023-todo-row-carries-scope-and-criteria.md)（成功标准正本在台账行）、[ADR 0025](../../../adr/0025-database-design-master-doc-and-ddl-ownership.md)（决定 3：表族顺序与「前缀即所有权」，`af_*` 列级正本在对方仓库文档）
 关联设计：[cross-project-contracts.md](../../../design/cross-project-contracts.md) §6（Axiom-Flow 服务接口契约 8902）、[parsing-flow.md](../../../design/parsing-flow.md) §2（根侧解析消费流）、[database-design.md](../../../architecture/database-design.md) §6.2／§7.6／§7.8（根侧 `af_*` 总览行、改名批次口径与待确认事项）、Axiom-Flow [database-design.md](../../../../Axiom-Flow/docs/architecture/database-design.md)（`af_*` 结构与迁移链唯一事实源，**只读**）、Axiom-Flow [ADR 0010](../../../../Axiom-Flow/docs/adr/0010-page-regions-are-parse-inputs.md)（区域行跨版本存活与无 `job_id` 不变式，**只读**）
-关联 Tracker：docs/trackers/todo.md（REQ-133 登记，普通任务轮 ARCH-035 节）；2026-10-21 该行已原子移出 todo 并入综合请求 [REQ-136](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)
+关联 Tracker：docs/trackers/todo.md（REQ-133 登记，普通任务轮 ARCH-035 节）；2026-10-21 该行已原子移出 todo 并入综合请求 [REQ-136](2026-10-21-af-family-rebuild-consolidated-request.md)
 归档判定：Retain（跨项目请求原文、`af_*` 形状实读锚点与移交回执口径属不可替代过程证据）
 
 ## 对接信息（跨项目协作规范·计划文档模板）

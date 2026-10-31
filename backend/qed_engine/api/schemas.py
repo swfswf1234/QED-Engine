@@ -4,7 +4,7 @@
 实现状态：Current
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -88,6 +88,12 @@ class LlmTextRequest(BaseModel):
     system: str | None = None
     prompt_template: str | None = None
     max_tokens: int | None = None
+    #: 调用归因三键（跨项目协作：子仓库经 8900 调用时上送，账由本服务一处落）。
+    #: `service` 是共享表 `qed_llm_calls.service` 的筛选维，形状闸不收自由文本。
+    service: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,40}$")
+    task: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,60}$")
+    step: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,60}$")
+    meta: dict | None = None
 
 
 class LlmVisionRequest(BaseModel):

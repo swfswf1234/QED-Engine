@@ -2,8 +2,8 @@
  * 学习工作台页用例（v1.0 三张化，ADR 0026）
  * 守护七件事：页头两处返回落点、标题只写课程正式名称（无后缀无进度）、左栏两级无「修改目录」且只列名称，
  * 左栏两档左缘对齐、中栏连续正文流无页码口径＋滚动续取＋末尾三枚推进，
- * 右栏「学习交流」三段（本章总结与学习要点 → 详解＝主表 angles → 备注＝kp 行 learner_note），
- * 推进与备注一律写 kp 行（`qe_unit` 与候选池 `qe_kp_detail` 已退出，界面上不该再有它们的口径）。
+ * 右栏「批注」四段闭集（本章总结／本章学习导读／知识点总结／记录，缺位整段不渲染、零生成入口），
+ * 推进与记录一律写 kp 行（`qe_unit` 与候选池 `qe_kp_detail` 已退出，界面上不该再有它们的口径）。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -16,7 +16,7 @@ import { theme } from '../theme';
 import { mockFetch } from '../test/setup';
 import { useLearnWorkbenchStore } from '../stores/learnWorkbench';
 import type {
-  KpAngle, KpLearnerRow, LearnCourse, LearnDerived, LearnProgress,
+  KpLearnerRow, LearnCourse, LearnDerived, LearnProgress,
   OutlineRow, PointChapter, PointUnit,
 } from '../api/learn';
 
@@ -46,12 +46,12 @@ const BOOKS = [
 const CHAPTERS: PointChapter[] = [
   {
     kp_id: 'c1', name: '第1章 实数', node_kind: 'outline', unit_id: 'kp:c1', point_count: 2,
-    book_ref: 'b07', depth: 1, parent_kp_id: null,
+    book_ref: 'b07', depth: 1, parent_kp_id: null, from_detail_id: 'af-c1',
     source_ref: { ref_id: 'b07', page_start: 5, page_end: 20 }, summary: '', key_points: [],
   },
   {
     kp_id: 'c2', name: '第2章 完备性', node_kind: 'outline', unit_id: 'kp:c2', point_count: 1,
-    book_ref: 'b07', depth: 1, parent_kp_id: null,
+    book_ref: 'b07', depth: 1, parent_kp_id: null, from_detail_id: 'af-c2',
     source_ref: { ref_id: 'b07', page_start: 21, page_end: 40 },
     summary: '本章把完备性分成三条等价表述', key_points: ['单调有界原理', '闭区间套定理'],
   },
@@ -100,8 +100,6 @@ interface Hub {
   /** 服务端唯一的落笔存储：kp_id → 行（没有这一格＝没落过笔） */
   kpRows: Record<string, LearnerCell>;
   progressPosts: Array<Record<string, unknown>>;
-  generate: Array<Record<string, unknown>>;
-  generateStatus: number;
 }
 
 const hub = {} as Hub;
@@ -111,8 +109,6 @@ function resetHub() {
   hub.chapters = CHAPTERS.map((chapter) => ({ ...chapter, key_points: [...chapter.key_points] }));
   hub.kpRows = {};
   hub.progressPosts = [];
-  hub.generate = [];
-  hub.generateStatus = 200;
 }
 
 function learnerRow(kpId: string): KpLearnerRow | null {
@@ -179,6 +175,28 @@ function routes() {
     if (url.includes('/outline')) {
       return jsonResponse({ course_id: 'ma', book_ref: 'b07', outline: outlineRows() });
     }
+    if (url.includes('/kp/nodes/')) {
+      // 章级导读正文（§6 段②）取数腿：只有 af-c2 备好文，其余一律 exists=false（整段不渲染）
+      const nodeId = decodeURIComponent(url.match(/\/kp\/nodes\/([^/]+)\/narrative/)?.[1] ?? '');
+      return jsonResponse(nodeId === 'af-c2'
+        ? { node_id: nodeId, narrative_ref: 'knowledge/c2.md', exists: true, content: '本章从完备性的三条等价表述讲起', bytes: 46, rev: 1 }
+        : { node_id: nodeId, narrative_ref: '', exists: false, content: '', bytes: 0, rev: 0 });
+    }
+    if (url.endsWith('/knowledge-points/sync')) {
+      return jsonResponse({
+        course_id: 'ma',
+        books: [{
+          book_ref: 'b07', ok: true, skipped_empty: false,
+          chapters: { created: 0, reused: 3, dropped: 0, orphaned_points: 0 },
+          points: { created: 0, reused: 8, skipped: 0 },
+          detached: 0, excluded: { rejected: 0, reference: 0, point_rows: 0 },
+        }],
+        totals: {
+          chapters: { created: 0, reused: 3, dropped: 0, orphaned_points: 0 },
+          points: { created: 0, reused: 8, skipped: 0 },
+        },
+      });
+    }
     if (url.includes('/knowledge-points')) {
       if (url.includes('/narrative')) {
         return jsonResponse({ kp_id: 'p1', narrative_ref: '', available: false, reason: '这一条没有长文正文', content: '' });
@@ -191,7 +209,7 @@ function routes() {
     if (url.match(/\/learn\/courses\/[^/]+\/progress/)) {
       if (init?.method === 'POST') {
         hub.progressPosts.push({ kp_id: body.kp_id, status: body.status, note: body.note ?? null });
-        // 撤销（pending 且没带备注）＝整行删除；pending 带备注＝留着备注
+        // 撤销（pending 且没带记录）＝整行删除；pending 带记录＝留着记录
         if (body.status === 'pending' && !body.note) delete hub.kpRows[String(body.kp_id)];
         else {
           hub.kpRows[String(body.kp_id)] = {
@@ -202,38 +220,6 @@ function routes() {
         return jsonResponse({ ...learnerRow(String(body.kp_id)), derived: progressOut() });
       }
       return jsonResponse(progressOut());
-    }
-    if (url.includes('/learn/annotations/generate')) {
-      hub.generate.push(body);
-      if (hub.generateStatus !== 200) {
-        return jsonResponse({ detail: '这一条的正文还没准备好，暂时生成不了' }, hub.generateStatus);
-      }
-      const part = String(body.part);
-      if (part === 'annotation') {
-        const kpId = String(body.kp_id);
-        hub.points = hub.points.map((unit) => {
-          if (unit.kp_id !== kpId) return unit;
-          const angles = [...(unit.angles ?? [])];
-          const next: KpAngle = { angle: 'explanation', note: '本次生成的注解正文' };
-          const at = angles.findIndex((item) => item.angle === next.angle);
-          if (at >= 0) angles[at] = next;
-          else angles.push(next);
-          return { ...unit, angles };
-        });
-        const row = hub.points.find((unit) => unit.kp_id === kpId) ?? null;
-        return jsonResponse({
-          ok: true, target: { kind: 'point', kp_id: kpId, name: row?.name ?? '' }, point: row,
-        });
-      }
-      const chapter = hub.chapters.find((row) => row.kp_id === body.kp_id);
-      if (chapter) {
-        if (part === 'summary') chapter.summary = `《${chapter.name}》本章总结`;
-        else chapter.key_points = ['要点一', '要点二'];
-      }
-      return jsonResponse({
-        ok: true, target: { kind: 'chapter', kp_id: body.kp_id, name: chapter?.name ?? '' },
-        chapter: { kp_id: body.kp_id, summary: chapter?.summary ?? '', key_points: [...(chapter?.key_points ?? [])] },
-      });
     }
     if (url.match(/\/learn\/kp-details/)) return jsonResponse({ detail: '候选池端点已退役' }, 404);
     if (url.endsWith('/learn/courses')) {
@@ -357,6 +343,52 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/'));
   });
 
+  it('页头「刷新」＝同步＋重取，进场不触发同步（REQ-144 裁乙的唯一同步入口）', async () => {
+    await readyScreen();
+    expect(calls.filter((c) => c.includes('/knowledge-points/sync'))).toEqual([]);
+    calls.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
+    await waitFor(() => expect(calls.some((c) => c.startsWith('POST') && c.includes('/knowledge-points/sync'))).toBe(true));
+    const at = calls.findIndex((c) => c.includes('/knowledge-points/sync'));
+    expect(calls.slice(at + 1).some((c) => c.includes('/knowledge-points') && !c.endsWith('/sync'))).toBe(true);
+  });
+
+  it('同步腿不可达：只出一条提示，三栏仍按上一次的结果照常显示', async () => {
+    await readyScreen();
+    routes();
+    type Face = (url: string, init?: { method?: string; body?: string }) => Promise<Response>;
+    const previous = mockFetch.getMockImplementation() as Face;
+    mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => (
+      url.endsWith('/knowledge-points/sync')
+        ? jsonResponse({ detail: '梳理侧不可达，同步未执行' }, 503)
+        : previous(url, init)
+    ));
+    calls.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
+    expect(await screen.findByText('本课内容这次没有更新')).toBeInTheDocument();
+    expect(await screen.findByText(pageText(5))).toBeInTheDocument();
+    expect(screen.queryByText('工作台数据不可达')).toBeNull();
+  });
+
+  it('同步失败只出固定话术：裸错误串里的端口与超时不进学习面可见文案（§8 不透传裸状态码文案）', async () => {
+    await readyScreen();
+    routes();
+    type Face = (url: string, init?: { method?: string; body?: string }) => Promise<Response>;
+    const previous = mockFetch.getMockImplementation() as Face;
+    mockFetch.mockImplementation((url: string, init?: { method?: string; body?: string }) => (
+      url.endsWith('/knowledge-points/sync')
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : previous(url, init)
+    ));
+    calls.length = 0;
+    fireEvent.click(screen.getByRole('button', { name: /刷\s*新/ }));
+    expect(await screen.findByText('本课内容这次没有更新')).toBeInTheDocument();
+    const visible = document.body.textContent ?? '';
+    for (const forbidden of ['8900', 'http', 'ms）', '服务', '超时']) {
+      expect(visible, `可见文案泄漏裸错误「${forbidden}」`).not.toContain(forbidden);
+    }
+  });
+
   it('标题只写课程正式名称：无「· 学习工作台」后缀、全页不显示学习进度', async () => {
     await readyScreen();
     const heading = (screen.getByTestId('workbench-heading').textContent ?? '').replace('返回书架', '');
@@ -424,22 +456,27 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     expect(screen.queryByRole('button', { name: /继续加载/ })).toBeNull();
   });
 
-  it('这一条的摘要直排在中栏标题下、正文之前', async () => {
+  it('中栏标题之下只有书页内容：该条摘要不直排、整章阅读也不写说明（T3 裁删）', async () => {
     await readyScreen();
     const body = screen.getByTestId('body-pane');
-    const summaryIndex = (body.textContent ?? '').indexOf('有序域的三条运算律');
-    expect(summaryIndex).toBeGreaterThanOrEqual(0);
-    expect(summaryIndex).toBeLessThan((body.textContent ?? '').indexOf(pageText(5)));
+    expect(screen.queryByTestId('body-summary')).toBeNull();
+    expect(body.textContent ?? '').not.toContain('有序域的三条运算律');
+    expect(body.textContent ?? '').toContain(pageText(5));
+    await openRow('第2章 完备性');
+    expect((screen.getByTestId('body-title').textContent ?? '')).toBe('第2章 完备性');
+    expect(screen.getByTestId('body-pane').textContent ?? '').not.toContain('正文按整章呈现');
   });
 
-  it('滚动到底自动续取下一批，读到尽头给「点下一条接着学」', async () => {
+  it('滚动到底自动续取下一批，取到尽头不显任何提示语（§5.2 第 7 款）', async () => {
     await readyScreen();
     await pickPoint('p3');
     expect(await screen.findByText(pageText(21))).toBeInTheDocument();
     expect(screen.queryByText(pageText(29))).toBeNull();
     await scrollBodyToBottom();
     expect(await screen.findByText(pageText(29))).toBeInTheDocument();
-    expect(await screen.findByText('这一条读完了：点「下一条」接着学。')).toBeInTheDocument();
+    const text = document.body.textContent ?? '';
+    expect(text).not.toContain('读完了');
+    expect(text).not.toContain('接着学');
   });
 
   it('缺产物的那一页单独给空态，其余页照常排版', async () => {
@@ -450,76 +487,86 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     expect(screen.getByText(pageText(26))).toBeInTheDocument();
   });
 
-  it('右栏标题＝学习交流，三段顺序＝本章总结与学习要点 → 详解 → 备注；推进不在右栏（C25~C28 改判）', async () => {
+  it('右栏标题＝批注，四段闭集顺序＝本章总结 → 本章学习导读 → 知识点总结 → 记录；推进不在右栏（§6）', async () => {
+    hub.kpRows.p3 = { status: 'pending', note: '这一条的一句记录' };
     await readyScreen();
-    expect(screen.getByText('学习交流')).toBeInTheDocument();
+    await pickPoint('p3');
+    expect(screen.getByText('批注')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('本章学习导读')).toBeInTheDocument());
     const text = screen.getByTestId('annotation-pane').textContent ?? '';
-    const marks = ['本章总结', '学习要点', '详解', '备注'].map((label) => text.indexOf(label));
+    const marks = ['本章总结', '本章学习导读', '知识点总结', '记录'].map((label) => text.indexOf(label));
     expect(marks.every((index) => index >= 0), text).toBe(true);
     expect(marks).toEqual([...marks].sort((a, b) => a - b));
-    for (const gone of ['推进', '上一条', '下一条', '批注', '点赞', '待整理', '已保留', '本条通用', '这一块']) {
+    for (const gone of ['推进', '上一条', '下一条', '详解', '学习要点', '备注', '提问', '点赞', '待整理']) {
       expect(text, `右栏不该再有「${gone}」`).not.toContain(gone);
     }
   });
 
-  it('章级两件齐备时进场直读，不再出「生成」入口', async () => {
+  it('右栏零生成入口、零提问入口：本面只读在册成品，一次生成请求都不发（T2 裁不留）', async () => {
     await readyScreen();
-    await pickPoint('p3');
-    expect(await screen.findByText('本章把完备性分成三条等价表述')).toBeInTheDocument();
-    expect(screen.getByText('单调有界原理')).toBeInTheDocument();
-    expect(screen.getByText('闭区间套定理')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /生成本章/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /生成/ })).toBeNull();
+    expect(screen.queryByLabelText('提问')).toBeNull();
+    expect(calls.filter((c) => c.includes('/annotations/generate'))).toEqual([]);
   });
 
-  it('章级缺位时出「生成本章总结与学习要点」，点了写进章行并重排右栏', async () => {
+  it('成品缺位＝整段不渲染，不写占位句也不写下一步话术（§6／§10）', async () => {
     await readyScreen();
-    fireEvent.click(await screen.findByRole('button', { name: /生成本章总结与学习要点/ }));
-    await waitFor(() => expect(hub.generate.map((row) => row.part)).toEqual(['summary', 'key_points']));
-    expect(await screen.findByText('《第1章 实数》本章总结')).toBeInTheDocument();
-    expect(screen.getByText('要点一')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /生成本章总结与学习要点/ })).toBeNull();
+    await pickPoint('p2');
+    await waitFor(() => expect(screen.getByTestId('body-title').textContent).toBe('绝对值'));
+    const text = screen.getByTestId('annotation-pane').textContent ?? '';
+    expect(text).not.toContain('本章总结');
+    expect(text).not.toContain('知识点总结');
+    expect(text).not.toContain('还没有');
+    expect(text).not.toContain('才有归属');
   });
 
-  it('详解段零内容时空态给下一步，生成的一条按 angles 追加即直读（不再有候选池状态）', async () => {
-    await readyScreen();
-    expect(await screen.findByText('这一条还没有注解：点「生成本条注解」先来一条。')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /生成本条注解/ }));
-    await waitFor(() => expect(hub.generate.at(-1)).toMatchObject({ target_kind: 'point', kp_id: 'p1', part: 'annotation' }));
-    const card = await screen.findByTestId('annotation-explanation');
-    expect(card.textContent).toContain('本次生成的注解正文');
-    expect(card.textContent).not.toContain('待整理');
-    expect(calls.some((c) => c.includes('/kp-details'))).toBe(false);
-  });
-
-  it('条级已有注解时按 angles 数组序直读，只读面没有点赞／确认入口（保留位随候选池退出）', async () => {
+  it('「详解」与长文读腿退出本面：主表带 angles 也不渲染，条级长文请求一发不出', async () => {
     hub.points = hub.points.map((unit) => (unit.kp_id === 'p1'
-      ? { ...unit, angles: [{ angle: 'summary', note: '这一条的总结' }, { angle: 'explanation', note: '这一条的注解' }] }
+      ? { ...unit, angles: [{ angle: 'summary', note: '一条旧注解' }], narrative_ref: 'knowledge/p1.md' }
       : unit));
     await readyScreen();
-    const list = await screen.findByTestId('detail-list');
-    expect([...list.querySelectorAll('[data-testid^="annotation-"]')]
-      .map((node) => node.getAttribute('data-testid')))
-      .toEqual(['annotation-summary', 'annotation-explanation']);
-    expect(list.textContent).toContain('这一条的总结');
-    for (const label of ['点赞', '确认入库', '驳回']) expect(screen.queryByRole('button', { name: new RegExp(label) })).toBeNull();
+    const text = screen.getByTestId('annotation-pane').textContent ?? '';
+    expect(text).not.toContain('一条旧注解');
+    expect(text).not.toContain('详解');
+    expect(screen.queryByTestId('detail-list')).toBeNull();
+    expect(calls.filter((c) => c.includes('/knowledge-points/p1/narrative'))).toEqual([]);
   });
 
-  it('备注写 kp 行的 learner_note：进场直读、保存只发 kp_id＋状态＋备注（C26）', async () => {
+  it('段②的门与取数键同为章行提升锚：锚空（人工目录章）不发请求也不渲染', async () => {
+    hub.chapters = hub.chapters.map((row) => ({ ...row, from_detail_id: '' }));
+    await readyScreen();
+    await pickPoint('p3');
+    await waitFor(() => expect(screen.getByText('本章总结')).toBeInTheDocument());
+    expect(screen.queryByText('本章学习导读')).toBeNull();
+    expect(calls.filter((c) => c.includes('/kp/nodes/'))).toEqual([]);
+  });
+
+  it('记录写 kp 行的 learner_note：进场直读、保存只发 kp_id＋状态＋记录（§6 段④）', async () => {
     hub.kpRows.p1 = { status: 'pending', note: '' };
     await readyScreen();
-    fireEvent.change(screen.getByLabelText('备注正文'), { target: { value: '上确界是最小的那个上界' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存备注' }));
+    fireEvent.change(screen.getByLabelText('记录正文'), { target: { value: '上确界是最小的那个上界' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存记录' }));
     await waitFor(() => expect(hub.progressPosts.at(-1)).toEqual({ kp_id: 'p1', status: 'pending', note: '上确界是最小的那个上界' }));
     expect(await screen.findByTestId('note-list')).toHaveTextContent('上确界是最小的那个上界');
     expect(calls.some((c) => c.includes('/kp-details'))).toBe(false);
   });
 
-  it('这一条还没有学习记录时备注存不下：给出下一步话术且不发请求', async () => {
+  it('该条尚无 kp 行＝记录保存禁用、零请求、不给下一步话术（§10）', async () => {
     await readyScreen();
-    expect(screen.getByText('这一条还没有学习记录：先用正文末尾记上位置，备注就存得下了。')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('备注正文'), { target: { value: '先记一句' } });
-    expect(screen.getByRole('button', { name: '保存备注' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存记录' })).toBeDisabled();
+    expect(screen.queryByText(/还没有学习记录/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('记录正文'), { target: { value: '先记一句' } });
     expect(calls.filter((c) => c.startsWith('POST'))).toEqual([]);
+  });
+
+  it('推进三枚＝水平居中、固定在中栏最下（不在正文滚动容器内，短正文也不贴文字尾）', async () => {
+    await readyScreen();
+    const scroll = screen.getByTestId('body-scroll');
+    const footer = screen.getByTestId('body-advance');
+    expect(scroll.contains(footer)).toBe(false);
+    expect(footer.contains(screen.getByTestId('advance-bar'))).toBe(true);
+    expect(footer.getAttribute('style') ?? '').toContain('justify-content: center');
+    expect(scroll.getAttribute('style') ?? '').toContain('overflow-y: auto');
   });
 
   it('正文末尾三枚＝上一条／下一条／已掌握并下一条，写 kp_id 终态位并回显左栏「已学」（C25）', async () => {
@@ -542,7 +589,7 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     await pickPoint('p3');
     fireEvent.click(await masterButton('已掌握并下一条'));
     await waitFor(() => expect(hub.progressPosts).toHaveLength(1));
-    expect(await screen.findByTestId('advance-notice')).toHaveTextContent('已经到本课最后一条');
+    expect(await screen.findByTestId('advance-notice')).toHaveTextContent('已经到这本最后一条');
     expect(screen.getByTestId('body-title').textContent).toBe('确界原理');
   });
 
@@ -568,33 +615,25 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     await waitFor(() => expect(screen.queryByText('已结课')).not.toBeInTheDocument());
   });
 
-  it('提问入口只展示不联通：输入不禁用、发送置灰并注明暂未开放，零请求（C28）', async () => {
-    await readyScreen();
-    const input = await screen.findByLabelText('提问');
-    fireEvent.change(input, { target: { value: '为什么上确界最小？' } });
-    const send = screen.getByRole('button', { name: /发\s*送/ });
-    expect(send).toBeDisabled();
-    expect(screen.getByText('提问功能暂未开放')).toBeInTheDocument();
-    expect(calls.filter((c) => c.startsWith('POST'))).toEqual([]);
-  });
-
   it('整章阅读：点零知识点的章行走整章范围，并明确记不上进度', async () => {
     hub.points = hub.points.filter((unit) => unit.kp_id !== 'p3');
     await readyScreen();
     expect((await screen.findByTestId('outline-tree')).textContent).not.toContain('这一章的知识点还在整理');
     await openRow('第2章 完备性');
-    expect(await screen.findByText('正文按整章呈现')).toBeInTheDocument();
+    expect(screen.queryByText('正文按整章呈现')).toBeNull();
     fireEvent.click(await masterButton('已掌握并下一条'));
     await waitFor(() => expect(hub.progressPosts).toHaveLength(0));
     expect(await screen.findByText('整章阅读记不进进度：这一章的知识点整理好后才能逐条推进。')).toBeInTheDocument();
   });
 
-  it('知识点没定位到书页时中栏给下一步，不空白', async () => {
+  it('知识点没定位到书页＝中栏空白，不写解释句（§10）', async () => {
     await readyScreen();
     hub.points = hub.points.map((unit) => (unit.kp_id === 'p2' ? { ...unit, source_ref: null, window_source: '' } : unit));
     await useLearnWorkbenchStore.getState().reloadPoints();
     await useLearnWorkbenchStore.getState().selectPoint('p2');
-    expect(await screen.findByText(/这一条还没有定位到书页/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('body-title').textContent).toBe('绝对值'));
+    expect(screen.queryByText(/这一条还没有定位到书页/)).toBeNull();
+    expect(screen.getByTestId('body-scroll').textContent ?? '').toBe('');
     expect(screen.queryByText(pageText(10))).toBeNull();
   });
 
@@ -627,7 +666,7 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     expect(await screen.findByText('工作台数据不可达')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /刷\s*新/ })).toBeInTheDocument();
     expect(screen.getByText('目录')).toBeInTheDocument();
-    expect(screen.getByText('学习交流')).toBeInTheDocument();
+    expect(screen.getByText('批注')).toBeInTheDocument();
   });
 
   it('断点回归：进场落在第一个没记过的条（门游标读时派生）', async () => {
@@ -637,15 +676,15 @@ describe('学习工作台 v1.0（章＋知识点逐步学习·右栏三段走主
     await waitFor(() => expect(screen.getByTestId('body-title').textContent).toBe('绝对值'));
   });
 
-  it('窄屏收栏：目录与学习交流改侧滑，正文独占宽度且末尾三枚始终在正文里', async () => {
+  it('窄屏收栏：目录与批注改侧滑，正文独占宽度且末尾三枚始终在正文里', async () => {
     await readyScreen('/learn/c/ma', 860);
     expect(screen.queryByText('推进与批注')).toBeNull();
     expect(screen.getByTestId('advance-bar')).toBeVisible();
     fireEvent.click(await screen.findByRole('button', { name: /打开目录/ }));
     expect(await screen.findByRole('button', { name: '第1章 实数' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /打开学习交流/ }));
-    expect(await screen.findByText('详解')).toBeVisible();
-    expect(screen.getByText('备注')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /打开批注/ }));
+    expect(await screen.findByText('知识点总结')).toBeVisible();
+    expect(screen.getByText('记录')).toBeVisible();
   });
 
   it('workbenchModeFor 断点不动：≥1400 三栏／1000~1400 右栏侧滑／<1000 两栏侧滑', () => {

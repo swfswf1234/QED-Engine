@@ -127,17 +127,19 @@ export interface BlockEdit {
   note?: string;
   corrected_text?: string | null;
   corrected_bbox?: [number, number, number, number] | null;
+  corrected_type?: string | null;
   edited_at?: string;
   updated_at?: string;
   [key: string]: unknown;
 }
 
-/** 块编辑提交体（字段均可选；verdict 空串视为不提交） */
+/** 块编辑提交体（字段均可选；verdict 空串视为不提交；corrected_type 受 8902 BlockType 十枚闭集） */
 export interface BlockEditInput {
   verdict?: 'ok' | 'bad' | '';
   note?: string;
   corrected_text?: string;
   corrected_bbox?: [number, number, number, number];
+  corrected_type?: string;
 }
 
 /** ingest 结果（af_books 进度回填） */
@@ -216,7 +218,7 @@ export function ingestBook(bookId: string, opts?: ApiRequestOptions): Promise<In
   return api.post<IngestResult>(`/books/${bookId}/ingest`, undefined, { timeoutMs: INGEST_TIMEOUT_MS, ...opts });
 }
 
-/** PUT /api/v1/books/{id}/pages/{no}/blocks/{i}/edit：块编辑门面（判定/备注/文字修正/范围修正） */
+/** PUT /api/v1/books/{id}/pages/{no}/blocks/{i}/edit：块编辑门面（判定/备注/文字修正/范围修正/类型改判） */
 export function putBlockEdit(
   bookId: string,
   pageNo: number,
@@ -229,6 +231,7 @@ export function putBlockEdit(
   if (input.note !== undefined) body.note = input.note;
   if (input.corrected_text !== undefined) body.corrected_text = input.corrected_text;
   if (input.corrected_bbox !== undefined) body.corrected_bbox = input.corrected_bbox;
+  if (input.corrected_type !== undefined) body.corrected_type = input.corrected_type;
   return api.put<BlockEdit>(`/books/${bookId}/pages/${pageNo}/blocks/${blockIndex}/edit`, body, opts);
 }
 

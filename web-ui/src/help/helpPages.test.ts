@@ -58,20 +58,24 @@ describe('使用手册四册形态守护', () => {
     expect(steps.some((step) => step.includes('领域'))).toBe(true);
   });
 
-  it('课程学习册与总册都是学习交流 v2 口径：两级目录、末尾三枚、学习交流三段（REQ-117 W11＋v1.0 三张化）', () => {
+  it('课程学习册与总册都是批注四段 v1.0 口径：两级目录、末尾三枚、右栏只读批注＋记录（REQ-117 W11＋REQ-144 W5）', () => {
     const text = JSON.stringify([HELP_PAGES.course.blocks, HELP_PAGES.center.blocks]);
     for (const token of [
       '学习工作台', '推进与批注', '修改目录', '本节学完', '继续加载', '本章候选', '确认入库',
       '本条学完', '跳过本条', '撤销勾选', '回到断点', '保留为候选', '这一条的总结与注解',
       // v1.0（ADR 0026 D10）：候选池与保留位随表退出，块级分组口径一并下线
       '点赞', '待整理', '已保留', '本条通用', '这一块', '生成本条总结', '出处页码',
+      // REQ-144 W5：右栏收敛为批注四段闭集，学习交流三段口径＋两枚生成钮＋提问位随段下线
+      '学习交流', '学习要点', '详解', '备注', '生成本条注解', '生成本章', '长文正文', '暂未开放', '提问',
+      // REQ-144 W4：中栏四句说明话术下线，手册不许再引用界面不存在的那一句
+      '这一条读完了', '正文按整章呈现', '这一条还没有定位到书页', '正文就排在这里',
     ]) {
-      expect(text, `课程学习册或总册出现 v1 口径「${token}」`).not.toContain(token);
+      expect(text, `课程学习册或总册出现旧口径「${token}」`).not.toContain(token);
     }
     const overview = HELP_PAGES.course.blocks[0].paragraphs ?? [];
     expect(overview.some((p) => p.includes('章下就是您要逐条读完的知识点'))).toBe(true);
     const steps = HELP_PAGES.course.blocks[1].steps ?? [];
-    for (const phrase of ['学习交流', '本章总结', '学习要点', '详解', '备注', '生成本条注解', '已掌握并下一条', '下一条', '暂未开放']) {
+    for (const phrase of ['批注', '本章总结', '本章学习导读', '知识点总结', '记录', '保存记录', '已掌握并下一条', '下一条']) {
       expect(steps.some((step) => step.includes(phrase)), `课程学习册使用说明缺「${phrase}」`).toBe(true);
     }
     const notes = HELP_PAGES.course.blocks[2].paragraphs ?? [];

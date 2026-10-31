@@ -57,7 +57,16 @@ function useDefaultExpansion(tree: ParsingTreeNode[]) {
   return { expandedDomains, expandedCourses, toggleDomain, toggleCourse };
 }
 
-export default function BookTree() {
+/**
+ * 选书出口可替换（REQ-141 梳理屏复用同一棵树）：给了 `onSelectBook` 就只报书目 ID，
+ * 不走解析工作台（`openWorkbench` 会拉解析任务并挂轮询定时器，梳理屏不需要）。
+ */
+export default function BookTree({
+  onSelectBook, selectedBookId,
+}: {
+  onSelectBook?: (bookId: string) => void;
+  selectedBookId?: string | null;
+} = {}) {
   const tree = useParsingStore((s) => s.tree);
   const treeLoading = useParsingStore((s) => s.treeLoading);
   const treeError = useParsingStore((s) => s.treeError);
@@ -68,11 +77,15 @@ export default function BookTree() {
 
   const { expandedDomains, expandedCourses, toggleDomain, toggleCourse } = useDefaultExpansion(tree);
 
-  const onSelectBook = useCallback(
+  const activeBookId = onSelectBook ? selectedBookId ?? null : compareBookId;
+
+  const pickBook = useCallback(
     (node: ParsingTreeNode) => {
-      if (node.type === 'book' && node.book) void openWorkbench(node.book.book_id, 1, node.book);
+      if (node.type !== 'book' || !node.book) return;
+      if (onSelectBook) onSelectBook(node.book.book_id);
+      else void openWorkbench(node.book.book_id, 1, node.book);
     },
-    [openWorkbench],
+    [openWorkbench, onSelectBook],
   );
 
   return (
@@ -108,9 +121,9 @@ export default function BookTree() {
                               {course.children.map((bookNode) => (
                                 <div
                                   key={bookNode.key}
-                                  className={`dl-tree-node dl-tree-book${compareBookId && bookNode.book?.book_id === compareBookId ? ' selected' : ''}`}
+                                  className={`dl-tree-node dl-tree-book${activeBookId && bookNode.book?.book_id === activeBookId ? ' selected' : ''}`}
                                   role="treeitem"
-                                  onClick={() => bookNode.book && onSelectBook(bookNode)}
+                                  onClick={() => bookNode.book && pickBook(bookNode)}
                                 >
                                   <span className="dl-tree-caret dl-tree-caret-disabled" />
                                   <span className="dl-tree-name">

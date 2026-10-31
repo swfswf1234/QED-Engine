@@ -337,7 +337,12 @@ SYNC_DOMAINS = [
         "domain_id": "math-advanced",
         "name": "数学（高等数学）",
         "courses": [
-            {"course_id": "math_analysis", "name": "数学分析", "stage": "beginner"},
+            {
+                "course_id": "math_analysis",
+                "name": "数学分析",
+                "stage": "beginner",
+                "description": "极限、连续与一元微积分",
+            },
             {"course_id": "linear_algebra", "name": "高等代数", "stage": "advanced"},
         ],
     }
@@ -350,6 +355,9 @@ SYNC_KNOWLEDGE = [
     {"knowledge_id": "k-la", "course_id": "linear_algebra", "name": "高等代数教程",
      "intro": "面向数学专业高年级的深入教材套", "position": "advanced"},
 ]
+
+# 8901 书库（qt_books）书级简介：只认 meta.intro 键位（REQ-121 R1 收窄＝零 ALTER），默认空表
+SYNC_QT_BOOKS: list[dict] = []
 
 # 8902 书目快照：b09 未解析（active_job_id 空）应 PASS；quantum 无课程归属应 PASS
 SYNC_BOOKS = [
@@ -372,6 +380,8 @@ def _sync_client(
     *,
     axiom_online=True,
     knowledge_online=True,
+    books_online=True,
+    qt_books=None,
     knowledge_store=None,
     pages=None,
     practice_store=None,
@@ -388,6 +398,10 @@ def _sync_client(
             if not knowledge_online:
                 raise httpx.ConnectError("knowledge down", request=request)
             return httpx.Response(200, json=SYNC_KNOWLEDGE)
+        if request.url.path.endswith("/books"):
+            if not books_online:
+                raise httpx.ConnectError("books down", request=request)
+            return httpx.Response(200, json=SYNC_QT_BOOKS if qt_books is None else qt_books)
         return httpx.Response(200, json=SYNC_DOMAINS)
 
     tracker = TrackerClient(
@@ -425,6 +439,7 @@ def _study_client(
     pages=None,
     knowledge_store=None,
     practice_store=None,
+    qt_books=None,
 ):
     """sync 出 math_analysis 学习课程 + 知识点主表同场，返回 (client, course_id, outline 行)。"""
     client = _sync_client(
@@ -432,6 +447,7 @@ def _study_client(
         knowledge_store=knowledge_store or InMemoryKnowledgeStore(),
         pages=pages,
         practice_store=practice_store,
+        qt_books=qt_books,
     )
     client.post("/api/v1/learn/courses/sync")
     course_id = _courses_by_id(client)[STUDY_COURSE]["learn_course_id"]
@@ -887,6 +903,34 @@ def test_sync_returns_book_meta_with_intro_and_position(monkeypatch):
     assert meta["linearalgebra-b01"]["position_label"] == "深入"
 
 
+def test_sync_prefers_book_intro_from_qt_books_meta(monkeypatch):
+    """书级优先（REQ-121 W3）：`qt_books.meta.intro` 命中即用它，键位缺失才回落套级 `qt_knowledge.intro`。"""
+    client = _sync_client(
+        monkeypatch,
+        qt_books=[
+            {"book_id": "mathanalysis-b05", "meta": {"intro": "单变量到多元递进，前三章配图。"}},
+            {"book_id": "mathanalysis-b07", "meta": None},
+            {"book_id": "linearalgebra-b01", "meta": {}},
+        ],
+    )
+    body = client.post("/api/v1/learn/courses/sync").json()
+    meta = {b["ref_id"]: b for b in body["books"]}
+    assert meta["mathanalysis-b05"]["intro"] == "单变量到多元递进，前三章配图。"
+    assert meta["mathanalysis-b07"]["intro"] == "面向数学专业本科一年级的教材套"
+    assert meta["linearalgebra-b01"]["intro"] == "面向数学专业高年级的深入教材套"
+    assert meta["mathanalysis-b05"]["position"] == "beginner"
+
+
+def test_sync_book_intro_leg_degrades_to_the_set_without_breaking(monkeypatch):
+    """8901 书库腿读不到＝书级简介整条回落套级，同步不 503、课程行照常物化（独立性铁律）。"""
+    client = _sync_client(monkeypatch, books_online=False)
+    response = client.post("/api/v1/learn/courses/sync")
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == ["linear_algebra", "math_analysis"]
+    meta = {b["ref_id"]: b for b in response.json()["books"]}
+    assert meta["mathanalysis-b05"]["intro"] == "面向数学专业本科一年级的教材套"
+
+
 def test_sync_degrades_when_knowledge_unreachable(monkeypatch):
     """8901 教程套读不到不阻断同步：展示字段留空，课程行照常物化。"""
     client = _sync_client(monkeypatch, knowledge_online=False)
@@ -896,6 +940,46 @@ def test_sync_degrades_when_knowledge_unreachable(monkeypatch):
     meta = {b["ref_id"]: b for b in body.json()["books"]}
     assert meta["mathanalysis-b05"]["intro"] == ""
     assert meta["mathanalysis-b05"]["position"] == ""
+
+
+# ---------- T5：教材角色判据（习题集退出课程学习面，判据只落 8900 一处） ----------
+
+ROLE_ROWS = [
+    {"book_id": "mathanalysis-b05", "roles": ["textbook", "solutions"]},
+    {"book_id": "mathanalysis-b07", "roles": ["exercises", "solutions"]},
+]
+
+
+def test_course_projection_carries_roles_and_textbook_flag(monkeypatch):
+    """课程投影附 `roles` 与派生位 `textbook`：唯 `roles` 非空且不含 textbook 者为 false（前端只读这一位）。"""
+    client = _sync_client(monkeypatch, qt_books=ROLE_ROWS)
+    client.post("/api/v1/learn/courses/sync")
+    books = {b["ref_id"]: b for b in _courses_by_id(client)[STUDY_COURSE]["derived"]["books"]}
+    assert books["mathanalysis-b05"]["textbook"] is True  # 含 textbook 即教材，多角色不扣
+    assert books["mathanalysis-b05"]["roles"] == ["textbook", "solutions"]
+    assert books["mathanalysis-b07"]["textbook"] is False  # 习题集：书架与工作台据这位收起
+    assert books["mathanalysis-b07"]["roles"] == ["exercises", "solutions"]
+
+
+def test_sync_books_meta_carries_roles_and_textbook_flag(monkeypatch):
+    """`books` 元数据腿同批给出两键：书架进场一次取齐，不再二次查角色。"""
+    client = _sync_client(monkeypatch, qt_books=ROLE_ROWS)
+    meta = {b["ref_id"]: b for b in client.post("/api/v1/learn/courses/sync").json()["books"]}
+    assert meta["mathanalysis-b05"]["textbook"] is True
+    assert meta["mathanalysis-b07"]["textbook"] is False
+    assert meta["mathanalysis-b07"]["roles"] == ["exercises", "solutions"]
+    assert meta["linearalgebra-b01"]["textbook"] is True  # 书目行没标角色＝未知，不过滤
+    assert meta["linearalgebra-b01"]["roles"] == []
+
+
+def test_role_leg_unreachable_textbooks_are_not_filtered(monkeypatch):
+    """8901 书目腿不可达＝角色未知：全员 `textbook=true`，书架与同步都不做过滤（独立性铁律）。"""
+    client = _sync_client(monkeypatch, books_online=False)
+    body = client.post("/api/v1/learn/courses/sync")
+    assert body.status_code == 200, body.text
+    meta = {b["ref_id"]: b for b in body.json()["books"]}
+    assert [b["textbook"] for b in meta.values()] == [True, True, True]
+    assert meta["mathanalysis-b07"]["roles"] == []
 
 
 # ---------- W9：注解面与按需生成腿（§V2.11 一端点，D10 改道主表） ----------
@@ -913,14 +997,17 @@ def _annotation_pages():
 
 
 def _annotation_client(
-    monkeypatch, *, pages=None, reply="这是生成结果。", success=True, error="", clock=None
+    monkeypatch, *, pages=None, reply="这是生成结果。", success=True, error="", clock=None, qt_books=None
 ):
     """注解用例场：学习课程＋目录＋已确认知识点＋书页可读同场，文字网关打桩（默认测试不调模型）。"""
     from qed_engine.services.learn import annotations
 
     store = InMemoryKnowledgeStore()
     client, course_id, rows = _study_client(
-        monkeypatch, pages=_annotation_pages() if pages is None else pages, knowledge_store=store
+        monkeypatch,
+        pages=_annotation_pages() if pages is None else pages,
+        knowledge_store=store,
+        qt_books=qt_books,
     )
     kp_id = _confirm_point(client, "确界原理", parent=_outline_row(rows, "1.1 实数的完备性")["kp_id"])
     calls: list[dict] = []
@@ -1022,6 +1109,57 @@ def test_generate_point_annotation_appends_angle_note(monkeypatch):
     assert stored["narrative_ref"] == before["narrative_ref"]  # 长文指针只由人工登记腿改
 
 
+def test_generate_point_summary_overwrites_main_table_summary(monkeypatch):
+    """点级总结（REQ-143 W5 放开的第二枚组合）＝覆写主表 `summary`，不碰 `angles`；条级不去重。"""
+    client, course_id, _rows, store, kp_id, calls = _annotation_client(
+        monkeypatch, reply=["第一版总结。", "第二版总结。"]
+    )
+    before = store.get_point(kp_id)
+    body = {"course_id": course_id, "target_kind": "point", "kp_id": kp_id, "part": "summary"}
+    resp = _generate(client, body)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["point"]["summary"] == "第一版总结。"
+    assert store.get_point(kp_id)["summary"] == "第一版总结。"
+    assert store.get_point(kp_id)["angles"] == before["angles"]  # 注解腿不受影响
+    again = _generate(client, body)
+    assert again.json()["point"]["summary"] == "第二版总结。"
+    assert len(calls) == 2
+    assert "这个知识点" in calls[0]["prompt"]  # 话术由目标层定档，不再由 part 判章／条
+
+
+def test_generate_prompt_carries_course_book_and_existing_intros(monkeypatch):
+    """提示词补三段（REQ-143 W5）＝课程介绍（目录行 description）＋教材介绍（qt_books.meta.intro）＋该条既有介绍。"""
+    client, course_id, _rows, _store, kp_id, calls = _annotation_client(
+        monkeypatch,
+        qt_books=[{"book_id": "mathanalysis-b05", "meta": {"intro": "一元微积分的系统教材，上册含实数理论。"}}],
+    )
+    resp = _generate(
+        client,
+        {"course_id": course_id, "target_kind": "point", "kp_id": kp_id, "part": "summary"},
+    )
+    assert resp.status_code == 200, resp.text
+    prompt = calls[0]["prompt"]
+    assert "课程介绍：极限、连续与一元微积分" in prompt
+    assert "教材介绍：一元微积分的系统教材，上册含实数理论。" in prompt
+    assert "已有的介绍：确界原理的叙述" in prompt  # T5 甲＝既有一句话介绍进 prompt，重生成不与人工措辞漂移
+    assert ANNOTATION_TEXT in prompt  # 三段之外，取材正文照旧进 prompt
+
+
+def test_generate_omits_intro_sections_when_sources_empty(monkeypatch):
+    """介绍缺位＝整段消失不留空标题（8901 降级或该书没填简介都不阻断生成）。"""
+    client, course_id, rows, _store, _kp, calls = _annotation_client(monkeypatch)
+    chapter = _outline_row(rows, "第一章 实数")  # 目录行既有 summary 为空、无书级简介
+    resp = _generate(
+        client,
+        {"course_id": course_id, "target_kind": "chapter", "kp_id": chapter["kp_id"], "part": "summary"},
+    )
+    assert resp.status_code == 200, resp.text
+    prompt = calls[0]["prompt"]
+    assert "教材介绍：" not in prompt  # 无书级简介＝该行不出现（段标题「课程与教材介绍」仍随课程简介出现）
+    assert "已有的介绍" not in prompt  # 章行 summary 为空＝整段不留
+    assert "课程介绍：极限、连续与一元微积分" in prompt  # 目录有 description 时仍进
+
+
 def test_chapter_generate_throttles_within_window_and_point_always_regenerates(monkeypatch):
     """章级 60s 内重复＝回上次成品（不重烧模型）；条级不去重（每次真生成，同角覆写成品）。"""
     client, course_id, rows, store, kp_id, calls = _annotation_client(
@@ -1086,7 +1224,7 @@ def test_generate_upstream_failure_returns_502_without_writing(monkeypatch):
 
 
 def test_generate_rejects_bad_combinations_and_unknown_targets(monkeypatch):
-    """组合闭集：章＝summary/key_points、条＝annotation；其余 422。目标不存在＝404，零调用。"""
+    """组合闭集（part × target 矩阵）：章＝summary/key_points、条＝summary/annotation；其余 422。目标不存在＝404，零调用。"""
     client, course_id, rows, _store, kp_id, calls = _annotation_client(monkeypatch)
     chapter = _outline_row(rows, "第一章 实数")
     assert _generate(

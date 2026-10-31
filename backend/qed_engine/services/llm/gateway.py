@@ -70,8 +70,14 @@ def call_text(
     max_tokens: int | None = None,
     response_format: str | None = None,  # 'json' = 请求 JSON 对象输出（M3 适配层按渠道处置）
     service: str = "qed_engine",
+    task: str | None = None,
+    step: str | None = None,
+    meta: dict | None = None,
 ) -> dict:
     """文字模型调用：api → 身份 api 引用；local → 本地 runtime（单活仲裁）。
+
+    归因三键（`service`／`task`／`step`）与 `meta` 由调用方上送并原样落 `qed_llm_calls`：
+    子仓库经本网关调用时**只有这里落一行**，成功与失败两行都带归因（否则按来源筛失败筛不出）。
 
     返回 {reply, call_id, success, error}。
     """
@@ -125,6 +131,7 @@ def call_text(
             settings, service=service, mode=mode, provider=resolved.provider, model=resolved.model,
             endpoint="text", prompt=prompt, response=reply,
             duration_ms=_duration_ms(started), status="success", prompt_template=prompt_template,
+            task=task, step=step, meta=meta,
         )
         return {"reply": reply, "call_id": call_id, "success": True, "error": "",
                 "finish_reason": finish_reason, "reasoning": reasoning}
@@ -134,6 +141,7 @@ def call_text(
             settings, service=service, mode=mode, provider="gateway", model="",
             endpoint="text", prompt=prompt, response="", duration_ms=_duration_ms(started),
             status="error", error=error[:500], prompt_template=prompt_template,
+            task=task, step=step, meta=meta,
         )
         return {"reply": "", "call_id": None, "success": False, "error": error}
 

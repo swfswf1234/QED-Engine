@@ -747,7 +747,7 @@ COMMENT='学习记录（owner×目标×状态单表：course 行=选课与学习
 4. **共享主表加三列的跨项目口径**：对 8901/8902 是追加式、只读方零破坏 ⇒ 按 R3 走「改本文 +
    改接口契约 + [cross-project-contracts.md](../../../design/cross-project-contracts.md) 登记」，**不发函**；
    若对方 ORM 全列映射需随步，转告窗口挂
-   [REQ-136 综合请求](../../../plans/2026-10-21-af-family-rebuild-consolidated-request.md)回执。
+   [REQ-136 综合请求](2026-10-21-af-family-rebuild-consolidated-request.md)回执。
 5. **库内命令原文（2026-10-22 执行批成文；**A 段已于同日由 agent 直跑执行完毕**＝用户改判「直接执行到切换完成／零迁移清空重建」，
    逐步取证见「过程与证据」P2～P4 条目，本段命令保留作 P7 的读法模板与回退依据；B 段生产 `qed` 仍待人工窗口。
    `dataset/**` 与生产库对 agent 全拦，agent 只出文不执行。

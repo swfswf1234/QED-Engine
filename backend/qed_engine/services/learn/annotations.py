@@ -20,46 +20,59 @@ from qed_engine.services.llm.gateway import call_text
 
 # 生成用途闭集：章级总结／章级学习要点／条级总结与注解（§V2.11）
 ANNOTATION_PARTS = ("summary", "key_points", "annotation")
-# 目标层闭集与其可用 part（章＝总结与要点、条＝注解；其余组合 422）
-PART_TARGETS: dict[str, str] = {"summary": "chapter", "key_points": "chapter", "annotation": "point"}
+# part × target 矩阵（REQ-143 W5 放开点级总结）：矩阵外的组合由 API 层 422
+PART_TARGETS: dict[str, tuple[str, ...]] = {
+    "summary": ("chapter", "point"),
+    "key_points": ("chapter",),
+    "annotation": ("point",),
+}
 THROTTLE_SECONDS = 60.0
 GEN_BATCH = "learn-annotation"
 # 要点条数与单条限长（学习要点 3~6 条；超出按前 6 条截，落库前已清洗）
 KEY_POINT_MAX_ITEMS = 6
 KEY_POINT_MAX_CHARS = 160
-SUMMARY_MAX_CHARS = 1000  # 章行 summary 列 VARCHAR(1000)
+SUMMARY_MAX_CHARS = 1000  # 章行与条行的 summary 列都是 VARCHAR(1000)
 ANNOTATION_MAX_CHARS = 2000
 _MODEL_REF_LIMIT = 120
+# 取材档位按目标层定档（章＝整章 6000 字／12 页，点＝所属锚点窗 3000 字／6 页），三枚 part 共用
+_SOURCE_TIERS: dict[str, dict[str, int]] = {
+    "chapter": {"source_chars": 6000, "max_pages": 12},
+    "point": {"source_chars": 3000, "max_pages": 6},
+}
 
-SYSTEM = "你是教材学习注解助手。只依据用户提供的教材正文作答，不编造外部结论，不使用Markdown标记。"
+SYSTEM = "你是教材学习注解助手。只依据用户提供的课程与教材介绍、已有介绍和教材正文作答，不编造外部结论，不使用Markdown标记。"
 
 _SPECS: dict[str, dict[str, Any]] = {
     "summary": {
         "max_tokens": 700,
-        "source_chars": 6000,
-        "max_pages": 12,
-        "instruction": (
-            "请为下面这一章写一段章节总结，说清这一章讲了什么、主线是什么，"
-            "150~250 字，一段话，不要分点，不要标题。"
-        ),
+        "instruction": {
+            "chapter": (
+                "请为下面这一章写一段章节总结，说清这一章讲了什么、主线是什么，"
+                "150~250 字，一段话，不要分点，不要标题。"
+            ),
+            "point": (
+                "请为下面这个知识点写一段总结，先说它是什么、再说它在这一章里起什么作用，"
+                "100~180 字，一段话，不要分点，不要标题。"
+            ),
+        },
     },
     "key_points": {
         "max_tokens": 900,
-        "source_chars": 6000,
-        "max_pages": 12,
-        "instruction": (
-            "请从下面这一章的正文里列出 3~6 条学习要点，每行一条，"
-            "行首不要编号、项目符号或星号，每条不超过 60 字。"
-        ),
+        "instruction": {
+            "chapter": (
+                "请从下面这一章的正文里列出 3~6 条学习要点，每行一条，"
+                "行首不要编号、项目符号或星号，每条不超过 60 字。"
+            )
+        },
     },
     "annotation": {
         "max_tokens": 700,
-        "source_chars": 3000,
-        "max_pages": 6,
-        "instruction": (
-            "请针对下面这个知识点写一段学习注解，先说它是什么、再说它为什么重要或怎么用，"
-            "120~200 字，一段话，不要标题。"
-        ),
+        "instruction": {
+            "point": (
+                "请针对下面这个知识点写一段学习注解，先说它是什么、再说它为什么重要或怎么用，"
+                "120~200 字，一段话，不要标题。"
+            )
+        },
     },
 }
 
@@ -68,20 +81,45 @@ _FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*$")
 _WHITESPACE = re.compile(r"\s+")
 
 
-def build_prompt(part: str, name: str, source_text: str) -> dict[str, Any]:
-    """拼装网关请求参数（限长在此定档：取材截断 + max_tokens 分档）。"""
+def build_prompt(
+    part: str,
+    target_kind: str,
+    name: str,
+    source_text: str,
+    *,
+    course_intro: str = "",
+    book_intro: str = "",
+    existing_intro: str = "",
+) -> dict[str, Any]:
+    """拼装网关请求参数：目标行＋三段上下文（课程介绍／教材介绍／该条既有介绍）＋指令＋正文节选。
+
+    限长在此定档（取材档位按目标层，见 `_SOURCE_TIERS`）；介绍缺位＝整段消失，不留空标题。
+    """
     spec = _SPECS[part]
-    label = "这一章" if PART_TARGETS[part] == "chapter" else "这个知识点"
-    prompt = (
-        f"# {label}：{name}\n\n{spec['instruction']}\n\n"
-        f"# 教材正文（节选，最多 {spec['source_chars']} 字）\n{source_text[: spec['source_chars']]}\n"
-    )
-    return {"system": SYSTEM, "prompt": prompt, "max_tokens": spec["max_tokens"]}
+    tier = _SOURCE_TIERS[target_kind]
+    label = "这一章" if target_kind == "chapter" else "这个知识点"
+    head = f"# {label}：{name}"
+    if existing_intro:
+        head += f"\n\n{label}已有的介绍：{existing_intro}"
+    sections = [head]
+    intros = [f"课程介绍：{course_intro}"] if course_intro else []
+    if book_intro and book_intro != course_intro:
+        intros.append(f"教材介绍：{book_intro}")
+    if intros:
+        sections.append("# 课程与教材介绍\n" + "\n".join(intros))
+    sections.append(spec["instruction"][target_kind])
+    limit = int(tier["source_chars"])
+    sections.append(f"# 教材正文（节选，最多 {limit} 字）\n{source_text[:limit]}")
+    return {
+        "system": SYSTEM,
+        "prompt": "\n\n".join(sections) + "\n",
+        "max_tokens": spec["max_tokens"],
+    }
 
 
-def source_page_limit(part: str) -> int:
-    """取材页数上限（章级 12 页／条级 6 页）：读侧有界，避免整本正文进 prompt。"""
-    return int(_SPECS[part]["max_pages"])
+def source_page_limit(target_kind: str) -> int:
+    """取材页数上限（章 12 页／点 6 页）：读侧有界，避免整本正文进 prompt。"""
+    return int(_SOURCE_TIERS[target_kind]["max_pages"])
 
 
 def _clean_line(text: str) -> str:
@@ -119,9 +157,27 @@ def clean_reason(reason: str) -> str:
     return (_WHITESPACE.sub(" ", reason or "").strip() or "没有返回内容")[:120]
 
 
-def generate(settings: Settings, part: str, name: str, source_text: str) -> dict[str, Any]:
+def generate(
+    settings: Settings,
+    part: str,
+    target_kind: str,
+    name: str,
+    source_text: str,
+    *,
+    course_intro: str = "",
+    book_intro: str = "",
+    existing_intro: str = "",
+) -> dict[str, Any]:
     """调用文字槽并清洗；返回 {ok, text|items, model_ref, reason}，失败不抛异常。"""
-    args = build_prompt(part, name, source_text)
+    args = build_prompt(
+        part,
+        target_kind,
+        name,
+        source_text,
+        course_intro=course_intro,
+        book_intro=book_intro,
+        existing_intro=existing_intro,
+    )
     try:
         result = call_text(
             settings,

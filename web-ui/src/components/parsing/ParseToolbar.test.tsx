@@ -90,6 +90,17 @@ describe('ParseToolbar 四行重排（§8 蓝图 D4）', () => {
     expect(r[2].querySelector('.ant-slider')).toBeNull();
   });
 
+  it('版式态不出「排版」钮＝样式面板一并撤（用户裁甲・连面板一起撤，行3 只剩流式／版式一枚切换）', async () => {
+    mount();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('版式'));
+    expect(screen.queryByRole('button', { name: '排版' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '版式样式面板' })).toBeNull();
+    // 面板三控制（正文字体／正文字号／显示页眉页脚）不再有界面入口
+    expect(document.querySelector('.ant-popover')).toBeNull();
+    expect(screen.queryByText('正文字体')).toBeNull();
+  });
+
   it('开编辑模式=4 行；行4（框图修改）=新增/合并两动作钮，无「删除选中」「保存框图修改」', async () => {
     mount();
     const user = userEvent.setup();

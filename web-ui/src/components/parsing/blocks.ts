@@ -33,6 +33,25 @@ export function renderInlineMath(text: string): string {
 }
 
 /**
+ * HTML 片段里的 `$…$` 走 KaTeX（现网形态＝符号表 `<table>` 单元格直出 `$I^k$`）。
+ * 只替换文本节点，标签名与属性里的 `$` 原样保留；无定界符片段不重排。
+ */
+export function renderMathInHtml(html: string): string {
+  if (!html.includes('$')) return html;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    if (!/\$[^$\n]+\$/.test(node.data)) continue;
+    const span = doc.createElement('span');
+    span.innerHTML = renderInlineMath(node.data);
+    node.replaceWith(span);
+  }
+  return doc.body.innerHTML;
+}
+
+/**
  * 剥成对数学定界符（`$$…$$` / `\[…\]` / `$…$`），返回裸 LaTeX 交 KaTeX。
  * 防御 Axiom-Flow ARCH-018 修复前的老代产物（latex 字段自带引擎定界符，KaTeX 视 `$` 为解析错误）。
  * 剥后内部仍含同种定界符则保留原文（可见异常不误剥）。

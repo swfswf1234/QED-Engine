@@ -221,7 +221,7 @@ export function TreeFormModal({ action, onClose }: { action: TreeFormAction | nu
           level: action.domain.level ?? '',
           stages: action.domain.stages?.join(', ') ?? '',
           classic_tracks: action.domain.classic_tracks ?? [],
-          scope: action.domain.scope ?? '',
+          scope: action.domain.scope,
         }
       : action?.kind === 'edit-course'
         ? {
@@ -279,7 +279,7 @@ export function TreeFormModal({ action, onClose }: { action: TreeFormAction | nu
                   kind: t.kind || 'main',
                 }))
             : undefined,
-          scope: String(values.scope ?? ''),
+          ...(values.scope === undefined ? {} : { scope: String(values.scope) }),
         });
         message.success('领域已更新');
       } else if (action?.kind === 'edit-course') {

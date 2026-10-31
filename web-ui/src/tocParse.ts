@@ -3,7 +3,10 @@
  * 规格正本：docs/plans/2026-10-11-learn-ui-course-study.md §7（原 design/learning-workbench-ui.md §6 随 2026-10-11 拆分轮迁稿；过程与裁决记录＝已归档壳 docs/history/plans/2026-10/2026-10-01-toc-knowledge-tree-and-learn-workbench.md）。
  * 消费面：#/learn/c/{courseId} 左栏「导入目录」确认面板（W4/W5）。
  */
-import { isTocHeadingText, tocItemParts } from './components/parsing/typography';
+import {
+  isChapterTocEntry, isTocHeadingText, isTocNoiseLine, TOC_LIKE_RATIO,
+  tocEntriesFromLine, tocLikeRatio,
+} from './components/parsing/typography';
 
 export type TocDepth = 1 | 2;
 
@@ -48,33 +51,49 @@ export interface OutlinePayloadNode {
   children: OutlinePayloadNode[];
 }
 
-const CHAPTER_RE = /^(第\s*[0-9一二三四五六七八九十百千]+\s*章|chapter\s+\d+)/i;
-
 /** 章节序号前缀剥离后得到的正文标题（正文侧章题常不带序号） */
 const CHAPTER_PREFIX_RE = /^第\s*[0-9一二三四五六七八九十百千]+\s*章\s*/i;
 
 // 设计内剔除（非解析失败）：这些行进 unrecognized 供面板复核，不静默丢弃
 const EXCLUDED_TITLE_RE = /^(前言|序|序言|后记|致谢|索引|参考文献|附录|习题|exercise|exercises)$/i;
 
-// 目录页自身的页码：b05 p8 实测以 paragraph 块出现「VII」
-const ROMAN_PAGE_RE = /^[IVXLCDMivxlcdm]+$/;
-
 const normalize = (text: string): string => (text ?? '').trim().replace(/\s+/g, '').toLowerCase();
 
 /** 目录条目行拆分 + 章题判定（不判定剔除项） */
-function classifyLine(raw: string): {
+function classifyName(name: string, page: number | null): {
   kind: 'chapter' | 'section' | 'excluded';
   name: string;
   page: number | null;
 } {
-  const { title, page } = tocItemParts(raw);
-  const num = page === '' ? null : Number(page);
-  const name = title.trim();
-  if (EXCLUDED_TITLE_RE.test(normalize(name))) return { kind: 'excluded', name, page: num };
-  if (CHAPTER_RE.test(name)) return { kind: 'chapter', name, page: num };
-  return { kind: 'section', name, page: num };
+  if (EXCLUDED_TITLE_RE.test(normalize(name))) return { kind: 'excluded', name, page };
+  if (isChapterTocEntry(name)) return { kind: 'chapter', name, page };
+  return { kind: 'section', name, page };
 }
 
+/** 中日文侧直连（折行丢的是行界不是词界）；西文只有在词尾点号/连字符这类硬断处才直连，否则补一个空格 */
+/** 中日文码位（通用标点／汉字扩充A／表词文字／兼容表词文字／全角形式）＝折行拼接处不补空格 */
+function isCjk(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (code >= 0x3000 && code <= 0x303f)
+    || (code >= 0x3400 && code <= 0x4dbf)
+    || (code >= 0x4e00 && code <= 0x9fff)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0xff00 && code <= 0xffef);
+}
+function joinFragments(parts: readonly string[]): string {
+  return parts.reduce((acc, part) => {
+    if (acc === '') return part;
+    const needsSpace = !isCjk(acc.slice(-1)) && !isCjk(part.slice(0, 1)) && !/[.…\-–—]$/.test(acc);
+    return acc + (needsSpace ? ' ' : '') + part;
+  }, '');
+}
+
+/**
+ * 目录行 → 章/节树。
+ * 两条清洗防线（DEFECT-025，2026-10-25 用户裁「先清洗再搬」）＝
+ * 守则一由 `tocEntriesFromLine` 承载（一行可出多条，行内引导点与页码一律剔离）；
+ * 守则二在此承载＝拆不出页码的碎片**不丢弃**，先与前一行拼回再判（折行的前半截）。
+ */
 export function parseTocLines(
   lines: readonly string[],
   options: TocParseOptions = {},
@@ -82,33 +101,51 @@ export function parseTocLines(
   const tree: TocNode[] = [];
   const unrecognized: TocUnrecognizedLine[] = [];
   let currentChapter: TocNode | null = null;
+  /** 守则二的攒批：只可能是「条目被换行或列边界折断」的前半截 */
+  let fragments: { raw: string; title: string }[] = [];
+
+  const flushFragments = () => {
+    for (const fragment of fragments) unrecognized.push({ raw: fragment.raw, reason: 'no-page', page: null });
+    fragments = [];
+  };
 
   for (const line of lines ?? []) {
     const raw = (line ?? '').trim();
-    if (raw === '' || isTocHeadingText(raw) || ROMAN_PAGE_RE.test(raw)) continue;
+    if (isTocNoiseLine(raw)) continue;
 
-    const hit = classifyLine(raw);
-    if (hit.kind === 'excluded') {
-      unrecognized.push({ raw, reason: 'excluded', page: hit.page });
-      continue;
+    for (const entry of tocEntriesFromLine(raw)) {
+      const num = entry.page === '' ? null : Number(entry.page);
+      if (num === null || !Number.isFinite(num)) {
+        fragments.push({ raw: entry.segment, title: entry.title });
+        continue;
+      }
+      const page = Math.round(num);
+      const name = fragments.length === 0
+        ? entry.title
+        : joinFragments([...fragments.map((fragment) => fragment.title), entry.title]);
+      const source = fragments.length === 0
+        ? entry.segment
+        : joinFragments([...fragments.map((fragment) => fragment.raw), entry.segment]);
+      fragments = [];
+      const hit = classifyName(name, page);
+      if (hit.kind === 'excluded') {
+        unrecognized.push({ raw: source, reason: 'excluded', page });
+        continue;
+      }
+      if (hit.kind === 'chapter') {
+        currentChapter = { name: hit.name, printPage: page, depth: 1, children: [] };
+        tree.push(currentChapter);
+        continue;
+      }
+      if (currentChapter === null) {
+        // 多栏目录按块序拼接时，节题可能先于其章题出现
+        unrecognized.push({ raw: source, reason: 'no-parent', page });
+        continue;
+      }
+      currentChapter.children.push({ name: hit.name, printPage: page, depth: 2, children: [] });
     }
-    if (hit.page === null || !Number.isFinite(hit.page)) {
-      unrecognized.push({ raw, reason: 'no-page', page: null });
-      continue;
-    }
-    const page = Math.round(hit.page);
-    if (hit.kind === 'chapter') {
-      currentChapter = { name: hit.name, printPage: page, depth: 1, children: [] };
-      tree.push(currentChapter);
-      continue;
-    }
-    if (currentChapter === null) {
-      // 多栏目录按块序拼接时，节题可能先于其章题出现
-      unrecognized.push({ raw, reason: 'no-parent', page });
-      continue;
-    }
-    currentChapter.children.push({ name: hit.name, printPage: page, depth: 2, children: [] });
   }
+  flushFragments();
 
   const offset = options.offset
     ?? estimateTocOffset(tree, options.bodyPages ?? [])
@@ -195,8 +232,6 @@ export interface TocAutoResult {
   unrecognized: TocUnrecognizedLine[];
 }
 
-/** 目录段续页门槛：该页「行＋尾页码」形态行占比（正文页≈0） */
-const TOC_LIKE_RATIO = 0.5;
 /** 偏移试算的正文窗口页数 */
 const BODY_SCAN_LIMIT = 40;
 
@@ -206,16 +241,6 @@ const EMPTY_AUTO: TocAutoResult = {
 };
 
 const pageLines = (text: string): string[] => tocLinesFromBlockTexts([text]);
-
-const isNoiseLine = (line: string): boolean => isTocHeadingText(line) || ROMAN_PAGE_RE.test(line);
-
-const isTocLikeLine = (line: string): boolean => !isNoiseLine(line) && tocItemParts(line).page !== '';
-
-function tocLikeRatio(lines: readonly string[]): number {
-  const candidates = lines.filter((line) => !isNoiseLine(line));
-  if (candidates.length === 0) return 0;
-  return candidates.filter(isTocLikeLine).length / candidates.length;
-}
 
 /**
  * 自动定位目录页段与正文起页并试算偏移：命中即返回可写入的章/节树，
@@ -241,7 +266,7 @@ export function autoLocateToc(pages: readonly BodyPageText[]): TocAutoResult {
     if (parsed.tree.length === 0) continue;
 
     const after = sorted.filter((item) => item.page > end);
-    const body = after.find((item) => pageLines(item.text).some((line) => CHAPTER_RE.test(line)));
+    const body = after.find((item) => pageLines(item.text).some((line) => isChapterTocEntry(line)));
     const partial: TocAutoResult = {
       ...EMPTY_AUTO, tocStart: start.page, tocEnd: end, lines,
       tree: parsed.tree, unrecognized: parsed.unrecognized,

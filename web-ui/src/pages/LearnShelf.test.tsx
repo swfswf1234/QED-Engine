@@ -175,6 +175,25 @@ describe('书架清单 LearnShelf（REQ-117 W8＋v1.0 读数）', { timeout: 200
     expect(splitBooks(list).dismissed.map((r) => r.ref_id)).toEqual(['b07']);
   });
 
+  it('splitBooks 只列教材（T5：服务端 textbook=false 者退出书架，位缺失照旧列）', () => {
+    const list = course({
+      resources: [
+        { kind: 'book', ref_id: 'b05', label: '甲', dismissed: false },
+        { kind: 'book', ref_id: 'b07', label: '乙', dismissed: false },
+        { kind: 'book', ref_id: 'b11', label: '丙', dismissed: false },
+      ],
+      derived: derived({
+        books: [
+          { ref_id: 'b05', label: '甲', total: 0, done: 0, percent: 0, textbook: true },
+          { ref_id: 'b07', label: '乙', total: 0, done: 0, percent: 0, textbook: false },
+        ],
+      }),
+    });
+    // b11 不在 derived.books 里＝角色未知，不作「不是教材」处理
+    expect(splitBooks(list).shown.map((r) => r.ref_id)).toEqual(['b05', 'b11']);
+    expect(splitBooks(list).dismissed).toEqual([]);
+  });
+
   it('toggleDismissed 整列提交只翻目标教材，其余元素原样保留', () => {
     const resources: CourseResource[] = [
       { kind: 'book', ref_id: 'b05', label: '甲', dismissed: false },

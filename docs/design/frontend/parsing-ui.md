@@ -2,11 +2,11 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-09-28
+最后更新：2026-10-26
 确认状态：已确认
 关联代码：`web-ui/src/pages/Parsing.tsx`、`web-ui/src/stores/parsing.ts`、`web-ui/src/api/axiom.ts`、
 `web-ui/src/components/parsing/`（BookTree/ParseToolbar/CompareView/PageImagePane/BlockList/BlockEditor/
-TypographyPanel/ResourceWatch/blocks.ts/typography.ts/regions.ts）
+ResourceWatch/blocks.ts/typography.ts/regions.ts）
 关联测试：`web-ui/src/pages/Parsing.test.tsx`、`web-ui/src/components/parsing/typography.test.ts`、
 `web-ui/src/components/parsing/regions.test.ts`、`web-ui/src/components/parsing/ResourceWatch.test.tsx`、
 `web-ui/src/components/parsing/ParseToolbar.test.tsx`（§8 四行与动作三态/确认弹窗）、
@@ -73,19 +73,17 @@ flowchart TD
     CV --> PI[PageImagePane 原文页 + bbox overlay + 框编辑交互]
     CV --> BL[BlockList 解析文档渲染 流式/版式重排版]
     BL --> BE[BlockEditor 单块内容编辑]
-    TB --> TP[TypographyPanel 版式样式面板]
 ```
 
 | 文件 | 职责 |
 | --- | --- |
 | `web-ui/src/pages/Parsing.tsx` | 页面容器：单屏布局（左树 + 右对照）、URL hash 同步、全局横幅（8900 错误 / 8902 降级 / 同步结果） |
 | `web-ui/src/components/parsing/BookTree.tsx` | 左书目树：领域→课程→书三级（数据源 `/parsing/tree`），**纯选择**，无状态徽标/筛选 |
-| `web-ui/src/components/parsing/ParseToolbar.tsx` | 对照顶栏（**四行**，§8）：行1 书名独行｜行2 解析动作族（三态文案 + 全动作确认弹窗）+ 任务进度 + 页码导航｜行3 编辑模式开关 / 滚动模式 / 滚动同步 / 渲染模式（+ 版式样式面板）｜行4 编辑口径（框图修改｜解析修正）动作与审阅统计（**无 engine 选择**） |
+| `web-ui/src/components/parsing/ParseToolbar.tsx` | 对照顶栏（**四行**，§8）：行1 书名独行｜行2 解析动作族（三态文案 + 全动作确认弹窗）+ 任务进度 + 页码导航｜行3 编辑模式开关 / 滚动模式 / 滚动同步 / 渲染模式｜行4 编辑口径（框图修改｜解析修正）动作与审阅统计（**无 engine 选择**） |
 | `web-ui/src/components/parsing/CompareView.tsx` | 双栏容器：态分流（§9）、单页模式 / 连续滚动模式、滚动同步 |
 | `web-ui/src/components/parsing/PageImagePane.tsx` | 原文页 + bbox overlay（hover/选中联动）+ **框编辑交互**：8 手柄拉伸、框体移动（落 `corrected_bbox`）、画框模式下空白拖拽画新框、Ctrl/Shift 多选、**框右键菜单**（修改/删除/恢复，§10） |
 | `web-ui/src/components/parsing/BlockList.tsx` | 解析文档渲染：**流式**（按块顺序，可读性优先）/ **版式=重排版**（§9 版式重排版规格，非原页复刻）+ 选中联动；KaTeX/Markdown/表格 |
 | `web-ui/src/components/parsing/BlockEditor.tsx` | 单块**内容**编辑：文字替换（公式为 LaTeX 源码）+ 判定/备注 Popover（框几何修改归左栏框编辑，弹层不含 bbox 数值输入） |
-| `web-ui/src/components/parsing/TypographyPanel.tsx` | 版式样式面板：正文字体（宋/黑/楷）+ 正文字号（五号～一号阶梯）+「显示页眉页脚/页码」开关；偏好存 localStorage |
 | `web-ui/src/components/parsing/ResourceWatch.tsx` | 资源告警弹窗（§12）：10s 轮询 `/monitor/gpu` + `/models/vision`，显存 ≥95% 与模型服务中断各一路 notification（中断发界见 §12），无自身界面 |
 | `web-ui/src/components/parsing/blocks.ts` | 块渲染工具（`tryRenderKatex`/`renderInlineMath`/`blockText`/`TYPE_LABELS`/`effectiveBbox`） |
 | `web-ui/src/components/parsing/typography.ts` | 版式排印纯函数：字号阶梯、标题级差推导、字体角色映射、目录启发式识别、pt↔px 换算 |
@@ -132,7 +130,7 @@ interface ParsingStore {
   scrollMode: 'single' | 'continuous';
   renderMode: 'stream' | 'layout';  // 版式=重排版（§9.1，非原页复刻）
   syncScroll: boolean;
-  typography: TypographyPrefs; // 版式偏好（正文字体/字号级/页眉页脚；localStorage 持久）
+  typography: TypographyPrefs; // 版式偏好（正文字体/字号级/页眉页脚；初始化读 localStorage，界面无写腿）
   // 解析任务
   activeJob: ParseJob | null;
   jobError: string | null;
@@ -154,7 +152,6 @@ interface ParsingStore {
   setDrawMode: (on: boolean) => void;         // 画框模式开关（顶栏「新增」）
   addRegionDraft / deleteRegion / restoreDeletedRegion / mergeSelectedBlocks / resetRegionDraft;  // 框图本地预览动作（右键删/改、合并、清空）
   confirmPageBlocks: (blockCount: number, skipIndex: number) => Promise<{ confirmed: number; skipped: number }>;  // 整页确认：逐块写 verdict=ok
-  setTypography: (patch: Partial<TypographyPrefs>) => void;  // 版式偏好（写 localStorage）
   setViewMode / setScrollMode / setRenderMode / setSyncScroll / setEngine;
   submitEdit: (blockIndex: number, input: BlockEditInput) => Promise<boolean>;
   ingestBook: (bookId: string) => Promise<void>;
@@ -187,8 +184,8 @@ interface ParsingStore {
 - 口径=解析修正时 `BlockEditor` **只修改内容**（文字/LaTeX/判定/备注），不含 bbox 数值输入
   （框几何修改归框图修改口径）；**「确认」不新增状态**——单块与整页确认均复用 `verdict=ok`，
   且提交前合并该块既有 `corrected_text`/`note`/`corrected_bbox`（`PUT …/edit` 整条替换）；
-- 版式偏好 `typography` 初始化读 localStorage、变更即写回；只作用于版式（重排版）渲染，
-  流式模式不受影响；切书切页不清空。
+- 版式偏好 `typography` 只在初始化时读 localStorage（历史偏好仍生效），**变更写回腿已随「排版」面板一并撤除**
+  （2026-10-25 用户裁甲）；偏好只作用于版式（重排版）渲染，流式模式不受影响；切书切页不清空。
 - `compareBookId/comparePageNo` 双向同步 URL hash（`?book&page`），支持刷新恢复。
 
 ## 6. 数据契约（消费要点）
@@ -237,7 +234,7 @@ interface ParsingStore {
 | --- | --- |
 | 1 | 书名（§7 `parsingBookLabel` 口径，带卷标识）独行 |
 | 2 | 解析动作族（书页入库／解析本页／全本族，**均先弹窗确认**）｜在飞任务进度 `parsed/total` 与错误文本｜页码导航（尾部靠右） |
-| 3 | 编辑模式开关｜滚动模式（`单页`／`连续`）｜滚动同步｜渲染模式（`流式`／`版式`，版式态带「排版」）——**无缩放控件**（页图与纸面尺寸口径见 §3） |
+| 3 | 编辑模式开关｜滚动模式（`单页`／`连续`）｜滚动同步｜渲染模式（`流式`／`版式`）——**无缩放控件、无「排版」入口**（页图与纸面尺寸口径见 §3） |
 | 4 | 编辑口径 Segmented（`框图修改`｜`解析修正`）＋该口径动作＋审阅统计「已判定 x / 共 y 块」（当前页） |
 
 **动作三态文案与确认弹窗**（`modal.confirm`，所有解析动作先确认后提交）：
@@ -255,8 +252,9 @@ interface ParsingStore {
 - 提交后轮询 `GET /parse-jobs/{id}` 显示进度条，完成自动刷新当前页；运行中禁用重复提交
   （`jobSubmitting` 在飞闸门）；失败显示错误文本；
 - **滚动同步** Switch 仅单页模式可用（连续模式整体一个滚动面）；
-- **渲染模式** `版式` 时行内出现「排版」按钮，打开**版式样式面板**（TypographyPanel：正文字体
-  宋/黑/楷、正文字号 五号～一号、显示页眉页脚开关；偏好即时持久，面板仅这三项控制）；
+- **渲染模式** `版式` 只有 `流式`／`版式` 两档，**行内不再出现「排版」按钮**（2026-10-25 用户裁甲＝连面板一起撤）：
+  版式样式面板 TypographyPanel 与其 `setTypography` 写腿、`saveTypographyPrefs` 持久腿一并删除，
+  正文字体／字号级／页眉页脚三项一律走 §9.1 默认值＋历史 localStorage 读回，界面无控制位；
 - **视图恒为对照**：无「仅原文/仅解析」切换——未解析页由 §9 态分流天然只显示书页图。
 
 **行4 编辑口径动作**：
@@ -317,23 +315,31 @@ interface ParsingStore {
   `corrected_text`/`note`/`corrected_bbox`**（该端点整条替换，不合并会丢掉已修正字段）；
   确认钮自身拦截冒泡，不触发块选中；
 - `BlockEditor`（内容口径）：**只修改内容**——文字替换（公式编辑 LaTeX 源码）+ 判定/备注
-  Popover；**不含 bbox 数值输入**（框几何修改归左栏框编辑口径，用户裁决）；
+  Popover + **块类型改判下拉**；**不含 bbox 数值输入**（框几何修改归左栏框编辑口径，用户裁决）；
+- **块类型改判**：下拉取值＝8902 `BlockType` 十枚闭集（`heading`/`paragraph`/`formula`/`table`/
+  `image`/`list`/`caption`/`header`/`footer`/`page_number`，顺序即声明序），本面**不自行扩充**，
+  加值须两仓同批改；初值取该块**生效类型**（已改判则取 `corrected_type`，否则取 `block.type`），
+  与生效类型相同则提交载荷**不带** `corrected_type` 键（不改判即不写意图行）。生效类型由 **8902
+  读侧**叠加到块序列（`blocks[].type`），8900 与 8903 **都不自建类型合并腿**；8900 侧只做闭集
+  形状门（非法值 422 且不打上游）。改判后原类型以「原：X」注记显示；有改判的块出「类型改判」角标；
 - 保存：`PUT /books/{id}/pages/{no}/blocks/{index}/edit`，
-  `{verdict, note, corrected_text, corrected_bbox}`；
+  `{verdict, note, corrected_text, corrected_bbox, corrected_type}`（字段全可选，见
+  [api-contracts.md](../../architecture/api-contracts.md) 数据域·Axiom-Flow 端点表）；
 - 回显：进入页时拉取页数据（blocks + 已合并 edits），刷新后保持；有编辑的块显示标记
-  （判定 Tag + 修正角标）。
+  （判定 Tag + 修正角标）；**类型改判成功后重取本页**——版式/流式两态按新生效类型重排，
+  改判成 header/footer/page_number 的行随即按下方 furniture 默认隐藏而消失。
 
 ### 9.1 版式重排版规格（typography）
 
 - **字号阶梯**（pt，px = pt × 4/3）：L0 五号 10.5｜L1 小四 12｜L2 四号 14｜L3 小三 15｜
   L4 三号 16｜L5 小二 18｜L6 二号 22｜L7 小一 24｜L8 一号 26——最小五号、最大一号（硬约束）；
-- **正文**：样式面板手动选一级，默认 **L0 五号**（用户裁决）；覆盖 paragraph / list /
+- **正文**：默认 **L0 五号**（用户裁决；「排版」面板撤除后界面无选级入口，历史偏好仍按 §5 读回）；覆盖 paragraph / list /
   table / formula（正文统一一个字号）；表格随正文级自适应纸面宽度，不横向截断；
 - **标题**：按级差自动推导，不可单独设置——**大标题（一级）= 正文级 + 4，小标题（二级）= +2，
   三级及以下 = +1**，一律封顶 L8；标题恒大于正文；
 - **字体角色**（中英文混排：西文一律 Times New Roman 前置）：正文**宋体**
   （`'Times New Roman', SimSun`）、标题**黑体**（`'Times New Roman', SimHei`）、
-  目录/题注**楷体**（`'Times New Roman', KaiTi`）；样式面板「正文字体」在宋/黑/楷三档切换正文族；
+  目录/题注**楷体**（`'Times New Roman', KaiTi`）；
 - **题注（caption）**：正文同级字号、楷体；
 - **节题白名单（类标题）**：单行 paragraph 去空白全文命中白名单（目录 / 目次 / Contents /
   重要符号表 / 符号表 / 前言 / 序 / 序言 / 后记 / 附录 / 索引 / 参考文献 / 致谢）即按一级
@@ -347,8 +353,14 @@ interface ParsingStore {
   页码列右对齐；个别未命中行整行进说明列（页码列空）；整块不命中回落正文 pre-wrap
   （数据侧类型修正承接后改按类型识别，REQ-099 R5）；
 - **页眉/页脚/页码**（header / footer / page_number）：版式态**默认隐藏**（用户裁决），
-  样式面板「显示页眉页脚」开关可恢复；
-- 偏好（正文字体、正文字号级、页眉页脚开关）localStorage 持久，见 §5 规则。
+  「排版」面板撤除后界面无恢复开关，历史偏好仍按 §5 读回；**归属可人工改判**——引擎识别错
+  章节名/页眉页脚时，在 `BlockEditor` 的类型下拉把该块改成正确类型即生效（§9 块类型改判），
+  不需要重新解析；
+- **数学符号按公式渲染**（2026-10-25 用户令「数学符号要按照公式渲染好」）：现网产物把 `$…$` 直带进
+  表格 `html`、符号表符号列与目录条目名里，三处一律走 KaTeX——表格单元格经 `blocks.ts` 的
+  `renderMathInHtml`（DOMParser 只替换文本节点，不动标签结构），符号列／说明列与目录条目名走
+  `renderInlineMath`；屏上不出现裸 `$…$` 定界符；
+- 偏好（正文字体、正文字号级、页眉页脚开关）只在初始化时从 localStorage 读回，写入腿已随「排版」面板撤除，见 §5 规则。
 
 ## 10. bbox 规范
 

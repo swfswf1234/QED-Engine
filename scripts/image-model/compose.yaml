@@ -22,6 +22,8 @@ services:
       MINERU_MODEL_SOURCE: local
       # 注：MINERU_MODELS_DIR 对 MinerU 无效（不读该变量）；模型路径由镜像内
       # /root/mineru.json 的 models-dir 声明，指向下方卷挂载点。
+      # 已实测证伪、勿重试：调小 MINERU_API_TASK_RETENTION_SECONDS（86400→120）不改变
+      # OOM 死亡平台（b07 240 页→270 页），进程 RSS 累积与任务保留无关；段间重启容器才是有效杠杆。
     volumes:
       # 仓库 model/mineru → 容器模型目录（Windows 仓库根经 WSL /mnt/ 路径，由 infra 脚本转换）
       - ../../model/mineru:/root/mineru_models
