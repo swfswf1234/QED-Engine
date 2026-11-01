@@ -372,6 +372,13 @@ node_id，既是幂等锚也是导读腿的取数键）经 `patch_point` 写。�
   `npm run build` 成功（哈希 `index-C-NvTlK_.js`）。真机取证件＝`tmp/kp_ma_after_w9.json`、
   `tmp/kp_ma_after_w10.json`、`tmp/afkp_b05.json`、`tmp/w10_b07_report.json`、`tmp/w10_sync_after.json`
   与 `tmp/w10_*.py` 脚本（只读探针＋一次签认删除的守卫脚本，收口前按临时目录规范处置）。
+- **2026-11-01（随步指针・不改本壳判据）**：[REQ-145 壳](2026-11-01-kp-course-level-merge-and-explore-source.md)
+  的四条裁决只改道归本位的**承载源**＝`qed_knowledge_point.book_ref` 语义退役（停写／停筛／不作判据），
+  归本位改按 `anchors[].ref_id ∪ source_ref.ref_id` 读，第八记那枚「点行自身 → 所属章行 → 课程首本」
+  三级回落随之删除（搬家由 REQ-145 W4 承接）。**本壳 T4「按书名读、换书回书架」的用户令一字未改**——
+  变的只是「这一行属于哪本书」从哪里读；共行推论另加一条后果＝归本位从此是**多值**（同一行可出现在
+  覆盖它的每一本序列里），进度口径仍课程级不变。`GET|PUT …/outline` 整树写面的去书化形态待裁（该壳 U4），
+  未裁前本壳既有通路照常运行、不动码。
 
 ## 验证与验收
 
