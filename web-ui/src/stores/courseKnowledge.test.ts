@@ -17,12 +17,16 @@ const OVERVIEW = {
     { kp_id: 'p1', course_id: 'ma', name: '确界原理', norm_key: '确界原理', node_kind: 'point', parent_kp_id: 'k1', depth: null, order_hint: 1, type: 'concept', summary: '有上界数集必有上确界', anchors: [{ kind: 'page', page: 5 }], book_ref: null },
   ],
   total: 2,
+  truncated: false,
   candidate_total: 0,
 };
 
 describe('课程知识点 store（courseKnowledge：只读 + 全层级）', { timeout: 15000 }, () => {
   beforeEach(() => {
-    useCourseKnowledgeStore.setState({ courseId: null, course: null, rows: [], loading: false, error: null, notFound: false });
+    useCourseKnowledgeStore.setState({
+      courseId: null, course: null, rows: [], loading: false, error: null, notFound: false,
+      total: 0, truncated: false,
+    });
     mockFetch.mockReset();
   });
 
@@ -66,5 +70,21 @@ describe('课程知识点 store（courseKnowledge：只读 + 全层级）', { ti
     expect(state.notFound).toBe(true);
     expect(state.error).toContain('课程不存在');
     expect(state.rows).toEqual([]);
+  });
+
+  // REQ-147 W2：整课一次取全有封顶，触顶必须由响应自证，界面才谈得上「全解」
+  it('读量如实：total 与 truncated 入 store，行数少于 total 时才带截断旗标', async () => {
+    mockFetch.mockImplementation(() => jsonResponse({ ...OVERVIEW, total: 3001, truncated: true }));
+    await useCourseKnowledgeStore.getState().fetchCourse('ma');
+    const state = useCourseKnowledgeStore.getState();
+    expect(state.total).toBe(3001);
+    expect(state.truncated).toBe(true);
+    expect(state.rows).toHaveLength(2);
+
+    mockFetch.mockImplementation(() => jsonResponse(OVERVIEW));
+    await useCourseKnowledgeStore.getState().fetchCourse('ma');
+    const again = useCourseKnowledgeStore.getState();
+    expect(again.total).toBe(2);
+    expect(again.truncated).toBe(false);
   });
 });

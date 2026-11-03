@@ -49,7 +49,7 @@
 | 判分阈值与复习间隔序列**取值**（三型阈值、`kp_type` 各档间隔） | 服务端 `backend/qed_engine/services/learn/grading.py`、`services/learn/practice.py`；UI 只消费结论字段 |
 | 题面公式渲染基线与 KaTeX 双定界符防御 | [parsing-ui.md](parsing-ui.md) §9.1（同一套 `BlockList`，判例 BUGFIX-011） |
 | 课程学习与批注、链路推进 | [课程学习界面设计稿](../../history/plans/2026-10/2026-10-11-learn-ui-course-study.md)（REQ-105，2026-10-16 Achieved 收口，v1 稿留改不晋升、随壳归档；重设计轮 REQ-117） |
-| 知识点探索与星图 | [knowledge-point-exploration-ui.md](knowledge-point-exploration-ui.md)（已晋升·暂定，四行 REQ-104/110/113/114 合一份） |
+| 知识点探索与星图 | [knowledge-point-exploration-ui.md](knowledge-point-exploration-ui.md)（已晋升·已确认，四行 REQ-104/110/113/114 合一份） |
 | 8903 路由总表与视觉 token 规范 | [frontend-architecture.md](../../architecture/frontend-architecture.md) |
 
 **非目标**：不出题（v1 题源＝书里现成习题；v2 两段式生成另批实施，届时只替换题源侧，

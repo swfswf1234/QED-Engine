@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-10-24
+最后更新：2026-11-03
 确认状态：已确认
 关联代码：子项目各自仓库（`Axiom-Flow/`、`QED-Tracker/`）、`backend/qed_engine/clients/tracker_client.py`（8901 客户端实现）
 关联测试：`tests/test_api.py`、`tests/test_config.py`、`tests/test_tracker_client.py`、`tests/test_web.py`；子项目各自契约测试
@@ -239,7 +239,7 @@ prompt 追加「人工评审意见」上下文段（判据晋升其 `KA-31`）�
   | 入库与解析 | ingest＝渲染页图（元数据落 af_books，不调模型），**分钟级同步长请求**（超时分层见 §11）；解析任务 202 提交 + 轮询（`queued/running/completed/failed`，progress `{parsed,total,error}`）——解析本身已是后台任务范式 | Axiom-Flow `api.md`；`api-contracts.md` §④；parsing-flow.md §4 |
   | 产物与对照 | 页级 blocks/markdown/原页图读取；manifest 产物清单（路径/大小/哈希）；源 PDF 由 8900 本地端点从数据根取（不经 8902） | `api-contracts.md` §④；parsing-flow.md §5/§7 |
   | 人工编辑落库 | 块级编辑记录（EditRecord）与判定写入；8900 `/review` 门面为过渡兼容，新消费面一律走 edit 契约 | `api-contracts.md` §④ |
-  | 知识点梳理工作区（**2026-10-21 定档，尚未落地**） | 梳理段正本整体归 8902：工作区与候选池＝单表 `af_kp`（层级 `parent_id`、关系 `links` JSON、机器位 `gen_status`／人工位 `confirmed` 分列、批次 `gen_batch`、长文只留 `narrative_ref` 指针）。根侧消费面**只有两件事**＝经 8900 透传读其**只读导出端点**（命名与形状归对方）＋把 `confirmed=1` 的行单向提升进共享 `qed_knowledge_point`（幂等锚＝主表标量列 `from_detail_id` 存 `node_id`）；**提升时的列映射（2026-10-21 v1.0 定档）**＝对方别名列表 → 主表 `aliases`、对方多角度叙述 → 主表 `angles`（`angle` 闭集复用根侧既有六词 `summary`／`explanation`／`definition`／`theorem`／`proof`／`example`，对方若给闭集外词即拒收并记偏差，不静默改写）、对方长文指针 → 主表 `narrative_ref`；**两侧指针形态刻意不同**＝对方存 `<book_dir>/kp/<node_id>.md` 的**单段文件名**（其 KA-20），根侧存**数据根相对路径全串**，提升腿负责补前缀，理由是 8900 须在 8902 离线时自行解析该指针（独立性铁律）；8902 **不直写共享表**、**不回写提升结果**，根侧**不直写 `af_*`**；AF 离线时学习与练习三链照常（独立性铁律，只梳理屏不可用） | Axiom-Flow [PLAN-024](../../Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md)（逐列与提升通路正本）；根侧承接面 [REQ-134](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md)（已退指针）与 [REQ-132 壳 W5](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) |
+  | 知识点梳理工作区（**2026-10-21 定档，尚未落地**） | 梳理段正本整体归 8902：工作区与候选池＝单表 `af_kp`（层级 `parent_id`、关系 `links` JSON、机器位 `gen_status`／人工位 `confirmed` 分列、批次 `gen_batch`、长文只留 `narrative_ref` 指针）。根侧消费面**只有两件事**＝经 8900 透传读其**只读导出端点**（命名与形状归对方）＋把**在册**行单向提升进共享 `qed_knowledge_point`（幂等锚＝主表标量列 `from_detail_id` 存 `node_id`）；提升**范围判据**＝`gen_status != 'rejected'` ∧ `toc_role != 'reference'` ∧ 非习题行（REQ-144 裁乙，[ADR 0028](../adr/0028-exercise-out-of-kp-sequence.md) G3 加第三道行级闸）——**「只提升 `confirmed=1`」是本文旧表述，2026-11-02 起作废**：人工位 `af_kp.confirmed` 不作为提升的准入条件，而是**随提升镜像进主表新列 `confirm_state`**（1→`confirmed`、0→`unconfirmed`，只升不降；[ADR 0027](../adr/0027-kp-human-confirm-column.md) D2③／D8）；**提升时的列映射（2026-10-21 v1.0 定档）**＝对方别名列表 → 主表 `aliases`、对方多角度叙述 → 主表 `angles`（`angle` 闭集复用根侧既有六词 `summary`／`explanation`／`definition`／`theorem`／`proof`／`example`，对方若给闭集外词即拒收并记偏差，不静默改写）、对方长文指针 → 主表 `narrative_ref`；**两侧指针形态刻意不同**＝对方存 `<book_dir>/kp/<node_id>.md` 的**单段文件名**（其 KA-20），根侧存**数据根相对路径全串**，提升腿负责补前缀，理由是 8900 须在 8902 离线时自行解析该指针（独立性铁律）；8902 **不直写共享表**、**不回写提升结果**，根侧**不直写 `af_*`**；AF 离线时学习与练习三链照常（独立性铁律，只梳理屏不可用） | Axiom-Flow [PLAN-024](../../Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md)（逐列与提升通路正本）；根侧承接面 [REQ-134](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md)（已退指针）与 [REQ-132 壳 W5](../history/plans/2026-10/2026-10-21-qe-family-rename-and-refactor.md) |
   | 预留面 | 版本列表/回滚、chunks（RAG 切片预留）、书目 PATCH/DELETE——8902 侧已实现，8900 透传与前端消费未排期 | `api-contracts.md` §④「规划契约」 |
 
 - **梳理批次的 `stage` 三值与读面派生区间（2026-10-29，8902 已实现、8900 零改码转发）**：`stage∈{full, outline, content}`
@@ -257,6 +257,14 @@ prompt 追加「人工评审意见」上下文段（判据晋升其 `KA-31`）�
   5-310 一类巨区间，均属该推法的缺陷；③ `stage='content'` 的产出形状按基本版本收窄＝只写节级 `summary`、**不再建
   `node_kind='point'` 行**（存量点行已由需求方签认删除 213 条，备份留根仓 `tmp/kp-run/`），章级总结改为「章基本介绍＋
   其下各节总结」一次调用并同时产出章导读，写腿仍走既有 `summary` 列与 `narrative` 写腿。两侧零新端点、零 DDL。
+- **习题的两级闸（2026-11-02，[ADR 0028](../adr/0028-exercise-out-of-kp-sequence.md)）**：「知识点序列」＝共享
+  `qed_knowledge_point` 的 outline／point 行及由它们渲染的一切读面，**其中永不含习题行**。关口①＝上条 ① 的
+  `node_type=exercise` 派生键自该日起被根侧提升腿消费（不再只作梳理屏的标签语言），**对方侧零改码、根侧零新增请求**；
+  关口②＝根侧写共享表前的第三道行级过滤 `node_type != 'exercise'`（该键缺席时回落 `toc_kind != 'exercise'`），
+  排除数进提升响应 `excluded.exercise`。整本习题集另由共享 `qt_books.roles` 判据在同步腿入口挡下（REQ-144 T5）——
+  **整本闸与行级闸缺一不可**，同一判据在两种粒度上各自成立。根侧对本键的依赖是**语义稳定**：改名或挪列即静默失效，
+  两侧守护须各自钉住主判据与回落判据两条路径。习题的承载位＝`af_kp` 结构面（`node_type=exercise`）＋练习面的
+  页区间与答案配对（REQ-146），与知识点序列在库内不同表、不同语义。
 
 
 - **上下游**：上游 8901 `axiom push` 交接（§3 对接点）；解析经引擎适配器**直连本地模型服务**，

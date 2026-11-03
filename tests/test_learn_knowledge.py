@@ -140,7 +140,8 @@ def test_star_map_aggregates_tracks_courses_and_counts(client):
     assert {n["course_id"] for n in tracks["分析学"]["courses"]} == {"math_analysis", "real_analysis"}
     node = next(n for n in tracks["分析学"]["courses"] if n["course_id"] == "math_analysis")
     assert node["name"] == "数学分析"
-    assert node["kp_confirmed"] == 2
+    # 两键分桶（ADR 0027 D4）：直登记即人已背书，故 total 与 confirmed 相等
+    assert node["kp_total"] == 2 and node["kp_confirmed"] == 2
     # 候选位随候选池退出：星图节点只剩「已登记知识点数」一枚计数
     assert "kp_candidates" not in node
     assert node["stage"] == "基础" and node["sort_order"] == 1
@@ -179,7 +180,7 @@ def test_point_registration_lands_in_shared_main_table(client, store):
     point = _add_point(
         client, anchors=[{"kind": "book", "ref_id": "b05", "page": 7}], from_detail_id="af-node-01"
     )
-    assert "confirmed" not in point  # 主表一行即一条已确认知识点（R6：无恒真确认位列）
+    assert point["confirm_state"] == "confirmed"  # 人工直登记＝人已背书（ADR 0027 D2①）
     assert point["node_kind"] == "point" and point["depth"] is None
     assert point["norm_key"] == "确界原理"
     assert point["anchors"][0]["ref_id"] == "b05"
@@ -442,6 +443,28 @@ def test_course_points_shape_and_sequence_flag(client):
     assert client.get("/api/v1/learn/courses/unknown_course/knowledge-points").status_code == 404
 
 
+def test_course_points_read_cap_reports_truncation_honestly(client, monkeypatch):
+    """P0-2 读量如实：整课一次取全的封顶是显式常量，被封顶时响应自证截断，不静默少给（REQ-147 W2）。"""
+    from qed_engine.api import learn as learn_api
+
+    # 封顶只能是常量：曾经的 500 是写死在调用行的魔法数，现网单课已近其半
+    assert learn_api.KP_COURSE_READ_LIMIT >= 3000
+
+    monkeypatch.setattr(learn_api, "KP_COURSE_READ_LIMIT", 2)
+    for name in ("确界原理", "单调有界定理", "闭区间连续函数性质"):
+        _add_point(client, name=name)
+
+    body = client.get("/api/v1/learn/courses/math_analysis/knowledge-points").json()
+    assert body["total"] == 3
+    assert len(body["points"]) == 2
+    assert body["truncated"] is True
+
+    _add_point(client, course_id="real_analysis", name="勒贝格积分")
+    other = client.get("/api/v1/learn/courses/real_analysis/knowledge-points").json()
+    assert other["total"] == 1 and len(other["points"]) == 1
+    assert other["truncated"] is False
+
+
 def test_point_queries_exclude_outline_rows_by_default(client):
     _put_outline(client)
     chapters = {r["name"]: r["kp_id"] for r in _get_outline(client)}
@@ -473,11 +496,66 @@ def test_star_map_counts_only_point_rows_not_outline(client):
     """章名行（outline）不进知识点数：星图徽标＝可登记的细知识点数。"""
     _put_outline(client)
     _add_point(client, parent_kp_id=_get_outline(client)[0]["kp_id"])
-    body = client.get("/api/v1/learn/star-map").json()
-    node = next(
-        c for t in body["domains"][0]["tracks"] for c in t["courses"] if c["course_id"] == "math_analysis"
+    node = _star_course(client)
+    assert node["kp_total"] == 1 and node["kp_confirmed"] == 1
+
+
+def test_star_map_two_keys_tell_two_different_facts(client):
+    """`kp_total`＝机器整理出来的点数、`kp_confirmed`＝人真背过的点数（ADR 0027 D4）。
+
+    现网 93 行全 `unconfirmed`——若仍按旧义把 point 行数塞进 `kp_confirmed`，「已确认」就成了
+    谎话；若反过来按 confirmed 过滤，REQ-147 刚点亮的整理度图元会整体熄灭。两键分开的正是这两头。
+    """
+    _put_outline(client)
+    chapter = _get_outline(client)[0]["kp_id"]
+    signed = _add_point(client, parent_kp_id=chapter, name="确界原理")
+    withdrawn = _add_point(client, parent_kp_id=chapter, name="单调有界原理")
+    client.patch(
+        f"/api/v1/learn/knowledge-points/{signed['kp_id']}", json={"confirm_state": "unconfirmed"}
     )
-    assert node["kp_confirmed"] == 1
+    client.patch(
+        f"/api/v1/learn/knowledge-points/{withdrawn['kp_id']}", json={"confirm_state": "rejected"}
+    )
+    node = _star_course(client)
+    assert node["kp_total"] == 1, "驳回行不计数，未确认行照数——整理度与人工背书互不遮蔽"
+    assert node["kp_confirmed"] == 0
+
+
+def test_rejected_rows_leave_the_learner_reads(client):
+    """D3 读面判据＝排除 `rejected` 其余照画：检索列表、课内总览、目录三处同闸；
+    单行翻案不经本闸——被驳回者仍可按 `kp_id` PATCH 回来（人工通道要能触到驳回行）。"""
+    _put_outline(client)
+    chapter = _get_outline(client)[0]
+    kept = _add_point(client, parent_kp_id=chapter["kp_id"], name="确界原理")
+    dropped = _add_point(client, parent_kp_id=chapter["kp_id"], name="单调有界原理")
+    client.patch(
+        f"/api/v1/learn/knowledge-points/{dropped['kp_id']}", json={"confirm_state": "rejected"}
+    )
+    client.patch(
+        f"/api/v1/learn/knowledge-points/{chapter['kp_id']}", json={"confirm_state": "rejected"}
+    )
+
+    listing = client.get("/api/v1/learn/knowledge-points?course=math_analysis").json()
+    assert [p["kp_id"] for p in listing["points"]] == [kept["kp_id"]], "只剩未驳回那一条"
+    assert listing["total"] == 1
+
+    course_body = client.get("/api/v1/learn/courses/math_analysis/knowledge-points").json()
+    assert {p["name"] for p in course_body["points"]} == {"确界原理"}
+    assert course_body["total"] == 1
+    with_outline = client.get(
+        "/api/v1/learn/courses/math_analysis/knowledge-points?include_outline=true"
+    ).json()
+    assert "第1章 实数与函数" not in {p["name"] for p in with_outline["points"]}
+
+    assert chapter["kp_id"] not in {row["kp_id"] for row in _get_outline(client)}
+    assert _star_course(client)["kp_total"] == 1
+
+    revived = client.patch(
+        f"/api/v1/learn/knowledge-points/{dropped['kp_id']}",
+        json={"confirm_state": "unconfirmed"},
+    ).json()
+    assert revived["confirm_state"] == "unconfirmed"
+    assert client.get("/api/v1/learn/knowledge-points?course=math_analysis").json()["total"] == 2
 
 
 # ---------- 错误码与降级（503 三态） ----------
@@ -502,11 +580,12 @@ def test_knowledge_endpoints_503_without_store(monkeypatch):
     # 星图不依赖新表：目录可达即出图（未配置库时知识点计数降级为 0）
     body = orphan.get("/api/v1/learn/star-map").json()
     assert body["domains"][0]["tracks"][0]["courses"][0]["kp_confirmed"] == 0
+    assert body["domains"][0]["tracks"][0]["courses"][0]["kp_total"] == 0
 
 
 class _FakeCountingStore:
     def counts_by_course(self) -> dict[str, dict[str, int]]:
-        return {"math_analysis": {"confirmed": 2}}
+        return {"math_analysis": {"total": 3, "confirmed": 2}}
 
     def list_points(self, **_kwargs):
         return [], 0
@@ -565,7 +644,7 @@ def test_star_map_mounts_store_and_reports_counts(monkeypatch):
     body = client.get("/api/v1/learn/star-map").json()
     courses = body["domains"][0]["tracks"][0]["courses"]
     target = next(c for c in courses if c["course_id"] == "math_analysis")
-    assert target["kp_confirmed"] == 2
+    assert target["kp_total"] == 3 and target["kp_confirmed"] == 2
     assert "kp_candidates" not in target
 
 
@@ -600,7 +679,17 @@ def _get_outline(client, *, course="math_analysis", book="b05"):
     return resp.json()["outline"]
 
 
-def test_put_outline_writes_two_level_tree_as_confirmed_rows(client, store):
+def _star_course(client, course_id="math_analysis"):
+    body = client.get("/api/v1/learn/star-map").json()
+    return next(
+        course
+        for track in body["domains"][0]["tracks"]
+        for course in track["courses"]
+        if course["course_id"] == course_id
+    )
+
+
+def test_put_outline_writes_two_level_tree_as_unconfirmed_rows(client, store):
     _put_outline(client)
     rows = _get_outline(client)
     assert [r["name"] for r in rows] == [
@@ -611,7 +700,8 @@ def test_put_outline_writes_two_level_tree_as_confirmed_rows(client, store):
     ]
     first = rows[0]
     assert first["node_kind"] == "outline" and first["depth"] == 1
-    assert first["parent_kp_id"] is None and "confirmed" not in first
+    # 整树写入只落结构，不替人签字：人工位由列默认落 unconfirmed（ADR 0027 D2）
+    assert first["parent_kp_id"] is None and first["confirm_state"] == "unconfirmed"
     assert first["book_ref"] == "b05"
     assert first["source_ref"] == {"kind": "book", "ref_id": "b05", "page_start": 9, "page_end": 40}
     child = rows[1]
@@ -631,6 +721,15 @@ def test_outline_points_hang_on_chapter_and_count_per_node(client):
     rows = {r["kp_id"]: r for r in _get_outline(client)}
     assert rows[chapters["第1章 实数与函数"]]["point_count"] == 1
     assert rows[chapters["第2章 极限"]]["point_count"] == 0
+
+    # 驳回行不进学习面（ADR 0027 D3）：目录计数同样不数它
+    rejected = _add_point(client, name="待驳回的知识点", parent_kp_id=chapters["第1章 实数与函数"])
+    assert client.patch(
+        f"/api/v1/learn/knowledge-points/{rejected['kp_id']}",
+        json={"confirm_state": "rejected"},
+    ).status_code == 200
+    rows = {r["kp_id"]: r for r in _get_outline(client)}
+    assert rows[chapters["第1章 实数与函数"]]["point_count"] == 1
 
 
 def test_reimport_outline_reuses_kp_id_and_orphans_dropped_points(client):
@@ -715,6 +814,39 @@ def test_patch_point_moves_between_chapters_and_rejects_bad_parent(client):
     assert client.patch(
         f"/api/v1/learn/knowledge-points/{rows['第2章 极限']}", json={"parent_kp_id": point["kp_id"]}
     ).status_code == 422
+
+
+def test_patch_confirm_state_is_the_human_signing_path(client):
+    """提升腿三通路之②＝PATCH 置位：可背书、可驳回、可翻案；闭集外取值与旧布尔键都 422（ADR 0027 D2②）。"""
+    _put_outline(client)
+    chapter = _get_outline(client)[0]
+    row = _add_point(client, name="夹逼准则", parent_kp_id=chapter["kp_id"], type="concept")
+    assert row["confirm_state"] == "confirmed"
+
+    rejected = client.patch(
+        f"/api/v1/learn/knowledge-points/{row['kp_id']}", json={"confirm_state": "rejected"}
+    ).json()
+    assert rejected["confirm_state"] == "rejected"
+    downgraded = client.patch(
+        f"/api/v1/learn/knowledge-points/{row['kp_id']}", json={"confirm_state": "unconfirmed"}
+    ).json()
+    assert downgraded["confirm_state"] == "unconfirmed"
+    # 章行同样可被人工背书（本列两类行通用，学习面判据只看 rejected）
+    assert client.patch(
+        f"/api/v1/learn/knowledge-points/{chapter['kp_id']}", json={"confirm_state": "confirmed"}
+    ).json()["confirm_state"] == "confirmed"
+
+    assert client.patch(
+        f"/api/v1/learn/knowledge-points/{row['kp_id']}", json={"confirm_state": "approved"}
+    ).status_code == 422
+    assert client.patch(
+        f"/api/v1/learn/knowledge-points/{row['kp_id']}", json={"confirmed": 1}
+    ).status_code == 422
+    # null＝不改（NOT NULL 列没有清空语义）
+    cleared = client.patch(
+        f"/api/v1/learn/knowledge-points/{row['kp_id']}", json={"confirm_state": None, "order_hint": 4}
+    ).json()
+    assert cleared["order_hint"] == 4 and cleared["confirm_state"] == "unconfirmed"
 
 
 CROSS_CHAPTER_TREE = [
@@ -980,14 +1112,15 @@ def test_point_and_outline_share_coords(client):
 
 
 def test_main_table_ddl_declares_v1_shape():
-    """DDL 定档：25 列含三枚 v1.0 新列，去重索引按 (course_id,node_kind,norm_key)，book_ref 去空串哨兵，审计两列齐备。"""
+    """DDL 定档：26 列含三枚 v1.0 新列与 `confirm_state`，去重索引按 (course_id,node_kind,norm_key)，book_ref 去空串哨兵，审计两列齐备。"""
     from qed_engine.services.learn.knowledge import _POINT_COLUMNS, CREATE_TABLE_SQL
 
-    assert len(_POINT_COLUMNS.split(",")) == 25
+    assert len(_POINT_COLUMNS.split(",")) == 26
     for column in (
         "aliases JSON",
         "narrative_ref VARCHAR(500) NOT NULL DEFAULT " + chr(39) + chr(39),
         "angles JSON",
+        "confirm_state VARCHAR(16) NOT NULL DEFAULT " + chr(39) + "unconfirmed" + chr(39),
     ):
         assert column in CREATE_TABLE_SQL, column
     assert "KEY idx_kp_course_kind_norm (course_id, node_kind, norm_key)" in CREATE_TABLE_SQL
@@ -995,6 +1128,7 @@ def test_main_table_ddl_declares_v1_shape():
     assert "created_by VARCHAR(16) NOT NULL DEFAULT " + chr(39) + chr(39) in CREATE_TABLE_SQL
     assert "updated_by VARCHAR(16) NOT NULL DEFAULT " + chr(39) + chr(39) in CREATE_TABLE_SQL
     assert "COLLATE=utf8mb4_0900_ai_ci" in CREATE_TABLE_SQL
+    assert "DROP" not in CREATE_TABLE_SQL.upper()
     book_line = next(
         ln for ln in CREATE_TABLE_SQL.splitlines() if ln.strip().startswith("book_ref")
     )
@@ -1012,19 +1146,77 @@ def test_point_row_carries_null_book_ref_not_empty_sentinel(client):
 
 
 def test_candidate_pool_table_and_routes_are_retired(client):
-    """D1/D10 退场守护：池表 DDL、五枚端点与主表确认位列一律不得复活（复活即契约漂移）。"""
+    """D1/D10 退场守护：池表 DDL 与五枚端点不得复活，布尔确认键 `confirmed` 也不得复活。
+
+    确认态自 ADR 0027 起由实列 `confirm_state` 承载（三值、可按列筛），
+    「存在即已确认」的恒真位形态永远是退役态。
+    """
     from qed_engine.services.learn import knowledge as knowledge_module
 
     assert "qe_kp_detail" not in knowledge_module.CREATE_TABLE_SQL
     assert not [p for p in {r.path for r in client.app.routes} if "kp-details" in p]
     _put_outline(client)
     point = _add_point(client, parent_kp_id=_get_outline(client)[0]["kp_id"])
-    assert "confirmed" not in point
+    assert "confirmed" not in point and point["confirm_state"] == "confirmed"
     assert all("confirmed" not in row for row in _get_outline(client))
     assert all(
         "confirmed" not in row
         for row in client.get("/api/v1/learn/courses/math_analysis/knowledge-points").json()["points"]
     )
+
+
+def test_ensure_columns_backfills_confirm_state_idempotently(monkeypatch):
+    """追加式补列守护（ADR 0027 D7）：缺列才 ALTER、已存在零动作，绝不隐式 DROP。"""
+    from types import SimpleNamespace
+
+    from qed_engine.services.learn import knowledge as knowledge_module
+
+    settings = SimpleNamespace(qed_db_name="qed_test")
+    absent = _RecordingConn([])
+    monkeypatch.setattr(knowledge_module, "_connect", lambda _settings: absent)
+    assert knowledge_module.ensure_columns(settings) == ["confirm_state"]
+    added = [sql for sql in absent.executed if sql.startswith("ALTER TABLE")]
+    assert len(added) == 1
+    assert "ADD COLUMN confirm_state VARCHAR(16) NOT NULL DEFAULT " + chr(39) + "unconfirmed" in added[0]
+
+    present = _RecordingConn([("kp_id",), ("confirm_state",)])
+    monkeypatch.setattr(knowledge_module, "_connect", lambda _settings: present)
+    assert knowledge_module.ensure_columns(settings) == []
+    assert not [sql for sql in present.executed if sql.startswith("ALTER TABLE")]
+
+
+class _RecordingCursor:
+    def __init__(self, conn: "_RecordingConn") -> None:
+        self._conn = conn
+
+    def __enter__(self) -> "_RecordingCursor":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, sql: str, params: object = None) -> None:
+        self._conn.executed.append(sql)
+
+    def fetchall(self) -> list[tuple[str, ...]]:
+        return self._conn.rows
+
+
+class _RecordingConn:
+    """假连接：只记录执行过的语句，供 `ensure_columns` 的幂等判据取证（不触真实库）。"""
+
+    def __init__(self, rows: list[tuple[str, ...]]) -> None:
+        self.rows = rows
+        self.executed: list[str] = []
+
+    def cursor(self) -> _RecordingCursor:
+        return _RecordingCursor(self)
+
+    def commit(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 def test_point_rows_carry_meta_extension_slot(client):
@@ -1138,9 +1330,14 @@ _UNSET = object()
 def _af(
     node_id, name, *, depth, parent_id=None, kind="outline", status="candidate",
     role="knowledge", summary="", pages=(12, 14), anchors=_UNSET, narrative_ref="",
-    order_hint=1, book=SYNC_BOOK_A,
+    order_hint=1, book=SYNC_BOOK_A, node_type=_UNSET, toc_kind="", confirmed=0,
 ):
-    """造一枚 `af_kp` 工作区行（形状照现网 ④ 透传读数：锚的 ref_id 是页 id 不是书 id）。"""
+    """造一枚 `af_kp` 工作区行（形状照现网 ④ 透传读数：锚的 ref_id 是页 id 不是书 id）。
+
+    `node_type` 默认不发键（＝上游旧形态，供 ADR 0028 的回落判据用例）；显式给值时按现网
+    ④ 派生键形状带上。`toc_kind` 默认空串（现网知识行为空，习题行取 `exercise`）。
+    `confirmed`＝梳理侧人工位（现网读数全 0，ADR 0027 取证）。
+    """
     start, end = pages if pages is not None else (None, None)
     if anchors is _UNSET:
         anchors = (
@@ -1153,9 +1350,12 @@ def _af(
         "parent_id": parent_id, "depth": depth, "order_hint": order_hint, "name": name,
         "role": "", "type": "", "summary": summary, "links": [], "anchors": list(anchors),
         "narrative_ref": narrative_ref, "gen_status": status, "gen_batch": "afkp-batch-1",
-        "model_ref": "rule:toc", "toc_role": role, "toc_kind": "", "confirmed": 0, "rev": 1,
+        "model_ref": "rule:toc", "toc_role": role, "toc_kind": toc_kind, "confirmed": confirmed,
+        "rev": 1,
         "created_at": "2026-10-29T17:10:29", "updated_at": "2026-10-29T17:31:34",
     }
+    if node_type is not _UNSET:
+        row["node_type"] = node_type
     if pages is not None:
         row["page_start"] = start
         row["page_end"] = end
@@ -1266,7 +1466,7 @@ def test_sync_promotes_only_clean_chapters_and_points(monkeypatch, store):
     assert book["ok"] is True
     assert book["chapters"]["created"] == 1 and book["chapters"]["reused"] == 0
     assert book["points"]["created"] == 2
-    assert book["excluded"] == {"rejected": 1, "reference": 1, "point_rows": 1}
+    assert book["excluded"] == {"rejected": 1, "reference": 1, "exercise": 0, "point_rows": 1}
     assert book["detached"] == 1
 
     assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_A)] == [
@@ -1274,6 +1474,148 @@ def test_sync_promotes_only_clean_chapters_and_points(monkeypatch, store):
     ]
     names = sorted(row["name"] for row in store.points.values() if row["node_kind"] == "point")
     assert names == ["单调有界原理", "确界原理"]
+
+
+def test_sync_mirrors_upstream_confirm_flag_up_only(monkeypatch, store):
+    """提升腿三通路之③＝按上游 `af_kp.confirmed` 镜像且只升不降，机器路径永不写 rejected（ADR 0027 D2③）。"""
+    ws = {
+        SYNC_BOOK_A: [
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40), confirmed=1),
+            _af("afkp-p1", "确界原理", depth=2, parent_id="afkp-ch1", pages=(9, 9), confirmed=1),
+            _af("afkp-p2", "单调有界原理", depth=2, parent_id="afkp-ch1", pages=(10, 12)),
+        ],
+        SYNC_BOOK_B: [],
+    }
+    _sync(_sync_client(monkeypatch, store, workspace=ws))
+    chapter = store.list_outline("math_analysis", SYNC_BOOK_A)[0]
+    points = {
+        str(row["name"]): str(row["kp_id"])
+        for row in store.points.values() if row["node_kind"] == "point"
+    }
+    assert chapter["confirm_state"] == "confirmed"
+    assert store.get_point(points["确界原理"])["confirm_state"] == "confirmed"
+    assert store.get_point(points["单调有界原理"])["confirm_state"] == "unconfirmed"
+
+    # 上游人工位被撤回＝机器不得据此抹掉人的判定（现网读数全 0，存量因此一律 unconfirmed）
+    for row in ws[SYNC_BOOK_A]:
+        row["confirmed"] = 0
+    _sync(_sync_client(monkeypatch, store, workspace=ws))
+    assert store.get_point(chapter["kp_id"])["confirm_state"] == "confirmed"
+    assert store.get_point(points["确界原理"])["confirm_state"] == "confirmed"
+    assert all(row["confirm_state"] != "rejected" for row in store.points.values())
+
+
+def test_demo_gate_machine_to_human_end_to_end(monkeypatch, store):
+    """REQ-148 W1 demo 门＝一行知识点从「机器整理出来」走到「人真背过」再被驳回的整链读数。
+
+    每步只换一个动作，判据一律从端点取（不读 store 内部）：提升腿（上游未背书）落
+    `unconfirmed` → 星图两键 1/0 → `PATCH confirmed` → 两键 1/1 → `PATCH rejected` →
+    学习面与两键一起退场 → `PATCH unconfirmed` 翻案回场（人工通道要能触到驳回行）。
+    """
+    client = _sync_client(monkeypatch, store, workspace={
+        SYNC_BOOK_A: [
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40)),
+            _af("afkp-p1", "确界原理", depth=2, parent_id="afkp-ch1", pages=(9, 9)),
+        ],
+        SYNC_BOOK_B: [],
+    })
+    _sync(client)
+
+    def _course_point(name):
+        body = client.get(
+            "/api/v1/learn/courses/math_analysis/knowledge-points?include_outline=true"
+        ).json()
+        return next(p for p in body["points"] if p["name"] == name)
+
+    point = _course_point("确界原理")
+    assert point["confirm_state"] == "unconfirmed", "机器提升、上游没背书＝不得自称已确认"
+    node = _star_course(client)
+    assert (node["kp_total"], node["kp_confirmed"]) == (1, 0), "整理度照数，背书数归零"
+
+    signed = client.patch(
+        f"/api/v1/learn/knowledge-points/{point['kp_id']}", json={"confirm_state": "confirmed"}
+    ).json()
+    assert signed["confirm_state"] == "confirmed"
+    node = _star_course(client)
+    assert (node["kp_total"], node["kp_confirmed"]) == (1, 1), "两键各说各事，人签字才进第二键"
+
+    rejected = client.patch(
+        f"/api/v1/learn/knowledge-points/{point['kp_id']}", json={"confirm_state": "rejected"}
+    ).json()
+    assert rejected["confirm_state"] == "rejected"
+    assert client.get("/api/v1/learn/knowledge-points?course=math_analysis").json()["total"] == 0
+    node = _star_course(client)
+    assert (node["kp_total"], node["kp_confirmed"]) == (0, 0), "驳回行既不进列表也不进整理度"
+
+    revived = client.patch(
+        f"/api/v1/learn/knowledge-points/{point['kp_id']}", json={"confirm_state": "unconfirmed"}
+    ).json()
+    assert revived["confirm_state"] == "unconfirmed"
+    node = _star_course(client)
+    assert (node["kp_total"], node["kp_confirmed"]) == (1, 0), "翻案后回到未背书但照画的状态"
+    assert _course_point("确界原理")["kp_id"] == point["kp_id"], "全链只动一列，行本身不换身份"
+
+
+def test_sync_excludes_exercise_rows_by_node_type(monkeypatch, store):
+    """ADR 0028 G3 主判据：`node_type=='exercise'` 的行不提升——即便形状正是 REQ-146 S1 将产的
+    「父＝所属章的 depth2」（现网 0 污染属巧合，落闸后才是防线）。"""
+    ws = {
+        SYNC_BOOK_A: [
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40)),
+            _af("afkp-p1", "确界原理", depth=2, parent_id="afkp-ch1", pages=(9, 9)),
+            _af("afkp-ex", "习题 1.2", depth=2, parent_id="afkp-ch1", pages=(38, 40),
+                node_type="exercise", toc_kind="exercise"),
+            _af("afkp-other", "总复习", depth=2, parent_id="afkp-ch1", pages=(41, 41),
+                node_type="other"),
+        ],
+        SYNC_BOOK_B: [],
+    }
+    body = _sync(_sync_client(monkeypatch, store, workspace=ws))
+    book = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["excluded"]["exercise"] == 1
+    promoted = sorted(row["name"] for row in store.points.values() if row["node_kind"] == "point")
+    assert promoted == ["总复习", "确界原理"]
+
+
+def test_sync_excludes_exercise_rows_by_toc_kind_fallback(monkeypatch, store):
+    """ADR 0028 G3 回落判据：上游少发 `node_type` 时按 `toc_kind=='exercise'` 仍拦住——
+    闸不许因上游收窄键而静默失效。"""
+    ws = {
+        SYNC_BOOK_A: [
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40)),
+            _af("afkp-ex", "习题", depth=2, parent_id="afkp-ch1", pages=(38, 40),
+                toc_kind="exercise"),
+        ],
+        SYNC_BOOK_B: [],
+    }
+    body = _sync(_sync_client(monkeypatch, store, workspace=ws))
+    book = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["excluded"]["exercise"] == 1
+    assert _promoted_points(store, SYNC_BOOK_A) == set()
+
+
+def test_sync_exercise_gate_keeps_survivor_counts_and_response_shape(monkeypatch, store):
+    """端到端：闸落在 `reference` 之后、不改章与点的幸存计数口径，响应 `excluded` 出四枚键。"""
+    ws = {
+        SYNC_BOOK_A: [
+            _af("afkp-ref", "前言", depth=1, role="reference", pages=(4, 4)),
+            _af("afkp-ch1", "第1章 实数", depth=1, pages=(9, 40)),
+            _af("afkp-p1", "确界原理", depth=2, parent_id="afkp-ch1", pages=(9, 9)),
+            _af("afkp-ex", "习题 1.2", depth=2, parent_id="afkp-ch1", pages=(38, 40),
+                node_type="exercise"),
+            _af("afkp-rej", "被驳回的节", depth=2, parent_id="afkp-ch1", status="rejected",
+                node_type="point"),
+        ],
+        SYNC_BOOK_B: [],
+    }
+    body = _sync(_sync_client(monkeypatch, store, workspace=ws))
+    book = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_A)
+    assert book["excluded"] == {"rejected": 1, "reference": 1, "exercise": 1, "point_rows": 0}
+    assert book["chapters"]["created"] == 1
+    assert book["points"]["created"] == 1
+    assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_A)] == [
+        "第1章 实数"
+    ]
 
 
 def test_sync_sequence_reads_promoted_rows_with_book_scoped_window(monkeypatch, store):
@@ -1296,6 +1638,16 @@ def test_sync_sequence_reads_promoted_rows_with_book_scoped_window(monkeypatch, 
     assert units[0]["anchors"][0]["ref_id"] == SYNC_BOOK_A
     assert units[0]["summary"] == "点总结一"
     assert units[1]["summary"] == ""
+
+
+def test_rejected_points_leave_the_course_sequence(monkeypatch, store):
+    """学习序列走同一道读闸：驳回的知识点不进推进单元，其余照排（机器提升与人工驳回同判据）。"""
+    client = _sync_client(monkeypatch, store)
+    _sync(client)
+    assert [unit["title"] for unit in _sequence(client)["units"]] == ["确界原理", "单调有界原理"]
+    rejected = next(row for row in store.points.values() if row["name"] == "单调有界原理")
+    store.patch_point(rejected["kp_id"], confirm_state="rejected")
+    assert [unit["title"] for unit in _sequence(client)["units"]] == ["确界原理"]
 
 
 def test_sync_sequence_rows_belong_to_their_own_book(monkeypatch, store):
@@ -1425,7 +1777,7 @@ def test_sync_leaves_half_reviewed_book_subtree_untouched(monkeypatch, store):
     body = _sync(client)
     book_b = next(item for item in body["books"] if item["book_ref"] == SYNC_BOOK_B)
     assert book_b["skipped_empty"] is True
-    assert book_b["excluded"] == {"rejected": 0, "reference": 1, "point_rows": 0}
+    assert book_b["excluded"] == {"rejected": 0, "reference": 1, "exercise": 0, "point_rows": 0}
     assert [row["name"] for row in store.list_outline("math_analysis", SYNC_BOOK_B)] == [
         "人工整理的章"
     ]

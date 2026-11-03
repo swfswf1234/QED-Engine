@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：Implemented
-最后更新：2026-10-15
+最后更新：2026-11-03
 确认状态：暂定
 关联代码：`web-ui/`（React 19 + TypeScript + Vite 构建，构建产物 `web-ui/dist/` 由
 `scripts/serve_web.py` 静态托管 8903）、`web-ui/.env.production`（`VITE_API_BASE`）
@@ -55,7 +55,7 @@ web-ui/
 ## 信息架构（hash 路由）
 
 - `#/` 主界面（Home）：学习中心框架（领域→课程→章节/知识点浏览，数学试点）+ 使用手册。
-- `#/knowledge` 学习中心 · 知识探索（Knowledge，单页两视图）：领域层＝星空背景层上的「层＝行 × 轨迹＝列」森林导航（领域下拉 + 轨迹列框 + 课程框 + 先修连线），课程卡悬停＝课程名称＋课程叙述（`GET /learn/star-map` 的 `description`），点击就地下钻；课程层＝该课**大知识点虚框＋框内小知识点条目**的层级星图（同页替换、深链 `#/knowledge?course={course_id}`、面包屑「知识探索 / {课程名}」回退且不含领域名、零知识点写面、无通往学习／练习的出口）。该面设计已于 2026-10-15 晋升 [knowledge-point-exploration-ui.md](../design/frontend/knowledge-point-exploration-ui.md)（暂定；REQ-104／110／113／114 四行合一份），原晋升稿正文归档 [learning-star-map.md](../history/plans/2026-10/learning-star-map.md)。
+- `#/knowledge` 学习中心 · 知识探索（Knowledge，单页两视图）：领域层＝星空背景层上的「层＝行 × 轨迹＝列」森林导航（领域下拉 + 轨迹列框 + 课程框 + 先修连线），课程卡悬停＝课程名称＋课程叙述（`GET /learn/star-map` 的 `description`），点击就地下钻；课程层＝该课**章节虚框＋框内知识点条目**的层级星图（同页替换、深链 `#/knowledge?course={course_id}`、面包屑「知识探索 / {课程名}」回退且不含领域名、零知识点写面、无通往学习／练习的出口）。该面设计已于 2026-10-15 晋升 [knowledge-point-exploration-ui.md](../design/frontend/knowledge-point-exploration-ui.md)（已确认 2026-11-03；REQ-104／110／113／114 四行合一份），原晋升稿正文归档 [learning-star-map.md](../history/plans/2026-10/learning-star-map.md)。
 - `#/learn` 学习中心 · 课程学习·书架清单（LearnShelf）：**服务端同步结果的展示面**（`POST /learn/courses/sync`——教材在解析侧就绪即出现在书架，未就绪者服务端 PASS），**界面不新建、不删除学习课程**，页头「刷新」＝重新同步。形态＝标题行右侧领域下拉（进场默认第一个领域）→ 课程行（标题＝共享表**正式名称**，状态徽章词本身承载口径＝`已结课`／`学习进度 N%`／`知识点未就绪`／`未开始`）→ 课程下**教材横排小卡片**（书名＋面向对象档位＋该教材进度 `N/M 条`＋教程套简介，动作＝「进入学习」深链与「忽略」，忽略＝教材级 `dismissed` 写进 `resources` JSON、可在「已忽略」区按回来）；页头三枚＝使用手册／刷新／返回。解析侧不可达时只列既有课程、不白屏（独立性铁律）。该面设计已于 2026-10-18 随 REQ-117 晋升 [learning-course-ui.md](../design/frontend/learning-course-ui.md)（暂定）。
 - `#/learn/c/:learnCourseId?book=` 学习中心 · 课程学习·单屏工作台（LearnWorkbench）：三栏同屏 + 断点三档（≥1400 三栏／1000~1400 目录＋正文／<1000 单栏，窄栏收「打开目录／打开学习交流」抽屉）。**左＝「章 → 知识点」两级目录**（节层不显形，栏内只列名称与自己的「已学」标记、零处理进度说明，行左缘两档 8px／22px）；**中＝一条知识点的连续正文流**（复用解析管理版式 parsing-ui §9.1，跨页合并、按 8 页/批滚动续取、界面无页码与「继续加载」，image 块按页图 `bbox` 内联裁切），**正文末尾三枚推进**＝上一条／下一条／已掌握并下一条（同条再点＝撤销）；**右＝「学习交流」三段**＝本章总结与学习要点 → 详解（直读知识点主表行 `angles`，**数组序即权威展示序**，
 前端不重排、无点赞与块级过滤；`narrative_ref` 非空时另给「读这一条的正文」文件读腿；段末 LLM 提问占位零请求）

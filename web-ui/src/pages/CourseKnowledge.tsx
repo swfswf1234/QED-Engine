@@ -1,5 +1,5 @@
 /**
- * 知识探索·课程层级星图视图（REQ-113 W3~W4：七审改判，大知识点虚框＋框内小知识点条目）
+ * 知识探索·课程层级星图视图（REQ-113 W3~W4：七审改判，章节虚框＋框内知识点条目）
  * - 设计：docs/design/knowledge-point-exploration-ui.md §9/§10
  *   （承载页面＝Knowledge.tsx 单页；本视图是被替换进主体的那一段，URL 形态 `#/knowledge?course={id}`）
  * - 主体只画虚框堆叠与框内条目网格，几何决策在 kpTreeLayout 纯函数；**归属由虚框承载，不画层级线**
@@ -8,6 +8,7 @@
  * - 课程名行＝本视图唯一标题（《课程名》＋介绍），只显一处不与图区重复
  * - 无浅色卡：图区直接画在星空层上，控件与文字随页面级暗色 ConfigProvider（五审裁决 2026-10-14）
  * - 零写面（§11）：候选确认/驳回/登记归工作台批注闭环（M6），本视图不请求候选池
+ * - 读量如实（REQ-147 W2）：只在服务端 `truncated=true` 时于图区上方出一行载入数／全量数，未触顶不出字
  */
 import { useEffect, useMemo } from 'react';
 import { Alert, Button, Spin, Typography } from 'antd';
@@ -21,6 +22,8 @@ const { Title, Text, Paragraph } = Typography;
 export default function CourseKnowledge({ courseId, contentWidth = 0 }: { courseId: string; contentWidth?: number }) {
   const course = useCourseKnowledgeStore((s) => s.course);
   const rows = useCourseKnowledgeStore((s) => s.rows);
+  const total = useCourseKnowledgeStore((s) => s.total);
+  const truncated = useCourseKnowledgeStore((s) => s.truncated);
   const loading = useCourseKnowledgeStore((s) => s.loading);
   const error = useCourseKnowledgeStore((s) => s.error);
   const notFound = useCourseKnowledgeStore((s) => s.notFound);
@@ -52,13 +55,20 @@ export default function CourseKnowledge({ courseId, contentWidth = 0 }: { course
         />
       )}
 
+      {/* 读量封顶只在真触顶时说一句（REQ-147 W2）：图上的行数是载入数，不等于该课全量 */}
+      {!error && truncated && (
+        <Paragraph style={{ marginBottom: 14, color: '#a9bde3', maxWidth: 920 }}>
+          {`该课程共 ${total} 条知识点，本次只载入 ${rows.length} 条——图只画到载入的部分，缺的不是没登记的知识点。`}
+        </Paragraph>
+      )}
+
       {!error && (loading && rows.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 80 }}><Spin /></div>
       ) : layout.boxes.length > 0 ? (
         <KpTreeGraph layout={layout} />
       ) : (
         <div className="kn-empty kn-empty-dark">
-          <Text style={{ color: '#a9bde3' }}>该课程暂无已确认知识点</Text>
+          <Text style={{ color: '#a9bde3' }}>该课程暂无已整理知识点</Text>
         </div>
       ))}
     </div>

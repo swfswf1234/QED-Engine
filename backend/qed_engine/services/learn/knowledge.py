@@ -1,9 +1,10 @@
-"""学习域·知识点主表存储（M5）：`qed_knowledge_point`（共享主数据，25 列）。
+"""学习域·知识点主表存储（M5）：`qed_knowledge_point`（共享主数据，26 列）。
 
-模块职责：第四张共享表的幂等建表、norm_key 规范化、point 行直登记与检索聚合、outline
-整树幂等替换与归属移动；事实源＝docs/architecture/database-design.md §五。
-两段式口径不变：主表一行即一条**已确认**知识点（确认由「写入主表」这一动作承载，本表无
-确认位列）。候选池 `qe_kp_detail` 与其五枚端点已随 ADR 0026 D1/D10 退出，point 行的产面
+模块职责：第四张共享表的幂等建表与追加式补列、norm_key 规范化、point 行直登记与检索聚合、
+outline 整树幂等替换与归属移动；事实源＝docs/architecture/database-design.md §五。
+两段式口径：主表一行＝一条知识点或目录节点，「人已背书」由实列 `confirm_state` 承载
+（三值闭集，默认 `unconfirmed`；直登记落 `confirmed`，提升腿按上游人工位镜像只升不降）。
+候选池 `qe_kp_detail` 与其五枚端点已随 ADR 0026 D1/D10 退出，point 行的产面
 平移为 `add_point()`（`POST /learn/knowledge-points` 直登记）；多版本叙述改由主表
 `angles` 索引 + `narrative_ref` 指针承载，正文落在数据根 `parsed/**`，不落库。
 设计关联（DesignRef）：docs/architecture/database-design.md
@@ -32,8 +33,13 @@ logger = logging.getLogger("qed_engine.learn")
 KP_TYPES = ("memory", "procedure", "concept", "design")
 # 多角度叙述闭集（主表 `angles` 列内元素；ADR 0026 D5，复用退役候选池的既有六词，不新造）
 ANGLE_KINDS = ("summary", "explanation", "definition", "theorem", "proof", "example")
-# M6：主表一行 Either 目录节点（大知识点）或细知识点
+# M6：主表一行 Either 目录节点（章节）或知识点
 NODE_KINDS = ("outline", "point")
+# 人工确认位三值闭集：列名与取值沿用 Axiom-Flow `af_pages.confirm_state` 的族内判例，不造第二形
+CONFIRM_UNCONFIRMED = "unconfirmed"
+CONFIRM_CONFIRMED = "confirmed"
+CONFIRM_REJECTED = "rejected"
+CONFIRM_STATES = (CONFIRM_UNCONFIRMED, CONFIRM_CONFIRMED, CONFIRM_REJECTED)
 # 审计列取值：写入方服务标识（与 qed_domain/qed_course 的 created_by/updated_by 同口径）
 WRITER = "qed_engine"
 
@@ -44,7 +50,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   domain_label VARCHAR(255) DEFAULT '' COMMENT '领域名快照',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course）',
   course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  node_kind VARCHAR(16) NOT NULL DEFAULT 'point' COMMENT '闭集 outline=目录节点(大知识点) / point=细知识点',
+  node_kind VARCHAR(16) NOT NULL DEFAULT 'point' COMMENT '闭集 outline=目录节点(章节) / point=知识点（两型都可进知识点序列；序列永不含习题行，见 ADR 0028 G1）',
   parent_kp_id VARCHAR(64) COMMENT 'outline：父 outline（章=NULL，节=章）；point：所属 outline（NULL=未归档池）',
   depth TINYINT COMMENT 'outline 层级：1=章 2=节；point 行 NULL',
   book_ref VARCHAR(64) COMMENT 'outline：来源书（qt_books.book_id，版本换代不碎树）；point 行 NULL（空串哨兵随 DEFECT-011 唯一键降级后撤销）',
@@ -60,6 +66,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   anchors JSON COMMENT '来源锚点 [{kind,ref_id,page?,snippet?}]（DeepTutor K1 形状，降级不删）',
   from_detail_id VARCHAR(64) COMMENT '提升幂等锚=Axiom-Flow af_kp.node_id（梳理侧节点稳定身份，一经发放不可变）',
   meta JSON COMMENT '扩展槽：未定档字段先入本列（只读不筛）；定档后升为实体列并清空对应键',
+  confirm_state VARCHAR(16) NOT NULL DEFAULT 'unconfirmed' COMMENT '人工确认位 闭集 unconfirmed/confirmed/rejected（人背书位；提升腿按上游 af_kp.confirmed 镜像只升不降，机器路径不写 rejected）',
   created_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '创建写入方标识（qed_engine）',
   updated_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '最近写入方标识（qed_engine）',
   created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
@@ -69,15 +76,29 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   KEY idx_kp_course_kind (course_id, node_kind),
   KEY idx_kp_domain (domain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；一行=一个人工确认的行，别名/长文指针/角度索引同表承载；结构由 QED-Engine 根定义）';
+COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；人工确认态由 confirm_state 列承载，别名/长文指针/角度索引同表承载；结构由 QED-Engine 根定义）';
 """
 
 _POINT_COLUMNS = (
     "kp_id, domain_id, domain_label, course_id, course_label, node_kind, parent_kp_id, depth, "
     "book_ref, name, aliases, norm_key, type, order_hint, summary, narrative_ref, angles, "
-    "source_ref, anchors, from_detail_id, meta, created_by, updated_by, created_at, updated_at"
+    "source_ref, anchors, from_detail_id, meta, confirm_state, created_by, updated_by, "
+    "created_at, updated_at"
 )
 _JSON_COLUMNS = ("anchors", "aliases", "angles")
+
+
+def _create_column_ddl(name: str) -> str:
+    """取建表语句里该列的原文行（去尾逗号）＝补列 ALTER 的唯一片段来源，两侧不各写一份。"""
+    return next(
+        line.strip().rstrip(",")
+        for line in CREATE_TABLE_SQL.splitlines()
+        if line.strip().startswith(f"{name} ")
+    )
+
+
+# 追加式补列清单：库内缺哪列就 ALTER 哪列（绝不隐式 DROP）；新列定档即在此登记
+_ADDABLE_COLUMNS = {"confirm_state": _create_column_ddl("confirm_state")}
 
 
 def norm_key(name: str) -> str:
@@ -190,14 +211,17 @@ class MySQLKnowledgeStore:
         order_hint: int | None = None,
         from_detail_id: str = "",
         source_ref: dict[str, Any] | None = None,
+        confirm_state: str = CONFIRM_CONFIRMED,
     ) -> dict[str, Any]:
         """直登记一条 point 行＝候选池退役后主表的唯一产面（ADR 0026 D10）。
 
         父级只允许同课程的 outline 行或 NULL（未归档池）；同课程重复 `norm_key` 拒绝 409；
-        「写入本表」这一动作即承载确认（R6：主表无确认位列）。
+        默认落 `confirmed`＝「人坐在键盘前点这一枚登记」即人的背书（ADR 0027 D2①），
+        请求侧 `PointCreateBody` 未声明本键，取值不由调用方指定。
 
         `source_ref`＝机器腿专用页窗（提升同步腿写，`PointCreateBody` 未声明 ⇒ 请求侧不可达）：
         梳理侧的 `page_start`／`page_end` 两键在此落地，读侧三级回落的第一级即命中。
+        `confirm_state` 同属机器腿可显式传入的键＝提升腿按上游 `af_kp.confirmed` 镜像的结果。
         """
         if not str(course_id or "").strip():
             raise LearnConflict("course_id 不可为空")
@@ -205,6 +229,8 @@ class MySQLKnowledgeStore:
             raise LearnConflict("name 不可为空")
         if type is not None and type not in KP_TYPES:
             raise LearnConflict(f"type 必须是 {KP_TYPES} 之一")
+        if confirm_state not in CONFIRM_STATES:
+            raise LearnConflict(f"confirm_state 必须是 {CONFIRM_STATES} 之一")
         key = norm_key(name)
         conn = self._connect()
         try:
@@ -233,12 +259,12 @@ class MySQLKnowledgeStore:
                     "(kp_id, domain_id, domain_label, course_id, course_label, node_kind, "
                     " parent_kp_id, depth, book_ref, name, aliases, norm_key, type, order_hint, "
                     " summary, narrative_ref, angles, source_ref, anchors, from_detail_id, meta, "
-                    " created_by, updated_by, created_at, updated_at) "
+                    " confirm_state, created_by, updated_by, created_at, updated_at) "
                     "VALUES (%(kp_id)s, %(domain_id)s, %(domain_label)s, %(course_id)s, "
                     " %(course_label)s, 'point', %(parent_kp_id)s, NULL, NULL, %(name)s, "
                     " %(aliases)s, %(norm_key)s, %(type)s, %(order_hint)s, %(summary)s, "
-                    " %(narrative_ref)s, NULL, %(source_ref)s, %(anchors)s, %(from_detail_id)s, NULL, "
-                    " %(writer)s, %(writer)s, %(now)s, %(now)s)",
+                    " %(narrative_ref)s, NULL, %(source_ref)s, %(anchors)s, %(from_detail_id)s, "
+                    " NULL, %(confirm_state)s, %(writer)s, %(writer)s, %(now)s, %(now)s)",
                     {
                         "kp_id": kp_id,
                         "domain_id": domain_id,
@@ -256,6 +282,7 @@ class MySQLKnowledgeStore:
                         "source_ref": _to_json(source_ref),
                         "anchors": _to_json(anchors or []),
                         "from_detail_id": from_detail_id or None,
+                        "confirm_state": confirm_state,
                         "writer": WRITER,
                         "now": now,
                     },
@@ -284,9 +311,13 @@ class MySQLKnowledgeStore:
         kind: str | None = "point",
         limit: int = 50,
         offset: int = 0,
+        exclude_rejected: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         where: list[str] = []
         params: list[Any] = []
+        if exclude_rejected:
+            where.append("confirm_state<>%s")
+            params.append(CONFIRM_REJECTED)
         if kind:
             where.append("node_kind=%s")
             params.append(kind)
@@ -316,25 +347,34 @@ class MySQLKnowledgeStore:
         return [_row_to_dict(row) for row in rows], total
 
     def counts_by_course(self) -> dict[str, dict[str, int]]:
-        """星图节点徽标：{course_id: {confirmed}}（只数 point 行，章名不计入；候选位随池表退出）。"""
+        """星图两键分桶（ADR 0027 D4）：`total`＝机器整理出来的点数（驳回行不数）、
+        `confirmed`＝人真背过的点数；只数 point 行，章名不计入。"""
         counts: dict[str, dict[str, int]] = {}
         with self._connect() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT course_id, COUNT(*) AS n FROM qed_knowledge_point "
+                    "SELECT course_id, "
+                    "SUM(confirm_state <> 'rejected') AS total, "
+                    "SUM(confirm_state = 'confirmed') AS confirmed FROM qed_knowledge_point "
                     "WHERE node_kind='point' GROUP BY course_id"
                 )
                 for row in cursor.fetchall():
-                    counts.setdefault(row["course_id"], {})["confirmed"] = int(row["n"])
-        for entry in counts.values():
-            entry.setdefault("confirmed", 0)
+                    counts[row["course_id"]] = {
+                        "total": int(row["total"] or 0),
+                        "confirmed": int(row["confirmed"] or 0),
+                    }
         return counts
 
     # ---------- 章节目录树（outline 行） ----------
 
-    def list_outline(self, course_id: str, book_ref: str | None = None) -> list[dict[str, Any]]:
+    def list_outline(
+        self, course_id: str, book_ref: str | None = None, *, exclude_rejected: bool = False
+    ) -> list[dict[str, Any]]:
         where = ["node_kind='outline'", "course_id=%s"]
         params: list[Any] = [course_id]
+        if exclude_rejected:
+            where.append("confirm_state<>%s")
+            params.append(CONFIRM_REJECTED)
         if book_ref:
             where.append("book_ref=%s")
             params.append(book_ref)
@@ -348,8 +388,9 @@ class MySQLKnowledgeStore:
                 rows = [_row_to_dict(row) for row in cursor.fetchall()]
                 cursor.execute(
                     "SELECT parent_kp_id, COUNT(*) AS n FROM qed_knowledge_point "
-                    "WHERE node_kind='point' AND course_id=%s GROUP BY parent_kp_id",
-                    (course_id,),
+                    "WHERE node_kind='point' AND course_id=%s AND confirm_state<>%s "
+                    "GROUP BY parent_kp_id",
+                    (course_id, CONFIRM_REJECTED),
                 )
                 points = {row["parent_kp_id"]: int(row["n"]) for row in cursor.fetchall() if row["parent_kp_id"]}
         for row in rows:
@@ -472,7 +513,10 @@ class MySQLKnowledgeStore:
         }
 
     def patch_point(self, kp_id: str, **fields: Any) -> dict[str, Any]:
-        """白名单改列（parent_kp_id / name / order_hint / summary），归属与改名不重开确认。
+        """白名单改列（parent_kp_id / name / order_hint / summary / confirm_state），归属与改名不重开确认。
+
+        `confirm_state`＝人工确认位（三值闭集，`None`＝不改）：人工背书、驳回与翻案都走本键，
+        提升腿只在镜像目标为 `confirmed` 时传入（只升不降，机器永不写 `rejected`）。
 
         `meta`＝扩展槽合并写入（REQ-117 C20：章级学习要点落 `meta.chapter_key_points`，零 DDL）；
         只覆盖给出的键，不开放给人工面端点。
@@ -504,6 +548,12 @@ class MySQLKnowledgeStore:
                 if "summary" in fields:
                     sets.append("summary=%s")
                     params.append(fields["summary"])
+                if fields.get("confirm_state") is not None:
+                    state = str(fields["confirm_state"])
+                    if state not in CONFIRM_STATES:
+                        raise LearnConflict(f"confirm_state 必须是 {CONFIRM_STATES} 之一")
+                    sets.append("confirm_state=%s")
+                    params.append(state)
                 if "from_detail_id" in fields:
                     sets.append("from_detail_id=%s")
                     params.append(fields["from_detail_id"] or None)
@@ -561,8 +611,33 @@ class MySQLKnowledgeStore:
         return self.get_point(kp_id)
 
 
+def ensure_columns(settings: Settings) -> list[str]:
+    """幂等补齐主表缺失列（判例 qed_llm_calls）；只做追加式 ADD COLUMN，绝不隐式 DROP。
+
+    返回本次新增的列名。已存在的表不因本函数改形：列残留无害，删除列属破坏性变更。
+    """
+    conn = _connect(settings)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'qed_knowledge_point'",
+                (settings.qed_db_name,),
+            )
+            existing = {row[0] for row in cursor.fetchall()}
+            added: list[str] = []
+            for column, ddl in _ADDABLE_COLUMNS.items():
+                if column not in existing:
+                    cursor.execute(f"ALTER TABLE qed_knowledge_point ADD COLUMN {ddl}")
+                    added.append(column)
+        conn.commit()
+        return added
+    finally:
+        conn.close()
+
+
 def ensure_tables(settings: Settings) -> None:
-    """幂等建主表（判例 qed_llm_calls）；数据库不可达抛异常由调用方降级。"""
+    """幂等建主表并补齐定档列（判例 qed_llm_calls）；数据库不可达抛异常由调用方降级。"""
     conn = _connect(settings)
     try:
         with conn.cursor() as cursor:
@@ -573,6 +648,7 @@ def ensure_tables(settings: Settings) -> None:
         conn.commit()
     finally:
         conn.close()
+    ensure_columns(settings)
 
 
 def build_store(settings: Settings) -> MySQLKnowledgeStore | None:

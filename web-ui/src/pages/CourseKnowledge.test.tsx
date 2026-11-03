@@ -1,8 +1,8 @@
 /**
- * 课程层视图单测（REQ-110 W3 由「页」降级为同页内视图；REQ-113 W4 七审改判为大知识点虚框＋框内条目）
+ * 课程层视图单测（REQ-110 W3 由「页」降级为同页内视图；REQ-113 W4 七审改判为章节虚框＋框内条目）
  * 口径：本视图只承载主体（《课程名》行＋介绍＋层级星图/空态/降级提示），
  * 页头、大标题与面包屑归 Knowledge.tsx（同页替换层），领域下拉只属领域层，本视图零导航按钮。
- * 图上只有两层：虚框＝大知识点、条目＝框内小知识点；无父／悬空父的 point 不进图，也不出现「未归档」。
+ * 图上只有两层：虚框＝章节、条目＝框内知识点；无父／悬空父的 point 不进图，也不出现「未归档」。
  * ECharts 依赖 canvas，jsdom 不可用：层级星图以框／条目名单替身透出（同 Knowledge.test 处理）。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -41,6 +41,7 @@ function overviewOf(courseExtra: Record<string, unknown>, points: unknown[]) {
     course: { course_id: 'ma', name: '数学分析', track: '分析学', domain_id: 'math', description: '极限、连续与一元微积分', ...courseExtra },
     points,
     total: points.length,
+    truncated: false,
     candidate_total: 0,
   };
 }
@@ -67,7 +68,7 @@ describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + R
     mockFetch.mockReset();
   });
 
-  it('《课程名》＋介绍 + 层级星图（虚框＝大知识点，条目＝框内小知识点）', async () => {
+  it('《课程名》＋介绍 + 层级星图（虚框＝章节，条目＝框内知识点）', async () => {
     routeReads();
     renderView();
     expect(await screen.findByText('《数学分析》')).toBeInTheDocument();
@@ -90,16 +91,16 @@ describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + R
     expect(await screen.findByLabelText('层级星图')).toHaveAttribute('data-width', '1360');
   });
 
-  it('只有大知识点（outline 行，无 point）也出图；全是无父 point → 走空态', async () => {
+  it('只有章节（outline 行，无 point）也出图；全是无父 point → 走空态', async () => {
     routeReads(overviewOf({}, [OUTLINE_ROWS[0], OUTLINE_ROWS[1]]));
     const first = renderView();
     expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
-    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已整理知识点')).not.toBeInTheDocument();
     first.unmount();
 
     routeReads(overviewOf({}, [OUTLINE_ROWS[3]]));
     renderView('complex_analysis');
-    expect(await screen.findByText('该课程暂无已确认知识点')).toBeInTheDocument();
+    expect(await screen.findByText('该课程暂无已整理知识点')).toBeInTheDocument();
     expect(screen.queryByLabelText('层级星图')).not.toBeInTheDocument();
   });
 
@@ -133,10 +134,28 @@ describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + R
     expect(String(mockFetch.mock.calls[0][0])).toContain('include_outline=true');
   });
 
-  it('无已确认知识点 → 空态「该课程暂无已确认知识点」，课程名与介绍照常显示，不画图', async () => {
+  // REQ-147 W2：读量封顶必须显式说出来——图上数出来的行数是「载入数」，不是「该课全量」
+  it('触顶才出「本次只载入 N 条（该课共 M 条）」一行；未触顶一个字不出', async () => {
+    routeReads({ ...overviewOf({}, OUTLINE_ROWS.slice(0, 2)), total: 3001, truncated: true });
+    const first = renderView();
+    expect(await screen.findByLabelText('层级星图')).toBeInTheDocument();
+    const notice = screen.getByText(/本次只载入/);
+    expect(notice.textContent).toContain('2');
+    expect(notice.textContent).toContain('3001');
+    // 不是「未整理」的话术，也不与统计行／复习段混写
+    expect(notice).not.toHaveTextContent(/未整理|已确认 \d|轨迹|复习/);
+    first.unmount();
+
+    routeReads();
+    renderView();
+    await screen.findByLabelText('层级星图');
+    expect(screen.queryByText(/本次只载入/)).not.toBeInTheDocument();
+  });
+
+  it('无已整理知识点 → 空态「该课程暂无已整理知识点」，课程名与介绍照常显示，不画图', async () => {
     routeReads(overviewOf({}, []));
     renderView('complex_analysis');
-    expect(await screen.findByText('该课程暂无已确认知识点')).toBeInTheDocument();
+    expect(await screen.findByText('该课程暂无已整理知识点')).toBeInTheDocument();
     expect(screen.getByText('《数学分析》')).toBeInTheDocument();
     expect(screen.getByText('极限、连续与一元微积分')).toBeInTheDocument();
     expect(screen.queryByLabelText('层级星图')).not.toBeInTheDocument();
@@ -166,7 +185,7 @@ describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + R
     renderView();
     expect(await screen.findByText('知识点数据不可达')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /重\s*试/ })).toBeInTheDocument();
-    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已整理知识点')).not.toBeInTheDocument();
   });
 
   it('课程不存在（404）→ 「课程不存在或已下线」，不显示重试也不误报空态', async () => {
@@ -176,7 +195,7 @@ describe('课程层级星图视图 CourseKnowledge（REQ-110 同页内视图 + R
     renderView('ghost');
     expect(await screen.findByText('课程不存在或已下线')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /重\s*试/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已整理知识点')).not.toBeInTheDocument();
   });
 
   it('切换 courseId 只重取该课数据：旧课程名不残留', async () => {

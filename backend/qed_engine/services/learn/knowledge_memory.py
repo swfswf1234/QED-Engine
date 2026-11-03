@@ -1,6 +1,6 @@
 """知识点主表的内存实现（M5 语义 + M6 层级）：契约测试注入 + 数据库未接入期降级。
 
-模块职责：InMemoryKnowledgeStore——主表层级（outline 目录节点 / point 细知识点）、
+模块职责：InMemoryKnowledgeStore——主表层级（outline 目录节点 / point 知识点）、
 point 行直登记（`add_point`）、多角度索引追加（`append_angle`）与目录整树幂等替换
 （同名复用 kp_id、失父 point 归未归档池）的进程内实现，接口与 MySQLKnowledgeStore 同形。
 候选池 `qe_kp_detail` 及其六枚方法已随 ADR 0026 D1/D10 退出。
@@ -20,6 +20,10 @@ from typing import Any
 from qed_engine.services.learn.base import LearnConflict, LearnNotFound
 from qed_engine.services.learn.knowledge import (
     ANGLE_KINDS,
+    CONFIRM_CONFIRMED,
+    CONFIRM_REJECTED,
+    CONFIRM_STATES,
+    CONFIRM_UNCONFIRMED,
     KP_TYPES,
     WRITER,
     flatten_outline,
@@ -57,10 +61,12 @@ class InMemoryKnowledgeStore:
         order_hint: int | None = None,
         from_detail_id: str = "",
         source_ref: dict[str, Any] | None = None,
+        confirm_state: str = CONFIRM_CONFIRMED,
     ) -> dict[str, Any]:
         """直登记一条 point 行＝候选池退役后主表的唯一产面（与 MySQL 实现同校验口径）。
 
-        `source_ref`＝机器腿专用页窗（提升同步腿写；请求侧 `PointCreateBody` 未声明该键）。
+        `source_ref`＝机器腿专用页窗（提升同步腿写；请求侧 `PointCreateBody` 未声明该键）；
+        `confirm_state` 同为机器腿可显式传入的键，缺省＝人工直登记落 `confirmed`。
         """
         if not str(course_id or "").strip():
             raise LearnConflict("course_id 不可为空")
@@ -68,6 +74,8 @@ class InMemoryKnowledgeStore:
             raise LearnConflict("name 不可为空")
         if type is not None and type not in KP_TYPES:
             raise LearnConflict(f"type 必须是 {KP_TYPES} 之一")
+        if confirm_state not in CONFIRM_STATES:
+            raise LearnConflict(f"confirm_state 必须是 {CONFIRM_STATES} 之一")
         key = norm_key(name)
         with self._lock:
             if parent_kp_id:
@@ -107,6 +115,7 @@ class InMemoryKnowledgeStore:
                 "anchors": anchors or [],
                 "from_detail_id": from_detail_id or None,
                 "meta": None,
+                "confirm_state": confirm_state,
                 "created_by": WRITER,
                 "updated_by": WRITER,
                 "created_at": now,
@@ -151,13 +160,15 @@ class InMemoryKnowledgeStore:
         kind: str | None = "point",
         limit: int = 50,
         offset: int = 0,
+        exclude_rejected: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         needle = (q or "").lower()
         with self._lock:
             rows = [
                 dict(row)
                 for row in self.points.values()
-                if (not kind or row["node_kind"] == kind)
+                if (not exclude_rejected or row.get("confirm_state") != CONFIRM_REJECTED)
+                and (not kind or row["node_kind"] == kind)
                 and (not domain_id or row["domain_id"] == domain_id)
                 and (not course_id or row["course_id"] == course_id)
                 and (not type or row["type"] == type)
@@ -171,16 +182,18 @@ class InMemoryKnowledgeStore:
         return rows[offset : offset + limit], len(rows)
 
     def counts_by_course(self) -> dict[str, dict[str, int]]:
-        """星图节点徽标：{course_id: {confirmed}}（只数 point 行，章名不计入；候选位随池表退出）。"""
+        """星图两键分桶（与 MySQL 同形）：`total`＝整理出来的点数、`confirmed`＝人已背书的点数。"""
         counts: dict[str, dict[str, int]] = {}
         with self._lock:
             for point in self.points.values():
-                if point["node_kind"] == "point":
-                    counts.setdefault(point["course_id"], {})["confirmed"] = (
-                        counts.get(point["course_id"], {}).get("confirmed", 0) + 1
-                    )
-        for entry in counts.values():
-            entry.setdefault("confirmed", 0)
+                if point["node_kind"] != "point":
+                    continue
+                entry = counts.setdefault(point["course_id"], {"total": 0, "confirmed": 0})
+                state = str(point.get("confirm_state") or CONFIRM_UNCONFIRMED)
+                if state != CONFIRM_REJECTED:
+                    entry["total"] += 1
+                if state == CONFIRM_CONFIRMED:
+                    entry["confirmed"] += 1
         return counts
 
     def patch_point(self, kp_id: str, **fields: Any) -> dict[str, Any]:
@@ -199,6 +212,11 @@ class InMemoryKnowledgeStore:
                 row["parent_kp_id"] = fields["parent_kp_id"]
             if "summary" in fields:
                 row["summary"] = fields["summary"]
+            if fields.get("confirm_state") is not None:
+                state = str(fields["confirm_state"])
+                if state not in CONFIRM_STATES:
+                    raise LearnConflict(f"confirm_state 必须是 {CONFIRM_STATES} 之一")
+                row["confirm_state"] = state
             if "from_detail_id" in fields:
                 row["from_detail_id"] = fields["from_detail_id"] or None
             if "source_ref" in fields:
@@ -216,13 +234,16 @@ class InMemoryKnowledgeStore:
 
     # ---------- 章节目录树（outline 行） ----------
 
-    def list_outline(self, course_id: str, book_ref: str | None = None) -> list[dict[str, Any]]:
+    def list_outline(
+        self, course_id: str, book_ref: str | None = None, *, exclude_rejected: bool = False
+    ) -> list[dict[str, Any]]:
         with self._lock:
             rows = [
                 dict(row)
                 for row in self.points.values()
                 if row["node_kind"] == "outline"
                 and row["course_id"] == course_id
+                and (not exclude_rejected or row.get("confirm_state") != CONFIRM_REJECTED)
                 and (not book_ref or row["book_ref"] == book_ref)
             ]
             rows.sort(key=lambda r: (r["order_hint"] if r["order_hint"] is not None else 9999, r["kp_id"]))
@@ -230,7 +251,9 @@ class InMemoryKnowledgeStore:
                 row["point_count"] = sum(
                     1
                     for point in self.points.values()
-                    if point["node_kind"] == "point" and point["parent_kp_id"] == row["kp_id"]
+                    if point["node_kind"] == "point"
+                    and point["parent_kp_id"] == row["kp_id"]
+                    and point.get("confirm_state") != CONFIRM_REJECTED
                 )
         return rows
 
@@ -286,6 +309,7 @@ class InMemoryKnowledgeStore:
                         "anchors": [],
                         "from_detail_id": None,
                         "meta": None,
+                        "confirm_state": CONFIRM_UNCONFIRMED,
                         "created_by": WRITER,
                         "updated_by": WRITER,
                         "created_at": now,

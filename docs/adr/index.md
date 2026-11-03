@@ -1,7 +1,7 @@
 # ADR 索引
 
 状态：Current
-最后更新：2026-10-21
+最后更新：2026-11-02
 确认状态：暂定
 
 本目录登记影响长期约束的架构决策：决定、理由、后果和取代关系。编号与生命周期规则见
@@ -29,5 +29,8 @@
 | [`0024`](0024-preschema-rebuild-tiers-and-demo-gate.md) | 1.0 前 schema 重建档位与 demo 门（范围锁死） | 工程治理 | v0.1 | Accepted | — |
 | [`0025`](0025-database-design-master-doc-and-ddl-ownership.md) | 数据库设计总纲升为三项目总正本并承载建表语句 | 架构与边界 | v0.1 | Accepted | — |
 | [`0026`](0026-v1-root-table-family-freeze.md) | v1.0 根私有表族定档为三张与编译链路退役 | 架构与边界 | v0.1 | Accepted | — |
+| [`0027`](0027-kp-human-confirm-column.md) | 共享知识点主表落人工确认位与「已确认」口径落真 | 架构与边界 | v0.1 | Accepted | — |
+| [`0028`](0028-exercise-out-of-kp-sequence.md) | 习题不入知识点序列・两级闸 | 架构与边界 | v0.1 | Accepted | — |
+| [`0029`](0029-tracker-round-hierarchy-and-row-scope-cap.md) | 台账分层与轮节瘦身（备注下移、总任务上轮、行只写范围） | 工程治理 | v0.1 | Accepted | — |
 
-下一个可用编号：0027
+下一个可用编号：0030

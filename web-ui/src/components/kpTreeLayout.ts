@@ -1,7 +1,7 @@
 /**
  * 课程知识点·层级星图布局纯函数（设计：docs/design/knowledge-point-exploration-ui.md §9）
- * 版式＝**大知识点虚框自上而下按学习顺序堆叠、框内条目排行优先网格**（REQ-113）：
- * - 语义是两级知识粒度而非文档三级：outline depth1＝大知识点（虚框容器），
+ * 版式＝**章节虚框自上而下按学习顺序堆叠、框内条目排行优先网格**（REQ-113）：
+ * - 语义是两级知识粒度而非文档三级：outline depth1＝章节（虚框容器），
  *   outline depth2 与归入的 `point` 行都是**框内条目**（point 的父为节时归到该节所在的框），不另立第三层
  * - 归属只由虚框几何承载：`parent_kp_id` 仅参与归框计算，**不产生边集与归属文案**
  * - `parent_kp_id` 空／悬空的 point 与父悬空的节都不进图，也不补画虚拟框（学习面不出现「未归档」）
@@ -38,10 +38,10 @@ export const KP_BOX_INSET = 14;
 export const KP_CELL_W = 200;
 /** 条目行高 */
 export const KP_CELL_H = 36;
-/** 条目圆点半径（大知识点由框承载，条目一律同尺寸） */
+/** 条目圆点半径（章节由框承载，条目一律同尺寸） */
 export const KP_ITEM_R = 5;
 
-/** 大知识点虚框：坐标＝框中心（ECharts 符号以中心定位），w/h 为像素 */
+/** 章节虚框：坐标＝框中心（ECharts 符号以中心定位），w/h 为像素 */
 export interface KpBoxNode {
   id: string;
   name: string;
@@ -52,7 +52,7 @@ export interface KpBoxNode {
   h: number;
 }
 
-/** 框内条目（小知识点＝outline depth2，归入的知识点＝point） */
+/** 框内条目（知识点＝outline depth2，归入本节的 point 行并列绘制） */
 export interface KpItemNode {
   id: string;
   name: string;

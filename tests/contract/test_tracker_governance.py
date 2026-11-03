@@ -39,6 +39,18 @@ LONGTERM_MARKER = "长期滚动：无终态"
 # 文档锚（ADR 0021）：任务描述列必须链接承载该行的仓库内文档（plans/ 壳或其他 docs 文档）。
 # 镜像测试只认「整格＝plans 链接」的唯一镜像行，其余行用行内链接取锚不受镜像约束。
 DOC_LINK = re.compile(r"\]\(([^)\s]+\.md)\)")
+# ADR 0029（台账分层与轮节瘦身）：轮节三段式＝标题只写轮名 → 节下备注段 → 任务表；
+# 含主线行的节二选一声明形态；任务描述列只写范围，取证与沿革落壳。
+TODO_HEADER = f"| {' | '.join(TODO_COLUMNS)} |"
+ROUND_HEADING_MAX_CHARS = 64
+ROUND_HEADING_FORBIDDEN = ("——", "；")
+TASK_DESC_MAX_CHARS = 500
+# 声明的字面形态＝节下备注段里的粗体标记（`**分层轮**`／`**承载轮**`）；正文里提到「默认承载轮」
+# 这类词不带粗体，不会被误判成声明。
+MODULE_MASTER_MARKER = "总任务"
+LAYERED_ROUND = "**分层轮**"
+CARRIER_ROUND = "**承载轮**"
+LAYERED_ROUND_ROW_BUDGET = 8
 
 
 def _table(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
@@ -68,8 +80,78 @@ def _field(content: str, name: str) -> str:
     return matches[0].strip()
 
 
+def _doc_tables(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
+    """跨分节扫描同表头的全部表格行：分节标题、空行与**正文段落只作表格分隔**，不作终止。
+
+    ADR 0029 L1 把轮次叙述从 `### ` 标题挪到标题与表头之间的备注段，`_table` 的「首个非表格行
+    即终止」口径会从此截断后续分节，故 todo 的行集合改用本扫描器。
+    """
+    return _doc_tables_lines(path.read_text(encoding="utf-8").splitlines(), columns, strict=True)
+
+
+def _todo_sections() -> list[tuple[str, str, list[dict[str, str]]]]:
+    """按 `### ` 切节，返回 `(节标题, 节下备注段, 该节任务行)`；`#`／`##` 级标题不开节。
+
+    备注段＝标题与任务表头之间的非空正文（分层声明与轮次叙述的落点，ADR 0029 L1／L2）。
+    """
+    sections: list[tuple[str, list[str]]] = []
+    heading = ""
+    bucket: list[str] = []
+    for line in (TRACKERS / "todo.md").read_text(encoding="utf-8").splitlines():
+        if line.startswith("### "):
+            if heading:
+                sections.append((heading, bucket))
+            heading, bucket = line.removeprefix("### ").strip(), []
+            continue
+        if line.startswith("####"):
+            # 块级子分组（ADR 0021「分节标题与承载」）只是节内导航，不切断本节的行集合
+            bucket.append(line)
+            continue
+        if line.startswith("#"):
+            if heading:
+                sections.append((heading, bucket))
+            heading, bucket = "", []
+            continue
+        if heading:
+            bucket.append(line)
+    if heading:
+        sections.append((heading, bucket))
+    out: list[tuple[str, str, list[dict[str, str]]]] = []
+    for title, bucket in sections:
+        headers = [index for index, line in enumerate(bucket) if line.strip() == TODO_HEADER]
+        note = "\n".join(bucket[: headers[0]] if headers else bucket).strip()
+        out.append((title, note, _doc_tables_lines(bucket, TODO_COLUMNS)))
+    return out
+
+
+def _doc_tables_lines(
+    lines: list[str], columns: tuple[str, ...], *, strict: bool = False
+) -> list[dict[str, str]]:
+    header = f"| {' | '.join(columns)} |"
+    rows: list[dict[str, str]] = []
+    in_table = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == header:
+            in_table = True
+            continue
+        if stripped.startswith("| ---"):
+            continue
+        if stripped.startswith("#") or not stripped.startswith("|"):
+            in_table = False
+            continue
+        if not in_table:
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) != len(columns):
+            assert not strict, line
+            continue
+        rows.append(dict(zip(columns, cells, strict=True)))
+    return rows
+
+
 def _todo_rows() -> list[dict[str, str]]:
-    return _table(TRACKERS / "todo.md", TODO_COLUMNS)
+    return _doc_tables(TRACKERS / "todo.md", TODO_COLUMNS)
 
 
 def test_tracker_directory_has_exact_governed_files_and_index_links():
@@ -232,6 +314,109 @@ def test_todo_task_rows_carry_a_document_anchor():
         " plans/ 壳或其他事实源文档（缺陷/待开始条目可链承载轮壳的登记表条目）"
     )
     assert not dead_links, f"文档锚指向不存在文件的行 {dead_links}"
+
+
+def test_todo_section_view_aggregates_exactly_the_flat_rows():
+    """G8 探测器自证：分节视图既不丢行也不增行，且备注段不进任务行集合。
+
+    挪节与 `####` 子分组改的是归属不是集合；`## 规则` 的指针表不是任务表，不得混入。
+    """
+    flat = [row["ID"] for row in _todo_rows()]
+    sectioned = [row["ID"] for _, _, rows in _todo_sections() for row in rows]
+    assert sectioned == flat
+    assert len({title for title, _, _ in _todo_sections()}) >= 5
+    assert all(rows for _, _, rows in _todo_sections()), "出现空任务节的标题"
+    assert any(LAYERED_ROUND in note for _, note, _ in _todo_sections()), (
+        f"全台账无一分节声明 {LAYERED_ROUND}——主线轮都退化成细则清单，"
+        f"G8b 的行预算与 {MODULE_MASTER_MARKER} 标记、G8d 的壳锚都失去对象"
+    )
+
+
+def test_todo_round_headings_carry_no_narrative():
+    """G8a（ADR 0029 L1）：`### ` 轮节标题只写轮名——长度受限、不含破折号与分号。
+
+    轮次定位、批次沿革、收口顺序与裁决出处写节下备注段（标题与表头之间的正文）。
+    """
+    offenders = [
+        (title[:24], len(title))
+        for title, _, _ in _todo_sections()
+        if len(title) > ROUND_HEADING_MAX_CHARS
+        or any(token in title for token in ROUND_HEADING_FORBIDDEN)
+    ]
+    assert not offenders, (
+        f"轮节标题超长或承载叙述的节 {offenders}——标题只写轮名（≤{ROUND_HEADING_MAX_CHARS} 字符、"
+        f"不出现 {'、'.join(ROUND_HEADING_FORBIDDEN)}），叙述下移到节下备注段"
+    )
+
+
+def test_round_sections_declare_layered_or_carrier_form():
+    """G8b（ADR 0029 L2）：含主线行的节必须在节下备注以字面标记二选一声明 `**分层轮**`／`**承载轮**`。
+
+    分层轮只留主线行与模块总任务行（任务描述含「总任务」）且总行数受限；`承载轮` 全台账至多一节
+    （默认承载轮＝普通任务轮），细则行一律落它。
+    """
+    carriers = []
+    for title, note, rows in _todo_sections():
+        if not any(row["类别"] == "主线" for row in rows):
+            continue
+        layered = LAYERED_ROUND in note
+        carrier = CARRIER_ROUND in note
+        assert layered != carrier, (
+            f"节「{title[:24]}」含主线行但节下备注未二选一声明 {LAYERED_ROUND}／{CARRIER_ROUND}"
+            "——主线轮要么只列模块总任务，要么是指定的默认承载轮"
+        )
+        if carrier:
+            carriers.append(title)
+            continue
+        unmarked = [
+            row["ID"]
+            for row in rows
+            if row["类别"] != "主线" and MODULE_MASTER_MARKER not in row["任务描述"]
+        ]
+        assert len(rows) <= LAYERED_ROUND_ROW_BUDGET, (
+            f"分层轮节「{title[:24]}」有 {len(rows)} 行，超预算 {LAYERED_ROUND_ROW_BUDGET}"
+            f"——细则行挪进默认承载轮（该节行号 {[row['ID'] for row in rows]}）"
+        )
+        assert not unmarked, (
+            f"分层轮节「{title[:24]}」里不是模块总任务的行 {unmarked}——把细则行挪进默认承载轮，"
+            f"或把该行改写为该模块的总任务行（任务描述含「{MODULE_MASTER_MARKER}」）"
+        )
+    assert len(carriers) <= 1, f"声明 {CARRIER_ROUND} 的节多于一节 {carriers}"
+
+
+def test_todo_task_description_column_is_within_scope_cap():
+    """G8c（ADR 0029 L4）：任务描述列只写「做什么＋目标/效果＋锚」，长度受限。
+
+    现网取证数字、文件行号、令文与裁值沿革、代价登记、工作项拆解与逐批门禁输出都不属于行。
+    """
+    offenders = [
+        (row["ID"], len(row["任务描述"]))
+        for row in _todo_rows()
+        if len(row["任务描述"]) > TASK_DESC_MAX_CHARS
+    ]
+    assert not offenders, (
+        f"任务描述列超 {TASK_DESC_MAX_CHARS} 字符的行 {offenders}——先逐行核对承载壳是否已有该正文，"
+        "缺失先回填壳（带日期戳）再瘦身，不得直接删（ADR 0029 L5）"
+    )
+
+
+def test_layered_round_master_rows_anchor_a_plan_shell():
+    """G8d（ADR 0029 L3）：分层轮的模块总任务行必须锚一枚 `plans/` 壳。
+
+    原则上整格镜像自己的一枚壳（ADR 0016 一任务一行一壳）；同一滚动壳分线承载多枚总任务时行内链
+    该壳并在壳的分线登记表各留条目。细节与过程只有壳这一个落点。
+    """
+    offenders = [
+        (title[:24], row["ID"])
+        for title, note, rows in _todo_sections()
+        if LAYERED_ROUND in note
+        for row in rows
+        if row["类别"] != "主线" and "../plans/" not in row["任务描述"]
+    ]
+    assert not offenders, (
+        f"分层轮里无 plans/ 壳锚的总任务行 {offenders}——每枚任务都要对应一枚壳，"
+        "细节与过程写进壳（用户 2026-11-03 令 3）"
+    )
 
 
 def test_todo_section_headings_point_at_live_rounds_or_generic_sections():

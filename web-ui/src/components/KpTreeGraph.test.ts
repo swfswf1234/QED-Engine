@@ -1,8 +1,8 @@
 /**
  * 课程知识点层级星图渲染层单测（REQ-113 W3，设计稿 A §9 七审改判 2026-10-15）
- * 口径：大知识点＝虚框图元（roundRect＋dashed 描边＋透明填充＋框内顶部名称带），
+ * 口径：章节＝虚框图元（roundRect＋dashed 描边＋透明填充＋框内顶部名称带），
  * 框内条目＝发光圆点＋常驻名称标签；**画布不出现边图元**（归属由虚框承载）；
- * 悬停两类语义＝虚框（大知识点名称＋摘要）与条目（小知识点名称＋摘要），编辑侧字段一律不进提示；
+ * 悬停两类语义＝虚框（章节名称＋摘要）与条目（知识点名称＋摘要），编辑侧字段一律不进提示；
  * 取景锚（两个不可见的角点）把数据坐标钉成像素，圆点不被拉成椭圆。
  * jsdom 无 canvas：只拍 option 纯数据与 formatter（同 StarMapGraph.test 处理）。
  */
@@ -32,7 +32,7 @@ const byId = (option: ReturnType<typeof buildKpTreeOption>, id: string) =>
 const tooltipOf = (option: ReturnType<typeof buildKpTreeOption>, params: unknown) =>
   (option.tooltip as { formatter: (p: unknown) => string }).formatter(params);
 
-describe('buildKpTreeOption（课程层级星图：大知识点虚框＋框内条目，暗底无边）', () => {
+describe('buildKpTreeOption（课程层级星图：章节虚框＋框内条目，暗底无边）', () => {
   it('图元两层：虚框＝dashed 圆角框＋框内顶部名称带，条目＝发光圆点＋右侧常驻标签', () => {
     const option = buildKpTreeOption(LAYOUT);
     const series = seriesOf(option);
@@ -140,7 +140,7 @@ describe('buildKpTreeOption（课程层级星图：大知识点虚框＋框内�
     expect(ids).toEqual(['k1', 'k11', 'p1', 'p2']);
   });
 
-  it('空布局（课程无已确认知识点）不画任何图元，由页面走空态', () => {
+  it('空布局（课程无已整理知识点）不画任何图元，由页面走空态', () => {
     const option = buildKpTreeOption(kpTreeLayout([], 1200));
     expect(dataOf(option).filter((d) => d.kind !== 'frame')).toEqual([]);
   });

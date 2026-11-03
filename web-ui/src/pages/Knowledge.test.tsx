@@ -262,7 +262,7 @@ describe('学习中心·知识探索 Knowledge（REQ-110 单页两级视图）',
     );
     renderPage('/knowledge?course=ghost');
     expect(await screen.findByText('课程不存在或已下线')).toBeInTheDocument();
-    expect(screen.queryByText('该课程暂无已确认知识点')).not.toBeInTheDocument();
+    expect(screen.queryByText('该课程暂无已整理知识点')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('层级星图')).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole('link', { name: '知识探索' }));

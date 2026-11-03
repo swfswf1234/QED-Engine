@@ -34,7 +34,13 @@ from qed_engine.services.learn.base import (
     derive_books_progress,
     derive_progress,
 )
-from qed_engine.services.learn.knowledge import KP_TYPES, norm_key
+from qed_engine.services.learn.knowledge import (
+    CONFIRM_CONFIRMED,
+    CONFIRM_STATES,
+    CONFIRM_UNCONFIRMED,
+    KP_TYPES,
+    norm_key,
+)
 from qed_engine.services.learn.practice import (
     ANSWER_SOURCES,
     ATTEMPT_ORIGINS,
@@ -264,9 +270,11 @@ def _course_tree(
     course_id = str(course["learn_course_id"])
     if knowledge is None:
         return [], [], rows
-    outline_rows = knowledge.list_outline(course_id)
+    outline_rows = knowledge.list_outline(course_id, exclude_rejected=True)
     by_kp = {str(row["kp_id"]): row for row in outline_rows}
-    points, _total = knowledge.list_points(course_id=course_id, kind="point", limit=1000)
+    points, _total = knowledge.list_points(
+        course_id=course_id, kind="point", limit=1000, exclude_rejected=True
+    )
     book_refs = [
         str(r.get("ref_id") or "")
         for r in (course.get("resources") or [])
@@ -801,10 +809,10 @@ class OutlineTreeBody(BaseModel):
 
 
 class PointPatchBody(BaseModel):
-    """知识点改列白名单（extra=forbid）：归属、展示名、顺序提示与介绍。
+    """知识点改列白名单（extra=forbid）：归属、展示名、顺序提示、介绍与人工确认位。
 
-    `node_kind`/`type` 分类列与 `narrative_ref`/`angles` 的产面不在人工面（确认由「写入主表」
-    这一动作承载，长文与角度归生成与梳理腿）。
+    `node_kind`/`type` 分类列与 `narrative_ref`/`angles` 的产面不在人工面（长文与角度归生成与梳理腿）。
+    `confirm_state`＝人工确认位（三值闭集，`null`＝不改）：本端点是人工背书、驳回与翻案的唯一人工通道。
     """
 
     model_config = {"extra": "forbid"}
@@ -814,13 +822,22 @@ class PointPatchBody(BaseModel):
     order_hint: int | None = None
     # 摘要＝知识点一句话介绍（学习者可见）；上限对齐列宽 VARCHAR(1000)
     summary: str | None = Field(default=None, max_length=1000)
+    confirm_state: str | None = None
+
+    @field_validator("confirm_state")
+    @classmethod
+    def _confirm_state_closed(cls, v: str | None) -> str | None:
+        if v is not None and v not in CONFIRM_STATES:
+            raise ValueError(f"confirm_state 必须是 {CONFIRM_STATES} 之一")
+        return v
 
 
 class PointCreateBody(BaseModel):
     """point 行直登记（候选池退役后主表的唯一产面，ADR 0026 D10）。
 
     父级只允许同课程的 outline 行或 NULL（未归档池）；`from_detail_id`＝梳理侧节点稳定身份
-    （提升幂等锚），一经发放不可变。
+    （提升幂等锚），一经发放不可变。确认位不进本模型：由「人点这一枚登记」这一动作直接落
+    `confirmed`，取值不由请求侧指定（ADR 0027 D2①）。
     """
 
     course_id: str = Field(min_length=1)
@@ -967,7 +984,7 @@ def _point_out(point: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/star-map")
 def star_map(request: Request, domain: str | None = Query(default=None)) -> dict[str, Any]:
-    """星图一次取全：领域 → track 星云 → 课程节点（含已确认知识点数）+ 先修边（标跨 track）。
+    """星图一次取全：领域 → track 星云 → 课程节点（含整理出来／人已背书两枚计数）+ 先修边（标跨 track）。
 
     数据源＝qed_domain/qed_course（既有）；候选位数随候选池退役一并摘除。
     """
@@ -1010,6 +1027,8 @@ def star_map(request: Request, domain: str | None = Query(default=None)) -> dict
                     "stage": course.get("stage") or "",
                     "sort_order": course.get("sort_order"),
                     "description": str(course.get("description") or ""),
+                    # 两键各说各事（ADR 0027 D4）：整理度读 total，人工背书读 confirmed
+                    "kp_total": int(count.get("total") or 0),
                     "kp_confirmed": int(count.get("confirmed") or 0),
                 }
             )
@@ -1055,12 +1074,13 @@ def list_knowledge_points(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
-    """已确认知识点跨课程检索（主表只存采纳结果；`node_kind=point` 才进检索面）。"""
+    """知识点跨课程检索（学习面判据＝排除 `rejected`，其余照画；`node_kind=point` 才进检索面）。"""
     if type is not None and type not in KP_TYPES:
         raise HTTPException(status_code=422, detail=f"type 必须是 {KP_TYPES} 之一")
     store = _knowledge(request)
     points, total = store.list_points(
-        domain_id=domain, course_id=course, type=type, q=q, limit=limit, offset=offset
+        domain_id=domain, course_id=course, type=type, q=q, limit=limit, offset=offset,
+        exclude_rejected=True,
     )
     return {"points": [_point_out(p) for p in points], "total": total}
 
@@ -1081,6 +1101,11 @@ def create_knowledge_point(request: Request, body: PointCreateBody) -> dict[str,
     return _point_out(_guard(store.add_point, **fields))
 
 
+# 整课一次取全的封顶：知识探索面把一门课读成一张图，分页只会在图上留缺口。
+# 取值须显著高于现网单课最大行数（2026-11-02 现网最大 93 行），触顶时响应以 `truncated` 自证。
+KP_COURSE_READ_LIMIT = 3000
+
+
 @router.get("/courses/{course_id}/knowledge-points")
 def course_knowledge_points(
     request: Request, course_id: str, include_outline: bool = Query(default=False)
@@ -1090,11 +1115,16 @@ def course_knowledge_points(
     默认只出 point 行（章名不进知识点列表）；`include_outline=true` 时带目录节点行。
     `sequence`＝该课程在工作台里的推进序列，`units[].learner` 携勾选与质性门态，未加入学习面
     时 `enrolled=false` 且序列为空（主数据照常出）。
+    `total`＝该课主表全量行数，`truncated`＝本次没读全（行数触到 `KP_COURSE_READ_LIMIT`），
+    读侧据此如实降级，不静默少给。
     """
     store = _knowledge(request)
     course = _require_catalog_course(request, course_id)
     points, total = store.list_points(
-        course_id=course_id, kind=None if include_outline else "point", limit=500
+        course_id=course_id,
+        kind=None if include_outline else "point",
+        limit=KP_COURSE_READ_LIMIT,
+        exclude_rejected=True,
     )
     sequence: dict[str, Any] = {
         "enrolled": False, "units": [], "chapters": [], "kp_path": [],
@@ -1124,16 +1154,18 @@ def course_knowledge_points(
         },
         "points": [_point_out(point) for point in points],
         "total": total,
+        "truncated": len(points) < total,
         "sequence": sequence,
     }
 
 
 # ---------- 提升同步腿（REQ-144 裁乙：在册 af_kp 成品 → 共享主表） ----------
 
-# 纯净目录的两道过滤键（判据正本＝REQ-144 壳「纯净目录的过滤口径」）：
-# 在册＝gen_status 非 rejected；非前置后置＝toc_role 非 reference
+# 纯净目录的三道过滤键（判据正本＝REQ-144 壳「纯净目录的过滤口径」＋ ADR 0028 G3 的第三道）：
+# 在册＝gen_status 非 rejected；非前置后置＝toc_role 非 reference；非习题行＝node_type 非 exercise
 KP_REJECTED = "rejected"
 KP_REFERENCE_ROLE = "reference"
+KP_EXERCISE = "exercise"
 # ④ 工作区读腿的路径段（一比一照 8902 形状，本层不别名）
 KP_WORKSPACE_PATH = f"{API_PREFIX}/books/{{book_id}}/kp"
 
@@ -1160,16 +1192,48 @@ def _kp_anchors(node: dict[str, Any], book_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def _kp_is_exercise_row(node: dict[str, Any]) -> bool:
+    """习题行判据（ADR 0028 G3）：主判据＝梳理侧派生键 `node_type`，该键缺席时回落 `toc_kind`。
+
+    回落是为上游少发一枚键时闸仍不失效；`node_type` 有值即以其为准（不再回落），
+    否则上游发出 `chapter`／`point`／`other` 的行会被 `toc_kind` 误判。
+    """
+    node_type = str(node.get("node_type") or "").strip()
+    if node_type:
+        return node_type == KP_EXERCISE
+    return str(node.get("toc_kind") or "").strip() == KP_EXERCISE
+
+
+def _kp_confirmed_upstream(node: dict[str, Any]) -> bool:
+    """上游人工位读数（`af_kp.confirmed`）：非零即人已确认，缺键与 0 都按未确认处理。"""
+    return str(node.get("confirmed") or "").strip() not in ("", "0")
+
+
+def _kp_confirm_mirror(row: dict[str, Any], node: dict[str, Any]) -> str | None:
+    """镜像目标（ADR 0027 D2③）：只有「上游已背书且主表这行还没背书」才置位。
+
+    只升不降＝机器不得抹掉人的判定（撤回位、`rejected` 都不由本腿产生）。
+    """
+    if not _kp_confirmed_upstream(node):
+        return None
+    if str(row.get("confirm_state") or "") == CONFIRM_CONFIRMED:
+        return None
+    return CONFIRM_CONFIRMED
+
+
 def _kp_split_workspace(nodes: list[Any]) -> dict[str, Any]:
-    """工作区行 → 纯净层：章（depth1）＋知识点（depth2 且父章在册纯净）＋三类排除计数。
+    """工作区行 → 纯净层：章（depth1）＋知识点（depth2 且父章在册纯净）＋四类排除计数。
 
     depth2 落 point 行而非 outline 节行（第十令「章＝章节、节＝知识点」＋界面两级），
     遗留 `point` 行不入目录：其页区间与父节重合，进目录即同一段正文读两遍。
+    习题行由第三道闸排除：知识点序列永不含习题（ADR 0028 G1／G3）。
     """
     live = [n for n in nodes if isinstance(n, dict) and str(n.get("gen_status") or "") != KP_REJECTED]
     rejected = len(nodes) - len(live)
-    knowledge = [n for n in live if str(n.get("toc_role") or "knowledge") != KP_REFERENCE_ROLE]
-    reference = len(live) - len(knowledge)
+    role_ok = [n for n in live if str(n.get("toc_role") or "knowledge") != KP_REFERENCE_ROLE]
+    reference = len(live) - len(role_ok)
+    knowledge = [n for n in role_ok if not _kp_is_exercise_row(n)]
+    exercise = len(role_ok) - len(knowledge)
     point_rows = sum(1 for n in knowledge if str(n.get("node_kind") or "") == "point")
 
     def _order(node: dict[str, Any]) -> tuple[int, str]:
@@ -1195,7 +1259,12 @@ def _kp_split_workspace(nodes: list[Any]) -> dict[str, Any]:
         "chapters": chapters,
         "by_chapter": by_chapter,
         "detached": detached,
-        "excluded": {"rejected": rejected, "reference": reference, "point_rows": point_rows},
+        "excluded": {
+            "rejected": rejected,
+            "reference": reference,
+            "exercise": exercise,
+            "point_rows": point_rows,
+        },
     }
 
 
@@ -1255,7 +1324,9 @@ def _sync_book_knowledge(
 
     chapter_ids: dict[str, str] = {}
     anchors: dict[str, dict[str, Any]] = {}
-    for row in store.list_outline(course_id, book_ref):
+    outline_rows = store.list_outline(course_id, book_ref)
+    rows_by_id = {str(row["kp_id"]): row for row in outline_rows}
+    for row in outline_rows:
         key = norm_key(str(row.get("name") or ""))
         if str(row.get("depth") or "") == "1" and key not in chapter_ids:
             chapter_ids[key] = str(row["kp_id"])
@@ -1266,9 +1337,15 @@ def _sync_book_knowledge(
         node_id = str(chapter.get("node_id") or "")
         if kp_id is None or not node_id:
             continue
+        fields: dict[str, Any] = {}
         if str(anchors.get(node_id, {}).get("from_detail_id") or "") != node_id:
             # 提升锚＝章导读腿的取数键（④ /kp/nodes/{node_id}/narrative），只由本腿写
-            _guard(store.patch_point, kp_id, from_detail_id=node_id)
+            fields["from_detail_id"] = node_id
+        mirrored = _kp_confirm_mirror(rows_by_id.get(kp_id) or {}, chapter)
+        if mirrored:
+            fields["confirm_state"] = mirrored
+        if fields:
+            _guard(store.patch_point, kp_id, **fields)
         anchors[node_id] = {"kp_id": kp_id, "from_detail_id": node_id}
 
     point_rows, _total = store.list_points(course_id=course_id, kind="point", limit=2000)
@@ -1309,6 +1386,9 @@ def _sync_book_knowledge(
                         fields["name"] = name
                         known_keys.pop(old_key, None)
                         known_keys[key] = str(existing["kp_id"])
+                mirrored = _kp_confirm_mirror(existing, point)
+                if mirrored:
+                    fields["confirm_state"] = mirrored
                 _guard(store.patch_point, str(existing["kp_id"]), **fields)
                 reused += 1
                 continue
@@ -1326,6 +1406,9 @@ def _sync_book_knowledge(
                 from_detail_id=node_id,
                 anchors=fields["anchors"],
                 source_ref=fields["source_ref"],
+                confirm_state=(
+                    CONFIRM_CONFIRMED if _kp_confirmed_upstream(point) else CONFIRM_UNCONFIRMED
+                ),
                 **coords,
             )
             known_keys[key] = str(row["kp_id"])
@@ -1353,7 +1436,8 @@ def sync_course_knowledge_points(request: Request, course_id: str) -> dict[str, 
     逐本隔离：8902 连接失败 503（整次不执行）、单本上游非 200 只在该本报告 `ok=false`、
     零纯净章且本腿未在此落过笔＝整本跳过（保护未梳理／半梳理教材的人工目录子树）。
     角色取不到＝未知、不过滤（判据只在有证据时收紧）。
-    写入即承载确认（D10），本腿不碰确认位。
+    确认位＝按上游 `af_kp.confirmed` 镜像带入（1→`confirmed`、0 或缺键→`unconfirmed`）且只升不降，
+    本腿永不写 `rejected`（ADR 0027 D2③）。
     """
     store = _knowledge(request)
     course = _guard(_store(request).get_course, course_id)
@@ -1623,19 +1707,23 @@ def _require_catalog_course(request: Request, course_id: str) -> dict[str, Any]:
 def get_outline(
     request: Request, course_id: str, book: str | None = Query(default=None)
 ) -> dict[str, Any]:
-    """章节树一次取全（前序平铺 + 每节点本章知识点计数），左栏按 depth 缩进渲染。"""
+    """章节树一次取全（前序平铺 + 每节点本章知识点计数），左栏按 depth 缩进渲染。
+
+    学习面判据＝排除 `rejected`（ADR 0027 D3）：驳回的章行不再进目录，其余照画。
+    """
     store = _knowledge(request)
     _require_catalog_course(request, course_id)
     return {
         "course_id": course_id,
         "book_ref": book or "",
-        "outline": store.list_outline(course_id, book),
+        "outline": store.list_outline(course_id, book, exclude_rejected=True),
     }
 
 
 @router.put("/courses/{course_id}/outline")
 def put_outline(request: Request, course_id: str, body: OutlineTreeBody) -> dict[str, Any]:
-    """目录确认后的整树写入：幂等替换同 book_ref 的 outline 子树，写入即视为已确认。
+    """目录确认后的整树写入：幂等替换同 book_ref 的 outline 子树；写入只落结构、不替人签字
+    （新建行按列默认落 `unconfirmed`，ADR 0027 D2）。
 
     point 行一律不删；其父 outline 被替换掉时归未归档池（parent_kp_id=NULL）。
     坐标列按课程目录补全（REQ-118 D1）。
@@ -1657,7 +1745,8 @@ def put_outline(request: Request, course_id: str, body: OutlineTreeBody) -> dict
 
 @router.patch("/knowledge-points/{kp_id}")
 def patch_knowledge_point(request: Request, kp_id: str, body: PointPatchBody) -> dict[str, Any]:
-    """人工面移动与改名：开放归属、展示名、顺序提示与摘要（确认位与四分类不走本端点）。"""
+    """人工面移动与改名：开放归属、展示名、顺序提示与摘要；`confirm_state` 的背书／驳回／翻案
+    也只走本端点（四分类 `type` 不走）。"""
     store = _knowledge(request)
     row = _guard(store.get_point, kp_id)
     fields = {k: getattr(body, k) for k in body.model_fields_set}

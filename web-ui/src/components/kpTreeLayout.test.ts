@@ -1,6 +1,6 @@
 /**
  * 课程层级星图布局纯函数单测（REQ-113 W2，设计稿 A §9 七审改判 2026-10-15）
- * 口径：两级粒度＝大知识点虚框（outline depth1）纵向堆叠 + 框内条目（outline depth2 与归入的 point）
+ * 口径：两级粒度＝章节虚框（outline depth1）纵向堆叠 + 框内条目（outline depth2 与归入的 point）
  * 行优先网格；归属由虚框几何承载（**无边集、无 ownership**）；定序＝order_hint 升序 → 来源锚最小页码
  * → 名称码点 → 行 id；`parent_kp_id` 空／悬空的 point 不进图（学习面不出现「未归档」）；
  * 节点只带名称＋摘要＋几何（编辑侧 type／锚数／下辖数不进布局）。
@@ -31,7 +31,7 @@ const SECTION = row({
   parent_kp_id: 'k1', order_hint: 1, summary: '集合与对应关系',
 });
 const SECTION2 = row({ kp_id: 'k12', name: '1.2 函数', node_kind: 'outline', depth: 2, parent_kp_id: 'k1', order_hint: 2 });
-// point 的父是「节」→ 归到该节所在的大知识点框
+// point 的父是「节」→ 归到该节所在章节框
 const P1 = row({ kp_id: 'p1', name: '确界原理', parent_kp_id: 'k11', summary: '有上界数集必有上确界', anchors: [{ kind: 'book', ref_id: 'b05', page: 5 }] });
 const P2 = row({ kp_id: 'p2', name: '单调有界原理', parent_kp_id: 'k11', anchors: [{ kind: 'book', ref_id: 'b05', page: 8 }] });
 // 直挂章的 point：仍是该章框内条目，不另立第三层
@@ -51,7 +51,7 @@ const contains = (box: ReturnType<typeof kpTreeLayout>['boxes'][number], n: { x:
   n.x >= box.x - box.w / 2 && n.x <= box.x + box.w / 2
   && n.y >= box.y - box.h / 2 && n.y <= box.y + box.h / 2;
 
-describe('kpTreeLayout（课程层级星图：大知识点虚框堆叠＋框内条目网格）', () => {
+describe('kpTreeLayout（课程层级星图：章节虚框堆叠＋框内条目网格）', () => {
   it('两级粒度：outline depth1＝虚框，depth2 与归入的 point＝框内条目；point 不另立第三层', () => {
     const layout = kpTreeLayout(ALL, W);
     expect(layout.boxes.map((b) => b.id)).toEqual(['k1', 'k2']);
@@ -155,7 +155,7 @@ describe('kpTreeLayout（课程层级星图：大知识点虚框堆叠＋框内�
     expect(JSON.stringify(b)).toBe(JSON.stringify(a));
   });
 
-  it('空输入＝空图（课程无已确认知识点由页面走空态）', () => {
+  it('空输入＝空图（课程无已整理知识点由页面走空态）', () => {
     const layout = kpTreeLayout([], W);
     expect(layout.boxes).toEqual([]);
     expect(layout.items).toEqual([]);

@@ -87,6 +87,7 @@ S1→W2、S2→W3、S3→W3＋W5、S4→W4、S5→W6，文档随步＝W7。
 | 根侧抽题腿已具备 | `exerciseParse.ts` 三条答案通路全在册；`stores/practice.ts` 的页区间与答案书状态齐全；`confirmImport` 恒写 `kp_id: null`（课级归属，裁决 R2） | 三形态**同一条流程**，差的只有两样：页区间从哪来、`source_kind`／`answer_source` 取什么值 |
 | 归属缺的是一枚只读键 | `backend/qed_engine/api/learn.py` 的 `_course_tree()` 不发 `from_detail_id`，而主表该列自 REQ-144 的同步腿起已有值 | 屏侧拿不到 Axiom-Flow 的 `node_id` → 主表 `kp_id` 的映射；补读键即可，零 DDL、零新表 |
 | 列域已够 | `qe_question.source_kind` 五值（`exercise_book`／`textbook_chapter`／`solutions_book`／`manual`／`generated`）、`answer_source` 六值（`same_page`／`solution_section`／`sibling_book`／`manual`／`llm`／`none`） | 教材习题／自带答案的习题集／独立答案本三形态零 DDL、零新列 |
+| 习题行与知识点序列的边界已由 [ADR 0028](../adr/0028-exercise-out-of-kp-sequence.md) 定档（2026-11-02 随步） | 用户令「两个关口」落该 ADR G1~G5：关口①＝本行 S1 产的 `node_type=exercise` 派生键被根侧提升腿**升格为提升判据的输入**（零对方改码）；关口②＝根侧写共享表前的第三道行级过滤，落码承载＝[REQ-149 壳](../history/plans/2026-11/2026-11-02-exercise-out-of-kp-sequence.md) W2，**排在本行 S1 编码之前**（G4 的排他性动机） | 本行 S1 照做（习题行只成在 8902 结构面）、S4 挂点只匹配主表的**章行与点行**且永不匹配或新建习题行，主表无对应行时 `kp_id=null` 记未归档 ⇒ 与本令不冲突，**S 判据不改**；现网 b05 的 23 枚 exercise 行零污染属**巧合**（恰全落在被现有过滤排除的档位），落闸后才成为防线 |
 
 ## 待裁点与裁决
 
@@ -138,6 +139,10 @@ T1~T4 全部回填完毕，W1 关闭；其后工作项按上表取值动码，�
   `_outline_identity` 供逐页早落与定稿两趟共用（`KA-40` 改写面不含身份列，两趟不一致会永久留在行里）。
   门禁：AF `pytest tests -q` 1231 passed／18 skipped、`tests/contract` 289 passed、`ruff check src tests`
   干净。AF 侧零 git 操作，代码提交由用户指派的另一 AGENT 执行。
+- **2026-11-03**：与 [REQ-149 壳（已关闭）](../history/plans/2026-11/2026-11-02-exercise-out-of-kp-sequence.md) 的互读注记＝
+  习题行只成在 8902 结构面（`af_kp` 行，供练习面抽题），**落共享表前经 REQ-149 的行级闸**
+  （`node_type=exercise` 主判据、缺席回落 `toc_kind=exercise`）；本行 S1 产出的 depth2 习题行
+  不会进入 `qed_knowledge_point`，也不出现在知识探索与课程学习序列（ADR 0028 G1／G5）。
 
 ## 验证与验收
 

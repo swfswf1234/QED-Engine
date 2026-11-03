@@ -5,8 +5,10 @@
  *   悬停高亮写在 series 级 emphasis（graph 符号不读逐项 emphasis.itemStyle），列框逐项 disabled 关掉
  * - 连线只连课程框：同轨实线、跨轨虚线、无箭头；弯曲度由布局给定（跨行长边自动绕开中间课程框）
  * - 节点点击只透传课程 id（`nebula:` 前缀的列框节点忽略）
- * - 课程提示行＝课程名称（加粗）＋课程叙述（`course.description`，REQ-110 W4）；
- *   计数段与复习段都不出现（四审裁决 / 裁决 ④）
+ * - 课程提示行＝课程名称（加粗）＋课程叙述（`course.description`，REQ-110 W4）＋整理度行；
+ *   复习段不出现（裁决 ④）。计数段由 REQ-147 W1 改判回归：全解面必须能答「这门课整理到哪一步」
+ * - 整理度两档视觉分档（REQ-147 W1）：空档底色／描边／字色转灰且发光归零，让「还没整理的课」一眼可辨；
+ *   分档不用 opacity——课程框必须保持不透明才能遮住从框下穿过的连线
  */
 import { useMemo } from 'react';
 import type { EChartsCoreOption } from 'echarts/core';
@@ -23,6 +25,11 @@ const TRACK_COLORS = ['#7fd1ff', '#c0a3ff', '#8affc9', '#ffd479', '#ff9ec7', '#a
 const BOX_FILL = '#0d1633';
 const BOX_FILL_ACTIVE = '#1c2c5c';
 const BOX_TEXT = '#eef3ff';
+/** 尚无已整理知识点的课程：底色退到近黑、描边与字色转灰、发光归零（REQ-147 W1 空档） */
+const BOX_FILL_EMPTY = '#0a0e1a';
+const BOX_BORDER_EMPTY = '#3f4c66';
+const BOX_TEXT_EMPTY = '#8496b6';
+const COUNT_TEXT = '#9db6e6';
 const TITLE_TEXT = '#f4f8ff';
 const TITLE_TEXT_BORDER = 'rgba(4, 8, 22, 0.92)';
 
@@ -39,8 +46,10 @@ interface GraphNodeItem {
   /** 星图语义：nebula=轨迹列框（不可点、不悬停）/ course=课程（点击就地下钻课程层级视图） */
   kind: 'nebula' | 'course';
   track: string;
-  /** 课程＝叙述（`course.description`，可空）；列框＝空串 */
+  /** 课程叙述（`course.description`，可空）；列框＝空串 */
   detail: string;
+  /** 该课已整理知识点数（`kp_total`，排除驳回行）：分档与提示都用它；列框＝0 */
+  kpCount: number;
 }
 
 const clampFont = (size: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(size)));
@@ -69,6 +78,7 @@ export function buildStarMapOption(
     kind: 'nebula',
     track: n.name,
     detail: '',
+    kpCount: 0,
     itemStyle: {
       color: 'rgba(255, 255, 255, 0.02)',
       borderColor: colorOf(n.name),
@@ -93,7 +103,8 @@ export function buildStarMapOption(
   }));
 
   const courseItems: GraphNodeItem[] = layout.nodes.map((n) => {
-    // 提示＝课程名称＋课程叙述（四审裁决：计数段删除）；叙述空值时只显课名一行
+    // 整理度分档：空掉的课程不发光、整框转灰，学习者一眼看出哪几门还是空的（REQ-147 W1）
+    const lit = n.kpTotal > 0;
     return {
       id: n.id,
       name: n.name,
@@ -104,19 +115,20 @@ export function buildStarMapOption(
       kind: 'course',
       track: n.track,
       detail: n.description,
+      kpCount: n.kpTotal,
       itemStyle: {
-        color: BOX_FILL,
-        borderColor: colorOf(n.track),
+        color: lit ? BOX_FILL : BOX_FILL_EMPTY,
+        borderColor: lit ? colorOf(n.track) : BOX_BORDER_EMPTY,
         borderWidth: 1.4,
         borderRadius: 8,
-        shadowBlur: 14,
+        shadowBlur: lit ? 14 : 0,
         shadowColor: colorOf(n.track),
       },
       label: {
         show: true,
         position: 'inside',
         formatter: n.name,
-        color: BOX_TEXT,
+        color: lit ? BOX_TEXT : BOX_TEXT_EMPTY,
         fontSize: boxFont,
         fontWeight: 600,
         overflow: 'truncate',
@@ -142,9 +154,14 @@ export function buildStarMapOption(
         // 列框不给提示：只有课程才响应鼠标
         if (!data || data.kind !== 'course') return '';
         const title = `<b>${escapeHtml(data.name)}</b>`;
-        if (!data.detail) return title;
-        // 叙述限宽折行、不截字符数（设计稿 A §8）
-        return `${title}<div style="max-width:360px;white-space:pre-wrap">${escapeHtml(data.detail)}</div>`;
+        // 叙述限宽折行、不截字符数（§8）；叙述空值不出行、不留空行占位
+        const story = data.detail
+          ? `<div style="max-width:360px;white-space:pre-wrap">${escapeHtml(data.detail)}</div>`
+          : '';
+        // 整理度行常驻：全解面要能答「这门课整理到哪一步」；措辞用「已整理」——确认态列尚不存在，
+        // 写「已确认」是不实的话（REQ-147 壳 Q1 待裁）
+        const count = data.kpCount > 0 ? `已整理知识点 ${data.kpCount}` : '尚无已整理知识点';
+        return `${title}${story}<div style="color:${COUNT_TEXT}">${count}</div>`;
       },
     },
     series: [

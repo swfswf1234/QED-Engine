@@ -51,7 +51,7 @@ export interface StarNode {
   tier: number;
   /** 先修拓扑深度 */
   depth: number;
-  kpConfirmed: number;
+  kpTotal: number;
   /** 课程叙述（qed_course.description）：渲染层悬停用，几何无关 */
   description: string;
 }
@@ -451,7 +451,8 @@ function placeColumns(
         h: slot.h,
         tier: slot.tier,
         depth: depths.get(slot.course.course_id) ?? 0,
-        kpConfirmed: slot.course.kp_confirmed,
+        // 整理度读 `kp_total`；后端未出该键时回落旧键，不让课程卡整体变暗（ADR 0027 D4）
+        kpTotal: slot.course.kp_total ?? slot.course.kp_confirmed,
         description: slot.course.description ?? '',
       });
       top = Math.min(top, y - slot.h / 2);

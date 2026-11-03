@@ -19,6 +19,9 @@ export interface StarCourseNode {
   stage: string;
   sort_order: number | null;
   description?: string;
+  /** 该课整理出来的知识点数（排除驳回行）——整理度图元读这一枚 */
+  kp_total?: number;
+  /** 人已背书的知识点数（`confirm_state='confirmed'`）；8900 未重载时仍出旧义＝point 行数 */
   kp_confirmed: number;
 }
 
@@ -52,7 +55,7 @@ export interface StarMapResponse {
 
 export type KnowledgePointType = 'memory' | 'procedure' | 'concept' | 'design';
 
-/** 主表节点形态：outline＝目录节点（大知识点），point＝细知识点 */
+/** 主表节点形态：outline＝目录节点（章节），point＝知识点 */
 export type NodeKind = 'outline' | 'point';
 
 /** 多角度叙述闭集（主表 `angles` 元素；数组序＝权威排序） */
@@ -159,7 +162,10 @@ export interface CourseSequence {
 export interface CourseKnowledgeResponse {
   course: { course_id: string; name: string; track: string; domain_id: string; description: string };
   points: KnowledgePoint[];
+  /** 该课主表全量行数（与 `points` 的取回数分得开，才谈得上「全解」） */
   total: number;
+  /** 取回数被服务端封顶（`KP_COURSE_READ_LIMIT`）裁掉过：true 时图上的行数不是全量 */
+  truncated: boolean;
   sequence: CourseSequence;
 }
 
@@ -245,7 +251,7 @@ export interface KnowledgePointListResponse {
   total: number;
 }
 
-/** GET /api/v1/learn/knowledge-points：已确认知识点跨课程检索 */
+/** GET /api/v1/learn/knowledge-points：知识点跨课程检索（学习面判据＝排除驳回行，其余照画） */
 export function listKnowledgePoints(
   query: KnowledgePointQuery = {},
   opts?: ApiRequestOptions,

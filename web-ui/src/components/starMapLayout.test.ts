@@ -267,4 +267,16 @@ describe('星图布局纯函数 starMapLayout（层＝行 × 轨迹＝列 森林
     expect(STARMAP_VIEW.height).toBeGreaterThan(500);
     expect(nebulaId('x')).toBe('nebula:x');
   });
+
+  it('整理度取 `kp_total`，该键缺失时回落 `kp_confirmed`（8900 未重载不熄灭）', () => {
+    const [lit, legacy] = [
+      { ...course('a', '数学分析', ANALYSIS), kp_total: 82, kp_confirmed: 0 },
+      { course_id: 'b', name: '实变函数', track: ANALYSIS, stage: '', sort_order: null, kp_confirmed: 7 },
+    ];
+    const layout = starMapLayout(domain([cluster(ANALYSIS, [lit, legacy])]), [], {
+      width: 1200, height: 700,
+    });
+    expect(layout.nodes.find((n) => n.id === 'a')?.kpTotal).toBe(82);
+    expect(layout.nodes.find((n) => n.id === 'b')?.kpTotal).toBe(7);
+  });
 });

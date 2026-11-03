@@ -3,8 +3,14 @@ import { buildStarMapOption } from './StarMapGraph';
 import { starMapLayout } from './starMapLayout';
 import type { StarCourseNode, StarMapDomain, StarMapEdge, TrackCluster } from '../api/learn';
 
-function course(id: string, name: string, track: string, stage = '', description = ''): StarCourseNode {
-  return { course_id: id, name, track, stage, sort_order: null, description, kp_confirmed: 0 };
+function course(
+  id: string, name: string, track: string, stage = '', description = '', kpTotal = 0,
+  kpConfirmed = 0,
+): StarCourseNode {
+  return {
+    course_id: id, name, track, stage, sort_order: null, description,
+    kp_total: kpTotal, kp_confirmed: kpConfirmed,
+  };
 }
 
 function cluster(track: string, courses: StarCourseNode[], kind = 'main', summary = ''): TrackCluster {
@@ -20,12 +26,12 @@ const DOMAIN: StarMapDomain = {
   level: '本科',
   tracks: [
     cluster(ANALYSIS, [
-      course('math_analysis', '数学分析', ANALYSIS, '基础'),
+      course('math_analysis', '数学分析', ANALYSIS, '基础', '', 82),
       course('ode', '常微分方程', ANALYSIS, '主干'),
       course('pde', '偏微分方程', ANALYSIS, '分支'),
     ]),
     cluster(ALGEBRA, [
-      course('linear_algebra', '高等代数', ALGEBRA, '基础'),
+      course('linear_algebra', '高等代数', ALGEBRA, '基础', '', 15),
       course('abstract_algebra', '抽象代数', ALGEBRA, '主干'),
     ], 'branch'),
   ],
@@ -48,8 +54,17 @@ interface ItemShape {
   symbolSize: number | [number, number];
   kind: string;
   detail: string;
-  itemStyle: { color: string; borderType?: string; opacity?: number };
-  label: { show: boolean; position: string; formatter: string };
+  /** 课程＝该课已整理知识点数（StarNode.kpTotal 透传）；列框＝0 */
+  kpCount: number;
+  itemStyle: {
+    color: string;
+    borderType?: string;
+    opacity?: number;
+    borderColor?: string;
+    borderWidth?: number;
+    shadowBlur?: number;
+  };
+  label: { show: boolean; position: string; formatter: string; color?: string };
   emphasis?: { disabled?: boolean };
 }
 
@@ -156,9 +171,9 @@ describe('星图渲染 buildStarMapOption（课程＝框本体、连线只连框
     expect(series.emphasis.label.color).toBe('#ffffff');
   });
 
-  it('课程悬停提示＝课名（加粗）＋课程叙述两行，计数段与复习段都不出现（REQ-110 四审裁决）', () => {
+  it('课程悬停提示＝课名（加粗）＋叙述＋整理度行；复习段仍不出现（REQ-147 W1 改判 §8）', () => {
     const layout = starMapLayout(
-      { ...DOMAIN, tracks: [cluster(ANALYSIS, [course('math_analysis', '数学分析', ANALYSIS, '基础', '极限、连续与一元微积分')], 'main')] },
+      { ...DOMAIN, tracks: [cluster(ANALYSIS, [course('math_analysis', '数学分析', ANALYSIS, '基础', '极限、连续与一元微积分', 82)], 'main')] },
       [],
       { width: 1200, height: 700 },
     );
@@ -169,20 +184,100 @@ describe('星图渲染 buildStarMapOption（课程＝框本体、连线只连框
     expect(html).toContain('极限、连续与一元微积分');
     // 叙述限宽折行、不截字符
     expect(html).toContain('white-space:pre-wrap');
+    // 计数段回归：四审删的是「已确认知识点」这个不实措辞，不是「整理度不可见」
+    expect(html).toContain('已整理知识点 82');
     expect(html).not.toContain('已确认');
     expect(html).not.toContain('待选');
     expect(html).not.toContain('复习');
   });
 
-  it('叙述为空只显课名一行；列框与空数据不给提示', () => {
+  it('整理度随布局取值：有值出「已整理知识点 N」，零出「尚无已整理知识点」，两侧都不写「已确认」', () => {
+    const layout = starMapLayout(
+      {
+        ...DOMAIN,
+        tracks: [cluster(ANALYSIS, [
+          course('math_analysis', '数学分析', ANALYSIS, '基础', '', 7),
+          course('ode', '常微分方程', ANALYSIS, '主干'),
+        ], 'main')],
+      },
+      [],
+      { width: 1200, height: 700 },
+    );
+    const option = buildStarMapOption(layout) as unknown as OptionShape;
+    const htmlOf = (name: string) =>
+      option.tooltip.formatter({ data: option.series[0].data.find((d) => d.name === name)! });
+    const lit = htmlOf('数学分析');
+    const empty = htmlOf('常微分方程');
+    expect(lit).toContain('已整理知识点 7');
+    expect(lit).not.toContain('尚无');
+    expect(empty).toContain('尚无已整理知识点');
+    expect(empty).not.toMatch(/知识点 0/);
+    for (const html of [lit, empty]) {
+      expect(html).not.toContain('已确认');
+      expect(html).not.toContain('复习');
+    }
+  });
+
+  it('整理度读 `kp_total`，与 `kp_confirmed` 各说各事：人没背书的课照样亮（ADR 0027 D4）', () => {
+    const layout = starMapLayout(
+      {
+        ...DOMAIN,
+        tracks: [cluster(ANALYSIS, [
+          // 现网真实形状：机器整理出 82 枚、人一枚都还没签
+          course('math_analysis', '数学分析', ANALYSIS, '基础', '介绍', 82, 0),
+          course('ode', '常微分方程', ANALYSIS, '主干', '介绍', 0, 0),
+        ], 'main')],
+      },
+      [],
+      { width: 1200, height: 700 },
+    );
+    const option = buildStarMapOption(layout) as unknown as OptionShape;
+    const courses = option.series[0].data.filter((d) => d.kind === 'course');
+    const itemOf = (name: string) => courses.find((d) => d.name === name)!;
+    expect(itemOf('数学分析').kpCount).toBe(82);
+    expect(itemOf('数学分析').itemStyle.color).not.toBe(itemOf('常微分方程').itemStyle.color);
+    const html = option.tooltip.formatter({ data: itemOf('数学分析') });
+    expect(html).toContain('已整理知识点 82');
+    expect(html).not.toContain('已确认');
+  });
+
+  it('课程框按整理度两档分视觉：空档不发光、底色／描边／字色转灰；两档都不透明（REQ-147 W1）', () => {
+    const { layout, series } = build();
+    const courses = series.data.filter((d) => d.kind === 'course');
+    const litNode = layout.nodes.find((n) => n.kpTotal > 0)!;
+    const emptyNode = layout.nodes.find((n) => n.kpTotal === 0)!;
+    expect(litNode).toBeDefined();
+    expect(emptyNode).toBeDefined();
+    const itemOf = (id: string) => courses.find((d) => d.id === id)!;
+    const lit = itemOf(litNode.id);
+    const empty = itemOf(emptyNode.id);
+    // 断链守护：布局算出的整理度必须进渲染项，不能停在 starMapLayout
+    expect(lit.kpCount).toBe(litNode.kpTotal);
+    expect(empty.kpCount).toBe(0);
+    // 三处都要有差别，只改一处肉眼看不出「这门课是空的」
+    expect(lit.itemStyle.color).not.toBe(empty.itemStyle.color);
+    expect(lit.itemStyle.borderColor).not.toBe(empty.itemStyle.borderColor);
+    expect(lit.label.color).not.toBe(empty.label.color);
+    // 发光只给有内容的框
+    expect((lit.itemStyle.shadowBlur ?? 0)).toBeGreaterThan(0);
+    expect(empty.itemStyle.shadowBlur).toBe(0);
+    // 分档不得用 opacity：框必须保持不透明才能遮住从下方穿过的连线
+    for (const item of courses) {
+      expect(item.itemStyle.opacity ?? 1).toBe(1);
+    }
+  });
+
+  it('叙述为空不出叙述行，整理度行始终在位；列框与空数据不给提示', () => {
     const { option, series } = build();
     const nebula = series.data.find((d) => d.kind === 'nebula')!;
     const course = series.data.find((d) => d.kind === 'course')!;
     expect(option.tooltip.formatter({ data: nebula })).toBe('');
     expect(option.tooltip.formatter({})).toBe('');
-    // 布局夹具无 description → 提示只有课名一行，不留空行占位
+    // 布局夹具无 description → 提示只显课名 + 整理度，不留空行占位
     const html = option.tooltip.formatter({ data: course });
-    expect(html).toBe(`<b>${course.name}</b>`);
+    expect(html).toContain(`<b>${course.name}</b>`);
+    expect(html).not.toContain('white-space:pre-wrap');
+    expect(html).toContain('已整理知识点');
     expect(html).not.toContain('<br/>');
   });
 

@@ -2,7 +2,7 @@
 
 设计状态：Accepted
 实现状态：In Progress
-最后更新：2026-11-01
+最后更新：2026-11-03
 需求方：QED-Engine（根私有 `qe_*` 三表 + `qed_knowledge_point` + `qed_llm_calls`）、QED-Tracker（受托建表的 `qed_domain`/`qed_course`、私有 `qt_*` 五表）、Axiom-Flow（私有 `af_*` 四表）
 确认状态：已确认
 关联代码：`backend/qed_engine/services/learn/base.py`、`backend/qed_engine/services/learn/knowledge.py`、`backend/qed_engine/services/learn/practice.py`（本文正本 7 张表中四张的可执行 DDL；第五张 `qed_llm_calls` 的 DDL 归属 LLM 网关模块 `services/llm/call_log.py`，见五章该表小节）、`QED-Tracker/src/qed_tracker/db/models.py`（`qed_domain`/`qed_course` 形状事实源）、`QED-Tracker/src/qed_tracker/db/schema.py`（受托建表面 `ensure_schema`）、`.env.example`（`QED_DB_*` 变量模板）
@@ -42,7 +42,8 @@
 **课程学习**由 `qe_learning` 一张承载（选课与学习路径、知识点终态与质性门），**课后练习**由
 `qe_question`（题库）与 `qe_attempt`（作答事实）两张承载；练习与复习的到期队列是 `qe_attempt`
 流水的读时重放，不另立调度表。知识点的生成与梳理工作区在 Axiom-Flow（`af_kp`），根侧只留
-「拉取已确认知识点 → 写共享主表」一条提升面。
+「拉取在册知识点 → 写共享主表」一条提升面，人的背书位由提升腿按 `af_kp.confirmed` 镜像进
+`confirm_state`。
 
 本文**负责**的粒度：表清单与表族归属、列名与列序、SQL 类型与宽度、可空性与默认值语义、列注释与
 表注释、索引与约束，以及本文正本 7 张表的建表语句——改动其中任一项即须同批改本文。本文**不负责**
@@ -62,7 +63,7 @@
 | R3 | 共享表变更先经根登记 | `qed_*` schema 变更须先改本文与接口契约、通知消费方，再由所有权方执行迁移 |
 | R4 | 逻辑引用不建跨命名空间外键 | 跨表族引用由应用层维护；同命名空间内允许物理外键 |
 | R5 | 只引用不复制 | 领域／课程／书目／教程／解析版本一律存 `ref_id` + `label` 快照，素材 `kind` 闭集 `book`/`af_version`/`knowledge` |
-| R6 | 人工位机器不写 | `retired`（题目退役）、`bookmarked`（错题收藏）、`resolved`（错题人工处置）、`learner_note` 与 `qualitative_*`（学习者自评位）只由人工置位；知识点梳理的确认位在 Axiom-Flow `af_kp.confirmed`，根侧「写入主表」这一动作即承载确认 |
+| R6 | 人工位机器不写 | `retired`（题目退役）、`bookmarked`（错题收藏）、`resolved`（错题人工处置）、`learner_note` 与 `qualitative_*`（学习者自评位）只由人工置位；知识点的人工确认位＝共享主表 `confirm_state`（三值闭集），人工通道只有直登记与 `PATCH` 置位两条，机器侧唯一允许的写法是把梳理侧 `af_kp.confirmed` 镜像过来且只升不降，`rejected` 永不由机器产生 |
 | R7 | `meta` 扩展槽三红线 | 只读不筛（不进 `WHERE`／不建函数索引／不参与唯一键）、不放密钥与个人信息、不放跨项目契约字段；定档后升实体列并清空对应键 |
 | R8 | 主键不可变 | `domain_id`／`course_id`／`kp_id` 一经写入不得改值——下游四族按 ID 逻辑串接 |
 | R9 | 存储与字符集 | `ENGINE=InnoDB`、`CHARSET=utf8mb4`；根侧 DDL 一律显式声明库默认 `COLLATE=utf8mb4_0900_ai_ci`，不声明与共享族分裂的排序规则 |
@@ -79,7 +80,7 @@
 | --- | --- | --- | --- | --- |
 | `qed_domain` | 共享 | 一个学科领域（当前仅 math，预留扩展）；含学习阶段顺序与领域探索门面态 | 受托建表：所有权与可执行面在 QED-Tracker；生产库 `meta` 居物理末位、`domain_id` 现状 VARCHAR(32) | `QED-Tracker/src/qed_tracker/db/models.py::QedDomain`（本文＝设计正本） |
 | `qed_course` | 共享 | 一门课程：阶段、先修 DAG、别名、学习顺序；取代 `courses/math.json` | 受托建表；根侧 `exploration_stage` 在线优先经 8901 写、不可达时降级直写（见 7.8 T6） | `QED-Tracker/src/qed_tracker/db/models.py::QedCourse` |
-| `qed_knowledge_point` | 共享 | 一个**已确认**知识点或目录节点（outline/point 两级层级主数据）；25 列 | 结构由根定义；本表**不存确认位**（能进即已确认）；`type` 四分类只描述 point 行；`aliases`（别名，权威名仍在 `name`）／`narrative_ref`（长文正文指针，存**数据根相对路径全串**）／`angles`（多角度叙述索引，`angle` 闭集六词）三列为 v1.0 定档追加 | 本文五章 + 可执行 DDL `backend/qed_engine/services/learn/knowledge.py` |
+| `qed_knowledge_point` | 共享 | 一条知识点或目录节点（outline/point 两级层级主数据）；26 列 | 结构由根定义；「人是否核过」由 `confirm_state` 列承载（默认 `unconfirmed`，学习面只排除 `rejected`、其余照画）；`type` 四分类只描述 point 行；`aliases`（别名，权威名仍在 `name`）／`narrative_ref`（长文正文指针，存**数据根相对路径全串**）／`angles`（多角度叙述索引，`angle` 闭集六词）三列为 v1.0 定档追加 | 本文五章 + 可执行 DDL `backend/qed_engine/services/learn/knowledge.py` |
 | `qed_llm_calls` | 共享 | 一次 LLM 调用记录（完整输入输出、耗时、成败、审核态） | 三项目均可写；有外部写方，**绝不 DROP 重建**（ADR 0024 例外档） | 本文五章 + 可执行 DDL `backend/qed_engine/services/llm/call_log.py` |
 | `qe_learning` | 根私有 | 学习记录单表（13 列）：`target_kind='course'` 行＝选课与学习路径顺序，`target_kind='kp'` 行＝知识点终态与质性门 | **课程无独立 ID**——course 行的 `target_id` 直引共享 `qed_course.course_id`；学习路径是 course 行 `config.kp_path` 的 `kp_id` 有序数组；进度百分比、结课态与掌握分一律读时重算不落列；`owner` 为多学习者扩展位（v1.0 恒 `admin`） | 本文五章 + `backend/qed_engine/services/learn/base.py` |
 | `qe_question` | 根私有 | 一道题或一张卡（24 列）：题面 + 服务端判分依据 + 题源溯源 + 产出事实 | 表名已定档（REQ-132 W1 落地）；`expected_answer` 不进题面下发响应；题源只留 `book_ref` + `source_ref`，课程名读时从共享表取；**不加 `owner`**——题库是内容、跨学习者共享，分账由作答表承担；生产 `qed` 库内尚未建表（见 7.8 T3） | `backend/qed_engine/services/learn/practice.py` |
@@ -87,7 +88,7 @@
 | `af_books` | AF 私有 | 一册已验证书：`qt_books` 只读快照 + 哈希/ingest/解析进度 + 生效版本指针 | 列级内容由 Axiom-Flow 承载；`af_*` 四表形状由对方 PLAN-024 定档，**库内重建窗口已执行**（2026-10-22 档 B 整族重建；根侧 2026-10-24 只读探针复算＝两库 `alembic_version` 均 `20261022_0001`、`af_*` 恰四张，见 7.8 T11） | `Axiom-Flow/docs/architecture/database-design.md` |
 | `af_operations` | AF 私有 | 一条事件明细：解析、人工编辑、结构意图与审阅判定全量入本表（单表事件流） | 同上 | 同上 |
 | `af_pages` | AF 私有 | 一个解析版本一页的解析状态、质量信号与产物指针 | 同上；`job_id='legacy'` 是根视图存量哨兵，非真实版本行 | 同上 |
-| `af_kp` | AF 私有 | 一个知识点节点：梳理工作区、去重谱系与长文正文文件指针 | 同上；根侧经 HTTP 单向拉取已确认行提升进共享主表 | 同上 |
+| `af_kp` | AF 私有 | 一个知识点节点：梳理工作区、去重谱系与长文正文文件指针 | 同上；根侧经 HTTP 单向拉取**在册行**提升进共享主表，`confirmed` 位由提升腿镜像进主表 `confirm_state`（只升不降） | 同上 |
 | `qt_knowledge` | Tracker 私有 | 一套教程（tutorial）或课程延展资料归类（other_material），两态 draft→confirmed | 与共享 `qed_knowledge_point` **语义不同且无引用关系**（命名避让见五章） | `QED-Tracker/docs/architecture/database-private-tables.md` |
 | `qt_books` | 私有书目 | 一册/一本书：选用态 + 持有态 + 下载生命周期（QED-060） | 根侧经 8901 API 透传消费，不直连 | 同上 |
 | `qt_sources` | Tracker 私有 | 一次下载渠道尝试（挂 `book_id`），ok 标达成败 | `book_id` 宽度与 `qt_books.book_id` 主键宽度不匹配（见 7.8） | 同上 |
@@ -142,12 +143,12 @@ flowchart LR
 | --- | --- | --- | --- |
 | 发现与下载（8901） | `qt_knowledge`、`qt_books`、`qt_sources` | `qt_books.book_id`（`verified` 态才算可解析书目） | 渠道尝试与任务各自留痕，不改书目主行语义 |
 | 解析与梳理（8902） | `af_books`、`af_operations`、`af_pages`、`af_kp` | `af_books.book_id` 同源快照 ＋ `job_id` 版本作用域 ＋ `af_kp.node_id` | `af_books` 只存 `qt_books` 的只读快照，不回写对方；长文正文落文件、表内只存指针 |
-| 知识体系（8900） | `qed_knowledge_point`（outline/point 单表两级，**课程级一套结构**） | `kp_id`（来源书只由行内 `anchors[].ref_id`／`source_ref.ref_id` 承载，不再以列或以分片作用域出现） | 8900 单向拉取对方已确认知识点，**落笔前先按课程级归并一次**再写入本表：同一物被多本覆盖时合为一行，异写法进 `aliases`、各本页窗进 `anchors`；解析版本换代不碎知识点树 |
+| 知识体系（8900） | `qed_knowledge_point`（outline/point 单表两级，**课程级一套结构**） | `kp_id`（来源书只由行内 `anchors[].ref_id`／`source_ref.ref_id` 承载，不再以列或以分片作用域出现） | 8900 单向拉取对方在册知识点（驳回行与习题行不入），**落笔前先按课程级归并一次**再写入本表：同一物被多本覆盖时合为一行，异写法进 `aliases`、各本页窗进 `anchors`；解析版本换代不碎知识点树 |
 | 课程学习与课后练习（8900） | `qe_learning`、`qe_question`、`qe_attempt` | `target_id`（course 行＝`qed_course.course_id`、kp 行＝`kp_id`）与 `question_id` | 题面只存 `book_ref` ＋ `source_ref{page,block_indexes}`，不存书目列；学习记录只存 `target_id`，不存课程名与知识点名快照 |
 | 全程账目（三项目） | `qed_llm_calls` | 无入向引用（`service`/`task`/`step` 自描述） | 独立审计账，只追加不改写 |
 
 血缘仍是单向，且**跨界引用键只有两个**（`course_id`、`kp_id`）：知识点梳理与长文正文的正本在
-Axiom-Flow（`af_kp` + 数据根 `parsed/**` 文件），根侧只经 HTTP 单向拉取已确认行写入共享主表，
+Axiom-Flow（`af_kp` + 数据根 `parsed/**` 文件），根侧只经 HTTP 单向拉取在册行写入共享主表，
 `narrative_ref` 是指针而非正文（不入列内容、不入 `meta`）；间隔复习不是独立一跳，而是
 `qe_attempt` 流水的读时重放。
 
@@ -251,7 +252,7 @@ R＝可读，W＝可写，–＝不直连（经对应服务 HTTP API 消费）�
 | --- | --- | --- | --- |
 | 主数据 | 一处登记、多处消费，改动即波及全链 | `qed_domain`、`qed_course`、`qed_knowledge_point`、`qe_learning`、`qt_knowledge`、`qt_books` | 主键不可变（R8）；共享主数据变更走 7.1 首行顺序，根私有主数据走次行（本文与代码 DDL 同批） |
 | 版本化产物 | 一行属一个解析版本或一次出题批次，换代不抹旧行 | `af_books`、`af_pages`、`qe_question` | 按 `job_id`／批次作用域读写；`qe_question` 取 `retired` 软删位；再生昂贵，属备份确认档 |
-| 候选与待选池 | 机器写、人工确认后才提升 | `af_kp` | 确认位只活在本池（R6）；正本在他项目族，根侧只单向拉取已确认行 |
+| 候选与待选池 | 机器写、人可驳回；在册且未被驳回即提升 | `af_kp` | 确认位在本池（R6），提升时镜像进主表 `confirm_state`（只升不降，机器不写 `rejected`）；正本在他项目族，根侧只单向拉取在册行 |
 | 事务事实 | 一行＝一次已发生的事件，全量保留不合并 | `qe_attempt`、`af_operations`、`qt_sources`、`qt_tasks`、`qt_selections` | 只追加不改写；判分由服务端写入，不信任客户端 |
 | 审计账目 | 有外部写方的历史账 | `qed_llm_calls` | **绝不 DROP 重建**，只做追加式 ALTER |
 
@@ -390,9 +391,10 @@ CREATE TABLE IF NOT EXISTS qed_course (
 
 ### qed_knowledge_point（知识点主数据表）
 
-**用途**：一行＝一个**已确认**的知识点或目录节点，承载「领域 → 课程 → 章节(outline) →
-知识点(point)」四层体系的第三、四层。`node_kind` 把两类行合在一表：outline＝大知识点（课程目录
-节点，可带层级与正文位置），point＝细知识点（梳理确认后进入本表的产物）。
+**用途**：一行＝一条知识点或目录节点，承载「领域 → 课程 → 章节(outline) →
+知识点(point)」四层体系的第三、四层。`node_kind` 把两类行合在一表：outline＝目录节点（章节，
+可带层级与正文位置），point＝知识点（梳理产出后经提升或人工登记进入本表的产物）；两型都可进
+知识点序列，序列永不含习题行（ADR 0028 G1）。
 **本表是课程级一套结构，不按来源书切片**：一行＝该课程的一个「物」（一个章或一个知识点），
 同一物被多本教材覆盖时合为**一行**——各本的称谓进 `aliases`、各本的页窗与锚进 `anchors`；
 教材维度在本表没有承载位（书身份只以 `anchors[].ref_id` 的形式存在于行内），因此一门课在结构上
@@ -402,7 +404,8 @@ CREATE TABLE IF NOT EXISTS qed_course (
 结果**：一个知识点的别名（`aliases`）、长文详解指针（`narrative_ref`）与多角度叙述索引（`angles`）
 都归本表，不归学习记录表。**权威名仍只在 `name` 一列**——权威性由「哪一行进了本表」表达，不由列
 表达，故无 `is_canonical` 位、无别名谱系表。多版本叙述正文不落本表（落数据根的 Markdown），
-掌握态也不在本表（归 `qe_learning` 的 kp 行）。**本表没有人工确认列——能进本表即已确认**。
+掌握态也不在本表（归 `qe_learning` 的 kp 行）。**「人是否核过」由 `confirm_state` 列承载**：
+进表不等于已确认——机器提升的行按列默认落 `unconfirmed`，人工直登记与 `PATCH` 置位才落 `confirmed`。
 
 **涉及模块**：`backend/qed_engine/services/learn/knowledge.py`（可执行 DDL + 幂等建表 + 读写）、
 `services/learn/annotations.py`（批注生成，落 `angles` 的角度条目）、
@@ -423,7 +426,7 @@ CREATE TABLE IF NOT EXISTS qed_course (
 | `domain_label` | VARCHAR(255) | – | 默认 `''` | 领域名快照 | 读展示用，不作筛选键 |
 | `course_id` | VARCHAR(64) | IDX | NOT NULL | 课程坐标（逻辑引用 `qed_course`） | 所有课程级查询的主键前缀 |
 | `course_label` | VARCHAR(255) | – | 默认 `''` | 课程名快照 | 同上 |
-| `node_kind` | VARCHAR(16) | IDX | NOT NULL，默认 `'point'` | 闭集 `outline`=目录节点(大知识点) / `point`=细知识点 | **所有「只数知识点」的查询按它过滤**（星图徽标、检索列表） |
+| `node_kind` | VARCHAR(16) | IDX | NOT NULL，默认 `'point'` | 闭集 `outline`=目录节点(章节) / `point`=知识点（序列永不含习题行，ADR 0028 G1） | **所有「只数知识点」的查询按它过滤**（星图徽标、检索列表） |
 | `parent_kp_id` | VARCHAR(64) | IDX | 可空 | outline：父 outline（章=NULL，节=章）；point：所属 outline | NULL 的 point 行＝未归档池 |
 | `depth` | TINYINT | – | 可空 | outline 层级：1=章 2=节 | point 行恒 NULL |
 | `book_ref` | VARCHAR(64) | – | 可空 | 已退役的按书切片列：读写面不再以此列作筛选键、分片作用域或归本位判据，来源书身份唯一承载位＝`anchors[].ref_id` 与 `source_ref.ref_id` | 退役取**语义退役**（停写＋停筛＋全表恒 NULL 的守护断言）；列与注释原文仍实存，物理 DROP 属破坏性变更走人工红线窗（备注与 7.8 登记，不在正文叙述） |
@@ -439,6 +442,7 @@ CREATE TABLE IF NOT EXISTS qed_course (
 | `anchors` | JSON | – | 可空 | 来源锚点 `[{kind,ref_id,page?,snippet?}]`，同物多源时的**唯一多来源承载位** | DeepTutor K1 形状，降级不删；`ref_id` 归一为书 ID（非解析页 id）后写入，按 `(ref_id,page)` 去重⇒同一本重跑不增长 |
 | `from_detail_id` | VARCHAR(64) | – | 可空 | 提升幂等锚＝Axiom-Flow `af_kp.node_id`（梳理侧节点稳定身份） | 标量列可 `WHERE`、可建唯一约束，比 JSON 锚硬；手工登记行无值；归并后一行可对应多本的梳理节点，本列只留**首建**那一本发放的锚，其余节点的对应关系落 `meta.merge.sources` |
 | `meta` | JSON | – | 可空 | 扩展槽（只读不筛） | R7；写方 8900；课程级归并的三键 `merge.key`／`merge.sources`／`merge.source_outline` 落本列（见本节注释） |
+| `confirm_state` | VARCHAR(16) | – | NOT NULL，默认 `'unconfirmed'` | 人工确认位：闭集 `unconfirmed`／`confirmed`／`rejected` | 列名与三值沿用 `af_pages.confirm_state` 的族内判例；outline 与 point 行通用；人工两条通路＝直登记落 `confirmed` 与 `PATCH` 置位（可背书、可驳回、可翻案），提升腿只按上游 `af_kp.confirmed` 镜像且只升不降（R6）；学习面读判据＝排除 `rejected` 其余照画，**不按 `confirmed` 过滤** |
 | `created_by` | VARCHAR(16) | – | NOT NULL，默认 `''` | 创建写入方标识 | 根侧常量 `qed_engine`，与共享两表同口径、非人名 |
 | `updated_by` | VARCHAR(16) | – | NOT NULL，默认 `''` | 最近写入方标识 | 同上 |
 | `created_at` | DATETIME | – | NOT NULL | UTC 创建时间 | |
@@ -462,6 +466,11 @@ CREATE TABLE IF NOT EXISTS qed_course (
 长文正文指针的**失效口径**：指针悬空＝可见降级（正文区标「待复核」），不静默改写、不静默删、
 不回落空串假装无正文；存全串而非 AF 侧的单段文件名，是为了让 8900 在 8902 离线时仍能自行解析
 该指针（独立性铁律），路径前缀派生规则不外引也不复制。
+人工确认位的**存量与列序口径**：本列经追加式 `ALTER ADD COLUMN` 落库（`ensure_columns()` 幂等补列，
+绝不隐式 DROP），故**物理列序在 `updated_at` 之后**、声明序在 `meta` 之后，与 §五 逐列不同序而无消费方
+（同 T2 既有形态）；存量行按列默认落 `unconfirmed`，**不做回填**——回填取值必须来自事实（上游人工位
+读数）而非「这些行已经画出来了」的便利。待复核队列的落点＝`confirm_state='unconfirmed'` 且带
+`from_detail_id` 的行（机器提升等人核）。
 本表可删除重建（无数据搬迁授权，档位见 7.3）。
 
 **建表语句**：
@@ -473,7 +482,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   domain_label VARCHAR(255) DEFAULT '' COMMENT '领域名快照',
   course_id VARCHAR(64) NOT NULL COMMENT '课程坐标（逻辑引用 qed_course）',
   course_label VARCHAR(255) DEFAULT '' COMMENT '课程名快照',
-  node_kind VARCHAR(16) NOT NULL DEFAULT 'point' COMMENT '闭集 outline=目录节点(大知识点) / point=细知识点',
+  node_kind VARCHAR(16) NOT NULL DEFAULT 'point' COMMENT '闭集 outline=目录节点(章节) / point=知识点（两型都可进知识点序列；序列永不含习题行，见 ADR 0028 G1）',
   parent_kp_id VARCHAR(64) COMMENT 'outline：父 outline（章=NULL，节=章）；point：所属 outline（NULL=未归档池）',
   depth TINYINT COMMENT 'outline 层级：1=章 2=节；point 行 NULL',
   book_ref VARCHAR(64) COMMENT 'outline：来源书（qt_books.book_id，版本换代不碎树）；point 行 NULL（空串哨兵随 DEFECT-011 唯一键降级后撤销）',
@@ -489,6 +498,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   anchors JSON COMMENT '来源锚点 [{kind,ref_id,page?,snippet?}]（DeepTutor K1 形状，降级不删）',
   from_detail_id VARCHAR(64) COMMENT '提升幂等锚=Axiom-Flow af_kp.node_id（梳理侧节点稳定身份，一经发放不可变）',
   meta JSON COMMENT '扩展槽：未定档字段先入本列（只读不筛）；定档后升为实体列并清空对应键',
+  confirm_state VARCHAR(16) NOT NULL DEFAULT 'unconfirmed' COMMENT '人工确认位 闭集 unconfirmed/confirmed/rejected（人背书位；提升腿按上游 af_kp.confirmed 镜像只升不降，机器路径不写 rejected）',
   created_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '创建写入方标识（qed_engine）',
   updated_by VARCHAR(16) NOT NULL DEFAULT '' COMMENT '最近写入方标识（qed_engine）',
   created_at DATETIME NOT NULL COMMENT 'UTC 创建时间',
@@ -498,7 +508,7 @@ CREATE TABLE IF NOT EXISTS qed_knowledge_point (
   KEY idx_kp_course_kind (course_id, node_kind),
   KEY idx_kp_domain (domain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；一行=一个人工确认的行，别名/长文指针/角度索引同表承载；结构由 QED-Engine 根定义）';
+COMMENT='知识点主数据（领域→课程→章节(outline)→知识点(point) 层级；人工确认态由 confirm_state 列承载，别名/长文指针/角度索引同表承载；结构由 QED-Engine 根定义）';
 ```
 
 ### qed_llm_calls（LLM 调用记录表）
@@ -799,7 +809,8 @@ COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次�
 - **共享主表加列的跨项目口径**：`qed_knowledge_point` 的 `aliases`／`narrative_ref`／`angles`
   三列对 8901/8902 是**追加式且只读方零破坏**（两项目对本表只读、且不消费这三列），故按 R3 走
   「先改本文与接口契约 → 通知消费方」即可，**不发跨项目请求函**；仅当对方 ORM 做全列映射而需随步
-  时，才在通知里附转告窗口。根私有族变更一律不同步（下表第三行）。
+  时，才在通知里附转告窗口。人工确认位 `confirm_state` 走同一口径（对方同样不消费本列）。
+  根私有族变更一律不同步（下表第三行）。
 - **`qt_*`/`af_*` 的列级正本在各自仓库文档**，本文只登记总览行与路由指针；其列级晋升为本文正本
   属后续批次，届时对方文档的「唯一事实源」声明改为本文镜像。
 
@@ -959,6 +970,7 @@ COMMENT='答题事实明细（掌握门的唯一数据源；全量保留逐次�
 | T12 | **v1.0 根私有表族定档＝三张**（2026-10-21 用户裁决；2026-10-22 第六批「A 全批同改」授权本文正文、代码 DDL 与守护数值同批落地）：① `qe_course_state`／`qe_unit`／`qe_unit_progress`／`qe_review_task` 四张整表退出，前三张的有效信息合并为 `qe_learning` 单表（13 列，`target_kind` 闭集 course／kp 单表继承），第四张改作答流水读时重放；② `qe_question` 删 `unit_id`／`learn_course_id`／`course_label` 三列（27 → 24）；③ `qe_attempt` 加 `owner`、幂等唯一键改 `(owner, question_id, review_date, origin)`、三枚索引加 `owner` 前缀、`score_trend` 退列、`resolved` 改判纯人工位（14 → 14）；④ 共享主表加 `aliases`／`narrative_ref`／`angles` 三列（22 → 25），长文正文落数据根 `parsed/**`（白名单不新增条目，ADR 0018 不动），读经 `GET /learn/knowledge-points/{kp_id}/narrative`（越根双闸）；⑤ 骨架编译链路与候选池端点族整链退役（12 枚），point 行产面平移为 `POST /learn/knowledge-points`。定档后本族 **3 张**、全库 **16 张**、根侧列数 116 → **51**。**`qed_test` 已于 2026-10-22 落地**（零迁移清空重建，库内实存读数见 T2；黄金样本对拍＝`target_kind='question'` 两行与作答流水重放态**逐值相等**，取证与退役端点清单在归档壳）；**生产 `qed` 仍未建**，属人工窗口、零迁移（T3）；同批守护数值＝`ROOT_PRIVATE_TABLES` 三枚、总览断言 16、正本 7、COLLATE 计数 5 | ADR 0026 → REQ-137 W1~W7（**2026-10-22 Achieved 收口**，壳归档于 [history/plans/2026-10](../history/plans/2026-10/2026-10-21-v1-root-table-family-freeze.md)） |
 | T11 | Axiom-Flow 已定档 `af_*` 由五张收为**四张**（`af_books` 零改列 22 列／`af_operations` 事件明细 27 列／`af_pages` 结果索引 12 列（**本行原记 11 列＝事实错**，2026-10-24 按真库 `SHOW COLUMNS` 复算更正；表级登记不写逐列形状，此处只更正计数）／`af_kp` 知识点单表 23 列，档位＝档 B 整族重建，迁移链 head `20261022_0001` 已在对方仓库落地）；本文 §三／§4.4／§6.3 **已按四张登记**（表级登记只写表名与路由，不写其逐列形状，不领先库内），**库内升级窗口已执行**（根侧 2026-10-24 只读探针复算＝两库 `alembic_version` 均 `20261022_0001`、`af_*` 恰四张 22／27／12／23 列、旧三表 `af_parse_jobs`／`af_block_edits`／`af_page_regions` 在两库**零存活**），R2「根侧不直连、经 8902 透传」恒定不变。**消费可见后果**＝业务库 `qed` 的新形状**四表全空**（`af_books` 0 行；本机 `.env` 的 `QED_DB_NAME` 指 `qed_test`，对方 C-7 的 `books/sync` 回灌只落测试库）⇒ 8900／8903 走业务库透传看到的是**空态「暂无书目」而非故障**；在用演示数据在 `qed_test`（`af_books` 17／`af_pages` 2614／`af_operations` 8／`af_kp` 0 行）。业务面恢复＝对方按其 runbook 以 `QED_DB_NAME=qed` 起服回灌＋逐本重新 ingest 与解析，页行与版本**不回填**（其档 B 四件必答②）；就绪判定仍以 DB 为唯一事实源不变。列级正本在 `Axiom-Flow/docs/history/plans/2026-10/2026-10-21-af-table-family-rebuild.md`（2026-10-23 由对方归档移动，路径随步；根侧 [REQ-134 壳](../history/plans/2026-10/2026-10-21-af-table-architecture-design.md) 同日退为指针） | REQ-134 W7 → 对方执行批**已完成**（其 PLAN-024 于 2026-10-23 以 Achieved 自关）→ 根侧随步落 REQ-136 收口批（2026-10-24） |
 | T13 | 共享主表 `qed_knowledge_point.book_ref` 定档为**语义退役**（停写＋停筛＋不作归本位判据，来源书改由 `anchors[].ref_id`／`source_ref.ref_id` 承载），但**列与其 DDL 注释原文在两库仍实存**、现网存量 outline 行仍带值（`qed_test` 只读核验＝11 行全带同一书值、82 枚 point 行全 NULL）；存量行的该列取值不清洗，读取侧一律按「键可能为空或为旧值」处理。物理 `DROP COLUMN` 属破坏性变更（7.2 末条）且落生产 `qed` 库 ALTER 红线窗，**另批人工执行**；届时本文 §五 字段明细、代码 DDL 与逐字对齐守护须同批改 | REQ-145 W4（物理退役归人工红线窗批次） |
+| T14 | 共享主表 **`confirm_state` 补列窗口**：本文逐列、DDL 围栏、代码 DDL 与 `_POINT_COLUMNS` 已同批改为 **26 列**（追加式 ALTER，声明序在 `meta` 之后、物理列序在 `updated_at` 之后）；`qed_test` 由 `ensure_columns()` 幂等补列（执行前单表 dump，补列后以 `information_schema.COLUMNS` 核名称·类型·可空性·默认值），存量 93 行按列默认落 `unconfirmed`，与上游 `af_kp.confirmed` 现网全 0 对拍一致＝**零回填脚本**；**生产 `qed` 库的同一 ALTER 属人工红线窗，agent 只交付命令原文与核验判据、不代执行**。中间态恒定约束＝代码已具备而生产库未具列期间，读写面必须靠幂等补列兜底，不得以 `SELECT` 不存在列的形式报错；**生产侧该中间态须以「先停 8900 → dump → ALTER → 起服」消除**，新代码首请求的自愈补列不得成为无备份路径 | REQ-148 W2（列形同批定档；`qed_test` 已于 2026-11-03 单表 dump→`ensure_columns()` 幂等补列→`information_schema` 与 93 行分布读数核毕）／W6（生产归人工） |
 
 ### 7.9 账本与作业表的保留期口径
 

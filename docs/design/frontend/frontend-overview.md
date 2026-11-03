@@ -3,7 +3,7 @@
 设计状态：Draft
 实现状态：In Progress
 确认状态：暂定
-最后更新：2026-10-18
+最后更新：2026-11-03
 关联代码：`web-ui/`（React 19 + TypeScript + Vite + AntD 5，构建产物 `web-ui/dist/` 由 `scripts/serve_web.py` 静态托管 8903）
 关联测试：`tests/test_web.py`（serve_web 契约 + web-ui 源码 token）、`web-ui/src/**/*.test.tsx`（vitest）
 关联 ADR：[ADR 0007](../../history/adr/v0.1/0007-qed-engine-backend-gateway.md)（前端唯一入口 8900）、[ADR 0024](../../adr/0024-preschema-rebuild-tiers-and-demo-gate.md)（demo 门 / 范围锁死）
@@ -65,7 +65,7 @@
 
 - **①→②→③ 是过程链路**，全在后台管理侧，管理者可管、可查、可定位问题。
 - **③ 文档分析处理是「过程 → 成品」的最后一道加工**：解析产出的是版面 / 块级内容，分析处理把它提炼为**语义成品**——① 生成并人工修正课本目录；② 登记并确认知识点（确认／驳回的唯一写面）；③ 展示 / 编排合适的课本学习链路；④ 关联对应课后习题及其讲解。分析驱动＝**LLM 自动分析 + 人工确认**；后续具体细节（分析算法、后端端点、习题讲解来源）由 **Axiom-Flow 负责**，根侧设计稿见 [REQ-116 文档分析处理设计稿](../../plans/2026-10-15-doc-analysis-processing.md)。
-- **④ 学习中心只消费 ③ 的产出**：知识探索浏览已确认知识点、课程学习按**已确认知识点**逐条推进、课后练习用已关联习题作答。学习中心不触发、不展示 ①②③ 的任何过程。
+- **④ 学习中心只消费 ③ 的产出**：知识探索浏览**已整理知识点**、课程学习按**在册知识点**（排除驳回行）逐条推进、课后练习用已关联习题作答。学习中心不触发、不展示 ①②③ 的任何过程。
 
 ## 5. 模块划分与详设索引
 
@@ -77,8 +77,8 @@
 
 | 模块 | 路由 | 详设文档 | 本轮口径 |
 | --- | --- | --- | --- |
-| 知识探索 | `#/knowledge`、`#/knowledge/c/:courseId` | 已晋升 [knowledge-point-exploration-ui.md](knowledge-point-exploration-ui.md)（暂定，REQ-104/110/113/114） | 只定流程定位 + 边界：浏览已确认知识点、下钻课程知识点；不含任何过程性内容 |
-| 课程学习 | `#/learn`（书架清单）、`#/learn/c/:learnCourseId?book=`（单屏工作台） | 已晋升 [learning-course-ui.md](learning-course-ui.md)（暂定，REQ-117 重设计轮一次晋升；v1 稿随 REQ-105 归档 [history](../../history/plans/2026-10/2026-10-11-learn-ui-course-study.md)） | 只定流程定位 + 边界：书架面＝**书架清单**（只列解析侧已就绪的教材，界面不新建不删除），工作台按**已确认知识点**逐条推进；形态规格（两级目录、中栏跨页正文流、右栏「学习交流」三段、推进落正文末尾三枚、按需生成与点赞消费语义、文案禁现矩阵、降级矩阵）**唯一正本在详设档**，本文不复制。学习中心零过程性（§3/§6）与面间零跳转在此同样适用：与课后练习的联动**只发生在数据层**（学习进度 ↔ 练习到期 / 复习），**界面无出口**（正本见 [learning-practice-ui.md](learning-practice-ui.md)）；知识点生产与确认、目录人工修正腿归后台管理·文档分析处理（[REQ-116](../../plans/2026-10-15-doc-analysis-processing.md)） |
+| 知识探索 | `#/knowledge`、`#/knowledge/c/:courseId` | 已晋升 [knowledge-point-exploration-ui.md](knowledge-point-exploration-ui.md)（已确认，REQ-104/110/113/114） | 只定流程定位 + 边界：浏览已整理知识点（章节虚框＋框内知识点条目）、下钻课程知识点；不含任何过程性内容 |
+| 课程学习 | `#/learn`（书架清单）、`#/learn/c/:learnCourseId?book=`（单屏工作台） | 已晋升 [learning-course-ui.md](learning-course-ui.md)（暂定，REQ-117 重设计轮一次晋升；v1 稿随 REQ-105 归档 [history](../../history/plans/2026-10/2026-10-11-learn-ui-course-study.md)） | 只定流程定位 + 边界：书架面＝**书架清单**（只列解析侧已就绪的教材，界面不新建不删除），工作台按**在册知识点**（排除驳回行）逐条推进；形态规格（两级目录、中栏跨页正文流、右栏「学习交流」三段、推进落正文末尾三枚、按需生成与点赞消费语义、文案禁现矩阵、降级矩阵）**唯一正本在详设档**，本文不复制。学习中心零过程性（§3/§6）与面间零跳转在此同样适用：与课后练习的联动**只发生在数据层**（学习进度 ↔ 练习到期 / 复习），**界面无出口**（正本见 [learning-practice-ui.md](learning-practice-ui.md)）；知识点生产与确认、目录人工修正腿归后台管理·文档分析处理（[REQ-116](../../plans/2026-10-15-doc-analysis-processing.md)） |
 | 课后练习 | `#/practice` | [learning-practice-ui.md](learning-practice-ui.md)（已晋升·暂定） | 独立面，主界面「课后练习」卡为唯一入口；与课程学习的联动**只在数据层**、**界面无出口**；课级全量、题源抽取→人工确认入库→作答判分 |
 
 ### 后台管理

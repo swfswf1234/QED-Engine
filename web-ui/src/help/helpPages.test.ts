@@ -83,6 +83,20 @@ describe('使用手册四册形态守护', () => {
     expect(HELP_PAGES.center.blocks[1].steps?.some((step) => step.includes('已掌握并下一条'))).toBe(true);
   });
 
+  // REQ-147 W3（S4）：手册要教「怎么看整理度」，也不替界面说不实的话、不写后台进度话术
+  it('知识探索册含整理度读法（亮／暗＋悬停计数），正文不出现「已确认／候选／陆续整理」诸类话术', () => {
+    const blocks = HELP_PAGES.knowledge.blocks;
+    const text = JSON.stringify(blocks);
+    for (const token of ['已确认', '候选', '待选', '复习', '解析', '同步', '入库', '陆续']) {
+      expect(text, `知识探索册出现不实或后台口径「${token}」`).not.toContain(token);
+    }
+    const overview = blocks[0].paragraphs ?? [];
+    expect(overview.some((p) => p.includes('暗'))).toBe(true);
+    const steps = blocks[1].steps ?? [];
+    expect(steps.some((s) => s.includes('已整理知识点'))).toBe(true);
+    expect(steps.some((s) => s.includes('暗'))).toBe(true);
+  });
+
   it('总册三条入口的说明句就是首页三卡的一句话（同源不漂移）', () => {
     const entries = HELP_PAGES.center.entries ?? [];
     expect(entries.map((entry) => entry.name)).toEqual(['知识探索', '课程学习', '课后练习']);

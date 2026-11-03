@@ -1,7 +1,7 @@
 # 设计文档索引
 
 状态：Current
-最后更新：2026-11-01
+最后更新：2026-11-03
 
 本目录保存**相对确定的设计文档**，按职责分组：项目配置 / 模型管理 / 项目协同 /
 **前端设计（`frontend/` 子目录）** / 后端全链路。每份职责边界单一，后续 plans/ 计划
@@ -19,7 +19,7 @@
 学习中心三面**已全部晋升**——「课后练习」2026-10-14 晋升为
 [learning-practice-ui.md](frontend/learning-practice-ui.md)（暂定），「知识探索」2026-10-15 以
 REQ-104/110/113/114 四行合一份晋升为
-[knowledge-point-exploration-ui.md](frontend/knowledge-point-exploration-ui.md)（暂定），
+[knowledge-point-exploration-ui.md](frontend/knowledge-point-exploration-ui.md)（已确认），
 「课程学习」2026-10-18 由 REQ-117 重设计轮晋升为
 [learning-course-ui.md](frontend/learning-course-ui.md)（暂定）；原两份晋升稿归档于 `history/plans/2026-10/`
 （learning-star-map、learning-workbench-ui），课程学习 v1 稿随 REQ-105 归档同月目录
@@ -70,7 +70,7 @@ REQ-104/110/113/114 四行合一份晋升为
 
 | 文档 | 设计状态 | 实现状态 | 内容 |
 | --- | --- | --- | --- |
-| [knowledge-point-exploration-ui.md](frontend/knowledge-point-exploration-ui.md) | Accepted | In Progress | 学习中心·知识探索单面 UI（`#/knowledge` 同页两视图：领域星图「层＝行 × 轨迹＝列」森林 ＋ 课程层大知识点虚框与框内条目层级星图，含 `starMapLayout.ts`／`kpTreeLayout.ts` 布局几何唯一正本、悬停与降级矩阵、零跨界出口与零写面硬边界；课程层结构正本＝共享主表的**课程级一套骨架**，书在本面完全透明，REQ-145 口径改道段尚未落码。**暂定**，待人工评审转正） |
+| [knowledge-point-exploration-ui.md](frontend/knowledge-point-exploration-ui.md) | Accepted | In Progress | 学习中心·知识探索单面 UI（`#/knowledge` 同页两视图：领域星图「层＝行 × 轨迹＝列」森林 ＋ 课程层章节虚框与框内条目层级星图，含 `starMapLayout.ts`／`kpTreeLayout.ts` 布局几何唯一正本、悬停与降级矩阵、零跨界出口与零写面硬边界；课程层结构正本＝共享主表的**课程级一套骨架**，书在本面完全透明，REQ-145 口径改道段尚未落码。**已确认**（2026-11-03 随知识探索收尾转正） |
 | [learning-practice-ui.md](frontend/learning-practice-ui.md) | Accepted | In Progress | 学习中心·课后练习独立面 UI（`#/practice`：课程选择＋今日面板/到期队列/错题本＋题源抽取→人工确认入库→题卡作答判分，含 `exerciseParse.ts` 抽取规格唯一正本与降级矩阵。**暂定**，待人工评审转正） |
 | [learning-course-ui.md](frontend/learning-course-ui.md) | Accepted | In Progress | 学习中心·课程学习两屏 UI（`#/learn` 书架清单 ＋ `#/learn/c/:learnCourseId?book=` 单屏工作台：阅读单位＝「章 ＋ 知识点」两级、目录只出梳理成品的纯净层、左栏零处理进度说明、中栏跨页正文流与两档左缘且零指导语、右栏**批注至多四段**（章总结／章学习导读／知识点总结／记录，缺位整段不渲染）、推进三枚居中置底、序列按书切且换书回书架、文案禁现矩阵与降级矩阵。**暂定**，待人工评审转正） |
 
